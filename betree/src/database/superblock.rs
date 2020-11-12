@@ -6,7 +6,7 @@ use crate::{
     vdev::{Block, BLOCK_SIZE},
 };
 use bincode::{deserialize, serialize_into};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 static MAGIC: &[u8] = b"HEAFSv3\0\n";
 

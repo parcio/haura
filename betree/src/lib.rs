@@ -24,8 +24,6 @@ extern crate rand;
 extern crate ref_slice;
 extern crate seqlock;
 extern crate serde;
-#[macro_use]
-extern crate serde_derive;
 extern crate stable_deref_trait;
 extern crate twox_hash;
 #[cfg(test)]

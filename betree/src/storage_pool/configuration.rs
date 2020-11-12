@@ -6,6 +6,7 @@ use crate::{
 use itertools::Itertools;
 use libc;
 use ref_slice::ref_slice;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
 };

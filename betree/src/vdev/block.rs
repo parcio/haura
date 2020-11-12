@@ -1,4 +1,5 @@
 use super::BLOCK_SIZE;
+use serde::{Deserialize, Serialize};
 use std::{
     iter::Sum,
     ops::{Add, AddAssign, Div, Mul, MulAssign, Rem, Sub},

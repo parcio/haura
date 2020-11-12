@@ -8,36 +8,30 @@ edition = "2018"
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
 
-[profile.test]
-opt-level = 2
-
-[profile.release]
-debug = true
-
 [dependencies]
 futures = { version = "0.3", features = ["thread-pool"] }
-serde = "1.0"
-serde_derive = "1.0"
+serde = { version = "1.0", features = [ "derive" ] }
 bincode = "1.0"
 error-chain = "0.12"
 libc = "0.2"
-parking_lot = "0.10"
-lock_api = { version = "0.3", features = ["owning_ref"] }
+parking_lot = "0.11"
+lock_api = { version = "0.4", features = ["owning_ref"] }
 owning_ref = "0.4"
-log = "0.4"
+log = { version = "0.4", features = [ "release_max_level_info" ] }
 byteorder = "1.0"
 lz4 = "1.21"
 seqlock = { path = "seqlock/" }
-twox-hash = "1.1"
+twox-hash = "1.6"
 stable_deref_trait = "1.1"
 unbytify = "0.2"
 toml = "0.5"
 itertools = "0.9"
 ref_slice = "1.1"
-env_logger = "0.7"
+env_logger = "0.8"
 scoped_threadpool = "0.1"
-indicatif = "0.14"
+indicatif = "0.15"
 async-trait = "0.1"
+jemallocator = { version = "0.3", features = [ "background_threads" ] }
 
 [dev-dependencies]
 rand = "0.7"

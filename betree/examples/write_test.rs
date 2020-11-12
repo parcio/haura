@@ -1,17 +1,3 @@
-extern crate betree_storage_stack;
-extern crate bincode;
-extern crate byteorder;
-extern crate clap;
-extern crate env_logger;
-extern crate indicatif;
-extern crate parking_lot;
-extern crate rand;
-extern crate scoped_threadpool;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate unbytify;
-
 use betree_storage_stack::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE},
     atomic_option::AtomicOption,
@@ -20,7 +6,10 @@ use betree_storage_stack::{
     compression,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{self, Dml, Dmu, Handler as HandlerTrait, HandlerDml, ObjectRef},
-    storage_pool::{configuration, Configuration, DiskOffset, StoragePoolLayer, StoragePoolUnit},
+    storage_pool::{
+        configuration::{self, LeafVdev, Vdev},
+        Configuration, DiskOffset, StoragePoolLayer, StoragePoolUnit,
+    },
     tree::{
         DefaultMessageAction, Error as TreeError, Inner as TreeInner, Node, Tree, TreeBaseLayer,
         TreeLayer,
@@ -34,12 +23,13 @@ use parking_lot::Mutex;
 use rand::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use scoped_threadpool::Pool;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
 use std::{
     error::Error,
     fmt::{Debug, Display, Formatter, Result as FmtResult},
     fs::OpenOptions,
-    io::Read,
+    io::{self, Read},
     mem::replace,
     ops::Deref,
     str::FromStr,
@@ -49,6 +39,9 @@ use std::{
     },
     time::Instant,
 };
+
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 struct Size(pub u64);
 
@@ -277,6 +270,7 @@ fn round_up(x: u64, y: u64) -> u64 {
 
 fn main() {
     env_logger::init();
+
     let matches = App::new("Simple benchmark")
         .arg(
             Arg::with_name("nosync")
@@ -430,7 +424,7 @@ fn run<K: KeyGenerator>(
     //     "/dev/disk/by-id/ata-ST3500418AS_9VM5SJB5",
     //     "/dev/disk/by-id/ata-ST3500418AS_9VM5V4MJ",
     // ];
-    let disks = ["/var/tmp/write_test"];
+    let disks = ["/dev/zvol/fpool/betree/d1"];
 
     let cfg = Configuration::new(
         // vec![

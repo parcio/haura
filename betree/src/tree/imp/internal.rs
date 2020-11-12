@@ -5,6 +5,7 @@ use crate::{
     tree::MessageAction,
 };
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, cmp, collections::BTreeMap, mem::replace};
 
 #[derive(Debug, Serialize, Deserialize)]

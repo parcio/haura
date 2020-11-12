@@ -5,6 +5,7 @@
 
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 use bincode::{deserialize, serialize_into};
+use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, ops::Deref};
 
 /// Defines the action of a message.

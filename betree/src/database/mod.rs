@@ -15,7 +15,7 @@ use bincode::{deserialize, serialize_into};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     iter::FromIterator,

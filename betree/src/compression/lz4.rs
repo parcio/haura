@@ -1,6 +1,7 @@
 use super::Compression;
 use crate::size::StaticSize;
 use lz4::{BlockMode, BlockSize, ContentChecksum, Decoder, Encoder, EncoderBuilder};
+use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 
 /// LZ4 compression. (<https://github.com/lz4/lz4>)
