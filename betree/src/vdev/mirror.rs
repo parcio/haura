@@ -1,14 +1,13 @@
-use super::errors::*;
-use super::util::*;
 use super::{
-    AtomicStatistics, Block, ScrubResult, Statistics, Vdev, VdevLeafRead, VdevLeafWrite, VdevRead,
-    VdevWrite,
+    errors::*, util::*, AtomicStatistics, Block, ScrubResult, Statistics, Vdev, VdevLeafRead,
+    VdevLeafWrite, VdevRead, VdevWrite,
 };
-use crate::buffer::SplittableBuffer;
-use crate::checksum::Checksum;
+use crate::{buffer::SplittableBuffer, checksum::Checksum};
 use async_trait::async_trait;
-use futures::prelude::*;
-use futures::stream::{FuturesOrdered, FuturesUnordered};
+use futures::{
+    prelude::*,
+    stream::{FuturesOrdered, FuturesUnordered},
+};
 use std::sync::atomic::Ordering;
 
 /// This `vdev` will mirror all data to its child vdevs.
@@ -262,11 +261,13 @@ impl<V: Vdev> Vdev for Mirror<V> {
 #[cfg(test)]
 mod tests {
     use super::Mirror;
-    use crate::checksum::{Builder, Checksum, State, XxHashBuilder};
-    use crate::vdev::test::{
-        generate_data, test_writes_are_persistent, FailingLeafVdev, FailureMode,
+    use crate::{
+        checksum::{Builder, Checksum, State, XxHashBuilder},
+        vdev::{
+            test::{generate_data, test_writes_are_persistent, FailingLeafVdev, FailureMode},
+            Block, Vdev, VdevRead, VdevWrite,
+        },
     };
-    use crate::vdev::{Block, Vdev, VdevRead, VdevWrite};
     use futures::executor::block_on;
     use quickcheck::TestResult;
 

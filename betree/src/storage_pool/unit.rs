@@ -1,15 +1,17 @@
 use super::{Configuration, DiskOffset, StoragePoolLayer};
-use crate::bounded_future_queue::BoundedFutureQueue;
-use crate::checksum::Checksum;
-use crate::vdev::{Block, Error as VdevError, VdevBoxed};
-use futures::executor::{block_on, ThreadPool};
-use futures::prelude::*;
-use futures::stream::FuturesUnordered;
-use futures::task::SpawnExt;
+use crate::{
+    bounded_future_queue::BoundedFutureQueue,
+    checksum::Checksum,
+    vdev::{Block, Error as VdevError, VdevBoxed},
+};
+use futures::{
+    executor::{block_on, ThreadPool},
+    prelude::*,
+    stream::FuturesUnordered,
+    task::SpawnExt,
+};
 use parking_lot::Mutex;
-use std::io;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{io, pin::Pin, sync::Arc};
 
 /// Actual implementation of the `StoragePoolLayer`.
 #[derive(Clone)]

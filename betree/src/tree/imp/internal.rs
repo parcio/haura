@@ -1,12 +1,11 @@
 use super::child_buffer::ChildBuffer;
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::size::{Size, SizeMut, StaticSize};
-use crate::tree::MessageAction;
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    size::{Size, SizeMut, StaticSize},
+    tree::MessageAction,
+};
 use parking_lot::RwLock;
-use std::borrow::Borrow;
-use std::cmp;
-use std::collections::BTreeMap;
-use std::mem::replace;
+use std::{borrow::Borrow, cmp, collections::BTreeMap, mem::replace};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -433,8 +432,7 @@ impl<'a, N: Size> TakeChildBuffer<'a, ChildBuffer<N>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::message_action::DefaultMessageActionMsg;
-    use crate::tree::DefaultMessageAction;
+    use crate::tree::{message_action::DefaultMessageActionMsg, DefaultMessageAction};
     use bincode::serialized_size;
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;

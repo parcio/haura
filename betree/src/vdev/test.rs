@@ -2,18 +2,15 @@ use super::{
     AtomicStatistics, Block, Error, ErrorKind, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead, VdevWrite,
 };
-use crate::checksum::Checksum;
-use crate::checksum::{Builder, State, XxHash, XxHashBuilder};
+use crate::checksum::{Builder, Checksum, State, XxHash, XxHashBuilder};
 use async_trait::async_trait;
-use futures::executor::block_on;
-use futures::prelude::*;
+use futures::{executor::block_on, prelude::*};
 use parking_lot::Mutex;
 use quickcheck::{Arbitrary, Gen};
 use rand::{seq::SliceRandom, Rng, RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use seqlock::SeqLock;
-use std::collections::HashMap;
-use std::sync::atomic::Ordering;
+use std::{collections::HashMap, sync::atomic::Ordering};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FailureMode {

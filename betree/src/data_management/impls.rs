@@ -1,26 +1,27 @@
-use super::errors::*;
-use super::{DmlBase, Handler, HandlerTypes, Object, PodType};
-use crate::allocator::{Action, SegmentAllocator, SegmentId};
-use crate::cache::{AddSize, Cache, ChangeKeyError, RemoveError};
-use crate::checksum::{Builder, Checksum, State};
-use crate::compression::{Compress, Compression};
-use crate::size::{SizeMut, StaticSize};
-use crate::storage_pool::{DiskOffset, StoragePoolLayer};
-use crate::vdev::{Block, BLOCK_SIZE};
-use futures::executor::block_on;
-use futures::future::ok;
-use futures::prelude::*;
+use super::{errors::*, DmlBase, Handler, HandlerTypes, Object, PodType};
+use crate::{
+    allocator::{Action, SegmentAllocator, SegmentId},
+    cache::{AddSize, Cache, ChangeKeyError, RemoveError},
+    checksum::{Builder, Checksum, State},
+    compression::{Compress, Compression},
+    size::{SizeMut, StaticSize},
+    storage_pool::{DiskOffset, StoragePoolLayer},
+    vdev::{Block, BLOCK_SIZE},
+};
+use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use serde::de::DeserializeOwned;
-use serde::ser::Error as SerError;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    de::DeserializeOwned, ser::Error as SerError, Deserialize, Deserializer, Serialize, Serializer,
+};
 use stable_deref_trait::StableDeref;
-use std::collections::HashMap;
-use std::mem::{replace, transmute, ManuallyDrop};
-use std::ops::{Deref, DerefMut};
-use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread::yield_now;
+use std::{
+    collections::HashMap,
+    mem::{replace, transmute, ManuallyDrop},
+    ops::{Deref, DerefMut},
+    pin::Pin,
+    sync::atomic::{AtomicU64, Ordering},
+    thread::yield_now,
+};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ModifiedObjectId(u64);

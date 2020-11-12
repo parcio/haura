@@ -1,20 +1,17 @@
-use super::dataset::Dataset;
-use super::errors::*;
-use super::Database;
 use super::{
-    dead_list_max_key, dead_list_max_key_ds, dead_list_min_key, ds_data_key, fetch_ds_data,
-    fetch_ss_data, offset_from_dead_list_key, ss_data_key, ss_data_key_max, ss_key,
+    dataset::Dataset, dead_list_max_key, dead_list_max_key_ds, dead_list_min_key, ds_data_key,
+    errors::*, fetch_ds_data, fetch_ss_data, offset_from_dead_list_key, ss_data_key,
+    ss_data_key_max, ss_key, Database, DatasetData, DatasetId, DatasetTree, DeadListData,
+    Generation, ObjectPointer,
 };
-use super::{DatasetData, DatasetId, DeadListData};
-use super::{DatasetTree, Generation, ObjectPointer};
-use crate::allocator::Action;
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::data_management::Handler;
-use crate::tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer};
+use crate::{
+    allocator::Action,
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::Handler,
+    tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer},
+};
 use byteorder::{BigEndian, ByteOrder};
-use std::borrow::Borrow;
-use std::ops::RangeBounds;
-use std::sync::Arc;
+use std::{borrow::Borrow, ops::RangeBounds, sync::Arc};
 
 /// The snapshot type.
 pub struct Snapshot {

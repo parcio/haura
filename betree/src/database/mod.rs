@@ -1,38 +1,41 @@
 //! This module provides the Database Layer.
-use crate::atomic_option::AtomicOption;
-use crate::cache::ClockCache;
-use crate::checksum::{XxHash, XxHashBuilder};
-use crate::compression;
-use crate::cow_bytes::SlicedCowBytes;
-use crate::data_management::{self, Dmu, HandlerDml};
-use crate::size::StaticSize;
-use crate::storage_pool::{Configuration, DiskOffset, StoragePoolLayer, StoragePoolUnit};
-use crate::tree::{DefaultMessageAction, Inner as TreeInner, Node, Tree, TreeBaseLayer, TreeLayer};
-use crate::vdev::Block;
+use crate::{
+    atomic_option::AtomicOption,
+    cache::ClockCache,
+    checksum::{XxHash, XxHashBuilder},
+    compression,
+    cow_bytes::SlicedCowBytes,
+    data_management::{self, Dmu, HandlerDml},
+    size::StaticSize,
+    storage_pool::{Configuration, DiskOffset, StoragePoolLayer, StoragePoolUnit},
+    tree::{DefaultMessageAction, Inner as TreeInner, Node, Tree, TreeBaseLayer, TreeLayer},
+    vdev::Block,
+};
 use bincode::{deserialize, serialize_into};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::collections::HashMap;
-use std::iter::FromIterator;
-use std::mem::replace;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    collections::HashMap,
+    iter::FromIterator,
+    mem::replace,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 mod dataset;
 mod errors;
 mod handler;
 mod snapshot;
 mod superblock;
-use self::handler::Handler;
-use self::superblock::Superblock;
+use self::{handler::Handler, superblock::Superblock};
 
-pub use self::dataset::Dataset;
-pub use self::errors::*;
-pub use self::handler::update_allocation_bitmap_msg;
-pub use self::snapshot::Snapshot;
+pub use self::{
+    dataset::Dataset, errors::*, handler::update_allocation_bitmap_msg, snapshot::Snapshot,
+};
 
 type ObjectPointer =
     data_management::impls::ObjectPointer<compression::None, XxHash, DatasetId, Generation>;

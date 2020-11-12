@@ -1,22 +1,26 @@
 use self::Inner::*;
-use super::child_buffer::ChildBuffer;
-use super::internal::{InternalNode, TakeChildBuffer};
-use super::leaf::LeafNode;
-use super::packed::PackedMap;
 use super::{
+    child_buffer::ChildBuffer,
+    internal::{InternalNode, TakeChildBuffer},
+    leaf::LeafNode,
+    packed::PackedMap,
     FillUpResult, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT, MIN_FLUSH_SIZE,
     MIN_LEAF_NODE_SIZE,
 };
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::data_management::{Object, ObjectRef};
-use crate::size::{Size, SizeMut, StaticSize};
-use crate::tree::MessageAction;
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::{Object, ObjectRef},
+    size::{Size, SizeMut, StaticSize},
+    tree::MessageAction,
+};
 use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
-use std::borrow::Borrow;
-use std::collections::BTreeMap;
-use std::io::{self, Write};
-use std::mem::replace;
+use std::{
+    borrow::Borrow,
+    collections::BTreeMap,
+    io::{self, Write},
+    mem::replace,
+};
 
 /// The tree node type.
 #[derive(Debug)]

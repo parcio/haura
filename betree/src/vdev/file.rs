@@ -1,17 +1,18 @@
-use super::errors::*;
-use super::util::alloc_uninitialized;
 use super::{
-    AtomicStatistics, Block, ScrubResult, Statistics, Vdev, VdevLeafRead, VdevLeafWrite, VdevRead,
+    errors::*, util::alloc_uninitialized, AtomicStatistics, Block, ScrubResult, Statistics, Vdev,
+    VdevLeafRead, VdevLeafWrite, VdevRead,
 };
 use crate::checksum::Checksum;
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
-use std::fs;
-use std::io;
-use std::os::unix::fs::FileExt;
-use std::os::unix::fs::FileTypeExt;
-use std::os::unix::io::AsRawFd;
-use std::sync::atomic::Ordering;
+use std::{
+    fs, io,
+    os::unix::{
+        fs::{FileExt, FileTypeExt},
+        io::AsRawFd,
+    },
+    sync::atomic::Ordering,
+};
 
 /// `LeafVdev` that is backed by a file.
 pub struct File {

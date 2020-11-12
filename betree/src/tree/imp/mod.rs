@@ -1,19 +1,19 @@
-use self::flush::Ref;
-use self::node::GetResult;
-use super::errors::*;
-use super::layer::{TreeBaseLayer, TreeLayer};
-use crate::cache::AddSize;
-use crate::cow_bytes::CowBytes;
-use crate::cow_bytes::SlicedCowBytes;
-use crate::data_management::{Dml, DmlBase, HandlerDml, ObjectRef};
-use crate::tree::MessageAction;
+use self::{flush::Ref, node::GetResult};
+use super::{
+    errors::*,
+    layer::{TreeBaseLayer, TreeLayer},
+};
+use crate::{
+    cache::AddSize,
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::{Dml, DmlBase, HandlerDml, ObjectRef},
+    tree::MessageAction,
+};
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
-use std::borrow::Borrow;
-use std::collections::Bound;
-use std::marker::PhantomData;
-use std::mem::replace;
-use std::ops::RangeBounds;
+use std::{
+    borrow::Borrow, collections::Bound, marker::PhantomData, mem::replace, ops::RangeBounds,
+};
 
 #[derive(Debug)]
 enum FillUpResult {
@@ -421,5 +421,4 @@ mod packed;
 mod range;
 mod split;
 
-pub use self::node::Node;
-pub use self::range::RangeIterator;
+pub use self::{node::Node, range::RangeIterator};

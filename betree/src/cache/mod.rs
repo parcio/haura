@@ -1,8 +1,10 @@
 //! This module provides a cache interface and a CLOCK cache implementation.
 
 use stable_deref_trait::StableDeref;
-use std::fmt::{Debug, Display};
-use std::hash::Hash;
+use std::{
+    fmt::{Debug, Display},
+    hash::Hash,
+};
 
 /// Error type of `Cache::change_key`.
 pub enum ChangeKeyError<E> {

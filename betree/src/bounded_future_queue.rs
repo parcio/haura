@@ -1,16 +1,16 @@
 //! This module provides a bounded queue of futures which are identified by a
 //! key.
 
-use futures::executor::block_on;
-use futures::future::{ok, ready, IntoFuture};
-use futures::prelude::*;
-use futures::stream::FuturesUnordered;
-use futures::task::Context;
-use futures::{ready, task::Poll, TryFuture};
-use std::borrow::Borrow;
-use std::collections::HashSet;
-use std::hash::Hash;
-use std::pin::Pin;
+use futures::{
+    executor::block_on,
+    future::{ok, ready, IntoFuture},
+    prelude::*,
+    ready,
+    stream::FuturesUnordered,
+    task::{Context, Poll},
+    TryFuture,
+};
+use std::{borrow::Borrow, collections::HashSet, hash::Hash, pin::Pin};
 
 struct Helper<K, F> {
     key: Option<K>,

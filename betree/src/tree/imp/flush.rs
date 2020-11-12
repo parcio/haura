@@ -1,15 +1,18 @@
-use super::child_buffer::ChildBuffer;
-use super::internal::TakeChildBuffer;
-use super::{FillUpResult, Inner, Node, Tree};
-use crate::cache::AddSize;
-use crate::data_management::{HandlerDml, ObjectRef};
-use crate::size::Size;
-use crate::tree::errors::*;
-use crate::tree::MessageAction;
+use super::{
+    child_buffer::ChildBuffer, internal::TakeChildBuffer, FillUpResult, Inner, Node, Tree,
+};
+use crate::{
+    cache::AddSize,
+    data_management::{HandlerDml, ObjectRef},
+    size::Size,
+    tree::{errors::*, MessageAction},
+};
 use stable_deref_trait::StableDeref;
-use std::borrow::Borrow;
-use std::mem::transmute;
-use std::ops::{Deref, DerefMut};
+use std::{
+    borrow::Borrow,
+    mem::transmute,
+    ops::{Deref, DerefMut},
+};
 
 impl<X, R, M, I> Tree<X, M, I>
 where

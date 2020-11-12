@@ -1,10 +1,14 @@
 use super::FillUpResult;
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::size::Size;
-use crate::tree::MessageAction;
-use std::borrow::Borrow;
-use std::collections::{BTreeMap, Bound};
-use std::iter::FromIterator;
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    size::Size,
+    tree::MessageAction,
+};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, Bound},
+    iter::FromIterator,
+};
 
 /// A leaf node of the tree holds pairs of keys values which are plain data.
 #[derive(Debug, Clone)]
@@ -200,9 +204,9 @@ impl LeafNode {
 #[cfg(test)]
 mod tests {
     use super::{BTreeMap, CowBytes, LeafNode, Size, SlicedCowBytes};
-    use crate::tree::imp::packed::PackedMap;
-    use crate::tree::message_action::DefaultMessageActionMsg;
-    use crate::tree::DefaultMessageAction;
+    use crate::tree::{
+        imp::packed::PackedMap, message_action::DefaultMessageActionMsg, DefaultMessageAction,
+    };
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
 

@@ -4,10 +4,12 @@
 //! `Some(_)` exactly once.
 
 use parking_lot::Mutex;
-use std::cell::UnsafeCell;
-use std::mem::MaybeUninit;
-use std::ptr::{drop_in_place, write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    ptr::{drop_in_place, write},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 /// `AtomicOption` is an `Option` which is `Send + Sync`.
 /// It is intialized to the `None` state and can be set to `Some(_)` exactly

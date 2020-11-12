@@ -1,11 +1,15 @@
 use super::leaf::LeafNode;
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::size::Size;
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    size::Size,
+};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use std::cmp;
-use std::io::{self, Write};
-use std::mem::{align_of, size_of};
-use std::slice::{from_raw_parts, from_raw_parts_mut};
+use std::{
+    cmp,
+    io::{self, Write},
+    mem::{align_of, size_of},
+    slice::{from_raw_parts, from_raw_parts_mut},
+};
 
 /// Layout:
 ///     header: Header,

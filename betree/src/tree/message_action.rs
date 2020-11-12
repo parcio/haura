@@ -5,8 +5,7 @@
 
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 use bincode::{deserialize, serialize_into};
-use std::fmt::Debug;
-use std::ops::Deref;
+use std::{fmt::Debug, ops::Deref};
 
 /// Defines the action of a message.
 pub trait MessageAction: Debug + Send + Sync {

@@ -1,6 +1,8 @@
 use super::BLOCK_SIZE;
-use std::iter::Sum;
-use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Rem, Sub};
+use std::{
+    iter::Sum,
+    ops::{Add, AddAssign, Div, Mul, MulAssign, Rem, Sub},
+};
 
 /// A unit which represents a number of bytes which are a multiple of
 /// `BLOCK_SIZE`.

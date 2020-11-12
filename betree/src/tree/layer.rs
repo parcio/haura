@@ -1,9 +1,7 @@
 use super::MessageAction;
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::borrow::Borrow;
-use std::ops::RangeBounds;
+use serde::{de::DeserializeOwned, Serialize};
+use std::{borrow::Borrow, ops::RangeBounds};
 
 use super::errors::*;
 

@@ -1,13 +1,18 @@
-use super::node::{GetRangeResult, Node};
-use super::{Inner, Tree};
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::data_management::{Dml, ObjectRef};
-use crate::tree::errors::*;
-use crate::tree::MessageAction;
-use std::borrow::Borrow;
-use std::collections::{BTreeMap, Bound, VecDeque};
-use std::mem::replace;
-use std::ops::RangeBounds;
+use super::{
+    node::{GetRangeResult, Node},
+    Inner, Tree,
+};
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::{Dml, ObjectRef},
+    tree::{errors::*, MessageAction},
+};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, Bound, VecDeque},
+    mem::replace,
+    ops::RangeBounds,
+};
 
 fn next(v: &mut Vec<u8>) {
     v.push(0);

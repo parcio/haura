@@ -6,7 +6,9 @@ mod imp;
 mod layer;
 mod message_action;
 
-pub use self::errors::{Error, ErrorKind};
-pub use self::imp::{Inner, Node, RangeIterator, Tree};
-pub use self::layer::{TreeBaseLayer, TreeLayer};
-pub use self::message_action::{DefaultMessageAction, MessageAction};
+pub use self::{
+    errors::{Error, ErrorKind},
+    imp::{Inner, Node, RangeIterator, Tree},
+    layer::{TreeBaseLayer, TreeLayer},
+    message_action::{DefaultMessageAction, MessageAction},
+};

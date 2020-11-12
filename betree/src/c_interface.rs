@@ -1,17 +1,20 @@
 //! This module provides the C interface to the database.
 #![allow(non_camel_case_types)]
-use std::ffi::CStr;
-use std::io::{stderr, Write};
-use std::os::raw::{c_char, c_int, c_uint};
-use std::process::abort;
-use std::ptr::null_mut;
-use std::ptr::{read, write};
-use std::slice::from_raw_parts;
-use std::sync::Arc;
+use std::{
+    ffi::CStr,
+    io::{stderr, Write},
+    os::raw::{c_char, c_int, c_uint},
+    process::abort,
+    ptr::{null_mut, read, write},
+    slice::from_raw_parts,
+    sync::Arc,
+};
 
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::database::{Database, Dataset, Error, Snapshot};
-use crate::storage_pool::Configuration;
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    database::{Database, Dataset, Error, Snapshot},
+    storage_pool::Configuration,
+};
 use error_chain::ChainedError;
 
 /// The type for a storage pool configuration

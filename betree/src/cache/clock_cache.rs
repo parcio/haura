@@ -6,15 +6,18 @@
 //! as CLOCK does not have to move the cache entry to the MRU position like LRU
 //! does.
 
-use super::clock::Clock;
-use super::{AddSize, Cache, ChangeKeyError, RemoveError, Stats};
+use super::{clock::Clock, AddSize, Cache, ChangeKeyError, RemoveError, Stats};
 use stable_deref_trait::StableDeref;
-use std::collections::HashMap;
-use std::fmt;
-use std::hash::Hash;
-use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    fmt,
+    hash::Hash,
+    ops::Deref,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 /// A clock cache. (1-bit approximation of LRU)
 pub struct ClockCache<K, V> {

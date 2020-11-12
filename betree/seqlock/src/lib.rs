@@ -50,12 +50,14 @@
 extern crate parking_lot;
 
 use parking_lot::{Mutex, MutexGuard};
-use std::cell::UnsafeCell;
-use std::fmt;
-use std::ops::{Deref, DerefMut};
-use std::ptr;
-use std::sync::atomic::{fence, AtomicUsize, Ordering};
-use std::thread;
+use std::{
+    cell::UnsafeCell,
+    fmt,
+    ops::{Deref, DerefMut},
+    ptr,
+    sync::atomic::{fence, AtomicUsize, Ordering},
+    thread,
+};
 
 /// A sequential lock
 pub struct SeqLock<T: Copy> {

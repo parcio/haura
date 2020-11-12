@@ -1,12 +1,12 @@
-use super::errors::*;
-use super::Database;
-use super::{ds_data_key, fetch_ds_data, DatasetData, DatasetId, DatasetTree, Generation};
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer};
-use std::borrow::Borrow;
-use std::collections::HashSet;
-use std::ops::RangeBounds;
-use std::sync::Arc;
+use super::{
+    ds_data_key, errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree,
+    Generation,
+};
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer},
+};
+use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
 /// The data set type.
 pub struct Dataset {

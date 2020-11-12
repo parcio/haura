@@ -1,12 +1,15 @@
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
-use crate::size::{Size, StaticSize};
-use crate::tree::MessageAction;
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    size::{Size, StaticSize},
+    tree::MessageAction,
+};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::borrow::Borrow;
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, Bound};
-use std::mem::replace;
+use std::{
+    borrow::Borrow,
+    collections::{btree_map::Entry, BTreeMap, Bound},
+    mem::replace,
+};
 
 /// A buffer for messages that belong to a child of a tree node.
 #[derive(Debug, Serialize, Deserialize)]

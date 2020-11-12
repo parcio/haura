@@ -4,10 +4,12 @@
 use crate::size::Size;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use stable_deref_trait::StableDeref;
-use std::borrow::Borrow;
-use std::cmp;
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::{
+    borrow::Borrow,
+    cmp,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 /// Copy-on-Write smart pointer which supports cheap cloning as it is
 /// reference-counted.

@@ -1,16 +1,20 @@
-use super::errors::*;
-use super::util::*;
 use super::{
-    AtomicStatistics, Block, ScrubResult, Statistics, Vdev, VdevLeafRead, VdevLeafWrite, VdevRead,
-    VdevWrite, BLOCK_SIZE,
+    errors::*, util::*, AtomicStatistics, Block, ScrubResult, Statistics, Vdev, VdevLeafRead,
+    VdevLeafWrite, VdevRead, VdevWrite, BLOCK_SIZE,
 };
-use crate::buffer::{new_buffer, SplittableBuffer, SplittableMutBuffer};
-use crate::checksum::Checksum;
+use crate::{
+    buffer::{new_buffer, SplittableBuffer, SplittableMutBuffer},
+    checksum::Checksum,
+};
 use async_trait::async_trait;
-use futures::prelude::*;
-use futures::stream::{FuturesOrdered, FuturesUnordered};
-use std::iter::{once, repeat};
-use std::sync::atomic::Ordering;
+use futures::{
+    prelude::*,
+    stream::{FuturesOrdered, FuturesUnordered},
+};
+use std::{
+    iter::{once, repeat},
+    sync::atomic::Ordering,
+};
 
 /// This `vdev` will generate parity data and stripe all data to its child
 /// vdevs.
@@ -583,13 +587,14 @@ fn block_iter(
 #[cfg(test)]
 mod tests {
     use super::Parity1;
-    use crate::checksum::{Builder, Checksum, State, XxHashBuilder};
-    use crate::vdev::test::{
-        generate_data, test_writes_are_persistent, FailingLeafVdev, FailureMode,
+    use crate::{
+        checksum::{Builder, Checksum, State, XxHashBuilder},
+        vdev::{
+            test::{generate_data, test_writes_are_persistent, FailingLeafVdev, FailureMode},
+            Block, Vdev, VdevRead, VdevWrite,
+        },
     };
-    use crate::vdev::{Block, Vdev, VdevRead, VdevWrite};
-    use futures::executor::block_on;
-    use futures::TryFutureExt;
+    use futures::{executor::block_on, TryFutureExt};
     use quickcheck::TestResult;
 
     fn build_parity_vdev(

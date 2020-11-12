@@ -1,5 +1,4 @@
-use std::marker::PhantomData;
-use std::ptr::NonNull;
+use std::{marker::PhantomData, ptr::NonNull};
 
 struct ClockEntry<T> {
     value: T,
@@ -205,8 +204,7 @@ impl<'a, T> Iterator for ClockIterMut<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::Clock;
-    use std::cell::Cell;
-    use std::collections::VecDeque;
+    use std::{cell::Cell, collections::VecDeque};
 
     #[test]
     fn push_pop_next_retain() {

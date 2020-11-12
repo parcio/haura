@@ -1,21 +1,27 @@
-use super::errors::*;
 use super::{
-    dead_list_key, DatasetId, DeadListData, Generation, Object, ObjectPointer, ObjectRef, TreeInner,
+    dead_list_key, errors::*, DatasetId, DeadListData, Generation, Object, ObjectPointer,
+    ObjectRef, TreeInner,
 };
-use crate::allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE};
-use crate::atomic_option::AtomicOption;
-use crate::cow_bytes::SlicedCowBytes;
-use crate::data_management::{self, HandlerDml};
-use crate::storage_pool::DiskOffset;
-use crate::tree::{DefaultMessageAction, Tree, TreeBaseLayer};
-use crate::vdev::Block;
+use crate::{
+    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE},
+    atomic_option::AtomicOption,
+    cow_bytes::SlicedCowBytes,
+    data_management::{self, HandlerDml},
+    storage_pool::DiskOffset,
+    tree::{DefaultMessageAction, Tree, TreeBaseLayer},
+    vdev::Block,
+};
 use byteorder::{BigEndian, ByteOrder};
 use owning_ref::OwningRef;
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 /// Returns a message for updating the allocation bitmap.
 pub fn update_allocation_bitmap_msg(

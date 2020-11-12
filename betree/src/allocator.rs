@@ -1,9 +1,7 @@
 //! This module provides `SegmentAllocator` and `SegmentId` for bitmap
 //! allocation of 1GiB segments.
 
-use crate::cow_bytes::CowBytes;
-use crate::storage_pool::DiskOffset;
-use crate::vdev::Block;
+use crate::{cow_bytes::CowBytes, storage_pool::DiskOffset, vdev::Block};
 use byteorder::{BigEndian, ByteOrder};
 use std::u32;
 

@@ -1,9 +1,11 @@
 //! This module provides reference counted buffers that can be splitted.
 
 use owning_ref::OwningRef;
-use std::mem::replace;
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::{
+    mem::replace,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 /// Returns a new splittable, mutable buffer that holds `data`
 /// and a `Handle` to recover the data later on.

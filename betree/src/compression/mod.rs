@@ -3,10 +3,11 @@
 //! `None` and `Lz4` are provided as implementation.
 
 use crate::size::Size;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::fmt::Debug;
-use std::io::{self, Write};
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    fmt::Debug,
+    io::{self, Write},
+};
 
 /// Trait for compressing and decompressing data.
 pub trait Compression:
