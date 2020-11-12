@@ -1,48 +1,5 @@
-[package]
-name = "betree_storage_stack"
-version = "0.1.0"
-authors = ["Felix Wiedemann <felix@kann.it>"]
-license = "MIT OR Apache-2.0"
-edition = "2018"
+[workspace]
 
-[lib]
-crate-type = ["rlib", "staticlib", "cdylib"]
-
-[profile.test]
-opt-level = 2
-
-[profile.release]
-debug = true
-
-[dependencies]
-futures = { version = "0.3", features = ["thread-pool"] }
-serde = "1.0"
-serde_derive = "1.0"
-bincode = "1.0"
-error-chain = "0.12"
-libc = "0.2"
-parking_lot = "0.10"
-lock_api = { version = "0.3", features = ["owning_ref"] }
-owning_ref = "0.4"
-log = "0.4"
-byteorder = "1.0"
-lz4 = "1.21"
-seqlock = { path = "seqlock/" }
-twox-hash = "1.1"
-stable_deref_trait = "1.1"
-unbytify = "0.2"
-toml = "0.5"
-itertools = "0.9"
-ref_slice = "1.1"
-env_logger = "0.7"
-scoped_threadpool = "0.1"
-indicatif = "0.14"
-async-trait = "0.1"
-
-[dev-dependencies]
-rand = "0.7"
-rand_xorshift = "0.2"
-quickcheck = "0.9"
-quickcheck_macros = "0.9"
-clap = "2.33"
-bencher = "0.1"
+members = [
+    "betree"
+]
