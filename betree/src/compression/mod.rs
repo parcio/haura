@@ -33,3 +33,6 @@ pub use self::none::None;
 
 mod lz4;
 pub use self::lz4::Lz4;
+
+mod zstd;
+pub use self::zstd::Zstd;
