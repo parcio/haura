@@ -144,18 +144,13 @@ impl<V> AddSize for PinnedEntry<V> {
     }
 }
 
-fn leak<T>(x: Box<T>) -> &'static T {
-    let p = Box::into_raw(x);
-    unsafe { &*p }
-}
-
 impl<K: Hash + Eq, V> ClockCache<K, V> {
     /// Returns a new cache instance with the given `capacity`.
     pub fn new(capacity: usize) -> Self {
         ClockCache {
             map: Default::default(),
             clock: Default::default(),
-            size: leak(Default::default()),
+            size: Box::leak(Default::default()),
             hits: Default::default(),
             misses: Default::default(),
             capacity,
