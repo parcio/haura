@@ -8,6 +8,14 @@ edition = "2018"
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
 
+[[bench]]
+name = "cache"
+harness = false
+
+[[bench]]
+name = "allocator"
+harness = false
+
 [dependencies]
 futures = { version = "0.3", features = ["thread-pool"] }
 serde = { version = "1.0", features = [ "derive" ] }
@@ -40,3 +48,5 @@ quickcheck = "0.9"
 quickcheck_macros = "0.9"
 clap = "2.33"
 bencher = "0.1"
+
+criterion = "0.3"
