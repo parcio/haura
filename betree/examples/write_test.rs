@@ -291,7 +291,7 @@ fn main() {
                 .takes_value(true)
                 .validator(|s| match parse_size(&s, 1, 128 * 1024) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(e.description().to_string()),
+                    Err(e) => Err(e.to_string()),
                 }),
         )
         .arg(
@@ -302,7 +302,7 @@ fn main() {
                 .validator(
                     |s| match parse_size(&s, 256 * 1024 * 1024, 16 * 1024 * 1024 * 1024) {
                         Ok(_) => Ok(()),
-                        Err(e) => Err(e.description().to_string()),
+                        Err(e) => Err(e.to_string()),
                     },
                 ),
         )
@@ -313,7 +313,7 @@ fn main() {
                 .takes_value(true)
                 .validator(|s| match parse_size(&s, None, None) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(e.description().to_string()),
+                    Err(e) => Err(e.to_string()),
                 }),
         )
         .arg(
@@ -324,7 +324,7 @@ fn main() {
                 .conflicts_with("iterations")
                 .validator(|s| match parse_size(&s, None, None) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(e.description().to_string()),
+                    Err(e) => Err(e.to_string()),
                 }),
         )
         .arg(
@@ -334,7 +334,7 @@ fn main() {
                 .takes_value(true)
                 .validator(|s| match parse_size(&s, None, None) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(e.description().to_string()),
+                    Err(e) => Err(e.to_string()),
                 }),
         )
         .arg(
@@ -343,7 +343,7 @@ fn main() {
                 .takes_value(true)
                 .validator(|s| match usize::from_str(&s) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(e.description().to_string()),
+                    Err(e) => Err(e.to_string()),
                 }),
         )
         .get_matches();
