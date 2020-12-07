@@ -44,7 +44,6 @@ jemallocator = { version = "0.3", features = [ "background_threads" ] }
 zstd = { version = "0.5", default-features = false }
 zstd-safe = { version = "2.0", default-features = false }
 
-
 [dev-dependencies]
 rand = "0.7"
 rand_xorshift = "0.2"
@@ -54,3 +53,6 @@ clap = "2.33"
 bencher = "0.1"
 
 criterion = "0.3"
+
+[features]
+internal-api = []

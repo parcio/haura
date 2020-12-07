@@ -34,7 +34,7 @@ pub fn update_allocation_bitmap_msg(
     DefaultMessageAction::upsert_msg(segment_offset, &data)
 }
 
-pub(super) struct Handler {
+pub struct Handler {
     pub root_tree_inner: AtomicOption<Arc<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
     pub root_tree_snapshot: RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
     pub current_generation: SeqLock<Generation>,

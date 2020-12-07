@@ -223,6 +223,11 @@ impl Database {
             .update_root_node(RootDmu::ref_from_ptr(root_ptr));
         Ok(())
     }
+
+    #[cfg(feature = "internal-api")]
+    pub fn root_tree(&self) -> &RootTree {
+        &self.root_tree
+    }
 }
 
 fn ss_key(ds_id: DatasetId, name: &[u8]) -> Vec<u8> {
@@ -331,7 +336,7 @@ impl DeadListData {
 #[derive(
     Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
-struct DatasetId(u64);
+pub struct DatasetId(u64);
 
 impl DatasetId {
     fn pack(self) -> [u8; 8] {
@@ -409,7 +414,7 @@ impl<P: DeserializeOwned> DatasetData<P> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-struct Generation(u64);
+pub struct Generation(u64);
 
 impl StaticSize for Generation {
     fn size() -> usize {
