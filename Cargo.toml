@@ -3,8 +3,15 @@ members = [
     "betree"
 ]
 
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
 [profile.test]
 opt-level = 2
+
+[profile.release.package."*"]
+debug = false
 
 [profile.release]
 debug = true
