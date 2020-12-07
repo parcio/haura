@@ -296,6 +296,7 @@ where
             self.msg_action().apply(key, &msg, &mut data);
         }
 
+        drop(node);
         if self.evict {
             self.dml.evict()?;
         }
@@ -306,21 +307,23 @@ where
     where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
-        let mut node = self.get_mut_root_node()?;
-
         let mut parent = None;
-        let mut node = loop {
-            match Ref::try_new(node, |node| node.try_walk(key.borrow())) {
-                Ok(mut child_buffer) => {
-                    if let Some(child) = self.try_get_mut_node(child_buffer.node_pointer_mut()) {
-                        node = child;
-                        parent = Some(child_buffer);
-                    } else {
-                        break child_buffer.into_owner();
+        let mut node = {
+            let mut node = self.get_mut_root_node()?;
+            loop {
+                match Ref::try_new(node, |node| node.try_walk(key.borrow())) {
+                    Ok(mut child_buffer) => {
+                        if let Some(child) = self.try_get_mut_node(child_buffer.node_pointer_mut())
+                        {
+                            node = child;
+                            parent = Some(child_buffer);
+                        } else {
+                            break child_buffer.into_owner();
+                        }
                     }
-                }
-                Err(node) => break node,
-            };
+                    Err(node) => break node,
+                };
+            }
         };
 
         let added_size = node.insert(key, msg, self.msg_action());
