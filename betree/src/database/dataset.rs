@@ -90,6 +90,17 @@ impl Database {
         Ok(())
     }
 
+    /// Opens a dataset, creating a new one if none exists by the given name.
+    pub fn open_or_create_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
+        match self.lookup_dataset_id(name) {
+            Ok(_) => self.open_dataset(name),
+            Err(Error(ErrorKind::DoesNotExist, _)) => self
+                .create_dataset(name)
+                .and_then(|()| self.open_dataset(name)),
+            Err(e) => Err(e),
+        }
+    }
+
     fn allocate_ds_id(&mut self) -> Result<DatasetId> {
         let key = &[0u8] as &[_];
         let last_ds_id = self
