@@ -40,7 +40,9 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
             inner: Arc::new(Inner {
                 write_back_queue: Mutex::new(BoundedFutureQueue::new(20 * devices.len())),
                 devices,
-                pool: ThreadPool::new()?,
+                pool: ThreadPool::builder()
+                    .name_prefix("storage_pool")
+                    .create()?,
             }),
         })
     }
