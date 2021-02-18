@@ -46,6 +46,8 @@ pub mod storage_pool;
 pub mod tree;
 pub mod vdev;
 
+pub mod object;
+
 pub use self::{
     database::{Database, Dataset, Error, Snapshot},
     storage_pool::StorageConfiguration,
