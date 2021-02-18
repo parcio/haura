@@ -57,7 +57,7 @@ impl Compression for Zstd {
 }
 
 pub struct Compress {
-    writer: Writer<Vec<u8>, Encoder>,
+    writer: Writer<Vec<u8>, Encoder<'static>>,
 }
 
 impl io::Write for Compress {

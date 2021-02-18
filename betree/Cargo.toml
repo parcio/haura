@@ -16,6 +16,10 @@ harness = false
 name = "allocator"
 harness = false
 
+[[bench]]
+name = "serialisation"
+harness = false
+
 [dependencies]
 futures = { version = "0.3", features = ["thread-pool"] }
 serde = { version = "1.0", features = [ "derive" ] }
@@ -31,9 +35,8 @@ lz4 = "1.21"
 seqlock = { path = "seqlock/" }
 twox-hash = "1.6"
 stable_deref_trait = "1.1"
-unbytify = "0.2"
 toml = "0.5"
-itertools = "0.9"
+itertools = "0.10"
 ref_slice = "1.1"
 env_logger = "0.8"
 scoped_threadpool = "0.1"
@@ -41,16 +44,21 @@ indicatif = "0.15"
 async-trait = "0.1"
 jemallocator = { version = "0.3", features = [ "background_threads" ] }
 
-zstd = { version = "0.5", default-features = false }
-zstd-safe = { version = "2.0", default-features = false }
+zstd = { version = "0.6", default-features = false }
+zstd-safe = { version = "3.0", default-features = false }
+
+speedy = "0.7"
 
 [dev-dependencies]
-rand = "0.7"
-rand_xorshift = "0.2"
-quickcheck = "0.9"
-quickcheck_macros = "0.9"
+rand = "0.8"
+rand_xorshift = "0.3"
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
 clap = "2.33"
 bencher = "0.1"
+
+# used in examples/write_test
+unbytify = "0.2"
 
 criterion = "0.3"
 
