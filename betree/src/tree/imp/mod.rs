@@ -1,7 +1,7 @@
 use self::{flush::Ref, node::GetResult};
 use super::{
     errors::*,
-    layer::{TreeBaseLayer, TreeLayer},
+    layer::{ErasedTreeSync, TreeBaseLayer, TreeLayer},
 };
 use crate::{
     cache::AddSize,
@@ -10,9 +10,10 @@ use crate::{
     tree::MessageAction,
 };
 use owning_ref::OwningRef;
-use parking_lot::{RwLock, RwLockWriteGuard};
+use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
 use std::{
-    borrow::Borrow, collections::Bound, marker::PhantomData, mem::replace, ops::RangeBounds,
+    any::Any, borrow::Borrow, collections::Bound, marker::PhantomData, mem::replace,
+    ops::RangeBounds,
 };
 
 #[derive(Debug)]
@@ -412,6 +413,25 @@ where
             .dml
             .write_back(|| self.inner.borrow().root_node.write())?;
         Ok(obj_ptr)
+    }
+}
+
+impl<X, R, M, I> ErasedTreeSync for Tree<X, M, I>
+where
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    M: MessageAction,
+    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+{
+    type Pointer = X::ObjectPointer;
+    type ObjectRef = R;
+    fn erased_sync(&self) -> Result<Self::Pointer, Error> {
+        TreeLayer::sync(self)
+    }
+    fn erased_try_lock_root(
+        &self,
+    ) -> Option<OwningRef<RwLockWriteGuard<Self::ObjectRef>, Self::Pointer>> {
+        self.try_lock_root()
     }
 }
 

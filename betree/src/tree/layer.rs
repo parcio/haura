@@ -1,7 +1,9 @@
 use super::MessageAction;
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
+use owning_ref::OwningRef;
+use parking_lot::RwLockWriteGuard;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{borrow::Borrow, ops::RangeBounds};
+use std::{any::Any, borrow::Borrow, ops::RangeBounds};
 
 use super::errors::*;
 
@@ -48,4 +50,17 @@ pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
 
     /// Sync the tree to disk.
     fn sync(&self) -> Result<Self::Pointer, Error>;
+}
+
+/// Special-purpose interface to allow for storing and syncing trees of different message types.
+pub(crate) trait ErasedTreeSync {
+    type Pointer;
+    type ObjectRef;
+    fn erased_sync(&self) -> Result<Self::Pointer, Error>;
+    // ObjectRef is not object-safe, so use Any since we only need the lock, not the value
+    // fn erased_try_lock_root(&self) -> Option<OwningRef<RwLockWriteGuard<dyn Any>, Self::Pointer>>;
+    // FIXME: find an actual abstraction, instead of encoding implementation details into this trait
+    fn erased_try_lock_root(
+        &self,
+    ) -> Option<OwningRef<RwLockWriteGuard<Self::ObjectRef>, Self::Pointer>>;
 }

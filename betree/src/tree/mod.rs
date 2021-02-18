@@ -12,3 +12,5 @@ pub use self::{
     layer::{TreeBaseLayer, TreeLayer},
     message_action::{DefaultMessageAction, MessageAction},
 };
+
+pub(crate) use self::layer::ErasedTreeSync;

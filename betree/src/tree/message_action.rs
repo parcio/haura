@@ -28,6 +28,12 @@ pub trait MessageAction: Debug + Send + Sync {
     ) -> SlicedCowBytes;
 }
 
+pub trait OpaqueMessageAction: MessageAction {
+    fn build_insert() -> SlicedCowBytes;
+    fn build_upsert(upsert: &[Upsert]) -> SlicedCowBytes;
+    fn build_delete() -> SlicedCowBytes;
+}
+
 impl<T: Deref + Debug + Send + Sync> MessageAction for T
 where
     T::Target: MessageAction,
@@ -50,11 +56,11 @@ where
 
 /// This is the default message action. It supports inserts, deletes, and
 /// upserts.
-#[derive(Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone)]
 pub struct DefaultMessageAction;
 
 #[derive(Serialize, Deserialize)]
-struct Upsert<'a> {
+pub struct Upsert<'a> {
     offset: u32,
     data: &'a [u8],
 }
