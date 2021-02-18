@@ -1,5 +1,5 @@
 //! This module provides the Data Management Layer
-//! which handles user-defined objects and incldues caching and write back.
+//! which handles user-defined objects and includes caching and write back.
 
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
@@ -38,7 +38,7 @@ impl<
 {
 }
 
-/// An reference to an object managed by a `Dml`.
+/// A reference to an object managed by a `Dml`.
 pub trait ObjectRef: Serialize + DeserializeOwned + StaticSize + 'static {
     /// The ObjectPointer for this ObjectRef.
     type ObjectPointer;

@@ -790,6 +790,7 @@ where
                 ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid,
             };
             let mut mids = Vec::new();
+
             match self.prepare_write_back(mid, &mut mids) {
                 Ok(None) => self.fix_or(&mut or),
                 Ok(Some(object)) => break (object, mid),
