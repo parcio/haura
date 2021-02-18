@@ -3,22 +3,24 @@
 use std::{
     ffi::CStr,
     io::{stderr, Write},
-    os::raw::{c_char, c_int, c_uint},
+    os::raw::{c_char, c_int, c_uint, c_ulong},
     process::abort,
     ptr::{null_mut, read, write},
-    slice::from_raw_parts,
+    slice::{from_raw_parts, from_raw_parts_mut},
     sync::Arc,
+    time::{Duration, UNIX_EPOCH},
 };
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{Database, Dataset, Error, Snapshot},
-    storage_pool::Configuration,
+    object::{Object, ObjectStore},
+    storage_pool::StorageConfiguration,
 };
 use error_chain::ChainedError;
 
 /// The type for a storage pool configuration
-pub struct cfg_t(Configuration);
+pub struct cfg_t(StorageConfiguration);
 /// The general error type
 pub struct err_t(Error);
 /// The database type
@@ -31,6 +33,11 @@ pub struct ss_t(Snapshot);
 pub struct name_iter_t(Box<dyn Iterator<Item = Result<SlicedCowBytes, Error>>>);
 /// The range iterator type
 pub struct range_iter_t(Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes), Error>>>);
+
+/// The object store wrapper type
+pub struct obj_store_t(ObjectStore);
+/// The handle of an object in the corresponding object store
+pub struct obj_t<'os>(Object<'os>);
 
 /// A reference counted byte slice
 #[repr(C)]
@@ -84,7 +91,7 @@ impl HandleResult for () {
     }
 }
 
-impl HandleResult for Configuration {
+impl HandleResult for StorageConfiguration {
     type Result = *mut cfg_t;
     fn success(self) -> *mut cfg_t {
         b(cfg_t(self))
@@ -144,6 +151,26 @@ impl HandleResult for Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes),
     }
 }
 
+impl HandleResult for ObjectStore {
+    type Result = *mut obj_store_t;
+    fn success(self) -> *mut obj_store_t {
+        b(obj_store_t(self))
+    }
+    fn fail() -> *mut obj_store_t {
+        null_mut()
+    }
+}
+
+impl<'os> HandleResult for Object<'os> {
+    type Result = *mut obj_t<'os>;
+    fn success(self) -> *mut obj_t<'os> {
+        b(obj_t(self))
+    }
+    fn fail() -> *mut obj_t<'os> {
+        null_mut()
+    }
+}
+
 trait HandleResultExt {
     type Result;
     fn handle_result(self, err: *mut *mut err_t) -> Self::Result;
@@ -154,6 +181,20 @@ impl<T: HandleResult> HandleResultExt for Result<T, Error> {
     fn handle_result(self, err: *mut *mut err_t) -> T::Result {
         match self {
             Ok(x) => x.success(),
+            Err(e) => {
+                handle_err(e, err);
+                T::fail()
+            }
+        }
+    }
+}
+
+impl<T: HandleResult> HandleResultExt for Result<Option<T>, Error> {
+    type Result = T::Result;
+    fn handle_result(self, err: *mut *mut err_t) -> T::Result {
+        match self {
+            Ok(Some(x)) => x.success(),
+            Ok(None) => T::fail(),
             Err(e) => {
                 handle_err(e, err);
                 T::fail()
@@ -187,7 +228,8 @@ pub unsafe extern "C" fn betree_parse_configuration(
     let cfg_string_iter = cfg_strings
         .iter()
         .map(|&p| CStr::from_ptr(p).to_string_lossy());
-    Configuration::parse_zfs_like(cfg_string_iter)
+
+    StorageConfiguration::parse_zfs_like(cfg_string_iter)
         .map_err(Error::from)
         .handle_result(err)
 }
@@ -228,7 +270,7 @@ pub unsafe extern "C" fn betree_free_range_iter(range_iter: *mut range_iter_t) {
 /// On error, return null.  If `err` is not null, store an error in `err`.
 #[no_mangle]
 pub unsafe extern "C" fn betree_open_db(cfg: *const cfg_t, err: *mut *mut err_t) -> *mut db_t {
-    Database::open(&(*cfg).0).handle_result(err)
+    Database::open((*cfg).0.clone()).handle_result(err)
 }
 
 /// Create a database given by a storate pool configuration.
@@ -239,7 +281,7 @@ pub unsafe extern "C" fn betree_open_db(cfg: *const cfg_t, err: *mut *mut err_t)
 /// Note that any existing database will be overwritten!
 #[no_mangle]
 pub unsafe extern "C" fn betree_create_db(cfg: *const cfg_t, err: *mut *mut err_t) -> *mut db_t {
-    Database::create(&(*cfg).0).handle_result(err)
+    Database::create((*cfg).0.clone()).handle_result(err)
 }
 
 /// Sync a database.
@@ -639,4 +681,133 @@ pub unsafe extern "C" fn betree_print_error(err: *mut err_t) {
     if write!(&mut stderr(), "{}", err.display_chain()).is_err() {
         abort();
     }
+}
+
+/// Create an object store interface.
+#[no_mangle]
+pub unsafe extern "C" fn betree_create_object_store(
+    db: *mut db_t,
+    err: *mut *mut err_t,
+) -> *mut obj_store_t {
+    let db = &mut (*db).0;
+    db.open_object_store().handle_result(err)
+}
+
+/// Open an existing object.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_open<'os>(
+    os: *mut obj_store_t,
+    key: *const c_char,
+    key_len: c_uint,
+    err: *mut *mut err_t,
+) -> *mut obj_t<'os> {
+    let os = &mut (*os).0;
+    os.open_object(from_raw_parts(key as *const u8, key_len as usize))
+        .handle_result(err)
+}
+
+/// Create a new object.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_create<'os>(
+    os: *mut obj_store_t,
+    key: *const c_char,
+    key_len: c_uint,
+    err: *mut *mut err_t,
+) -> *mut obj_t<'os> {
+    let os = &mut (*os).0;
+    os.create_object(from_raw_parts(key as *const u8, key_len as usize))
+        .handle_result(err)
+}
+
+/// Try to open an existing object, create it if none exists.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_open_or_create<'os>(
+    os: *mut obj_store_t,
+    key: *const c_char,
+    key_len: c_uint,
+    err: *mut *mut err_t,
+) -> *mut obj_t<'os> {
+    let os = &mut (*os).0;
+    os.open_or_create_object(from_raw_parts(key as *const u8, key_len as usize))
+        .handle_result(err)
+}
+
+/// Delete an existing object. The handle may not be used afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_delete(obj: *mut obj_t, err: *mut *mut err_t) -> c_int {
+    let obj = Box::from_raw(obj).0;
+    obj.delete().handle_result(err)
+}
+
+/// Closes an object. The handle may not be used afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_close(obj: *mut obj_t, err: *mut *mut err_t) -> c_int {
+    let obj = Box::from_raw(obj).0;
+    obj.close().handle_result(err)
+}
+
+/// Try to read `buf_len` bytes of `obj` into `buf`, starting at `offset` bytes into the objects
+/// data. The actually read number of bytes is written into `n_read` if and only if the read
+/// succeeded.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_read_at(
+    obj: *mut obj_t,
+    buf: *mut c_char,
+    buf_len: c_ulong,
+    offset: c_ulong,
+    n_read: *mut c_ulong,
+    err: *mut *mut err_t,
+) -> c_int {
+    let obj = &mut (*obj).0;
+    let buf = from_raw_parts_mut(buf as *mut u8, buf_len as usize);
+    obj.read_at(buf, offset)
+        .map(|read| {
+            *n_read = read as c_ulong;
+        })
+        .map_err(|(read, err)| {
+            *n_read = read;
+            err
+        })
+        .handle_result(err)
+}
+
+/// Try to write `buf_len` bytes from `buf` into `obj`, starting at `offset` bytes into the objects
+/// data.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_write_at(
+    obj: *mut obj_t,
+    buf: *const c_char,
+    buf_len: c_ulong,
+    offset: c_ulong,
+    n_written: *mut c_ulong,
+    err: *mut *mut err_t,
+) -> c_int {
+    let obj = &mut (*obj).0;
+    let buf = from_raw_parts(buf as *const u8, buf_len as usize);
+    obj.write_at(buf, offset)
+        .map(|written| {
+            *n_written = written;
+        })
+        .map_err(|(written, err)| {
+            *n_written = written;
+            err
+        })
+        .handle_result(err)
+}
+
+/// Return the objects size in bytes.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_size(obj: *const obj_t) -> c_ulong {
+    let obj = &(*obj).0;
+    obj.size()
+}
+
+/// Returns the last modification timestamp in microseconds since the Unix epoch.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_mtime_us(obj: *const obj_t) -> c_ulong {
+    let obj = &(*obj).0;
+    obj.modification_time()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0)
 }

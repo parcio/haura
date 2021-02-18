@@ -42,6 +42,9 @@ typedef struct range_iter_t range_iter_t;
  */
 typedef struct ss_t ss_t;
 
+typedef struct obj_store_t obj_store_t;
+typedef struct obj_t obj_t;
+
 /*
  * A reference counted byte slice
  */
@@ -52,24 +55,7 @@ typedef struct {
 } byte_slice_t;
 
 /*
- * Closes a database.
- *
- * Note that the `db_t` may not be used afterwards.
- */
-void betree_close_db(db_t *db);
-
-/*
- * Close a data set.
- *
- * On success, return 0.
- * On error, return -1.  If `err` is not null, store an error in `err`.
- *
- * Note that the `ds_t` may not be used afterwards.
- */
-int betree_close_ds(db_t *db, ds_t *ds, err_t **err);
-
-/*
- * Create a database given by a storate pool configuration.
+ * Create a database given by a storage pool configuration.
  *
  * On success, return a `db_t` which has to be freed with `betree_close_db`.
  * On error, return null.  If `err` is not null, store an error in `err`.
@@ -77,6 +63,31 @@ int betree_close_ds(db_t *db, ds_t *ds, err_t **err);
  * Note that any existing database will be overwritten!
  */
 db_t *betree_create_db(const cfg_t *cfg, err_t **err);
+
+/*
+ * Open a database given by a storage pool configuration.
+ *
+ * On success, return a `db_t` which has to be freed with `betree_close_db`.
+ * On error, return null.  If `err` is not null, store an error in `err`.
+ */
+db_t *betree_open_db(const cfg_t *cfg, err_t **err);
+
+/*
+ * Closes a database.
+ *
+ * Note that the `db_t` may not be used afterwards.
+ */
+void betree_close_db(db_t *db);
+
+/*
+ * Parse the configuration string for a storage pool.
+ *
+ * On success, return a `cfg_t` which has to be freed with `betree_free_cfg`.
+ * On error, return null.  If `err` is not null, store an error in `err`.
+ */
+cfg_t *betree_parse_configuration(const char *const *cfg_strings,
+                                  unsigned int cfg_strings_len,
+                                  err_t **err);
 
 /*
  * Create a new data set with the given name.
@@ -89,14 +100,22 @@ db_t *betree_create_db(const cfg_t *cfg, err_t **err);
 int betree_create_ds(db_t *db, const char *name, unsigned int len, err_t **err);
 
 /*
- * Create a new snapshot for the given data set with the given name.
+ * Open a data set identified by the given name.
+ *
+ * On success, return a `ds_t` which has to be freed with `betree_close_ds`.
+ * On error, return null.  If `err` is not null, store an error in `err`.
+ */
+ds_t *betree_open_ds(db_t *db, const char *name, unsigned int len, err_t **err);
+
+/*
+ * Close a data set.
  *
  * On success, return 0.
  * On error, return -1.  If `err` is not null, store an error in `err`.
  *
- * Note that the creation fails if a snapshot with same name exists already for this data set.
+ * Note that the `ds_t` may not be used afterwards.
  */
-int betree_create_snapshot(db_t *db, ds_t *ds, const char *name, unsigned int len, err_t **err);
+int betree_close_ds(db_t *db, ds_t *ds, err_t **err);
 
 /*
  * Delete the value for the given `key` if the key exists.
@@ -185,6 +204,16 @@ int betree_dataset_upsert(const ds_t *ds,
                           err_t **err);
 
 /*
+ * Create a new snapshot for the given data set with the given name.
+ *
+ * On success, return 0.
+ * On error, return -1.  If `err` is not null, store an error in `err`.
+ *
+ * Note that the creation fails if a snapshot with same name exists already for this data set.
+ */
+int betree_create_snapshot(db_t *db, ds_t *ds, const char *name, unsigned int len, err_t **err);
+
+/*
  * Delete the snapshot for the given data set with the given name.
  *
  * On success, return 0.
@@ -247,32 +276,6 @@ name_iter_t *betree_iter_snapshots(const db_t *db, const ds_t *ds, err_t **err);
 int betree_name_iter_next(name_iter_t *name_iter, byte_slice_t *name, err_t **err);
 
 /*
- * Open a database given by a storate pool configuration.
- *
- * On success, return a `db_t` which has to be freed with `betree_close_db`.
- * On error, return null.  If `err` is not null, store an error in `err`.
- */
-db_t *betree_open_db(const cfg_t *cfg, err_t **err);
-
-/*
- * Open a data set identified by the given name.
- *
- * On success, return a `ds_t` which has to be freed with `betree_close_ds`.
- * On error, return null.  If `err` is not null, store an error in `err`.
- */
-ds_t *betree_open_ds(db_t *db, const char *name, unsigned int len, err_t **err);
-
-/*
- * Parse the configuration string for a storage pool.
- *
- * On success, return a `cfg_t` which has to be freed with `betree_free_cfg`.
- * On error, return null.  If `err` is not null, store an error in `err`.
- */
-cfg_t *betree_parse_configuration(const char *const *cfg_strings,
-                                  unsigned int cfg_strings_len,
-                                  err_t **err);
-
-/*
  * Print the given error to stderr.
  */
 void betree_print_error(err_t *err);
@@ -326,3 +329,18 @@ range_iter_t *betree_snapshot_range(const ss_t *ss,
  * On error, return -1.  If `err` is not null, store an error in `err`.
  */
 int betree_sync_db(db_t *db, err_t **err);
+
+obj_store_t* betree_create_object_store(db_t* db, err_t** err);
+
+obj_t* betree_object_open(obj_store_t* os, const char* key, unsigned int key_len, err_t** err);
+obj_t* betree_object_create(obj_store_t* os, const char* key, unsigned int key_len, err_t** err);
+obj_t* betree_object_open_or_create(obj_store_t* os, const char* key, unsigned int key_len, err_t** err);
+
+int betree_object_delete(obj_t* obj, err_t** err);
+int betree_object_close(obj_t* obj, err_t** err);
+
+int betree_object_read_at(obj_t* obj, char* buf, unsigned long buf_len, unsigned long offset, unsigned long* n_read, err_t** err);
+int betree_object_write_at(obj_t* obj, char* buf, unsigned long buf_len, unsigned long offset, unsigned long* n_written, err_t** err);
+
+unsigned long betree_object_size(const obj_t* obj);
+unsigned long betree_object_mtime_us(const obj_t* obj);
