@@ -1,0 +1,18 @@
+[package]
+name = "bectl"
+version = "0.1.0"
+authors = ["tilpner <till@hoeppner.ws>"]
+edition = "2018"
+
+[dependencies]
+betree_storage_stack = { path = "../betree", features = [ "internal-api" ] }
+structopt = "0.3"
+chrono = "0.4"
+
+jemallocator = { version = "0.3", features = [ "background_threads" ] }
+
+anyhow = "1.0"
+
+log = "0.4"
+env_logger = "0.8"
+error-chain = "0.12"

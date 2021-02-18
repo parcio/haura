@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "betree"
+    "betree",
+    "bectl"
 ]
 
 [profile.dev.package."*"]
