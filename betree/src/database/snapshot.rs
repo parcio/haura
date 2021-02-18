@@ -21,7 +21,7 @@ pub struct Snapshot {
 
 impl Database {
     /// Open a snapshot for the given data set identified by the given name.
-    pub fn open_snapshot(&self, ds: &mut Dataset, name: &[u8]) -> Result<Snapshot> {
+    pub fn open_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<Snapshot> {
         let id = self.lookup_snapshot_id(ds.id, name)?;
         if !ds.open_snapshots.insert(id) {
             bail!(ErrorKind::InUse)
@@ -49,7 +49,7 @@ impl Database {
     ///
     /// Note that the creation fails if a snapshot with the same name exists
     /// already for the given data set.
-    pub fn create_snapshot(&mut self, ds: &mut Dataset, name: &[u8]) -> Result<()> {
+    pub fn create_snapshot<M>(&mut self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
         match self.lookup_snapshot_id(ds.id, name).err() {
             None => bail!(ErrorKind::AlreadyExists),
             Some(Error(ErrorKind::DoesNotExist, ..)) => {}
@@ -71,9 +71,9 @@ impl Database {
     }
 
     /// Iterate over all snapshots for the given data set.
-    pub fn iter_snapshots(
+    pub fn iter_snapshots<M>(
         &self,
-        ds: &Dataset,
+        ds: &Dataset<M>,
     ) -> Result<impl Iterator<Item = Result<SlicedCowBytes>>> {
         let mut low = [0; 9];
         low[0] = 3;
@@ -90,7 +90,7 @@ impl Database {
     ///
     /// Note that the deletion fails if a snapshot with the given name does not
     /// exist for this data set.
-    pub fn delete_snapshot(&self, ds: &mut Dataset, name: &[u8]) -> Result<()> {
+    pub fn delete_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
         let ss_id = self.lookup_snapshot_id(ds.id, name)?;
         if ds.open_snapshots.contains(&ss_id) {
             bail!(ErrorKind::InUse)

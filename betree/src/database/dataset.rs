@@ -1,16 +1,16 @@
 use super::{
     ds_data_key, errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree,
-    Generation,
+    Generation, MessageTree,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer},
+    tree::{DefaultMessageAction, ErasedTreeSync, MessageAction, Tree, TreeBaseLayer, TreeLayer},
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
 /// The data set type.
-pub struct Dataset {
-    tree: DatasetTree,
+pub struct Dataset<Message = DefaultMessageAction> {
+    tree: MessageTree<Message>,
     pub(super) id: DatasetId,
     name: Box<[u8]>,
     pub(super) open_snapshots: HashSet<Generation>,
@@ -25,10 +25,21 @@ impl Database {
         Ok(DatasetId::unpack(&data))
     }
 
+    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
+        self.open_custom_dataset::<DefaultMessageAction>(name)
+    }
+
+    pub fn create_dataset(&mut self, name: &[u8]) -> Result<()> {
+        self.create_custom_dataset::<DefaultMessageAction>(name)
+    }
+
     /// Opens a data set identified by the given name.
     ///
     /// Fails if the data set does not exist.
-    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
+    pub fn open_custom_dataset<M: MessageAction + Default + 'static>(
+        &mut self,
+        name: &[u8],
+    ) -> Result<Dataset<M>> {
         let id = self.lookup_dataset_id(name)?;
         let ds_data = fetch_ds_data(&self.root_tree, id)?;
         if self.open_datasets.contains_key(&id) {
@@ -37,7 +48,7 @@ impl Database {
         let ds_tree = Tree::open(
             id,
             ds_data.ptr,
-            DefaultMessageAction,
+            M::default(),
             Arc::clone(self.root_tree.dmu()),
         );
 
@@ -49,7 +60,10 @@ impl Database {
                 .write()
                 .insert(id, ss_id);
         }
-        self.open_datasets.insert(id, ds_tree.clone());
+        // FIXME: important!
+        let erased_tree = Box::new(ds_tree.clone());
+        self.open_datasets.insert(id, erased_tree);
+
         Ok(Dataset {
             tree: ds_tree.clone(),
             id,
@@ -61,7 +75,7 @@ impl Database {
     /// Creates a new data set identified by the given name.
     ///
     /// Fails if a data set with the same name exists already.
-    pub fn create_dataset(&mut self, name: &[u8]) -> Result<()> {
+    pub fn create_custom_dataset<M: MessageAction>(&mut self, name: &[u8]) -> Result<()> {
         match self.lookup_dataset_id(name) {
             Ok(_) => bail!(ErrorKind::AlreadyExists),
             Err(Error(ErrorKind::DoesNotExist, _)) => {}
@@ -91,12 +105,15 @@ impl Database {
     }
 
     /// Opens a dataset, creating a new one if none exists by the given name.
-    pub fn open_or_create_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
+    pub fn open_or_create_dataset<M: MessageAction + Default + 'static>(
+        &mut self,
+        name: &[u8],
+    ) -> Result<Dataset<M>> {
         match self.lookup_dataset_id(name) {
-            Ok(_) => self.open_dataset(name),
+            Ok(_) => self.open_custom_dataset(name),
             Err(Error(ErrorKind::DoesNotExist, _)) => self
-                .create_dataset(name)
-                .and_then(|()| self.open_dataset(name)),
+                .create_custom_dataset::<M>(name)
+                .and_then(|()| self.open_custom_dataset(name)),
             Err(e) => Err(e),
         }
     }
@@ -127,7 +144,10 @@ impl Database {
     }
 
     /// Closes the given data set.
-    pub fn close_dataset(&mut self, ds: Dataset) -> Result<()> {
+    pub fn close_dataset<Message: MessageAction + 'static>(
+        &mut self,
+        ds: Dataset<Message>,
+    ) -> Result<()> {
         self.sync_ds(ds.id, &ds.tree)?;
         self.open_datasets.remove(&ds.id);
         self.root_tree
@@ -141,7 +161,7 @@ impl Database {
     }
 }
 
-impl Dataset {
+impl<Message: MessageAction + 'static> Dataset<Message> {
     /// Inserts a message for the given key.
     pub fn insert_msg<K: Borrow<[u8]> + Into<CowBytes>>(
         &self,
@@ -151,33 +171,9 @@ impl Dataset {
         Ok(self.tree.insert(key, msg)?)
     }
 
-    /// Inserts the given key-value pair.
-    ///
-    /// Note that any existing value will be overwritten.
-    pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
-        self.insert_msg(key, DefaultMessageAction::insert_msg(data))
-    }
-
-    /// Upserts the value for the given key at the given offset.
-    ///
-    /// Note that the value will be zeropadded as needed.
-    pub fn upsert<K: Borrow<[u8]> + Into<CowBytes>>(
-        &self,
-        key: K,
-        data: &[u8],
-        offset: u32,
-    ) -> Result<()> {
-        self.insert_msg(key, DefaultMessageAction::upsert_msg(offset, data))
-    }
-
     /// Returns the value for the given key if existing.
     pub fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>> {
         Ok(self.tree.get(key)?)
-    }
-
-    /// Deletes the key-value pair if existing.
-    pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
-        self.insert_msg(key, DefaultMessageAction::delete_msg())
     }
 
     /// Iterates over all key-value pairs in the given key range.
@@ -204,5 +200,31 @@ impl Dataset {
     /// Returns the name of the data set.
     pub fn name(&self) -> &[u8] {
         &self.name
+    }
+}
+
+impl Dataset<DefaultMessageAction> {
+    /// Inserts the given key-value pair.
+    ///
+    /// Note that any existing value will be overwritten.
+    pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
+        self.insert_msg(key, DefaultMessageAction::insert_msg(data))
+    }
+
+    /// Upserts the value for the given key at the given offset.
+    ///
+    /// Note that the value will be zeropadded as needed.
+    pub fn upsert<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        data: &[u8],
+        offset: u32,
+    ) -> Result<()> {
+        self.insert_msg(key, DefaultMessageAction::upsert_msg(offset, data))
+    }
+
+    /// Deletes the key-value pair if existing.
+    pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
+        self.insert_msg(key, DefaultMessageAction::delete_msg())
     }
 }
