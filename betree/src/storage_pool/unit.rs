@@ -1,4 +1,4 @@
-use super::{Configuration, DiskOffset, StoragePoolLayer};
+use super::{DiskOffset, StorageConfiguration, StoragePoolLayer};
 use crate::{
     bounded_future_queue::BoundedFutureQueue,
     checksum::Checksum,
@@ -32,7 +32,7 @@ struct Inner<C> {
 
 impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
     type Checksum = C;
-    type Configuration = Configuration;
+    type Configuration = StorageConfiguration;
 
     fn new(configuration: &Self::Configuration) -> Result<Self, io::Error> {
         let devices = configuration.build()?;
@@ -40,9 +40,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
             inner: Arc::new(Inner {
                 write_back_queue: Mutex::new(BoundedFutureQueue::new(20 * devices.len())),
                 devices,
-                pool: ThreadPool::builder()
-                    .name_prefix("storage_pool")
-                    .create()?,
+                pool: ThreadPool::builder().name_prefix("storage_pool").create()?,
             }),
         })
     }

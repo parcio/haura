@@ -78,7 +78,7 @@ mod disk_offset;
 pub use self::disk_offset::DiskOffset;
 
 pub mod configuration;
-pub use self::configuration::Configuration;
+pub use self::configuration::StorageConfiguration;
 
 mod unit;
 pub use self::unit::StoragePoolUnit;

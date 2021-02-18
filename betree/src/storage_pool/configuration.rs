@@ -11,14 +11,14 @@ use std::{
     fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
 };
 
-/// `Configuration` type for `StoragePoolUnit`.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Configuration {
+/// `StorageConfiguration` type for `StoragePoolUnit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageConfiguration {
     top_level_vdevs: Vec<Vdev>,
 }
 
 /// Represents a top-level vdev.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Vdev {
     /// This vdev is a leaf vdev.
     Leaf(LeafVdev),
@@ -29,7 +29,7 @@ pub enum Vdev {
 }
 
 /// Represents a leaf vdev.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeafVdev(PathBuf);
 
 error_chain! {
@@ -39,10 +39,10 @@ error_chain! {
     }
 }
 
-impl Configuration {
-    /// Returns a new `Configuration` based on the given top-level vdevs.
+impl StorageConfiguration {
+    /// Returns a new `StorageConfiguration` based on the given top-level vdevs.
     pub fn new(top_level_vdevs: Vec<Vdev>) -> Self {
-        Configuration { top_level_vdevs }
+        StorageConfiguration { top_level_vdevs }
     }
     /// Opens file and devices and constructs a `Vec<Vdev>`.
     pub fn build<C: Checksum>(&self) -> io::Result<Vec<Box<dyn VdevBoxed<C>>>> {
@@ -88,7 +88,7 @@ impl Configuration {
                 .collect();
             v.push(f(leaves));
         }
-        Ok(Configuration { top_level_vdevs: v })
+        Ok(StorageConfiguration { top_level_vdevs: v })
     }
 
     /// Returns the configuration in a ZFS-like string representation.
@@ -119,9 +119,9 @@ fn is_path<S: AsRef<str> + ?Sized>(s: &S) -> bool {
     }
 }
 
-impl FromIterator<Vdev> for Configuration {
+impl FromIterator<Vdev> for StorageConfiguration {
     fn from_iter<T: IntoIterator<Item = Vdev>>(iter: T) -> Self {
-        Configuration {
+        StorageConfiguration {
             top_level_vdevs: iter.into_iter().collect(),
         }
     }
@@ -151,6 +151,7 @@ impl Vdev {
 
 impl LeafVdev {
     fn build(&self) -> io::Result<vdev::File> {
+        // use std::os::unix::fs::OpenOptionsExt;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -174,7 +175,7 @@ impl<'a> From<&'a str> for LeafVdev {
     }
 }
 
-impl fmt::Display for Configuration {
+impl fmt::Display for StorageConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for vdev in &self.top_level_vdevs {
             vdev.display(0, f)?;

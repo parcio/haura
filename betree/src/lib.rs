@@ -48,5 +48,5 @@ pub mod vdev;
 
 pub use self::{
     database::{Database, Dataset, Error, Snapshot},
-    storage_pool::Configuration,
+    storage_pool::StorageConfiguration,
 };
