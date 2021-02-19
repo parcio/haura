@@ -80,6 +80,12 @@ db_t *betree_open_db(const cfg_t *cfg, err_t **err);
 void betree_close_db(db_t *db);
 
 /*
+ * Initialises the global env_logger. This function is only available
+ * if the library is built with the init_env_logger feature enabled.
+ */
+void betree_init_env_logger(void);
+
+/*
  * Parse the configuration string for a storage pool.
  *
  * On success, return a `cfg_t` which has to be freed with `betree_free_cfg`.

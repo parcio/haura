@@ -38,7 +38,7 @@ stable_deref_trait = "1.1"
 toml = "0.5"
 itertools = "0.10"
 ref_slice = "1.1"
-env_logger = "0.8"
+env_logger = { version = "0.8", optional = true }
 scoped_threadpool = "0.1"
 indicatif = "0.15"
 async-trait = "0.1"
@@ -63,4 +63,7 @@ unbytify = "0.2"
 criterion = "0.3"
 
 [features]
+default = ["init_env_logger"]
+
 internal-api = []
+init_env_logger = ["env_logger"]

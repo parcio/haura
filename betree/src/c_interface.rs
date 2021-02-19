@@ -234,6 +234,13 @@ pub unsafe extern "C" fn betree_parse_configuration(
         .handle_result(err)
 }
 
+/// Enable the global env_logger, configured via environment variables.
+#[cfg(feature = "init_env_logger")]
+#[no_mangle]
+pub unsafe extern "C" fn betree_init_env_logger() {
+    crate::env_logger::init_env_logger()
+}
+
 /// Free a configuration object.
 #[no_mangle]
 pub unsafe extern "C" fn betree_free_cfg(cfg: *mut cfg_t) {
@@ -811,3 +818,4 @@ pub unsafe extern "C" fn betree_object_mtime_us(obj: *const obj_t) -> c_ulong {
         .map(|d| d.as_micros() as u64)
         .unwrap_or(0)
 }
+

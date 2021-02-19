@@ -30,6 +30,7 @@ extern crate twox_hash;
 #[macro_use]
 extern crate bencher;
 
+
 pub mod allocator;
 pub mod atomic_option;
 pub mod bounded_future_queue;
@@ -47,6 +48,9 @@ pub mod tree;
 pub mod vdev;
 
 pub mod object;
+
+#[cfg(feature = "init_env_logger")]
+pub mod env_logger;
 
 pub use self::{
     database::{Database, Dataset, Error, Snapshot},
