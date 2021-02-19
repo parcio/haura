@@ -346,7 +346,7 @@ int betree_object_delete(obj_t* obj, err_t** err);
 int betree_object_close(obj_t* obj, err_t** err);
 
 int betree_object_read_at(obj_t* obj, char* buf, unsigned long buf_len, unsigned long offset, unsigned long* n_read, err_t** err);
-int betree_object_write_at(obj_t* obj, char* buf, unsigned long buf_len, unsigned long offset, unsigned long* n_written, err_t** err);
+int betree_object_write_at(obj_t* obj, const char* buf, unsigned long buf_len, unsigned long offset, unsigned long* n_written, err_t** err);
 
 unsigned long betree_object_size(const obj_t* obj);
 unsigned long betree_object_mtime_us(const obj_t* obj);
