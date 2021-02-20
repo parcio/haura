@@ -10,10 +10,11 @@ let
 
   rustNightly = rustChannelOf {
     channel = "nightly";
-    date = "2020-02-17";
+    date = "2021-02-17";
   };
 
-  rust = rustStable.rust.override {
+  rust = rustNightly.rust.override {
+  #rust = rustStable.rust.override {
     extensions = [ "rust-src" "llvm-tools-preview" ];
   };
 
@@ -28,12 +29,22 @@ in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
   G_DEBUG = "resident-modules";
   G_SLICE = "debug-blocks";
 
+  LIBCLANG_PATH="${llvmPackages.libclang.lib}/lib/libclang.so";
+  JULEA_INCLUDE = "${toString ./.}/julea/include";
+
+  BINDGEN_EXTRA_CLANG_ARGS = [
+    "-I${glib.dev}/include/glib-2.0"
+    "-I${glib.out}/lib/glib-2.0/include"
+    "-I${libbson.out}/include/libbson-1.0"
+  ];
+
   nativeBuildInputs = [
     rustNightly.rustfmt-preview
     rust
 
     cargo-outdated
     cargo-bloat
+    rust-bindgen
 
     pkgconfig
 
@@ -44,9 +55,12 @@ in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
     meson
     ninja
     doxygen
+
+    glib
   ] ++ (with llvmPackages; [
     libcxxClang
     lldClang
+    libclang.lib
   ]);
 
   buildInputs = [
