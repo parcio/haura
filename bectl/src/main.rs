@@ -103,7 +103,7 @@ impl<'a> Display for PseudoAscii<'a> {
     }
 }
 
-fn open_db(cfg: StorageConfiguration) -> Result<Database> {
+fn open_db(cfg: StorageConfiguration) -> Result<Database<DatabaseConfiguration>> {
     Database::open(cfg).chain_err(|| "couldn't open database")
 }
 

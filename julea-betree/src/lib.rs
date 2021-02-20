@@ -6,8 +6,8 @@ use std::{
 use log::error;
 
 use betree_storage_stack::{
-    database::{Database, DatabaseConfiguration},
-    object::{Object, ObjectStore},
+    database::{self, DatabaseConfiguration},
+    object::{self, ObjectStore},
     storage_pool::StorageConfiguration,
 };
 
@@ -23,6 +23,9 @@ error_chain::error_chain! {
     }
 }
 
+type Database = database::Database<DatabaseConfiguration>;
+type Object<'os> = object::Object<'os, DatabaseConfiguration>;
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Configuration {
     storage: Vec<String>,
@@ -30,7 +33,7 @@ struct Configuration {
 
 struct Backend {
     database: Database,
-    object_store: ObjectStore,
+    object_store: ObjectStore<DatabaseConfiguration>,
 }
 
 unsafe fn return_box<T, E: Display>(
