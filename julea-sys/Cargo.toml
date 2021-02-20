@@ -1,0 +1,8 @@
+[package]
+name = "julea-sys"
+version = "0.1.0"
+authors = ["tilpner <till@hoeppner.ws>"]
+edition = "2018"
+
+[build-dependencies]
+bindgen = "0.57"
