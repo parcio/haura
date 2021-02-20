@@ -1,0 +1,20 @@
+[package]
+name = "julea-betree"
+version = "0.1.0"
+authors = ["tilpner <till@hoeppner.ws>"]
+edition = "2018"
+
+[lib]
+name = "object_betree"
+crate-type = ["cdylib"]
+
+[dependencies]
+betree_storage_stack = { path = "../betree" }
+julea-sys = { path = "../julea-sys" }
+
+log = "0.4"
+env_logger = "0.8"
+error-chain = "0.12"
+
+serde = "1.0"
+serde_json = "1.0"
