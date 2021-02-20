@@ -1,0 +1,32 @@
+[package]
+name = "betree-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.3", features = ["arbitrary-derive"] }
+arbitrary = { version = "0.4", features = ["derive"] }
+
+[dependencies.betree_storage_stack]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_target_1"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "kv-ops"
+path = "fuzz_targets/kv-ops.rs"
+test = false
+doc = false
