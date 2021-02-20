@@ -10,10 +10,9 @@ use crate::{
     tree::MessageAction,
 };
 use owning_ref::OwningRef;
-use parking_lot::{MappedRwLockWriteGuard, RwLock, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{
-    any::Any, borrow::Borrow, collections::Bound, marker::PhantomData, mem::replace,
-    ops::RangeBounds,
+    borrow::Borrow, collections::Bound, marker::PhantomData, mem::replace, ops::RangeBounds,
 };
 
 #[derive(Debug)]

@@ -3,7 +3,7 @@ use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 use owning_ref::OwningRef;
 use parking_lot::RwLockWriteGuard;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{any::Any, borrow::Borrow, ops::RangeBounds};
+use std::{borrow::Borrow, ops::RangeBounds};
 
 use super::errors::*;
 
@@ -57,8 +57,7 @@ pub(crate) trait ErasedTreeSync {
     type Pointer;
     type ObjectRef;
     fn erased_sync(&self) -> Result<Self::Pointer, Error>;
-    // ObjectRef is not object-safe, so use Any since we only need the lock, not the value
-    // fn erased_try_lock_root(&self) -> Option<OwningRef<RwLockWriteGuard<dyn Any>, Self::Pointer>>;
+    // ObjectRef is not object-safe, but we only need the lock, not the value
     // FIXME: find an actual abstraction, instead of encoding implementation details into this trait
     fn erased_try_lock_root(
         &self,

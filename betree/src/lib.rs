@@ -30,7 +30,6 @@ extern crate twox_hash;
 #[macro_use]
 extern crate bencher;
 
-
 pub mod allocator;
 pub mod atomic_option;
 pub mod bounded_future_queue;
