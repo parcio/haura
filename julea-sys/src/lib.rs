@@ -8,4 +8,3 @@ unsafe impl Sync for JBackend {}
 
 pub const FALSE: gboolean = 0;
 pub const TRUE: gboolean = !FALSE;
-
