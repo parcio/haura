@@ -7,6 +7,7 @@ use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, DmlBase, HandlerDml, ObjectRef},
+    range_validation::is_inclusive_non_empty,
     tree::MessageAction,
 };
 use owning_ref::OwningRef;
@@ -26,6 +27,7 @@ const MIN_FLUSH_SIZE: usize = 256 * 1024;
 const MIN_FANOUT: usize = 4;
 const MIN_LEAF_NODE_SIZE: usize = 1 * 1024 * 1024;
 const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
+pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// The actual tree type.
 pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
@@ -307,6 +309,8 @@ where
     where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
+        ensure!(!key.borrow().is_empty(), ErrorKind::EmptyKey);
+
         let mut parent = None;
         let mut node = {
             let mut node = self.get_mut_root_node()?;
@@ -365,6 +369,7 @@ where
         K: Borrow<[u8]> + Into<CowBytes>,
         Self: Clone,
     {
+        ensure!(is_inclusive_non_empty(&range), ErrorKind::InvalidRange);
         Ok(RangeIterator::new(range, self.clone()))
     }
 
@@ -373,6 +378,8 @@ where
         T: RangeBounds<K>,
         K: Borrow<[u8]>,
     {
+        ensure!(is_inclusive_non_empty(&range), ErrorKind::InvalidRange);
+
         if let (Bound::Unbounded, Bound::Unbounded) = (range.start_bound(), range.end_bound()) {
             let np = self.dml.insert(Node::empty_leaf(), self.tree_id());
             let old_root_np = replace(&mut *self.inner.borrow().root_node.write(), np);

@@ -6,7 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::DmlWithHandler,
     database::DatabaseBuilder,
-    tree::{DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
+    tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
@@ -213,6 +213,10 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ///
     /// Note that any existing value will be overwritten.
     pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
+        ensure!(
+            data.len() <= tree::MAX_MESSAGE_SIZE,
+            ErrorKind::MessageTooLarge
+        );
         self.insert_msg(key, DefaultMessageAction::insert_msg(data))
     }
 
@@ -225,6 +229,10 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         data: &[u8],
         offset: u32,
     ) -> Result<()> {
+        ensure!(
+            offset as usize + data.len() <= tree::MAX_MESSAGE_SIZE,
+            ErrorKind::MessageTooLarge
+        );
         self.insert_msg(key, DefaultMessageAction::upsert_msg(offset, data))
     }
 

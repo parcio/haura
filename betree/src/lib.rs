@@ -41,6 +41,7 @@ pub mod compression;
 pub mod cow_bytes;
 pub mod data_management;
 pub mod database;
+pub mod range_validation;
 pub mod size;
 pub mod storage_pool;
 pub mod tree;

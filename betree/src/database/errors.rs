@@ -13,5 +13,6 @@ error_chain! {
         AlreadyExists
         InUse
         InDestruction
+        MessageTooLarge
     }
 }

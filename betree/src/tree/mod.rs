@@ -13,4 +13,4 @@ pub use self::{
     message_action::{DefaultMessageAction, MessageAction},
 };
 
-pub(crate) use self::layer::ErasedTreeSync;
+pub(crate) use self::{imp::MAX_MESSAGE_SIZE, layer::ErasedTreeSync};

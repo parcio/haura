@@ -7,5 +7,7 @@ error_chain! {
         DmuError(crate::data_management::Error);
     }
     errors {
+        EmptyKey
+        InvalidRange
     }
 }

@@ -333,7 +333,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     #[cfg(feature = "internal-api")]
-    pub fn root_tree(&self) -> &RootTree {
+    pub fn root_tree(&self) -> &RootTree<Config::Dmu> {
         &self.root_tree
     }
 }
