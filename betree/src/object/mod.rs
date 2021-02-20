@@ -48,8 +48,7 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatasetTree, Error, ErrorKind, Result},
-    tree::MessageAction,
+    database::{DatabaseBuilder, Error, Result},
     Database, Dataset,
 };
 
@@ -79,16 +78,16 @@ fn object_chunk_key(object_id: u64, chunk_id: u32) -> [u8; 8 + 4] {
 }
 
 /// An object store
-pub struct ObjectStore {
-    data: Dataset,
-    metadata: Dataset<MetaMessageAction>,
+pub struct ObjectStore<Config: DatabaseBuilder> {
+    data: Dataset<Config>,
+    metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: AtomicU64,
 }
 
-impl Database {
+impl<Config: DatabaseBuilder> Database<Config> {
     /// Create an object store backed by a single database.
     // TODO: allow for multiple stores, construct names
-    pub fn open_object_store(&mut self) -> Result<ObjectStore> {
+    pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
             self.open_or_create_dataset(b"data")?,
             self.open_or_create_dataset(b"meta")?,
@@ -96,13 +95,13 @@ impl Database {
     }
 }
 
-impl<'os> ObjectStore {
+impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     /// Provide custom datasets for the object store, allowing to use different pools backed by
     /// different storage classes.
     pub fn with_datasets(
-        data: Dataset,
-        metadata: Dataset<MetaMessageAction>,
-    ) -> Result<ObjectStore> {
+        data: Dataset<Config>,
+        metadata: Dataset<Config, MetaMessageAction>,
+    ) -> Result<ObjectStore<Config>> {
         Ok(ObjectStore {
             object_id_counter: {
                 let last_key = data.get(OBJECT_ID_COUNTER_KEY)?.and_then(
@@ -121,7 +120,7 @@ impl<'os> ObjectStore {
     }
 
     /// Create a new object handle.
-    pub fn create_object(&'os self, key: &[u8]) -> Result<Object<'os>> {
+    pub fn create_object(&'os self, key: &[u8]) -> Result<Object<'os, Config>> {
         assert!(!key.contains(&0));
 
         let oid = loop {
@@ -153,7 +152,7 @@ impl<'os> ObjectStore {
         })
     }
 
-    pub fn open_object(&'os self, key: &[u8]) -> Result<Option<Object<'os>>> {
+    pub fn open_object(&'os self, key: &[u8]) -> Result<Option<Object<'os, Config>>> {
         assert!(!key.contains(&0));
 
         Ok(self.metadata.get(key)?.map(|info| Object {
@@ -163,7 +162,7 @@ impl<'os> ObjectStore {
         }))
     }
 
-    pub fn open_or_create_object(&'os self, key: &[u8]) -> Result<Object<'os>> {
+    pub fn open_or_create_object(&'os self, key: &[u8]) -> Result<Object<'os, Config>> {
         if let Some(obj) = self.open_object(key)? {
             Ok(obj)
         } else {
@@ -171,7 +170,7 @@ impl<'os> ObjectStore {
         }
     }
 
-    pub fn delete_object(&'os self, object: &Object) -> Result<()> {
+    pub fn delete_object(&'os self, object: &Object<Config>) -> Result<()> {
         // FIXME: bad error handling, object can end up partially deleted
         // TODO: is this proper deletion, or marked as deleted?
         self.metadata
@@ -185,11 +184,15 @@ impl<'os> ObjectStore {
         Ok(())
     }
 
+    pub fn close_object(&'os self, object: &Object<Config>) -> Result<()> {
+        object.sync_metadata()
+    }
+
     // TODO: return actual objects instead of objectinfos
     pub fn list_objects<R, K>(
         &'os self,
         range: R,
-    ) -> Result<Box<dyn Iterator<Item = Object<'os>> + 'os>>
+    ) -> Result<Box<dyn Iterator<Item = Object<'os, Config>> + 'os>>
     where
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
@@ -212,17 +215,17 @@ impl<'os> ObjectStore {
 
 /// A handle to an object which may or may not exist in the [ObjectStore] it was created from.
 #[must_use]
-pub struct Object<'os> {
-    store: &'os ObjectStore,
+pub struct Object<'os, Config: DatabaseBuilder> {
+    store: &'os ObjectStore<Config>,
     /// The key for which this object was opened
     pub key: Vec<u8>,
     info: ObjectInfo,
 }
 
-impl<'ds> Object<'ds> {
+impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
     /// Close this object, writing out its metadata
     pub fn close(self) -> Result<()> {
-        self.sync_metadata()
+        self.store.close_object(&self)
     }
 
     /// Delete this object
@@ -241,7 +244,10 @@ impl<'ds> Object<'ds> {
             let want_len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(oid, chunk.start.chunk_id);
 
-            let maybe_data = self.store.data.get(&key[..])
+            let maybe_data = self
+                .store
+                .data
+                .get(&key[..])
                 .map_err(|err| (total_read, err))?;
             if let Some(data) = maybe_data {
                 let data = &data[chunk.start.offset as usize..];

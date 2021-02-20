@@ -220,6 +220,18 @@ pub trait Dml: HandlerDml {
     fn drop_cache(&self);
 }
 
+pub trait DmlWithHandler {
+    type Handler;
+
+    fn handler(&self) -> &Self::Handler;
+}
+
+pub trait DmlWithSpl {
+    type Spl;
+
+    fn spl(&self) -> &Self::Spl;
+}
+
 mod delegation;
 mod errors;
 pub(crate) mod impls;

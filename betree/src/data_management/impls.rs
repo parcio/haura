@@ -865,6 +865,42 @@ where
     }
 }
 
+impl<C, E, SPL, H, I, G> super::DmlWithHandler for Dmu<C, E, SPL, H, I, G>
+where
+    C: Compression + StaticSize,
+    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    SPL: StoragePoolLayer,
+    SPL::Checksum: StaticSize,
+    H: Handler<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H::Object: Object<<Self as DmlBase>::ObjectRef>,
+    I: PodType,
+    G: PodType,
+{
+    type Handler = H;
+
+    fn handler(&self) -> &Self::Handler {
+        &self.handler
+    }
+}
+
+impl<C, E, SPL, H, I, G> super::DmlWithSpl for Dmu<C, E, SPL, H, I, G>
+where
+    C: Compression + StaticSize,
+    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    SPL: StoragePoolLayer,
+    SPL::Checksum: StaticSize,
+    H: Handler<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H::Object: Object<<Self as DmlBase>::ObjectRef>,
+    I: PodType,
+    G: PodType,
+{
+    type Spl = SPL;
+
+    fn spl(&self) -> &Self::Spl {
+        &self.pool
+    }
+}
+
 pub struct CacheValueRef<T, U> {
     head: T,
     guard: ManuallyDrop<U>,

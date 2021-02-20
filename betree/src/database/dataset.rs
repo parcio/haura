@@ -4,19 +4,24 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    tree::{DefaultMessageAction, ErasedTreeSync, MessageAction, Tree, TreeBaseLayer, TreeLayer},
+    data_management::DmlWithHandler,
+    database::DatabaseBuilder,
+    tree::{DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
 /// The data set type.
-pub struct Dataset<Message = DefaultMessageAction> {
-    tree: MessageTree<Message>,
+pub struct Dataset<Config, Message = DefaultMessageAction>
+where
+    Config: DatabaseBuilder,
+{
+    tree: MessageTree<Config::Dmu, Message>,
     pub(super) id: DatasetId,
     name: Box<[u8]>,
     pub(super) open_snapshots: HashSet<Generation>,
 }
 
-impl Database {
+impl<Config: DatabaseBuilder> Database<Config> {
     fn lookup_dataset_id(&self, name: &[u8]) -> Result<DatasetId> {
         let mut key = Vec::with_capacity(1 + name.len());
         key.push(1);
@@ -25,7 +30,7 @@ impl Database {
         Ok(DatasetId::unpack(&data))
     }
 
-    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
+    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
         self.open_custom_dataset::<DefaultMessageAction>(name)
     }
 
@@ -39,7 +44,7 @@ impl Database {
     pub fn open_custom_dataset<M: MessageAction + Default + 'static>(
         &mut self,
         name: &[u8],
-    ) -> Result<Dataset<M>> {
+    ) -> Result<Dataset<Config, M>> {
         let id = self.lookup_dataset_id(name)?;
         let ds_data = fetch_ds_data(&self.root_tree, id)?;
         if self.open_datasets.contains_key(&id) {
@@ -108,7 +113,7 @@ impl Database {
     pub fn open_or_create_dataset<M: MessageAction + Default + 'static>(
         &mut self,
         name: &[u8],
-    ) -> Result<Dataset<M>> {
+    ) -> Result<Dataset<Config, M>> {
         match self.lookup_dataset_id(name) {
             Ok(_) => self.open_custom_dataset(name),
             Err(Error(ErrorKind::DoesNotExist, _)) => self
@@ -146,7 +151,7 @@ impl Database {
     /// Closes the given data set.
     pub fn close_dataset<Message: MessageAction + 'static>(
         &mut self,
-        ds: Dataset<Message>,
+        ds: Dataset<Config, Message>,
     ) -> Result<()> {
         self.sync_ds(ds.id, &ds.tree)?;
         self.open_datasets.remove(&ds.id);
@@ -161,7 +166,7 @@ impl Database {
     }
 }
 
-impl<Message: MessageAction + 'static> Dataset<Message> {
+impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, Message> {
     /// Inserts a message for the given key.
     pub fn insert_msg<K: Borrow<[u8]> + Into<CowBytes>>(
         &self,
@@ -203,7 +208,7 @@ impl<Message: MessageAction + 'static> Dataset<Message> {
     }
 }
 
-impl Dataset<DefaultMessageAction> {
+impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     /// Inserts the given key-value pair.
     ///
     /// Note that any existing value will be overwritten.

@@ -7,21 +7,29 @@ use super::{
 use crate::{
     allocator::Action,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::Handler,
+    data_management::{DmlWithHandler, Handler},
+    database::DatabaseBuilder,
     tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer},
 };
 use byteorder::{BigEndian, ByteOrder};
 use std::{borrow::Borrow, ops::RangeBounds, sync::Arc};
 
 /// The snapshot type.
-pub struct Snapshot {
-    tree: DatasetTree,
+pub struct Snapshot<Config>
+where
+    Config: DatabaseBuilder,
+{
+    tree: DatasetTree<Config::Dmu>,
     name: Box<[u8]>,
 }
 
-impl Database {
+impl<Config: DatabaseBuilder> Database<Config> {
     /// Open a snapshot for the given data set identified by the given name.
-    pub fn open_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<Snapshot> {
+    pub fn open_snapshot<M>(
+        &self,
+        ds: &mut Dataset<Config, M>,
+        name: &[u8],
+    ) -> Result<Snapshot<Config>> {
         let id = self.lookup_snapshot_id(ds.id, name)?;
         if !ds.open_snapshots.insert(id) {
             bail!(ErrorKind::InUse)
@@ -49,7 +57,7 @@ impl Database {
     ///
     /// Note that the creation fails if a snapshot with the same name exists
     /// already for the given data set.
-    pub fn create_snapshot<M>(&mut self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
+    pub fn create_snapshot<M>(&mut self, ds: &mut Dataset<Config, M>, name: &[u8]) -> Result<()> {
         match self.lookup_snapshot_id(ds.id, name).err() {
             None => bail!(ErrorKind::AlreadyExists),
             Some(Error(ErrorKind::DoesNotExist, ..)) => {}
@@ -73,7 +81,7 @@ impl Database {
     /// Iterate over all snapshots for the given data set.
     pub fn iter_snapshots<M>(
         &self,
-        ds: &Dataset<M>,
+        ds: &Dataset<Config, M>,
     ) -> Result<impl Iterator<Item = Result<SlicedCowBytes>>> {
         let mut low = [0; 9];
         low[0] = 3;
@@ -90,7 +98,7 @@ impl Database {
     ///
     /// Note that the deletion fails if a snapshot with the given name does not
     /// exist for this data set.
-    pub fn delete_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
+    pub fn delete_snapshot<M>(&self, ds: &mut Dataset<Config, M>, name: &[u8]) -> Result<()> {
         let ss_id = self.lookup_snapshot_id(ds.id, name)?;
         if ds.open_snapshots.contains(&ss_id) {
             bail!(ErrorKind::InUse)
@@ -154,7 +162,7 @@ impl Database {
     }
 }
 
-impl Snapshot {
+impl<Config: DatabaseBuilder> Snapshot<Config> {
     /// Returns the value for the given key if existing.
     pub fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>> {
         Ok(self.tree.get(key)?)

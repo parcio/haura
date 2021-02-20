@@ -5,12 +5,12 @@ use crate::{
     checksum::{XxHash, XxHashBuilder},
     compression,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, DmlBase, Dmu, HandlerDml},
+    data_management::{self, Dml, DmlBase, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml},
     size::StaticSize,
     storage_pool::{DiskOffset, StorageConfiguration, StoragePoolLayer, StoragePoolUnit},
     tree::{
-        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, MessageAction, Node, Tree,
-        TreeBaseLayer, TreeLayer,
+        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
+        TreeLayer,
     },
     vdev::Block,
 };
@@ -34,7 +34,7 @@ mod errors;
 mod handler;
 mod snapshot;
 mod superblock;
-use self::{handler::Handler, superblock::Superblock};
+pub use self::{handler::Handler, superblock::Superblock};
 
 pub use self::{
     dataset::Dataset, errors::*, handler::update_allocation_bitmap_msg, snapshot::Snapshot,
@@ -60,21 +60,31 @@ pub(crate) type RootDmu = Dmu<
     Generation,
 >;
 
-pub(crate) type MessageTree<Message> =
-    Tree<Arc<RootDmu>, Message, Arc<TreeInner<ObjectRef, DatasetId, Message>>>;
+pub(crate) type MessageTree<Dmu, Message> =
+    Tree<Arc<Dmu>, Message, Arc<TreeInner<ObjectRef, DatasetId, Message>>>;
 
-pub(crate) type RootTree = MessageTree<DefaultMessageAction>;
-pub(crate) type DatasetTree = RootTree;
+pub(crate) type RootTree<Dmu> = MessageTree<Dmu, DefaultMessageAction>;
+pub(crate) type DatasetTree<Dmu> = RootTree<Dmu>;
 
 // TODO: Is this multi-step process unnecessarily rigid? Would fewer functions defeat the purpose?
-pub trait DatabaseBuilder {
+pub trait DatabaseBuilder
+where
+    Self::Spu: StoragePoolLayer,
+    Self::Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>
+        + Dml<Object = Object, ObjectRef = ObjectRef>
+        + HandlerDml<Object = Object>
+        + DmlWithHandler<Handler = handler::Handler>
+        + DmlWithSpl<Spl = Self::Spu>
+        + 'static,
+{
     type Spu: StoragePoolLayer;
-    type Handler: data_management::Handler<<RootDmu as data_management::DmlBase>::ObjectRef>;
+    type Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>;
 
     fn new_spu(&self) -> Result<Self::Spu>;
-    fn new_handler(&self, spu: &Self::Spu) -> Self::Handler;
-    fn new_dmu(&self, spu: Self::Spu, handler: Self::Handler) -> RootDmu;
-    fn select_root_tree(&self, dmu: Arc<RootDmu>) -> Result<(RootTree, ObjectPointer)>;
+    fn new_handler(&self, spu: &Self::Spu) -> handler::Handler;
+    fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> Self::Dmu;
+    fn select_root_tree(&self, dmu: Arc<Self::Dmu>)
+        -> Result<(RootTree<Self::Dmu>, ObjectPointer)>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -108,13 +118,13 @@ impl Default for DatabaseConfiguration {
 
 impl DatabaseBuilder for DatabaseConfiguration {
     type Spu = StoragePoolUnit<XxHash>;
-    type Handler = handler::Handler;
+    type Dmu = RootDmu;
 
     fn new_spu(&self) -> Result<Self::Spu> {
         StoragePoolUnit::<XxHash>::new(&self.storage).chain_err(|| ErrorKind::SplConfiguration)
     }
 
-    fn new_handler(&self, spu: &Self::Spu) -> Self::Handler {
+    fn new_handler(&self, spu: &Self::Spu) -> handler::Handler {
         Handler {
             root_tree_inner: AtomicOption::new(),
             root_tree_snapshot: RwLock::new(None),
@@ -129,7 +139,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         }
     }
 
-    fn new_dmu(&self, spu: Self::Spu, handler: Self::Handler) -> RootDmu {
+    fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> RootDmu {
         Dmu::new(
             compression::None,
             XxHashBuilder,
@@ -139,7 +149,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         )
     }
 
-    fn select_root_tree(&self, dmu: Arc<RootDmu>) -> Result<(RootTree, ObjectPointer)> {
+    fn select_root_tree(&self, dmu: Arc<RootDmu>) -> Result<(RootTree<Self::Dmu>, ObjectPointer)> {
         let root_ptr = if let AccessMode::OpenIfExists | AccessMode::OpenOrCreate = self.access_mode
         {
             match Superblock::<ObjectPointer>::fetch_superblocks(dmu.pool()) {
@@ -178,39 +188,6 @@ impl DatabaseBuilder for DatabaseConfiguration {
             let root_ptr = tree.sync()?;
             Ok((tree, root_ptr))
         }
-
-        /*
-        let (tree, root_ptr) = if create {
-            Superblock::<ObjectPointer>::clear_superblock(dmu.pool())?;
-            let tree = RootTree::empty_tree(DatasetId(0), DefaultMessageAction, dmu.clone());
-            tree.dmu()
-                .handler()
-                .root_tree_inner
-                .set(Arc::clone(tree.inner()));
-            {
-                let dmu = tree.dmu();
-                for disk_id in 0..disk_count {
-                    dmu.allocate_raw_at(DiskOffset::new(disk_id as usize, Block(0)), Block(2))
-                        .chain_err(|| "Superblock allocation failed")?;
-                }
-            }
-            let root_ptr = tree.sync()?;
-            (tree, root_ptr)
-        } else {
-            let root_ptr = match Superblock::<ObjectPointer>::fetch_superblocks(dmu.pool()) {
-                Some(p) => p,
-                None => bail!(ErrorKind::InvalidSuperblock),
-            };
-            let tree = RootTree::open(DatasetId(0), root_ptr.clone(), DefaultMessageAction, dmu);
-            *tree.dmu().handler().old_root_allocation.lock_write() =
-                Some((root_ptr.offset(), root_ptr.size()));
-            tree.dmu()
-                .handler()
-                .root_tree_inner
-                .set(Arc::clone(tree.inner()));
-            (tree, root_ptr)
-        };
-        */
     }
 }
 
@@ -220,12 +197,12 @@ type ErasedTree = dyn ErasedTreeSync<
 >;
 
 /// The database type.
-pub struct Database {
-    root_tree: RootTree,
+pub struct Database<Config: DatabaseBuilder> {
+    root_tree: RootTree<Config::Dmu>,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
 }
 
-impl Database {
+impl Database<DatabaseConfiguration> {
     /// Opens a database given by the storage pool configuration.
     pub fn open(cfg: StorageConfiguration) -> Result<Self> {
         Self::build(DatabaseConfiguration {
@@ -254,15 +231,12 @@ impl Database {
             ..Default::default()
         })
     }
+}
 
+impl<Config: DatabaseBuilder> Database<Config> {
     /// Opens or creates a database given by the storage pool configuration and
     /// sets the given cache size.
-    pub fn build<Builder>(builder: Builder) -> Result<Self>
-    where
-        Builder: DatabaseBuilder,
-        Builder::Handler:
-            data_management::Handler<<RootDmu as data_management::DmlBase>::ObjectRef>,
-    {
+    pub fn build(builder: Config) -> Result<Self> {
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);
         let dmu = Arc::new(builder.new_dmu(spl, handler));
@@ -340,7 +314,7 @@ impl Database {
                 info!("Sync: resyncing -- seen {} allocations", allocations);
             }
         };
-        let pool = self.root_tree.dmu().pool();
+        let pool = self.root_tree.dmu().spl();
         pool.flush()?;
         Superblock::<ObjectPointer>::write_superblock(pool, &root_ptr)?;
         pool.flush()?;

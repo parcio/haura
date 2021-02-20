@@ -8,12 +8,12 @@ use std::{
     ptr::{null_mut, read, write},
     slice::{from_raw_parts, from_raw_parts_mut},
     sync::Arc,
-    time::{Duration, UNIX_EPOCH},
+    time::UNIX_EPOCH,
 };
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{Database, Dataset, Error, Snapshot},
+    database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
     object::{Object, ObjectStore},
     storage_pool::StorageConfiguration,
 };
@@ -24,20 +24,20 @@ pub struct cfg_t(StorageConfiguration);
 /// The general error type
 pub struct err_t(Error);
 /// The database type
-pub struct db_t(Database);
+pub struct db_t(Database<DatabaseConfiguration>);
 /// The data set type
-pub struct ds_t(Dataset);
+pub struct ds_t(Dataset<DatabaseConfiguration>);
 /// The snapshot type
-pub struct ss_t(Snapshot);
+pub struct ss_t(Snapshot<DatabaseConfiguration>);
 /// The data set/snapshot name iterator type
 pub struct name_iter_t(Box<dyn Iterator<Item = Result<SlicedCowBytes, Error>>>);
 /// The range iterator type
 pub struct range_iter_t(Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes), Error>>>);
 
 /// The object store wrapper type
-pub struct obj_store_t(ObjectStore);
+pub struct obj_store_t(ObjectStore<DatabaseConfiguration>);
 /// The handle of an object in the corresponding object store
-pub struct obj_t<'os>(Object<'os>);
+pub struct obj_t<'os>(Object<'os, DatabaseConfiguration>);
 
 /// A reference counted byte slice
 #[repr(C)]
@@ -101,7 +101,7 @@ impl HandleResult for StorageConfiguration {
     }
 }
 
-impl HandleResult for Database {
+impl HandleResult for Database<DatabaseConfiguration> {
     type Result = *mut db_t;
     fn success(self) -> *mut db_t {
         b(db_t(self))
@@ -111,7 +111,7 @@ impl HandleResult for Database {
     }
 }
 
-impl HandleResult for Dataset {
+impl HandleResult for Dataset<DatabaseConfiguration> {
     type Result = *mut ds_t;
     fn success(self) -> *mut ds_t {
         b(ds_t(self))
@@ -121,7 +121,7 @@ impl HandleResult for Dataset {
     }
 }
 
-impl HandleResult for Snapshot {
+impl HandleResult for Snapshot<DatabaseConfiguration> {
     type Result = *mut ss_t;
     fn success(self) -> *mut ss_t {
         b(ss_t(self))
@@ -151,7 +151,7 @@ impl HandleResult for Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes),
     }
 }
 
-impl HandleResult for ObjectStore {
+impl HandleResult for ObjectStore<DatabaseConfiguration> {
     type Result = *mut obj_store_t;
     fn success(self) -> *mut obj_store_t {
         b(obj_store_t(self))
@@ -161,7 +161,7 @@ impl HandleResult for ObjectStore {
     }
 }
 
-impl<'os> HandleResult for Object<'os> {
+impl<'os> HandleResult for Object<'os, DatabaseConfiguration> {
     type Result = *mut obj_t<'os>;
     fn success(self) -> *mut obj_t<'os> {
         b(obj_t(self))
@@ -818,4 +818,3 @@ pub unsafe extern "C" fn betree_object_mtime_us(obj: *const obj_t) -> c_ulong {
         .map(|d| d.as_micros() as u64)
         .unwrap_or(0)
 }
-
