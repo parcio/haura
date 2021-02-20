@@ -32,12 +32,14 @@ use std::{
 mod dataset;
 mod errors;
 mod handler;
+mod in_memory;
 mod snapshot;
 mod superblock;
 pub use self::{handler::Handler, superblock::Superblock};
 
 pub use self::{
-    dataset::Dataset, errors::*, handler::update_allocation_bitmap_msg, snapshot::Snapshot,
+    dataset::Dataset, errors::*, handler::update_allocation_bitmap_msg,
+    in_memory::InMemoryConfiguration, snapshot::Snapshot,
 };
 
 const ROOT_DATASET_ID: DatasetId = DatasetId(0);

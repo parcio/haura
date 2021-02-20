@@ -82,3 +82,6 @@ pub use self::configuration::StorageConfiguration;
 
 mod unit;
 pub use self::unit::StoragePoolUnit;
+
+mod in_memory;
+pub use self::in_memory::InMemory;
