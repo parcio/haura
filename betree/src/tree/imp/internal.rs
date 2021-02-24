@@ -6,7 +6,7 @@ use crate::{
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, cmp, collections::BTreeMap, mem::replace};
+use std::{borrow::Borrow, collections::BTreeMap, fmt, mem::replace};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -31,31 +31,6 @@ impl<N: StaticSize> InternalNode<ChildBuffer<N>> {
                 .iter()
                 .map(|child| child.actual_size())
                 .sum::<usize>()
-    }
-}
-
-fn binary_search_by<'a, T, F>(s: &'a [T], mut f: F) -> Result<usize, usize>
-where
-    F: FnMut(&'a T) -> cmp::Ordering,
-{
-    use std::cmp::Ordering::*;
-    let mut size = s.len();
-    if size == 0 {
-        return Err(0);
-    }
-    let mut base = 0usize;
-    while size > 1 {
-        let half = size / 2;
-        let mid = base + half;
-        let cmp = f(&s[mid]);
-        base = if cmp == Greater { base } else { mid };
-        size -= half;
-    }
-    let cmp = f(&s[base]);
-    if cmp == Equal {
-        Ok(base)
-    } else {
-        Err(base + (cmp == Less) as usize)
     }
 }
 
@@ -85,7 +60,10 @@ impl<T> InternalNode<T> {
     /// Returns the index of the child buffer
     /// corresponding to the given `key`.
     fn idx(&self, key: &[u8]) -> usize {
-        match binary_search_by(&self.pivot, |pivot_key| pivot_key.as_ref().cmp(key)) {
+        match self
+            .pivot
+            .binary_search_by(|pivot_key| pivot_key.as_ref().cmp(key))
+        {
             Ok(idx) | Err(idx) => idx,
         }
     }
