@@ -11,20 +11,27 @@ use std::{
     slice::{from_raw_parts, from_raw_parts_mut},
 };
 
+// account for trailing fake element
+pub(crate) const HEADER_FIXED_LEN: usize = size_of::<Header>() + HEADER_PER_KEY_METADATA_LEN;
+pub(crate) const HEADER_PER_KEY_METADATA_LEN: usize = 2 * size_of::<Offset>();
+
+/// ```text
 /// Layout:
 ///     header: Header,
-///     keys: [Data; header.entry_count],
-///     values: [Data; header.entry_count],
+///     # We compute the length by subtracting two consecutive offsets,
+///     # this requires a trailing fake offset to compute the length of the last actual element.
+///     keys: [Offset; header.entry_count + 1],
+///     values: [Offset; header.entry_count + 1],
 ///     data: [u8],
 /// Header:
 ///     entry_count: u32,
-/// Data:
-///     pos: u32,
-///     len: u32,
+/// Offset:
+///     u32
+/// ```
 #[derive(Debug)]
 pub struct PackedMap {
-    data: CowBytes,
     entry_count: u32,
+    data: CowBytes,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -35,10 +42,7 @@ struct Header {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(packed)]
-struct Data {
-    pos: u32,
-    len: u32,
-}
+struct Offset(u32);
 
 fn ref_u32_from_bytes_mut(p: &mut [u8]) -> &mut [u32] {
     assert!(p.len() % size_of::<u32>() == 0);
@@ -47,7 +51,7 @@ fn ref_u32_from_bytes_mut(p: &mut [u8]) -> &mut [u32] {
 }
 
 fn prefix_size(entry_count: u32) -> usize {
-    size_of::<Header>() + 2 * size_of::<Data>() * entry_count as usize
+    size_of::<Header>() + HEADER_PER_KEY_METADATA_LEN * (entry_count + 1) as usize
 }
 
 impl PackedMap {
@@ -65,50 +69,99 @@ impl PackedMap {
         }
     }
 
-    fn keys(&self) -> &[Data] {
-        unsafe {
+    /// Returns (position, len) for the metadata entry at position `m_idx`.
+    /// If `m_idx < entry_count`, it will return the metadata of a value,
+    /// if `m_idx == entry_count`, undefined nonsense will be returned,
+    /// if `m_idx > entry_count`, the metadata of the value at position `m_idx - entry_count - 1` will
+    /// be returned.
+    fn position(&self, m_idx: u32) -> (Offset, u32) {
+        let m_idx = m_idx as usize;
+        let positions = unsafe {
             let ptr = self.data.as_ptr();
-            let start = ptr.add(size_of::<Header>()) as *const Data;
-            from_raw_parts(start, self.entry_count as usize)
+            let start = ptr.add(size_of::<Header>()) as *const Offset;
+            from_raw_parts(start, (self.entry_count as usize + 1) * 2)
+        };
+
+        (
+            positions[m_idx],
+            positions[m_idx + 1].0 - positions[m_idx].0,
+        )
+    }
+
+    fn key_pos(&self, idx: u32) -> (Offset, u32) {
+        self.position(idx)
+    }
+    fn val_pos(&self, idx: u32) -> (Offset, u32) {
+        self.position(self.entry_count + 1 + idx)
+    }
+
+    fn get_slice(&self, (Offset(pos), len): (Offset, u32)) -> &[u8] {
+        &self.data[pos as usize..pos as usize + len as usize]
+    }
+
+    fn get_slice_cow(&self, (Offset(pos), len): (Offset, u32)) -> SlicedCowBytes {
+        self.data.clone().slice(pos, len)
+    }
+
+    // Adapted from std::slice::binary_search_by
+    fn binary_search(&self, key: &[u8]) -> Result<u32, u32> {
+        use cmp::Ordering::*;
+        let mut size = self.entry_count;
+        if size == 0 {
+            return Err(0);
         }
-    }
-
-    fn values(&self) -> &[Data] {
-        unsafe {
-            let ptr = self.data.as_ptr();
-            let start = ptr.add(size_of::<Header>() + size_of::<Data>() * self.entry_count as usize)
-                as *const Data;
-            from_raw_parts(start, self.entry_count as usize)
+        let mut base = 0;
+        while size > 1 {
+            let half = size / 2;
+            let mid = base + half;
+            let cmp = self.get_slice(self.key_pos(mid)).cmp(key);
+            base = if cmp == Greater { base } else { mid };
+            size -= half;
         }
-    }
-
-    fn get_slice(&self, data: Data) -> &[u8] {
-        let pos = data.pos as usize;
-        let len = data.len as usize;
-        &self.data[pos..pos + len]
-    }
-
-    fn get_slice_cow(&self, data: Data) -> SlicedCowBytes {
-        self.data.clone().slice(data.pos, data.len)
+        let cmp = self.get_slice(self.key_pos(base)).cmp(key);
+        if cmp == Equal {
+            Ok(base)
+        } else {
+            Err(base + (cmp == Less) as u32)
+        }
     }
 
     pub fn get(&self, key: &[u8]) -> Option<SlicedCowBytes> {
-        let result = binary_search_by(self.keys(), |&data| self.get_slice(data).cmp(key));
+        let result = self.binary_search(key);
         let idx = match result {
             Err(_) => return None,
             Ok(idx) => idx,
         };
 
-        Some(self.get_slice_cow(self.values()[idx]))
+        Some(self.get_slice_cow(self.val_pos(idx)))
     }
 
-    pub fn get_all<'a>(&'a self) -> Box<dyn Iterator<Item = (&'a [u8], SlicedCowBytes)> + 'a> {
-        Box::new(
-            self.keys()
-                .iter()
-                .zip(self.values())
-                .map(move |(&key, &value)| (self.get_slice(key), self.get_slice_cow(value))),
-        )
+    pub fn get_all<'a>(&'a self) -> impl Iterator<Item = (&'a [u8], SlicedCowBytes)> + 'a {
+        struct Iter<'a> {
+            packed: &'a PackedMap,
+            idx: u32,
+        }
+        impl<'a> Iterator for Iter<'a> {
+            type Item = (&'a [u8], SlicedCowBytes);
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.idx < self.packed.entry_count {
+                    let ret = Some((
+                        self.packed.get_slice(self.packed.key_pos(self.idx)),
+                        self.packed.get_slice_cow(self.packed.val_pos(self.idx)),
+                    ));
+                    self.idx += 1;
+                    ret
+                } else {
+                    None
+                }
+            }
+        }
+
+        Iter {
+            packed: self,
+            idx: 0,
+        }
     }
 
     pub(super) fn unpack_leaf(&self) -> LeafNode {
@@ -123,16 +176,17 @@ impl PackedMap {
         for key in entries.keys() {
             writer.write_u32::<LittleEndian>(pos)?;
             let len = key.len() as u32;
-            writer.write_u32::<LittleEndian>(len)?;
             pos += len;
         }
+        writer.write_u32::<LittleEndian>(pos)?;
 
         for value in entries.values() {
             writer.write_u32::<LittleEndian>(pos)?;
             let len = value.len() as u32;
-            writer.write_u32::<LittleEndian>(len)?;
             pos += len;
         }
+        writer.write_u32::<LittleEndian>(pos)?;
+
         for key in entries.keys() {
             writer.write_all(key)?;
         }
@@ -147,33 +201,33 @@ impl PackedMap {
     }
 }
 
-fn binary_search_by<'a, T, F>(s: &'a [T], mut f: F) -> Result<usize, usize>
-where
-    F: FnMut(&'a T) -> cmp::Ordering,
-{
-    use std::cmp::Ordering::*;
-    let mut size = s.len();
-    if size == 0 {
-        return Err(0);
-    }
-    let mut base = 0usize;
-    while size > 1 {
-        let half = size / 2;
-        let mid = base + half;
-        let cmp = f(&s[mid]);
-        base = if cmp == Greater { base } else { mid };
-        size -= half;
-    }
-    let cmp = f(&s[base]);
-    if cmp == Equal {
-        Ok(base)
-    } else {
-        Err(base + (cmp == Less) as usize)
-    }
-}
-
 impl Size for PackedMap {
     fn size(&self) -> usize {
         self.data.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LeafNode, PackedMap};
+
+    #[quickcheck]
+    fn check_packed_contents(leaf: LeafNode) {
+        let mut v = Vec::new();
+        PackedMap::pack(&leaf, &mut v).unwrap();
+
+        let packed = PackedMap::new(v);
+
+        for (k, v) in leaf.entries() {
+            assert_eq!(Some(v), packed.get(k).as_ref());
+        }
+
+        assert_eq!(
+            leaf.entries()
+                .iter()
+                .map(|(k, v)| (&k[..], v.clone()))
+                .collect::<Vec<_>>(),
+            packed.get_all().collect::<Vec<_>>()
+        );
     }
 }

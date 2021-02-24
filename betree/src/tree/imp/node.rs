@@ -270,7 +270,7 @@ impl<N> Node<N> {
         all_msgs: &mut BTreeMap<CowBytes, Vec<SlicedCowBytes>>,
     ) -> GetRangeResult<Box<dyn Iterator<Item = (&'a [u8], SlicedCowBytes)> + 'a>, N> {
         match self.0 {
-            PackedLeaf(ref map) => GetRangeResult::Data(map.get_all()),
+            PackedLeaf(ref map) => GetRangeResult::Data(Box::new(map.get_all())),
             Leaf(ref leaf) => GetRangeResult::Data(Box::new(
                 leaf.entries().iter().map(|(k, v)| (&k[..], v.clone())),
             )),

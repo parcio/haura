@@ -2,7 +2,7 @@ use super::FillUpResult;
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     size::Size,
-    tree::MessageAction,
+    tree::{imp::packed, MessageAction},
 };
 use std::{
     borrow::Borrow,
@@ -20,16 +20,17 @@ pub(super) struct LeafNode {
 
 impl Size for LeafNode {
     fn size(&self) -> usize {
-        4 + self.entries_size
+        packed::HEADER_FIXED_LEN + self.entries_size
     }
 }
 impl LeafNode {
     pub(super) fn actual_size(&self) -> usize {
-        4 + self
-            .entries
-            .iter()
-            .map(|(key, value)| key.size() + value.size())
-            .sum::<usize>()
+        packed::HEADER_FIXED_LEN
+            + self
+                .entries
+                .iter()
+                .map(|(key, value)| packed::HEADER_PER_KEY_METADATA_LEN + key.len() + value.len())
+                .sum::<usize>()
     }
 }
 
@@ -38,14 +39,14 @@ impl<'a> FromIterator<(&'a [u8], SlicedCowBytes)> for LeafNode {
     where
         T: IntoIterator<Item = (&'a [u8], SlicedCowBytes)>,
     {
-        let mut entries_size = 0;
-        let entries = iter
-            .into_iter()
-            .map(|(key, value)| {
-                entries_size += 16 + key.len() + value.len();
-                (key.into(), value)
-            })
-            .collect();
+        let entries: BTreeMap<CowBytes, SlicedCowBytes> =
+            iter.into_iter().map(|(k, v)| (k.into(), v)).collect();
+
+        let entries_size = entries
+            .iter()
+            .map(|(k, v)| packed::HEADER_PER_KEY_METADATA_LEN + k.len() + v.len())
+            .sum::<usize>();
+
         LeafNode {
             entries_size,
             entries,
@@ -83,8 +84,8 @@ impl LeafNode {
         let mut sibling_size = 0;
         let mut split_key = None;
         for (k, v) in self.entries.iter().rev() {
-            sibling_size += k.size() + v.size();
-            if 4 + sibling_size >= min_size {
+            sibling_size += packed::HEADER_PER_KEY_METADATA_LEN + k.len() + v.len();
+            if packed::HEADER_FIXED_LEN + sibling_size >= min_size {
                 split_key = Some(k.clone());
                 break;
             }
@@ -108,21 +109,23 @@ impl LeafNode {
         M: MessageAction,
     {
         let size_before = self.entries_size as isize;
-        let key_size = 8 + key.borrow().len();
+        let key_size = key.borrow().len();
         let mut data = self.get(key.borrow());
         msg_action.apply_to_leaf(key.borrow(), msg, &mut data);
 
         if let Some(data) = data {
-            self.entries_size += data.size();
+            self.entries_size += data.len();
 
             if let Some(old_data) = self.entries.insert(key.into(), data) {
-                self.entries_size -= old_data.size();
+                self.entries_size -= old_data.len();
             } else {
+                self.entries_size += packed::HEADER_PER_KEY_METADATA_LEN;
                 self.entries_size += key_size;
             }
         } else if let Some(old_data) = self.entries.remove(key.borrow()) {
+            self.entries_size -= packed::HEADER_PER_KEY_METADATA_LEN;
             self.entries_size -= key_size;
-            self.entries_size -= old_data.size();
+            self.entries_size -= old_data.len();
         }
         self.entries_size as isize - size_before
     }
@@ -191,7 +194,7 @@ impl LeafNode {
         );
         let mut keys = Vec::new();
         for (key, value) in self.entries.range_mut::<[u8], _>(range) {
-            self.entries_size -= key.size() + value.size();
+            self.entries_size -= key.len() + value.len();
             keys.push(key.clone());
         }
         for key in keys {
@@ -213,35 +216,33 @@ mod tests {
     impl Arbitrary for LeafNode {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let len = g.gen_range(0, 20);
-            let entries = (0..len)
+            let entries: Vec<_> = (0..len)
                 .map(|_| {
                     (
-                        Arbitrary::arbitrary(g),
+                        CowBytes::arbitrary(g),
                         DefaultMessageActionMsg::arbitrary(g),
                     )
                 })
                 .map(|(k, v)| (k, v.0))
-                .collect::<BTreeMap<CowBytes, SlicedCowBytes>>();
-            LeafNode {
-                entries_size: entries
-                    .iter()
-                    .map(|(key, value)| key.size() + value.size())
-                    .sum::<usize>(),
-                entries,
-            }
+                .collect();
+
+            entries.iter().map(|(k, v)| (&k[..], v.clone())).collect()
         }
 
-        // fn shrink(&self) -> Box<Iterator<Item = Self>> {
-        //     Box::new(self.entries.shrink().map(|entries| {
-        //         LeafNode {
-        //             entries_size: entries
-        //                 .iter()
-        //                 .map(|(key, value)| key.size() + value.size())
-        //                 .sum::<usize>(),
-        //             entries,
-        //         }
-        //     }))
-        // }
+        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+            let v: Vec<_> = self
+                .entries
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k, CowBytes::from(v.to_vec())))
+                .collect();
+            Box::new(v.shrink().map(|entries| {
+                entries
+                    .iter()
+                    .map(|(k, v)| (&k[..], v.clone().into()))
+                    .collect()
+            }))
+        }
     }
 
     fn serialized_size(leaf_node: &LeafNode) -> usize {
@@ -251,8 +252,24 @@ mod tests {
     }
 
     #[quickcheck]
+    fn check_actual_size(leaf_node: LeafNode) {
+        assert_eq!(leaf_node.actual_size(), serialized_size(&leaf_node));
+    }
+
+    #[quickcheck]
     fn check_serialize_size(leaf_node: LeafNode) {
-        assert_eq!(leaf_node.size(), serialized_size(&leaf_node));
+        let size = leaf_node.size();
+        let serialized = serialized_size(&leaf_node);
+        if size != serialized {
+            eprintln!(
+                "leaf {:?}, size {}, actual_size {}, serialized_size {}",
+                leaf_node,
+                size,
+                leaf_node.actual_size(),
+                serialized
+            );
+            assert_eq!(size, serialized);
+        }
     }
 
     #[quickcheck]
