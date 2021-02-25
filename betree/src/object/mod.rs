@@ -86,11 +86,27 @@ pub struct ObjectStore<Config: DatabaseBuilder> {
 
 impl<Config: DatabaseBuilder> Database<Config> {
     /// Create an object store backed by a single database.
-    // TODO: allow for multiple stores, construct names
     pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
             self.open_or_create_dataset(b"data")?,
             self.open_or_create_dataset(b"meta")?,
+        )
+    }
+
+    /// Create a namespaced object store, with the datasets "{name}\0data" and "{name}\0meta".
+    pub fn open_named_object_store(&mut self, name: &[u8]) -> Result<ObjectStore<Config>> {
+        assert!(!name.contains(&0));
+        let mut v = name.to_vec();
+        v.push(0);
+
+        let mut data_name = v.clone();
+        data_name.extend_from_slice(b"data");
+        let mut meta_name = v;
+        meta_name.extend_from_slice(b"meta");
+
+        ObjectStore::with_datasets(
+            self.open_or_create_dataset(&data_name)?,
+            self.open_or_create_dataset(&meta_name)?
         )
     }
 }
