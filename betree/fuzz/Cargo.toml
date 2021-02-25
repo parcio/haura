@@ -23,3 +23,9 @@ name = "kv-ops"
 path = "fuzz_targets/kv-ops.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "obj-ops"
+path = "fuzz_targets/obj-ops.rs"
+test = false
+doc = false
