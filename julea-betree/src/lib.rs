@@ -1,13 +1,21 @@
 use julea_sys::{JTraceFileOperation::*, *};
 use std::{
-    convert::TryInto, ffi::CStr, fmt::Display, fs::File, ptr, result, slice, time::UNIX_EPOCH,
+    convert::TryInto,
+    ffi::{CStr, CString},
+    fmt::Display,
+    fs::File,
+    pin::Pin,
+    ptr, result, slice,
+    sync::RwLock,
+    time::UNIX_EPOCH,
 };
 
+use dashmap::DashMap;
 use log::error;
 
 use betree_storage_stack::{
     database::{self, DatabaseConfiguration},
-    object::{self, ObjectStore},
+    object,
     storage_pool::StorageConfiguration,
 };
 
@@ -24,6 +32,7 @@ error_chain::error_chain! {
 }
 
 type Database = database::Database<DatabaseConfiguration>;
+type ObjectStore = object::ObjectStore<DatabaseConfiguration>;
 type Object<'os> = object::Object<'os, DatabaseConfiguration>;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -32,8 +41,32 @@ struct Configuration {
 }
 
 struct Backend {
-    database: Database,
-    object_store: ObjectStore<DatabaseConfiguration>,
+    database: RwLock<Database>,
+    namespaces: DashMap<CString, Pin<Box<ObjectStore>>>,
+}
+
+impl Backend {
+    fn ns(&self, namespace: &CStr) -> dashmap::mapref::one::Ref<CString, Pin<Box<ObjectStore>>> {
+        use dashmap::mapref::entry::Entry;
+        // fast path, if already exists
+        if let Some(os) = self.namespaces.get(namespace) {
+            return os;
+        }
+
+        // not present, create it
+        match self.namespaces.entry(namespace.to_owned()) {
+            Entry::Occupied(e) => e.into_ref().downgrade(),
+            Entry::Vacant(e) => e
+                .insert(Box::pin(
+                    self.database
+                        .write()
+                        .expect("Unable to lock database for writing")
+                        .open_named_object_store(namespace.to_bytes())
+                        .expect("Unable to open object store"),
+                ))
+                .downgrade(),
+        }
+    }
 }
 
 unsafe fn return_box<T, E: Display>(
@@ -64,6 +97,17 @@ unsafe fn with_j_trace<T>(
     (val, (length, offset))
 }
 
+unsafe fn with_j_trace_once<T>(
+    op: JTraceFileOperation,
+    path: &[u8],
+    f: impl FnOnce() -> (T, (u64, u64)),
+) -> (T, (u64, u64)) {
+    j_trace_file_begin(path.as_ptr().cast::<i8>(), op);
+    let (val, (length, offset)) = f();
+    j_trace_file_end(path.as_ptr().cast::<i8>(), op, length, offset);
+    (val, (length, offset))
+}
+
 unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointer) -> gboolean {
     env_logger::init();
 
@@ -72,16 +116,14 @@ unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointe
         let file = File::open(&path)?;
         let config: Configuration = serde_json::from_reader(&file)?;
 
-        let mut db = Database::build(DatabaseConfiguration {
+        let db = Database::build(DatabaseConfiguration {
             storage: StorageConfiguration::parse_zfs_like(config.storage)?,
             ..Default::default()
         })?;
 
-        let os = db.open_object_store()?;
-
         Ok(Backend {
-            database: db,
-            object_store: os,
+            database: RwLock::new(db),
+            namespaces: DashMap::new(),
         })
     }();
 
@@ -89,8 +131,9 @@ unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointe
 }
 
 unsafe extern "C" fn backend_fini(backend_data: gpointer) {
-    let mut backend = Box::from_raw(backend_data.cast::<Backend>());
-    if let Err(err) = backend.database.sync() {
+    let backend = Box::from_raw(backend_data.cast::<Backend>());
+    let mut db = backend.database.write().unwrap();
+    if let Err(err) = db.sync() {
         error!("couldn't sync database during fini: {}", err);
     }
 }
@@ -102,10 +145,11 @@ unsafe extern "C" fn backend_create(
     backend_object: *mut gpointer,
 ) -> gboolean {
     let backend = &*backend_data.cast::<Backend>();
+    let ns = backend.ns(CStr::from_ptr(namespace));
     let key = CStr::from_ptr(path);
 
     let (obj, _) = with_j_trace(J_TRACE_FILE_CREATE, path, || {
-        let obj = backend.object_store.create_object(key.to_bytes());
+        let obj = ns.create_object(key.to_bytes());
         (obj, (0, 0))
     });
 
@@ -119,23 +163,23 @@ unsafe extern "C" fn backend_open(
     backend_object: *mut gpointer,
 ) -> gboolean {
     let backend = &*backend_data.cast::<Backend>();
+    let ns = backend.ns(CStr::from_ptr(namespace));
     let key = CStr::from_ptr(path);
 
     let (obj, _) = with_j_trace(J_TRACE_FILE_OPEN, path, || {
-        let obj = backend.object_store.open_object(key.to_bytes());
+        let obj = ns.open_object(key.to_bytes());
         (obj, (0, 0))
     });
 
     return_box(obj, "open object", backend_object)
 }
 
-unsafe extern "C" fn backend_delete(backend_data: gpointer, backend_object: gpointer) -> gboolean {
-    let backend = &*backend_data.cast::<Backend>();
+unsafe extern "C" fn backend_delete(_backend_data: gpointer, backend_object: gpointer) -> gboolean {
     let obj = Box::from_raw(backend_object.cast::<Object>());
-    let key = obj.key.as_ptr().cast::<i8>();
+    let key = obj.key.clone();
 
-    let (res, _) = with_j_trace(J_TRACE_FILE_DELETE, key, || {
-        let res = backend.object_store.delete_object(&obj);
+    let (res, _) = with_j_trace_once(J_TRACE_FILE_DELETE, &key, || {
+        let res = obj.delete();
         (res, (0, 0))
     });
 
@@ -147,13 +191,12 @@ unsafe extern "C" fn backend_delete(backend_data: gpointer, backend_object: gpoi
     }
 }
 
-unsafe extern "C" fn backend_close(backend_data: gpointer, backend_object: gpointer) -> gboolean {
-    let backend = &*backend_data.cast::<Backend>();
+unsafe extern "C" fn backend_close(_backend_data: gpointer, backend_object: gpointer) -> gboolean {
     let obj = Box::from_raw(backend_object.cast::<Object>());
-    let key = obj.key.as_ptr().cast::<i8>();
+    let key = obj.key.clone();
 
-    let (res, _) = with_j_trace(J_TRACE_FILE_CLOSE, key, || {
-        let res = backend.object_store.close_object(&obj);
+    let (res, _) = with_j_trace_once(J_TRACE_FILE_CLOSE, &key, || {
+        let res = obj.close();
         (res, (0, 0))
     });
 
@@ -166,7 +209,7 @@ unsafe extern "C" fn backend_close(backend_data: gpointer, backend_object: gpoin
 }
 
 unsafe extern "C" fn backend_status(
-    backend_data: gpointer,
+    _backend_data: gpointer,
     backend_object: gpointer,
     modification_time: *mut gint64,
     size: *mut guint64,
@@ -201,7 +244,7 @@ unsafe extern "C" fn backend_sync(backend_data: gpointer, backend_object: gpoint
     let obj = &*backend_object.cast::<Object>();
 
     let (res, _) = with_j_trace(J_TRACE_FILE_SYNC, obj.key.as_ptr().cast::<i8>(), || {
-        let res = backend.database.sync();
+        let res = backend.database.write().unwrap().sync();
         (res, (0, 0))
     });
 
@@ -214,7 +257,7 @@ unsafe extern "C" fn backend_sync(backend_data: gpointer, backend_object: gpoint
 }
 
 unsafe extern "C" fn backend_read(
-    backend_data: gpointer,
+    _backend_data: gpointer,
     backend_object: gpointer,
     buffer: gpointer,
     length: guint64,
@@ -249,7 +292,7 @@ unsafe extern "C" fn backend_read(
 }
 
 unsafe extern "C" fn backend_write(
-    backend_data: gpointer,
+    _backend_data: gpointer,
     backend_object: gpointer,
     buffer: gconstpointer,
     length: guint64,
@@ -286,7 +329,8 @@ unsafe extern "C" fn backend_write(
 
 static mut BETREE_BACKEND: JBackend = JBackend {
     type_: JBackendType::J_BACKEND_TYPE_OBJECT,
-    component: JBackendComponent::J_BACKEND_COMPONENT_SERVER,
+    component: JBackendComponent::J_BACKEND_COMPONENT_SERVER
+        | JBackendComponent::J_BACKEND_COMPONENT_CLIENT,
     data: ptr::null_mut(),
     anon1: JBackend__bindgen_ty_1 {
         object: JBackend__bindgen_ty_1__bindgen_ty_1 {
