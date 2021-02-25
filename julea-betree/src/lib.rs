@@ -86,28 +86,6 @@ unsafe fn return_box<T, E: Display>(
     }
 }
 
-unsafe fn with_j_trace<T>(
-    op: JTraceFileOperation,
-    path: *const i8,
-    mut f: impl FnMut() -> (T, (u64, u64)),
-) -> (T, (u64, u64)) {
-    j_trace_file_begin(path, op);
-    let (val, (length, offset)) = f();
-    j_trace_file_end(path, op, length, offset);
-    (val, (length, offset))
-}
-
-unsafe fn with_j_trace_once<T>(
-    op: JTraceFileOperation,
-    path: &[u8],
-    f: impl FnOnce() -> (T, (u64, u64)),
-) -> (T, (u64, u64)) {
-    j_trace_file_begin(path.as_ptr().cast::<i8>(), op);
-    let (val, (length, offset)) = f();
-    j_trace_file_end(path.as_ptr().cast::<i8>(), op, length, offset);
-    (val, (length, offset))
-}
-
 unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointer) -> gboolean {
     env_logger::init();
 
@@ -148,7 +126,7 @@ unsafe extern "C" fn backend_create(
     let ns = backend.ns(CStr::from_ptr(namespace));
     let key = CStr::from_ptr(path);
 
-    let (obj, _) = with_j_trace(J_TRACE_FILE_CREATE, path, || {
+    let (obj, _) = jtrace::with(J_TRACE_FILE_CREATE, path, || {
         let obj = ns.create_object(key.to_bytes());
         (obj, (0, 0))
     });
@@ -166,7 +144,7 @@ unsafe extern "C" fn backend_open(
     let ns = backend.ns(CStr::from_ptr(namespace));
     let key = CStr::from_ptr(path);
 
-    let (obj, _) = with_j_trace(J_TRACE_FILE_OPEN, path, || {
+    let (obj, _) = jtrace::with(J_TRACE_FILE_OPEN, path, || {
         let obj = ns.open_object(key.to_bytes());
         (obj, (0, 0))
     });
@@ -178,7 +156,7 @@ unsafe extern "C" fn backend_delete(_backend_data: gpointer, backend_object: gpo
     let obj = Box::from_raw(backend_object.cast::<Object>());
     let key = obj.key.clone();
 
-    let (res, _) = with_j_trace_once(J_TRACE_FILE_DELETE, &key, || {
+    let (res, _) = jtrace::with_once(J_TRACE_FILE_DELETE, &key, || {
         let res = obj.delete();
         (res, (0, 0))
     });
@@ -195,7 +173,7 @@ unsafe extern "C" fn backend_close(_backend_data: gpointer, backend_object: gpoi
     let obj = Box::from_raw(backend_object.cast::<Object>());
     let key = obj.key.clone();
 
-    let (res, _) = with_j_trace_once(J_TRACE_FILE_CLOSE, &key, || {
+    let (res, _) = jtrace::with_once(J_TRACE_FILE_CLOSE, &key, || {
         let res = obj.close();
         (res, (0, 0))
     });
@@ -217,7 +195,7 @@ unsafe extern "C" fn backend_status(
     let obj = &*backend_object.cast::<Object>();
     let key = obj.key.as_ptr().cast::<i8>();
 
-    let (res, _): (Result<()>, _) = with_j_trace(J_TRACE_FILE_STATUS, key, || {
+    let (res, _): (Result<()>, _) = jtrace::with(J_TRACE_FILE_STATUS, key, || {
         let res = (|| {
             modification_time.write(
                 obj.modification_time()
@@ -243,7 +221,7 @@ unsafe extern "C" fn backend_sync(backend_data: gpointer, backend_object: gpoint
     let backend = &mut *backend_data.cast::<Backend>();
     let obj = &*backend_object.cast::<Object>();
 
-    let (res, _) = with_j_trace(J_TRACE_FILE_SYNC, obj.key.as_ptr().cast::<i8>(), || {
+    let (res, _) = jtrace::with(J_TRACE_FILE_SYNC, obj.key.as_ptr().cast::<i8>(), || {
         let res = backend.database.write().unwrap().sync();
         (res, (0, 0))
     });
@@ -266,7 +244,7 @@ unsafe extern "C" fn backend_read(
 ) -> gboolean {
     let obj = &*backend_object.cast::<Object>();
 
-    let (res, (n_read, _)) = with_j_trace(J_TRACE_FILE_READ, obj.key.as_ptr().cast::<i8>(), || {
+    let (res, (n_read, _)) = jtrace::with(J_TRACE_FILE_READ, obj.key.as_ptr().cast::<i8>(), || {
         let res = obj.read_at(
             slice::from_raw_parts_mut(buffer.cast::<u8>(), length as usize),
             offset,
@@ -302,7 +280,7 @@ unsafe extern "C" fn backend_write(
     let obj = &mut *backend_object.cast::<Object>();
 
     let (res, (n_written, _)) =
-        with_j_trace(J_TRACE_FILE_WRITE, obj.key.as_ptr().cast::<i8>(), || {
+        jtrace::with(J_TRACE_FILE_WRITE, obj.key.as_ptr().cast::<i8>(), || {
             let res = obj.write_at(
                 slice::from_raw_parts(buffer.cast::<u8>(), length as usize),
                 offset,
@@ -330,7 +308,8 @@ unsafe extern "C" fn backend_write(
 static mut BETREE_BACKEND: JBackend = JBackend {
     type_: JBackendType::J_BACKEND_TYPE_OBJECT,
     component: JBackendComponent::J_BACKEND_COMPONENT_SERVER
-        | JBackendComponent::J_BACKEND_COMPONENT_CLIENT,
+        | JBackendComponent::J_BACKEND_COMPONENT_CLIENT
+        | JBackendComponent::J_BACKEND_COMPONENT_NOT_UNLOADABLE,
     data: ptr::null_mut(),
     anon1: JBackend__bindgen_ty_1 {
         object: JBackend__bindgen_ty_1__bindgen_ty_1 {
