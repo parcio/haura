@@ -6,8 +6,9 @@ use std::{
     fs::File,
     pin::Pin,
     ptr, result, slice,
-    sync::RwLock,
+    sync::{ mpsc, RwLock },
     time::UNIX_EPOCH,
+    thread
 };
 
 use dashmap::DashMap;
@@ -18,6 +19,9 @@ use betree_storage_stack::{
     object,
     storage_pool::StorageConfiguration,
 };
+
+mod jtrace;
+mod sync_timer;
 
 error_chain::error_chain! {
     foreign_links {
@@ -33,20 +37,25 @@ error_chain::error_chain! {
 
 type Database = database::Database<DatabaseConfiguration>;
 type ObjectStore = object::ObjectStore<DatabaseConfiguration>;
+type ObjectStoreRef<'b> = dashmap::mapref::one::Ref<'b, CString, Pin<Box<ObjectStore>>>;
 type Object<'os> = object::Object<'os, DatabaseConfiguration>;
+
+const DEFAULT_SYNC_TIMEOUT_MS: u64 = 5000;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Configuration {
     storage: Vec<String>,
+    sync_timeout_ms: Option<u64>
 }
 
-struct Backend {
+struct Backend<'b> {
     database: RwLock<Database>,
     namespaces: DashMap<CString, Pin<Box<ObjectStore>>>,
+    sync_timer_channel: mpsc::Sender<ObjectStoreRef<'b>>
 }
 
-impl Backend {
-    fn ns(&self, namespace: &CStr) -> dashmap::mapref::one::Ref<CString, Pin<Box<ObjectStore>>> {
+impl <'b> Backend<'b> {
+    fn ns(&'b self, namespace: &CStr) -> ObjectStoreRef<'b> {
         use dashmap::mapref::entry::Entry;
         // fast path, if already exists
         if let Some(os) = self.namespaces.get(namespace) {
@@ -56,7 +65,8 @@ impl Backend {
         // not present, create it
         match self.namespaces.entry(namespace.to_owned()) {
             Entry::Occupied(e) => e.into_ref().downgrade(),
-            Entry::Vacant(e) => e
+            Entry::Vacant(e) => {
+                let os = e
                 .insert(Box::pin(
                     self.database
                         .write()
@@ -64,7 +74,10 @@ impl Backend {
                         .open_named_object_store(namespace.to_bytes())
                         .expect("Unable to open object store"),
                 ))
-                .downgrade(),
+                .downgrade();
+                self.sync_timer_channel.send(self.namespaces.get(namespace).unwrap()).unwrap();
+                os
+            }
         }
     }
 }
@@ -99,21 +112,25 @@ unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointe
             ..Default::default()
         })?;
 
+        let timeout_ms = config.sync_timeout_ms.unwrap_or(DEFAULT_SYNC_TIMEOUT_MS);
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            sync_timer::sync_timer(timeout_ms, rx);
+        });
+
         Ok(Backend {
             database: RwLock::new(db),
             namespaces: DashMap::new(),
+            sync_timer_channel: tx
         })
     }();
 
     return_box(backend, "initialise backend", backend_data)
 }
 
+// This runs after exit handlers, so accessing TLS will fail
 unsafe extern "C" fn backend_fini(backend_data: gpointer) {
-    let backend = Box::from_raw(backend_data.cast::<Backend>());
-    let mut db = backend.database.write().unwrap();
-    if let Err(err) = db.sync() {
-        error!("couldn't sync database during fini: {}", err);
-    }
+    Box::from_raw(backend_data.cast::<Backend>());
 }
 
 unsafe extern "C" fn backend_create(
