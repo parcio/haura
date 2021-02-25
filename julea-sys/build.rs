@@ -23,7 +23,8 @@ fn main() {
         .disable_nested_struct_naming()
         .whitelist_type("JBackend")
         .whitelist_function("j_trace.*")
-        .rustified_non_exhaustive_enum("J.*")
+        .rustified_non_exhaustive_enum("JTrace.*")
+        .constified_enum_module("JBackend.*")
         // Finish the builder and generate the bindings.
         .generate()
         // Unwrap the Result and panic on failure.
