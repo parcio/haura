@@ -50,10 +50,10 @@ zstd-safe = { version = "3.0", default-features = false }
 speedy = "0.7"
 
 [dev-dependencies]
-rand = "0.8"
-rand_xorshift = "0.3"
-quickcheck = "1.0"
-quickcheck_macros = "1.0"
+rand = "0.7"
+rand_xorshift = "0.2"
+quickcheck = "0.9"
+quickcheck_macros = "0.9"
 clap = "2.33"
 bencher = "0.1"
 
@@ -65,5 +65,7 @@ criterion = "0.3"
 [features]
 default = ["init_env_logger"]
 
+# unlock unstable API for consumption by bectl and other debugging tools
 internal-api = []
+debug-tree-dump = []
 init_env_logger = ["env_logger"]
