@@ -72,8 +72,8 @@ impl Drop for byte_slice_t {
 }
 
 /// A byte slice reference counter
-#[repr(C)]
-pub struct byte_slice_rc_t(Vec<u8>);
+// Intentionally not #[repr(C)], or cbindgen will expose Vec internals
+struct byte_slice_rc_t(Vec<u8>);
 
 trait HandleResult {
     type Result;
