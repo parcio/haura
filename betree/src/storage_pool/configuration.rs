@@ -151,12 +151,13 @@ impl Vdev {
 
 impl LeafVdev {
     fn build(&self) -> io::Result<vdev::File> {
-        // use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::OpenOptionsExt;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             // TODO needs some work
             // .custom_flags(libc::O_DIRECT)
+            .custom_flags(libc::O_DSYNC)
             .open(&self.0)?;
         if unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) } != 0 {
             return Err(io::Error::last_os_error());
