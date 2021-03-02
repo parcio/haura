@@ -8,7 +8,7 @@ use betree_storage_stack::{
     data_management::{self, Dml, Dmu, Handler as HandlerTrait, HandlerDml, ObjectRef},
     storage_pool::{
         configuration::{self, LeafVdev, Vdev},
-        Configuration, DiskOffset, StoragePoolLayer, StoragePoolUnit,
+        DiskOffset, StorageConfiguration, StoragePoolLayer, StoragePoolUnit,
     },
     tree::{
         DefaultMessageAction, Error as TreeError, Inner as TreeInner, Node, Tree, TreeBaseLayer,
@@ -426,7 +426,7 @@ fn run<K: KeyGenerator>(
     // ];
     let disks = ["/dev/zvol/fpool/betree/d1"];
 
-    let cfg = Configuration::new(
+    let cfg = StorageConfiguration::new(
         // vec![
         //  configuration::Vdev::Leaf(configuration::LeafVdev::from("/var/tmp/write_test")),
         // ]
