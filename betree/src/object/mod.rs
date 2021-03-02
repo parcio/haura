@@ -159,7 +159,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         self.metadata
             .insert_msg(key, MetaMessage::set_info(&info).pack().into())?;
 
-        // TODO: write back object_id_counter
+        self.data
+            .insert(OBJECT_ID_COUNTER_KEY, &oid.to_le_bytes());
 
         Ok(Object {
             store: self,
@@ -200,9 +201,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         Ok(())
     }
 
-    pub fn close_object(&'os self, object: &Object<Config>) -> Result<()> {
-        object.sync_metadata()
-    }
+    pub fn close_object(&'os self, object: &Object<Config>) -> Result<()> { Ok(()) }
 
     // TODO: return actual objects instead of objectinfos
     pub fn list_objects<R, K>(
