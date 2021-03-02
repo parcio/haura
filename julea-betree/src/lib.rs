@@ -6,9 +6,9 @@ use std::{
     fs::File,
     pin::Pin,
     ptr, result, slice,
-    sync::{ mpsc, RwLock },
+    sync::{Arc, RwLock},
+    thread,
     time::UNIX_EPOCH,
-    thread
 };
 
 use dashmap::DashMap;
@@ -45,17 +45,16 @@ const DEFAULT_SYNC_TIMEOUT_MS: u64 = 5000;
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Configuration {
     storage: Vec<String>,
-    sync_timeout_ms: Option<u64>
+    sync_timeout_ms: Option<u64>,
 }
 
-struct Backend<'b> {
-    database: RwLock<Database>,
+struct Backend {
+    database: Arc<RwLock<Database>>,
     namespaces: DashMap<CString, Pin<Box<ObjectStore>>>,
-    sync_timer_channel: mpsc::Sender<ObjectStoreRef<'b>>
 }
 
-impl <'b> Backend<'b> {
-    fn ns(&'b self, namespace: &CStr) -> ObjectStoreRef<'b> {
+impl Backend {
+    fn ns<'b>(&'b self, namespace: &CStr) -> ObjectStoreRef<'b> {
         use dashmap::mapref::entry::Entry;
         // fast path, if already exists
         if let Some(os) = self.namespaces.get(namespace) {
@@ -65,8 +64,7 @@ impl <'b> Backend<'b> {
         // not present, create it
         match self.namespaces.entry(namespace.to_owned()) {
             Entry::Occupied(e) => e.into_ref().downgrade(),
-            Entry::Vacant(e) => {
-                let os = e
+            Entry::Vacant(e) => e
                 .insert(Box::pin(
                     self.database
                         .write()
@@ -74,10 +72,7 @@ impl <'b> Backend<'b> {
                         .open_named_object_store(namespace.to_bytes())
                         .expect("Unable to open object store"),
                 ))
-                .downgrade();
-                self.sync_timer_channel.send(self.namespaces.get(namespace).unwrap()).unwrap();
-                os
-            }
+                .downgrade(),
         }
     }
 }
@@ -111,17 +106,17 @@ unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointe
             storage: StorageConfiguration::parse_zfs_like(config.storage)?,
             ..Default::default()
         })?;
+        let db = Arc::new(RwLock::new(db));
 
-        let timeout_ms = config.sync_timeout_ms.unwrap_or(DEFAULT_SYNC_TIMEOUT_MS);
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            sync_timer::sync_timer(timeout_ms, rx);
+        thread::spawn({
+            let timeout_ms = config.sync_timeout_ms.unwrap_or(DEFAULT_SYNC_TIMEOUT_MS);
+            let db = db.clone();
+            move || sync_timer::sync_timer(timeout_ms, db.clone())
         });
 
         Ok(Backend {
-            database: RwLock::new(db),
+            database: db,
             namespaces: DashMap::new(),
-            sync_timer_channel: tx
         })
     }();
 
