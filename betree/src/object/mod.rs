@@ -234,7 +234,7 @@ pub struct Object<'os, Config: DatabaseBuilder> {
     store: &'os ObjectStore<Config>,
     /// The key for which this object was opened
     pub key: Vec<u8>,
-    info: ObjectInfo,
+    info: ObjectInfo
 }
 
 impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
@@ -314,7 +314,7 @@ impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
                 .data
                 .upsert(&key[..], &buf[..len], chunk.start.offset)
                 .map_err(|err| {
-                    let _ = self.sync_size_mtime();
+                    let _ = self.write_size_mtime();
                     (total_written, err)
                 })?;
             buf = &buf[len..];
@@ -324,7 +324,7 @@ impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
             self.info.size = self.info.size.max(chunk.end.as_bytes());
         }
 
-        self.sync_size_mtime()
+        self.write_size_mtime()
             .map(|()| total_written)
             .map_err(|err| (total_written, err))
     }
@@ -341,7 +341,7 @@ impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
         self.info.mtime
     }
 
-    fn sync_size_mtime(&self) -> Result<()> {
+    fn write_size_mtime(&self) -> Result<()> {
         self.store.metadata.insert_msg(
             &self.key[..],
             MetaMessage::new(None, Some(self.info.size), Some(self.info.mtime))
@@ -350,7 +350,7 @@ impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
         )
     }
 
-    fn sync_metadata(&self) -> Result<()> {
+    fn write_metadata(&self) -> Result<()> {
         self.store.metadata.insert_msg(
             &self.key[..],
             MetaMessage::set_info(&self.info).pack().into(),
