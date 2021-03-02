@@ -21,7 +21,11 @@ pub struct ObjectInfo {
     pub(crate) mtime: SystemTime,
 }
 
-/// Every message represents an overwrite of a set of [ObjectInfo] properties.
+/// Every message represents an overwrite or merge of a set of [ObjectInfo] properties.
+/// `size` and `mtime` are merged with `max`, whereas `object_id` is just overwritten.
+///
+/// The `max` merge is required to allow concurrent writes of mutually ignorant clients
+/// without writing over a larger `size` message.
 #[derive(Default)]
 pub(crate) struct MetaMessage {
     object_id: Option<u64>,
@@ -176,18 +180,26 @@ impl MessageAction for MetaMessageAction {
     ) -> SlicedCowBytes {
         let upper = MetaMessage::unpack(&upper_msg).unwrap();
 
+        fn or_max<T: Ord>(a: Option<T>, b: Option<T>) -> Option<T> {
+            match (a, b) {
+                (None, None) => None,
+                (Some(x), None) | (None, Some(x)) => Some(x),
+                (Some(a), Some(b)) => Some(a.max(b))
+            }
+        }
+
         match upper.to_content_flags() {
             // upper sets everything, lower has no influence
             CONTENT_FLAG_ALL => upper_msg,
             // upper sets nothing, does not alter lower
             CONTENT_FLAG_NONE => lower_msg,
-            // combine upper and lower, upper has priority
+            // combine upper and lower, upper has priority for object_id
             _ => {
                 let lower = MetaMessage::unpack(&lower_msg).unwrap();
                 let new = MetaMessage {
                     object_id: upper.object_id.or(lower.object_id),
-                    size: upper.size.or(lower.size),
-                    mtime: upper.mtime.or(lower.mtime),
+                    size: or_max(upper.size, lower.size),
+                    mtime: or_max(upper.mtime, lower.mtime)
                 };
                 CowBytes::from(new.pack()).into()
             }
