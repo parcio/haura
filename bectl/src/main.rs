@@ -1,6 +1,7 @@
 use std::{
     fmt::{self, Display},
     io::{self, Read, Write},
+    panic
 };
 
 use betree_storage_stack::{
@@ -45,7 +46,7 @@ enum Mode {
     },
 
     Obj {
-        dataset: String,
+        namespace: String,
         #[structopt(subcommand)]
         mode: ObjMode,
     },
@@ -182,10 +183,10 @@ fn bectl_main() -> Result<()> {
             }
         },
 
-        Mode::Obj { mode, .. } => match mode {
+        Mode::Obj { mode, namespace, .. } => match mode {
             ObjMode::List => {
                 let mut db = open_db(cfg)?;
-                let os = db.open_object_store()?;
+                let os = db.open_named_object_store(namespace.as_bytes())?;
 
                 for obj in os.list_objects::<_, &[u8]>(..)? {
                     let mtime = DateTime::<Utc>::from(obj.modification_time());
@@ -199,7 +200,7 @@ fn bectl_main() -> Result<()> {
             }
             ObjMode::Get { name } => {
                 let mut db = open_db(cfg)?;
-                let os = db.open_object_store()?;
+                let os = db.open_named_object_store(namespace.as_bytes())?;
                 let stdout = io::stdout();
                 let mut stdout_lock = stdout.lock();
 
@@ -213,7 +214,7 @@ fn bectl_main() -> Result<()> {
 
             ObjMode::Put { name, buf_size } => {
                 let mut db = open_db(cfg)?;
-                let os = db.open_object_store()?;
+                let os = db.open_named_object_store(namespace.as_bytes())?;
                 let mut obj = os.open_or_create_object(name.as_bytes())?;
 
                 let stdin = io::stdin();
@@ -225,7 +226,7 @@ fn bectl_main() -> Result<()> {
                 loop {
                     match stdin_lock.read(&mut buf) {
                         Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                        Err(e) => panic!(e), // FIXME: pass outside
+                        Err(e) => panic::panic_any(e), // FIXME: pass outside
                         Ok(0) => break,
                         Ok(n_read) => {
                             obj.write_at(&buf[..n_read], curr_pos)
@@ -240,7 +241,7 @@ fn bectl_main() -> Result<()> {
 
             ObjMode::Del { name } => {
                 let mut db = open_db(cfg)?;
-                let os = db.open_object_store()?;
+                let os = db.open_named_object_store(namespace.as_bytes())?;
 
                 if let Some(obj) = os.open_object(name.as_bytes())? {
                     obj.delete()?;
