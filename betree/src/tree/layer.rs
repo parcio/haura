@@ -39,12 +39,6 @@ pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
         K: Borrow<[u8]> + Into<CowBytes>,
         Self: Clone;
 
-    /// Deletes all entries in the given key `range`.
-    fn range_delete<K, R>(&self, range: R) -> Result<(), Error>
-    where
-        R: RangeBounds<K>,
-        K: Borrow<[u8]> + Into<Box<[u8]>>;
-
     /// Tree pointer type that represents a synced tree.
     type Pointer: Serialize + DeserializeOwned;
 

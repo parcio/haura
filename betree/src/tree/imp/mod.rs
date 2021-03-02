@@ -13,7 +13,8 @@ use crate::{
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{
-    borrow::Borrow, collections::Bound, marker::PhantomData, mem::replace, ops::RangeBounds,
+    borrow::Borrow, cmp, collections::Bound, fmt, marker::PhantomData, mem::replace,
+    ops::RangeBounds,
 };
 
 #[derive(Debug)]
@@ -218,10 +219,12 @@ where
                     Some((l_np, r_np, dead)) => (l_np, r_np, dead),
                 };
                 if level == 1 {
+                    // is leaf, has no references
                     for np in dead {
                         self.dml.remove(np);
                     }
                 } else {
+                    // is internal, has children
                     for np in dead {
                         self.remove_subtree(np)?;
                     }
@@ -371,46 +374,6 @@ where
     {
         ensure!(is_inclusive_non_empty(&range), ErrorKind::InvalidRange);
         Ok(RangeIterator::new(range, self.clone()))
-    }
-
-    fn range_delete<K, T>(&self, range: T) -> Result<(), Error>
-    where
-        T: RangeBounds<K>,
-        K: Borrow<[u8]>,
-    {
-        ensure!(is_inclusive_non_empty(&range), ErrorKind::InvalidRange);
-
-        if let (Bound::Unbounded, Bound::Unbounded) = (range.start_bound(), range.end_bound()) {
-            let np = self.dml.insert(Node::empty_leaf(), self.tree_id());
-            let old_root_np = replace(&mut *self.inner.borrow().root_node.write(), np);
-            return self.remove_subtree(old_root_np);
-        }
-
-        let start_box;
-        let end_box;
-        let start = match range.start_bound() {
-            Bound::Unbounded => &[] as &[_],
-            Bound::Excluded(x) => {
-                let mut v = x.borrow().to_vec();
-                v.push(0);
-                start_box = v.into_boxed_slice();
-                &start_box
-            }
-            Bound::Included(x) => x.borrow(),
-        };
-        let end = match range.end_bound() {
-            Bound::Unbounded => None,
-            Bound::Excluded(x) => Some(x.borrow()),
-            Bound::Included(x) => {
-                let mut v = x.borrow().to_vec();
-                v.push(0);
-                end_box = v.into_boxed_slice();
-                Some(&end_box[..])
-            }
-        };
-
-        let node = self.get_mut_root_node()?;
-        self.walk_tree(node, start, end)
     }
 
     fn sync(&self) -> Result<Self::Pointer, Error> {

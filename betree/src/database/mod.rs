@@ -9,7 +9,7 @@ use crate::{
     size::StaticSize,
     storage_pool::{DiskOffset, StorageConfiguration, StoragePoolLayer, StoragePoolUnit},
     tree::{
-        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
+        MessageAction, DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
         TreeLayer,
     },
     vdev::Block,
@@ -80,7 +80,7 @@ where
         + 'static,
 {
     type Spu: StoragePoolLayer;
-    type Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>;
+    type Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId> + Send + Sync;
 
     fn new_spu(&self) -> Result<Self::Spu>;
     fn new_handler(&self, spu: &Self::Spu) -> handler::Handler;
@@ -196,7 +196,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
 type ErasedTree = dyn ErasedTreeSync<
     Pointer = <RootDmu as DmlBase>::ObjectPointer,
     ObjectRef = <RootDmu as DmlBase>::ObjectRef,
->;
+> + Send + Sync;
 
 /// The database type.
 pub struct Database<Config: DatabaseBuilder> {

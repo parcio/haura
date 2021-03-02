@@ -15,7 +15,7 @@ pub struct Dataset<Config, Message = DefaultMessageAction>
 where
     Config: DatabaseBuilder,
 {
-    tree: MessageTree<Config::Dmu, Message>,
+    pub(super) tree: MessageTree<Config::Dmu, Message>,
     pub(super) id: DatasetId,
     name: Box<[u8]>,
     pub(super) open_snapshots: HashSet<Generation>,
@@ -65,7 +65,6 @@ impl<Config: DatabaseBuilder> Database<Config> {
                 .write()
                 .insert(id, ss_id);
         }
-        // FIXME: important!
         let erased_tree = Box::new(ds_tree.clone());
         self.open_datasets.insert(id, erased_tree);
 
@@ -193,15 +192,6 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         Ok(Box::new(self.tree.range(range)?.map(|r| Ok(r?))))
     }
 
-    /// Removes all key-value pairs in the given key range.
-    pub fn range_delete<R, K>(&self, range: R) -> Result<()>
-    where
-        R: RangeBounds<K>,
-        K: Borrow<[u8]> + Into<Box<[u8]>>,
-    {
-        Ok(self.tree.range_delete(range)?)
-    }
-
     /// Returns the name of the data set.
     pub fn name(&self) -> &[u8] {
         &self.name
@@ -239,5 +229,26 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     /// Deletes the key-value pair if existing.
     pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
         self.insert_msg(key, DefaultMessageAction::delete_msg())
+    }
+
+    /// Removes all key-value pairs in the given key range.
+    pub fn range_delete<R, K>(&self, range: R) -> Result<()>
+    where
+        R: RangeBounds<K>,
+        K: Borrow<[u8]> + Into<CowBytes>,
+    {
+        let mut res = Ok(());
+
+        for entry in self.tree.range(range)? {
+            if let Ok((k, _v)) = entry {
+                // keep going even on errors, return earliest Err
+                let del_res = self.delete(k);
+                if del_res.is_err() && res.is_ok() {
+                    res = del_res;
+                }
+            }
+        }
+
+        res
     }
 }

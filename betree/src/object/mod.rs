@@ -194,8 +194,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             .insert_msg(&object.key[..], MetaMessage::delete().pack().into())?;
 
         self.data.range_delete(
-            object_chunk_key(object.info.object_id, 0)
-                ..object_chunk_key(object.info.object_id, u32::MAX),
+            &object_chunk_key(object.info.object_id, 0)[..]
+                ..&object_chunk_key(object.info.object_id, u32::MAX)[..],
         )?;
 
         Ok(())
