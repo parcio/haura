@@ -1,10 +1,21 @@
-use crate::size::StaticSize;
+use super::{
+    CompressionBuilder, CompressionState, DecompressionState, DecompressionTag, Result,
+    DEFAULT_BUFFER_SIZE,
+};
+use crate::{
+    buffer::{Buf, BufWrite},
+    size::StaticSize,
+};
 use serde::{Deserialize, Serialize};
-use std::io;
+use std::{io, mem};
 
 /// No-op compression.
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
 pub struct None;
+pub struct NoneCompression {
+    buf: BufWrite,
+}
+pub struct NoneDecompression;
 
 impl StaticSize for None {
     fn size() -> usize {
@@ -12,42 +23,47 @@ impl StaticSize for None {
     }
 }
 
-impl super::Compression for None {
-    type Compress = Compress;
-
-    fn decompress(&self, buffer: Box<[u8]>) -> io::Result<Box<[u8]>> {
-        Ok(buffer)
+impl CompressionBuilder for None {
+    fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
+        Ok(Box::new(NoneCompression {
+            buf: BufWrite::with_capacity(DEFAULT_BUFFER_SIZE),
+        }))
     }
 
-    fn compress(&self) -> Self::Compress {
-        Compress::new()
-    }
-}
-
-pub struct Compress(Vec<u8>);
-
-impl Compress {
-    fn new() -> Self {
-        Compress(Vec::new())
+    fn decompression_tag(&self) -> DecompressionTag {
+        DecompressionTag::None
     }
 }
 
-impl io::Write for Compress {
+impl None {
+    pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
+        Ok(Box::new(NoneDecompression))
+    }
+}
+
+impl io::Write for NoneCompression {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.write(buf)
+        self.buf.write(buf)
     }
 
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.0.write_all(buf)
+        self.buf.write_all(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.0.flush()
+        Ok(())
     }
 }
 
-impl super::Compress for Compress {
-    fn finish(self) -> Box<[u8]> {
-        self.0.into_boxed_slice()
+impl CompressionState for NoneCompression {
+    fn finish(&mut self) -> Buf {
+        mem::replace(&mut self.buf, BufWrite::with_capacity(DEFAULT_BUFFER_SIZE)).into_buf()
+    }
+}
+
+impl DecompressionState for NoneDecompression {
+    fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
+        // FIXME: pass-through Buf, reusing alloc
+        Ok(data.to_vec().into_boxed_slice())
     }
 }

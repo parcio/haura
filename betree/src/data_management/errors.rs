@@ -6,6 +6,9 @@ error_chain! {
     foreign_links {
         VdevError(crate::vdev::Error);
     }
+    links {
+        Compression(crate::compression::Error, crate::compression::ErrorKind);
+    }
     errors {
         DecompressionError
         DeserializationError

@@ -2,37 +2,104 @@
 //! decompressing data.
 //! `None` and `Lz4` are provided as implementation.
 
-use crate::size::Size;
-use serde::{de::DeserializeOwned, Serialize};
+use crate::{
+    buffer::Buf,
+    size::{Size, StaticSize},
+    vdev::Block,
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt::Debug,
     io::{self, Write},
+    mem,
 };
 
-/// Trait for compressing and decompressing data.
-pub trait Compression:
-    Debug + Serialize + DeserializeOwned + Size + Clone + Send + Sync + 'static
-{
-    /// Returned by `compress`.
-    type Compress: Compress;
-    /// Decompresses data from the given `buffer`.
-    fn decompress(&self, buffer: Box<[u8]>) -> io::Result<Box<[u8]>>;
+use enum_dispatch::enum_dispatch;
+
+mod errors;
+pub use errors::*;
+
+/*#[enum_dispatch(CompressionConfiguration)]
+pub enum CompressionType {
+    None,
+    // Lz4,
+    Zstd
+}*/
+
+const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum CompressionConfiguration {
+    None,
+    // Lz4,
+    Zstd(Zstd),
+}
+
+impl CompressionConfiguration {
+    pub fn to_builder(&self) -> Box<dyn CompressionBuilder> {
+        match self {
+            CompressionConfiguration::None => Box::new(None),
+            CompressionConfiguration::Zstd(zstd) => Box::new(zstd.clone()),
+        }
+    }
+}
+
+/// This tag is stored alongside compressed blobs, to select the appropriate decompression
+/// method. This differs from a CompressionConfiguration, in that it is not configurable, as
+/// all methods will decompress just fine without knowing at which compression level it was
+/// originally written, so there's no advantage in storing the compression level with each object.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum DecompressionTag {
+    None,
+    Lz4,
+    Zstd,
+}
+
+impl DecompressionTag {
+    pub fn new_decompression(&self) -> Result<Box<dyn DecompressionState>> {
+        use DecompressionTag as Tag;
+        match self {
+            Tag::None => Ok(None::new_decompression()?),
+            Tag::Lz4 => todo!(), //Ok(Lz4::new_decompression()?),
+            Tag::Zstd => Ok(Zstd::new_decompression()?),
+        }
+    }
+}
+
+impl StaticSize for DecompressionTag {
+    fn size() -> usize {
+        mem::size_of::<DecompressionTag>()
+    }
+}
+
+/// Trait for compressing and decompressing data. Only compression is configurable, decompression
+/// must be able to decompress anything ever compressed in any configuration.
+pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
     /// Returns an object for compressing data into a `Box<[u8]>`.
-    fn compress(&self) -> Self::Compress;
+    fn new_compression(&self) -> Result<Box<dyn CompressionState>>;
+    fn decompression_tag(&self) -> DecompressionTag;
 }
 
 /// Trait for the object that compresses data.
-pub trait Compress: Write {
+pub trait CompressionState: Write {
     /// Finishes the compression stream and returns a buffer that contains the
     /// compressed data.
-    fn finish(self) -> Box<[u8]>;
+    fn finish(&mut self) -> Buf;
+}
+
+pub trait DecompressionState {
+    fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>>;
 }
 
 mod none;
 pub use self::none::None;
 
-mod lz4;
-pub use self::lz4::Lz4;
+//mod lz4;
+//pub use self::lz4::Lz4;
 
 mod zstd;
 pub use self::zstd::Zstd;
+
+//mod state_cache;
+//pub(crate) use self::state_cache::CompressionStateCache;
