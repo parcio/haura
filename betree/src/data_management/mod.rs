@@ -7,6 +7,7 @@ use crate::{
     size::{Size, StaticSize},
     storage_pool::DiskOffset,
     vdev::Block,
+    StoragePreference,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use stable_deref_trait::StableDeref;
@@ -81,6 +82,11 @@ pub trait Object<R>: Size + Sized {
     fn for_each_child<E, F>(&mut self, f: F) -> Result<(), E>
     where
         F: FnMut(&mut R) -> Result<(), E>;
+
+    /// Object-specific storage preference
+    fn storage_preference(&self) -> StoragePreference {
+        StoragePreference::NONE
+    }
 }
 
 /// A `Dml` for a specific `Handler`.

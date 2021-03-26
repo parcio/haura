@@ -1,9 +1,10 @@
 use super::{errors::*, DmlBase, Handler, HandlerTypes, Object, PodType};
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
+    buffer::Buf,
     cache::{AddSize, Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
-    compression::{Compress, Compression},
+    compression::{CompressionBuilder, CompressionState, DecompressionState, DecompressionTag},
     size::{SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
     vdev::{Block, BLOCK_SIZE},
@@ -16,6 +17,7 @@ use serde::{
 use stable_deref_trait::StableDeref;
 use std::{
     collections::HashMap,
+    convert::TryFrom,
     mem::{replace, transmute, ManuallyDrop},
     ops::{Deref, DerefMut},
     pin::Pin,
@@ -39,16 +41,15 @@ pub enum ObjectRef<P> {
     InWriteback(ModifiedObjectId),
 }
 
-impl<C, D, I, G> super::ObjectRef for ObjectRef<ObjectPointer<C, D, I, G>>
+impl<D, I, G> super::ObjectRef for ObjectRef<ObjectPointer<D, I, G>>
 where
-    C: 'static,
     D: 'static,
     I: 'static,
     G: Copy + 'static,
-    ObjectPointer<C, D, I, G>: Serialize + DeserializeOwned + StaticSize,
+    ObjectPointer<D, I, G>: Serialize + DeserializeOwned + StaticSize,
 {
-    type ObjectPointer = ObjectPointer<C, D, I, G>;
-    fn get_unmodified(&self) -> Option<&ObjectPointer<C, D, I, G>> {
+    type ObjectPointer = ObjectPointer<D, I, G>;
+    fn get_unmodified(&self) -> Option<&ObjectPointer<D, I, G>> {
         if let ObjectRef::Unmodified(ref p) = *self {
             Some(p)
         } else {
@@ -57,7 +58,7 @@ where
     }
 }
 
-impl<C, D, I, G: Copy> ObjectRef<ObjectPointer<C, D, I, G>> {
+impl<D, I, G: Copy> ObjectRef<ObjectPointer<D, I, G>> {
     fn as_key(&self) -> ObjectKey<G> {
         match *self {
             ObjectRef::Unmodified(ref ptr) => ObjectKey::Unmodified {
@@ -93,21 +94,21 @@ impl<P: Serialize> Serialize for ObjectRef<P> {
     }
 }
 
-impl<'de, C, D, I, G: Copy> Deserialize<'de> for ObjectRef<ObjectPointer<C, D, I, G>>
+impl<'de, D, I, G: Copy> Deserialize<'de> for ObjectRef<ObjectPointer<D, I, G>>
 where
-    ObjectPointer<C, D, I, G>: Deserialize<'de>,
+    ObjectPointer<D, I, G>: Deserialize<'de>,
 {
     fn deserialize<E>(deserializer: E) -> Result<Self, E::Error>
     where
         E: Deserializer<'de>,
     {
-        ObjectPointer::<C, D, I, G>::deserialize(deserializer).map(ObjectRef::Unmodified)
+        ObjectPointer::<D, I, G>::deserialize(deserializer).map(ObjectRef::Unmodified)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObjectPointer<C, D, I, G> {
-    compression: C,
+pub struct ObjectPointer<D, I, G> {
+    decompression_tag: DecompressionTag,
     checksum: D,
     offset: DiskOffset,
     size: Block<u32>,
@@ -115,21 +116,24 @@ pub struct ObjectPointer<C, D, I, G> {
     generation: G,
 }
 
-impl<C: StaticSize, D: StaticSize, I: StaticSize, G: StaticSize> StaticSize
-    for ObjectPointer<C, D, I, G>
-{
+impl<D: StaticSize, I: StaticSize, G: StaticSize> StaticSize for ObjectPointer<D, I, G> {
     fn size() -> usize {
-        C::size() + D::size() + I::size() + G::size() + <DiskOffset as StaticSize>::size() + 4
+        <DecompressionTag as StaticSize>::size()
+            + D::size()
+            + I::size()
+            + G::size()
+            + <DiskOffset as StaticSize>::size()
+            + 4
     }
 }
 
-impl<C, D, I, G: Copy> From<ObjectPointer<C, D, I, G>> for ObjectRef<ObjectPointer<C, D, I, G>> {
-    fn from(ptr: ObjectPointer<C, D, I, G>) -> Self {
+impl<D, I, G: Copy> From<ObjectPointer<D, I, G>> for ObjectRef<ObjectPointer<D, I, G>> {
+    fn from(ptr: ObjectPointer<D, I, G>) -> Self {
         ObjectRef::Unmodified(ptr)
     }
 }
 
-impl<C, D, I, G: Copy> ObjectPointer<C, D, I, G> {
+impl<D, I, G: Copy> ObjectPointer<D, I, G> {
     pub fn offset(&self) -> DiskOffset {
         self.offset
     }
@@ -142,45 +146,55 @@ impl<C, D, I, G: Copy> ObjectPointer<C, D, I, G> {
 }
 
 /// The Data Management Unit.
-pub struct Dmu<C: 'static, E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'static> {
-    default_compression: C,
+pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'static> {
+    default_compression: Box<dyn CompressionBuilder>,
+    // default_compression_state: C::CompressionState,
+    default_storage_class: u8,
     default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
     pool: SPL,
     cache: RwLock<E>,
-    written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<C, SPL::Checksum, I, G>>>,
+    written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum, I, G>>>,
     modified_info: Mutex<HashMap<ModifiedObjectId, I>>,
     handler: H,
-    allocation_data: Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>,
+    allocation_data: Box<[Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>]>,
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
 }
 
-impl<C, E, SPL, H> Dmu<C, E, SPL, H, H::Info, H::Generation>
+impl<E, SPL, H> Dmu<E, SPL, H, H::Info, H::Generation>
 where
     SPL: StoragePoolLayer,
     H: HandlerTypes,
 {
     /// Returns a new `Dmu`.
     pub fn new(
-        default_compression: C,
+        default_compression: Box<dyn CompressionBuilder>,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
         pool: SPL,
         cache: E,
         handler: H,
     ) -> Self {
-        let disk_cnt = pool.disk_count();
+        let allocation_data = (0..pool.storage_class_count())
+            .map(|class| {
+                (0..pool.disk_count(class))
+                    .map(|_| Mutex::new(None))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+
         Dmu {
+            // default_compression_state: default_compression.new_compression().expect("Can't create compression state"),
             default_compression,
+            default_storage_class: 0,
             default_checksum_builder,
             pool,
             cache: RwLock::new(cache),
             written_back: Mutex::new(HashMap::new()),
             modified_info: Mutex::new(HashMap::new()),
             handler,
-            allocation_data: (0..disk_cnt)
-                .map(|_| Mutex::new(None))
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
+            allocation_data,
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
         }
@@ -200,29 +214,33 @@ where
     pub fn pool(&self) -> &SPL {
         &self.pool
     }
+
+    fn iter_vdevs<'s>(&'s self) -> impl Iterator<Item = (u8, u16)> + 's {
+        let spl = self.pool();
+        (0..spl.storage_class_count())
+            .flat_map(move |class| (0..spl.disk_count(class)).map(move |disk_id| (class, disk_id)))
+    }
 }
 
-impl<C, E, SPL, H> DmlBase for Dmu<C, E, SPL, H, H::Info, H::Generation>
+impl<E, SPL, H> DmlBase for Dmu<E, SPL, H, H::Info, H::Generation>
 where
-    C: Compression + StaticSize,
     E: Cache<Key = ObjectKey<H::Generation>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     H: HandlerTypes,
 {
     type ObjectRef = ObjectRef<Self::ObjectPointer>;
-    type ObjectPointer = ObjectPointer<C, SPL::Checksum, H::Info, H::Generation>;
+    type ObjectPointer = ObjectPointer<SPL::Checksum, H::Info, H::Generation>;
     type Info = H::Info;
 }
 
-impl<C, E, SPL, H, I, G> Dmu<C, E, SPL, H, I, G>
+impl<E, SPL, H, I, G> Dmu<E, SPL, H, I, G>
 where
-    C: Compression + StaticSize,
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>, Info = I, Generation = G>,
-    H::Object: Object<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H::Object: Object<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
     I: PodType,
     G: PodType,
 {
@@ -244,7 +262,9 @@ where
         };
         let obj = CacheValueRef::write(entry);
         if let ObjectRef::Unmodified(ptr) = replace(or, ObjectRef::Modified(mid)) {
-            let actual_size = self.pool.actual_size(ptr.offset.disk_id() as u16, ptr.size);
+            let actual_size =
+                self.pool
+                    .actual_size(ptr.offset.storage_class(), ptr.offset.disk_id(), ptr.size);
             self.handler
                 .copy_on_write(ptr.offset, actual_size, ptr.generation, ptr.info);
         }
@@ -274,16 +294,15 @@ where
     /// Fetches asynchronously an object from disk and inserts it into the
     /// cache.
     fn fetch(&self, op: &<Self as DmlBase>::ObjectPointer) -> Result<(), Error> {
-        let compression = op.compression.clone();
+        // FIXME: reuse decompression_state
+        let mut decompression_state = op.decompression_tag.new_decompression()?;
         let offset = op.offset;
         let generation = op.generation;
 
         let compressed_data = self.pool.read(op.size, op.offset, op.checksum.clone())?;
 
         let object: H::Object = {
-            let data = compression
-                .decompress(compressed_data)
-                .chain_err(|| ErrorKind::DecompressionError)?;
+            let data = decompression_state.decompress(&compressed_data)?;
             Object::unpack(data).chain_err(|| ErrorKind::DeserializationError)?
         };
         let key = ObjectKey::Unmodified { offset, generation };
@@ -299,8 +318,8 @@ where
     ) -> Result<
         impl TryFuture<
                 Ok = (
-                    ObjectPointer<C, <SPL as StoragePoolLayer>::Checksum, I, G>,
-                    Box<[u8]>,
+                    ObjectPointer<<SPL as StoragePoolLayer>::Checksum, I, G>,
+                    Buf,
                 ),
                 Error = Error,
             > + Send,
@@ -405,18 +424,23 @@ where
             warn!("Writing back large object: {}", object.debug_info());
         }
 
-        let compression = self.default_compression.clone();
         let generation = self.handler.current_generation();
+        let storage_preference = object.storage_preference();
+        let storage_class = storage_preference
+            .preferred_class()
+            .unwrap_or(self.default_storage_class);
 
-        let mut compressed_data = {
-            let mut compress = compression.compress();
+        let compression = &self.default_compression;
+        let compressed_data = {
+            // FIXME: cache this
+            let mut state = compression.new_compression()?;
             {
                 object
-                    .pack(&mut compress)
+                    .pack(&mut state)
                     .chain_err(|| ErrorKind::SerializationError)?;
                 drop(object);
             }
-            compress.finish()
+            state.finish()
         };
 
         let info = self.modified_info.lock().remove(&mid).unwrap();
@@ -425,12 +449,13 @@ where
         let size = compressed_data.len();
         let size = Block(((size as usize + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
-        let offset = self.allocate(size)?;
-        if size.to_bytes() as usize != compressed_data.len() {
+        let offset = self.allocate(storage_class, size)?;
+        assert_eq!(size.to_bytes() as usize, compressed_data.len());
+        /*if size.to_bytes() as usize != compressed_data.len() {
             let mut v = compressed_data.into_vec();
             v.resize(size.to_bytes() as usize, 0);
             compressed_data = v.into_boxed_slice();
-        }
+        }*/
 
         let checksum = {
             let mut state = self.default_checksum_builder.build();
@@ -444,7 +469,7 @@ where
             offset,
             size,
             checksum,
-            compression,
+            decompression_tag: compression.decompression_tag(),
             generation,
             info,
         };
@@ -471,9 +496,11 @@ where
         }
         if !was_present {
             // The object has been `stolen`.  Notify the handler.
-            let actual_size = self
-                .pool
-                .actual_size(obj_ptr.offset.disk_id() as u16, obj_ptr.size);
+            let actual_size = self.pool.actual_size(
+                obj_ptr.offset.storage_class(),
+                obj_ptr.offset.disk_id(),
+                obj_ptr.size,
+            );
             self.handler.copy_on_write(
                 obj_ptr.offset,
                 actual_size,
@@ -485,71 +512,89 @@ where
         Ok(obj_ptr)
     }
 
-    fn allocate(&self, size: Block<u32>) -> Result<DiskOffset, Error> {
+    fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, Error> {
         if size >= Block(2048) {
             warn!("Very large allocation requested: {:?}", size);
         }
-        let start_disk_id = (self.next_disk_id.fetch_add(1, Ordering::Relaxed)
-            % u64::from(self.pool.disk_count())) as u16;
-        let disk_id = (start_disk_id..self.pool.disk_count())
-            .chain(0..start_disk_id)
-            .max_by_key(|&disk_id| {
-                self.pool
-                    .effective_free_size(disk_id, self.handler.get_free_space(disk_id))
-            })
-            .unwrap();
-        let size = self.pool.actual_size(disk_id, size);
-        let disk_size = self.pool.size_in_blocks(disk_id);
-        let disk_offset = {
-            let mut x = self.allocation_data[disk_id as usize].lock();
 
-            if x.is_none() {
-                let segment_id = SegmentId::get(DiskOffset::new(disk_id as usize, Block(0)));
-                let allocator = self
-                    .handler
-                    .get_allocation_bitmap(segment_id, self)
-                    .chain_err(|| ErrorKind::HandlerError)?;
-                *x = Some((segment_id, allocator));
+        'class: for class in storage_preference..self.pool.storage_class_count() {
+            let disks_in_class = self.pool.disk_count(class);
+            if disks_in_class == 0 {
+                continue;
             }
-            let &mut (ref mut segment_id, ref mut allocator) = x.as_mut().unwrap();
 
-            let first_seen_segment_id = *segment_id;
-            loop {
-                if let Some(segment_offset) = allocator.allocate(size.as_u32()) {
-                    break segment_id.disk_offset(segment_offset);
+            let start_disk_id = (self.next_disk_id.fetch_add(1, Ordering::Relaxed)
+                % u64::from(disks_in_class)) as u16;
+            let disk_id = (start_disk_id..disks_in_class)
+                .chain(0..start_disk_id)
+                .max_by_key(|&disk_id| {
+                    self.pool.effective_free_size(
+                        class,
+                        disk_id,
+                        self.handler.get_free_space(disk_id),
+                    )
+                })
+                .unwrap();
+            let size = self.pool.actual_size(class, disk_id, size);
+            let disk_size = self.pool.size_in_blocks(class, disk_id);
+
+            let disk_offset = {
+                let mut x = self.allocation_data[class as usize][disk_id as usize].lock();
+
+                if x.is_none() {
+                    let segment_id = SegmentId::get(DiskOffset::new(class, disk_id, Block(0)));
+                    let allocator = self
+                        .handler
+                        .get_allocation_bitmap(segment_id, self)
+                        .chain_err(|| ErrorKind::HandlerError)?;
+                    *x = Some((segment_id, allocator));
                 }
-                let next_segment_id = segment_id.next(disk_size);
-                trace!(
-                    "Next allocator segment: {:?} -> {:?} ({:?})",
-                    segment_id,
-                    next_segment_id,
-                    disk_size,
-                );
-                if next_segment_id == first_seen_segment_id {
-                    bail!(ErrorKind::OutOfSpaceError);
+                let &mut (ref mut segment_id, ref mut allocator) = x.as_mut().unwrap();
+
+                let first_seen_segment_id = *segment_id;
+                loop {
+                    if let Some(segment_offset) = allocator.allocate(size.as_u32()) {
+                        break segment_id.disk_offset(segment_offset);
+                    }
+                    let next_segment_id = segment_id.next(disk_size);
+                    trace!(
+                        "Next allocator segment: {:?} -> {:?} ({:?})",
+                        segment_id,
+                        next_segment_id,
+                        disk_size,
+                    );
+                    if next_segment_id == first_seen_segment_id {
+                        // Can't allocate in this class, try next
+                        continue 'class;
+                    }
+                    *allocator = self
+                        .handler
+                        .get_allocation_bitmap(next_segment_id, self)
+                        .chain_err(|| ErrorKind::HandlerError)?;
+                    *segment_id = next_segment_id;
                 }
-                *allocator = self
-                    .handler
-                    .get_allocation_bitmap(next_segment_id, self)
-                    .chain_err(|| ErrorKind::HandlerError)?;
-                *segment_id = next_segment_id;
-            }
-        };
-        info!("Allocated {:?} at {:?}", size, disk_offset);
-        self.handler
-            .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
-            .chain_err(|| ErrorKind::HandlerError)?;
-        Ok(disk_offset)
+            };
+
+            info!("Allocated {:?} at {:?}", size, disk_offset);
+            self.handler
+                .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
+                .chain_err(|| ErrorKind::HandlerError)?;
+
+            return Ok(disk_offset);
+        }
+
+        bail!(ErrorKind::OutOfSpaceError)
     }
 
     /// Tries to allocate `size` blocks at `disk_offset`.  Might fail if
     /// already in use.
     pub fn allocate_raw_at(&self, disk_offset: DiskOffset, size: Block<u32>) -> Result<(), Error> {
         let disk_id = disk_offset.disk_id();
-        let num_disks = self.pool.num_disks(disk_id as u16);
+        let num_disks = self.pool.num_disks(disk_offset.storage_class(), disk_id);
         let size = size * num_disks as u32;
         let segment_id = SegmentId::get(disk_offset);
-        let mut x = self.allocation_data[disk_id as usize].lock();
+        let mut x =
+            self.allocation_data[disk_offset.storage_class() as usize][disk_id as usize].lock();
         let mut allocator = self
             .handler
             .get_allocation_bitmap(segment_id, self)
@@ -623,13 +668,12 @@ where
     }
 }
 
-impl<C, E, SPL, H, I, G> super::HandlerDml for Dmu<C, E, SPL, H, I, G>
+impl<E, SPL, H, I, G> super::HandlerDml for Dmu<E, SPL, H, I, G>
 where
-    C: Compression + StaticSize,
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
@@ -729,7 +773,9 @@ where
             Err(RemoveError::Pinned) => unimplemented!(),
         };
         if let ObjectRef::Unmodified(ref ptr) = or {
-            let actual_size = self.pool.actual_size(ptr.offset.disk_id() as u16, ptr.size);
+            let actual_size =
+                self.pool
+                    .actual_size(ptr.offset.storage_class(), ptr.offset.disk_id(), ptr.size);
             self.handler
                 .copy_on_write(ptr.offset, actual_size, ptr.generation, ptr.info);
         }
@@ -746,7 +792,9 @@ where
             };
         };
         if let ObjectRef::Unmodified(ref ptr) = or {
-            let actual_size = self.pool.actual_size(ptr.offset.disk_id() as u16, ptr.size);
+            let actual_size =
+                self.pool
+                    .actual_size(ptr.offset.storage_class(), ptr.offset.disk_id(), ptr.size);
             self.handler
                 .copy_on_write(ptr.offset, actual_size, ptr.generation, ptr.info);
         }
@@ -767,13 +815,12 @@ where
     }
 }
 
-impl<C, E, SPL, H, I, G> super::Dml for Dmu<C, E, SPL, H, I, G>
+impl<E, SPL, H, I, G> super::Dml for Dmu<E, SPL, H, I, G>
 where
-    C: Compression + StaticSize,
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
@@ -814,7 +861,7 @@ where
 
     type Prefetch = Pin<
         Box<
-            dyn Future<Output = Result<(<Self as DmlBase>::ObjectPointer, Box<[u8]>), Error>>
+            dyn Future<Output = Result<(<Self as DmlBase>::ObjectPointer, Buf), Error>>
                 + Send
                 + 'static,
         >,
@@ -833,9 +880,9 @@ where
         let (ptr, compressed_data) = block_on(p)?;
         let object: H::Object = {
             let data = ptr
-                .compression
-                .decompress(compressed_data)
-                .chain_err(|| ErrorKind::DecompressionError)?;
+                .decompression_tag
+                .new_decompression()?
+                .decompress(&compressed_data)?;
             Object::unpack(data).chain_err(|| ErrorKind::DeserializationError)?
         };
         let key = ObjectKey::Unmodified {
@@ -865,13 +912,12 @@ where
     }
 }
 
-impl<C, E, SPL, H, I, G> super::DmlWithHandler for Dmu<C, E, SPL, H, I, G>
+impl<E, SPL, H, I, G> super::DmlWithHandler for Dmu<E, SPL, H, I, G>
 where
-    C: Compression + StaticSize,
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
@@ -883,13 +929,12 @@ where
     }
 }
 
-impl<C, E, SPL, H, I, G> super::DmlWithSpl for Dmu<C, E, SPL, H, I, G>
+impl<E, SPL, H, I, G> super::DmlWithSpl for Dmu<E, SPL, H, I, G>
 where
-    C: Compression + StaticSize,
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<C, SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
