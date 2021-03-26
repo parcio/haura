@@ -6,7 +6,7 @@
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 use bincode::{deserialize, serialize_into};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, ops::Deref};
+use std::{fmt::Debug, mem, ops::Deref};
 
 /// Defines the action of a message.
 pub trait MessageAction: Debug + Send + Sync {
@@ -63,6 +63,12 @@ pub struct DefaultMessageAction;
 pub struct Upsert<'a> {
     offset: u32,
     data: &'a [u8],
+}
+
+impl<'a> Upsert<'a> {
+    fn estimate_size(&self) -> usize {
+        mem::size_of::<u32>() + mem::size_of::<u64>() + self.data.len()
+    }
 }
 
 enum MsgType<'a> {
@@ -130,7 +136,8 @@ impl DefaultMessageAction {
     }
 
     fn build_upsert_msg(upsert: &[Upsert]) -> SlicedCowBytes {
-        let mut v = Vec::new();
+        let estimated_size = 1 + upsert.iter().map(Upsert::estimate_size).sum::<usize>();
+        let mut v = Vec::with_capacity(estimated_size);
         v.push(2);
         serialize_into(&mut v, upsert).unwrap();
         CowBytes::from(v).into()
