@@ -1,5 +1,6 @@
 use super::errors::*;
 use crate::{
+    buffer::{Buf, BufWrite},
     checksum::{Builder, State, XxHash, XxHashBuilder},
     size::StaticSize,
     storage_pool::StoragePoolLayer,
@@ -7,6 +8,7 @@ use crate::{
 };
 use bincode::{deserialize, serialize_into};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::io::{self, Seek, Write};
 
 static MAGIC: &[u8] = b"HEAFSv3\0\n";
 
@@ -58,12 +60,12 @@ impl Superblock<super::ObjectPointer> {
         } else {
             Block(1)
         };
-        pool.write_raw(sb_data, sb_offset)?;
+        pool.write_raw(Buf::from(sb_data), sb_offset)?;
         Ok(())
     }
 
     pub fn clear_superblock<S: StoragePoolLayer>(pool: &S) -> Result<()> {
-        let empty_data = vec![0; BLOCK_SIZE].into_boxed_slice();
+        let empty_data = Buf::zeroed(Block(1));
         pool.write_raw(empty_data.clone(), Block(0))?;
         pool.write_raw(empty_data, Block(1))?;
         Ok(())
@@ -71,8 +73,8 @@ impl Superblock<super::ObjectPointer> {
 }
 
 impl<P: Serialize> Superblock<P> {
-    pub fn pack(p: &P) -> Result<Box<[u8]>> {
-        let mut data = Vec::with_capacity(BLOCK_SIZE);
+    pub fn pack(p: &P) -> Result<Buf> {
+        let mut data = BufWrite::with_capacity(Block(1));
         {
             let mut this = Superblock {
                 magic: [0; 9],
@@ -82,10 +84,9 @@ impl<P: Serialize> Superblock<P> {
             serialize_into(&mut data, &this)?;
         }
         let checksum_size = XxHash::size();
-        data.resize(BLOCK_SIZE - checksum_size, 0);
-        let checksum = checksum(&data);
+        data.seek(io::SeekFrom::End(-i64::from(checksum_size as u32)));
+        let checksum = checksum(&data.as_ref()[..BLOCK_SIZE - checksum_size]);
         serialize_into(&mut data, &checksum)?;
-        assert!(data.len() == BLOCK_SIZE);
-        Ok(data.into_boxed_slice())
+        Ok(data.into_buf())
     }
 }
