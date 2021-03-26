@@ -1,9 +1,9 @@
 use super::{
-    errors::*, util::*, AtomicStatistics, Block, ScrubResult, Statistics, Vdev, VdevLeafRead,
-    VdevLeafWrite, VdevRead, VdevWrite, BLOCK_SIZE,
+    errors::*, util::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev,
+    VdevLeafRead, VdevLeafWrite, VdevRead, VdevWrite, BLOCK_SIZE,
 };
 use crate::{
-    buffer::{new_buffer, SplittableBuffer, SplittableMutBuffer},
+    buffer::{Buf, MutBuf},
     checksum::Checksum,
 };
 use async_trait::async_trait;
@@ -60,7 +60,7 @@ impl<V> Parity1<V> {
     }
 }
 
-impl<V: Vdev + VdevLeafRead<SplittableMutBuffer> + VdevLeafWrite> Vdev for Parity1<V> {
+impl<V: Vdev + VdevLeafRead + VdevLeafWrite> Vdev for Parity1<V> {
     fn actual_size(&self, size: Block<u32>) -> Block<u32> {
         size + self.long_col_len(size)
     }
@@ -95,39 +95,31 @@ impl<V: Vdev + VdevLeafRead<SplittableMutBuffer> + VdevLeafWrite> Vdev for Parit
 }
 
 #[async_trait]
-impl<
-        V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWrite + 'static,
-        C: Checksum,
-    > VdevRead<C> for Parity1<V>
-{
-    async fn read(
+impl<V: VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Parity1<V> {
+    async fn read<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<Box<[u8]>, Error> {
+    ) -> Result<Buf> {
         self.read_(size, offset, checksum, false).await
     }
 
-    async fn scrub(
+    async fn scrub<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<ScrubResult, Error> {
+    ) -> Result<ScrubResult> {
         self.read_(size, offset, checksum, true).await
     }
 
-    async fn read_raw(
-        &self,
-        size: Block<u32>,
-        offset: Block<u64>,
-    ) -> Result<Vec<Box<[u8]>>, Error> {
+    async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
         let futures: FuturesUnordered<_> = self
             .vdevs
             .iter()
             .map(|disk| {
-                let data = alloc_uninitialized(size.to_bytes() as usize);
+                let data = Buf::zeroed(size).into_full_mut();
                 disk.read_raw(data, offset).into_future()
             })
             .collect();
@@ -135,25 +127,25 @@ impl<
         let mut v = Vec::new();
         for r in result {
             if let Ok(x) = r {
-                v.push(x);
+                v.push(x.into_full_buf());
             }
         }
         if v.is_empty() {
-            Err(Error::from(ErrorKind::ReadError(self.id.clone())))
+            Err(VdevError::Read(self.id.clone()))
         } else {
             Ok(v)
         }
     }
 }
 
-impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWrite> Parity1<V> {
+impl<V: VdevLeafRead + VdevLeafWrite> Parity1<V> {
     async fn read_<R, C>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
         scrub: bool,
-    ) -> Result<R, Error>
+    ) -> Result<R>
     where
         R: From<ScrubResult>,
         C: Checksum,
@@ -167,8 +159,7 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
         let parity_disk_offset = offset / (disk_cnt as u64);
         let parity_disk_idx = (offset.as_u64() % (disk_cnt as u64)) as usize;
 
-        let (buf_handle, mut buf) =
-            new_buffer(vec![0; size.to_bytes() as usize].into_boxed_slice());
+        let mut buf = Buf::zeroed(size).into_full_mut();
 
         let mut reads = FuturesOrdered::new();
         {
@@ -179,12 +170,10 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
                 if col_length == Block(0) {
                     break;
                 }
-                reads.push(
-                    disk.read_raw(buf.split_off(col_length.to_bytes() as usize), disk_offset)
-                        .into_future(),
-                );
+                let (left, right) = buf.split_at(col_length);
+                buf = right;
+                reads.push(disk.read_raw(left, disk_offset).into_future());
             }
-            drop(buf);
         }
         let mut failed_idx = None;
         let mut faulted = Block(0);
@@ -197,14 +186,12 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
                     self.stats
                         .failed_reads
                         .fetch_add(size.as_u64(), Ordering::Relaxed);
-                    bail!(ErrorKind::ReadError(self.id.clone()));
+                    return Err(VdevError::Read(self.id.clone()));
                 }
             }
         }
-        let mut data = match buf_handle.into_inner() {
-            Ok(data) => data,
-            Err(_) => unreachable!("Failed to reacquire buffer handle"),
-        };
+
+        let data = buf.into_full_buf();
         if failed_idx.is_none() && !scrub && checksum.verify(&data).is_ok() {
             return Ok(ScrubResult {
                 data,
@@ -227,7 +214,7 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
                     self.stats
                         .failed_reads
                         .fetch_add(size.as_u64(), Ordering::Relaxed);
-                    bail!(ErrorKind::ReadError(self.id.clone()));
+                    return Err(VdevError::Read(self.id.clone()));
                 } else {
                     vec![0; long_col_len.to_bytes() as usize].into_boxed_slice()
                 }
@@ -250,7 +237,10 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
             let col_off = calc_col_offset(failed_idx, long_col_len, long_col_cnt);
             let start = col_off.to_bytes() as usize;
             let end = start + bad_block_len.to_bytes() as usize;
-            data[start..end].copy_from_slice(&repaired_block);
+
+            let mut data = data.into_full_mut();
+            data.as_mut()[start..end].copy_from_slice(&repaired_block);
+            let data = data.into_full_buf();
 
             // We give up if the checksum does not match after rebuild.
             if checksum.verify(&data).is_err() {
@@ -260,7 +250,7 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
                 self.stats
                     .checksum_errors
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(ErrorKind::ReadError(self.id.clone()));
+                return Err(VdevError::Read(self.id.clone()));
             }
 
             // Otherwise we try to rewrite the defective data.
@@ -352,7 +342,7 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
                     self.stats
                         .checksum_errors
                         .fetch_add(size.as_u64(), Ordering::Relaxed);
-                    bail!(ErrorKind::ReadError(self.id.clone()))
+                    return Err(VdevError::Read(self.id.clone()));
                 }
                 Some(bad_block_idx) => bad_block_idx,
             };
@@ -367,12 +357,11 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
             let col_off = calc_col_offset(bad_block_idx, long_col_len, long_col_cnt);
             let start = col_off.to_bytes() as usize;
             let end = start + bad_block_len.to_bytes() as usize;
-            data[start..end].copy_from_slice(&repaired_block);
 
-            VdevLeafRead::<SplittableMutBuffer>::checksum_error_occurred(
-                &self.vdevs[bad_disk_idx],
-                size,
-            );
+            let mut data = data.into_full_mut();
+            data.as_mut()[start..end].copy_from_slice(&repaired_block);
+
+            VdevLeafRead::checksum_error_occurred(&self.vdevs[bad_disk_idx], size);
             let repaired = match self.vdevs[bad_disk_idx]
                 .write_raw(repaired_block, bad_disk_offset, true)
                 .into_future()
@@ -382,7 +371,7 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
                 Err(_) => Block(0),
             };
             Ok(ScrubResult {
-                data,
+                data: data.into_full_buf(),
                 faulted,
                 repaired,
             }
@@ -393,10 +382,8 @@ impl<V: VdevLeafRead<SplittableMutBuffer> + VdevLeafRead<Box<[u8]>> + VdevLeafWr
 
 #[async_trait]
 impl<V: VdevLeafWrite> VdevWrite for Parity1<V> {
-    async fn write(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error> {
-        assert!(data.len() % BLOCK_SIZE == 0);
-        let mut data = SplittableBuffer::new(data);
-        let size = Block::from_bytes(data.len() as u32);
+    async fn write(&self, data: Buf, offset: Block<u64>) -> Result<()> {
+        let size = data.size();
         let long_col_len = self.long_col_len(size);
         let disk_cnt = self.vdevs.len();
         let long_col_cnt = self.long_col_cnt(size);
@@ -407,14 +394,11 @@ impl<V: VdevLeafWrite> VdevWrite for Parity1<V> {
 
         writes.push(
             self.vdevs[parity_disk_idx]
-                .write_raw(
-                    SplittableBuffer::from(parity_block),
-                    parity_disk_offset,
-                    false,
-                )
+                .write_raw(Buf::from(parity_block), parity_disk_offset, false)
                 .into_future(),
         );
 
+        let mut data = data;
         for ((disk, disk_offset), col_length) in disk_iter(
             &self.vdevs,
             parity_disk_idx,
@@ -425,14 +409,9 @@ impl<V: VdevLeafWrite> VdevWrite for Parity1<V> {
             if col_length == Block(0) {
                 break;
             }
-            writes.push(
-                disk.write_raw(
-                    data.split_off(col_length.to_bytes() as usize),
-                    disk_offset,
-                    false,
-                )
-                .into_future(),
-            );
+            let (left, right) = data.split_at(col_length);
+            data = right;
+            writes.push(disk.write_raw(left, disk_offset, false).into_future());
         }
         let results: Vec<_> = writes.collect().await;
 
@@ -452,14 +431,14 @@ impl<V: VdevLeafWrite> VdevWrite for Parity1<V> {
         Ok(())
     }
 
-    fn flush(&self) -> Result<(), Error> {
+    fn flush(&self) -> Result<()> {
         for vdev in self.vdevs.iter() {
             vdev.flush()?;
         }
         Ok(())
     }
 
-    async fn write_raw(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error> {
+    async fn write_raw(&self, data: Buf, offset: Block<u64>) -> Result<()> {
         let size = Block::from_bytes(data.len() as u32);
         let futures: FuturesUnordered<_> = self
             .vdevs
@@ -588,6 +567,7 @@ fn block_iter(
 mod tests {
     use super::Parity1;
     use crate::{
+        buffer::Buf,
         checksum::{Builder, Checksum, State, XxHashBuilder},
         vdev::{
             test::{generate_data, test_writes_are_persistent, FailingLeafVdev, FailureMode},
@@ -725,7 +705,7 @@ mod tests {
         disks[0].fail_writes(FailureMode::FailOperation);
         disks[1].fail_writes(FailureMode::FailOperation);
         let vdev = Parity1::new(disks.into_boxed_slice(), String::from("parity1"));
-        assert!(block_on(vdev.write(data, Block(0)).into_future()).is_err());
+        assert!(block_on(vdev.write(Buf::from(data), Block(0)).into_future()).is_err());
     }
 
     #[quickcheck]

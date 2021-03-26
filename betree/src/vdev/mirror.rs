@@ -1,8 +1,11 @@
 use super::{
-    errors::*, util::*, AtomicStatistics, Block, ScrubResult, Statistics, Vdev, VdevLeafRead,
-    VdevLeafWrite, VdevRead, VdevWrite,
+    errors::*, util::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev,
+    VdevLeafRead, VdevLeafWrite, VdevRead, VdevWrite,
 };
-use crate::{buffer::SplittableBuffer, checksum::Checksum};
+use crate::{
+    buffer::{Buf, MutBuf},
+    checksum::Checksum,
+};
 use async_trait::async_trait;
 use futures::{
     prelude::*,
@@ -29,7 +32,7 @@ impl<V> Mirror<V> {
 }
 
 struct ReadResult {
-    data: Option<Box<[u8]>>,
+    data: Option<Buf>,
     failed_disks: Vec<usize>,
 }
 
@@ -39,7 +42,7 @@ impl<V: VdevLeafWrite> Mirror<V> {
         size: Block<u32>,
         offset: Block<u64>,
         r: ReadResult,
-    ) -> Result<R, Error>
+    ) -> Result<R>
     where
         R: From<ScrubResult>,
     {
@@ -52,7 +55,7 @@ impl<V: VdevLeafWrite> Mirror<V> {
                 self.stats
                     .failed_reads
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(ErrorKind::ReadError(self.id.clone()));
+                return Err(VdevError::Read(self.id.clone()));
             }
         };
         let faulted = failed_disks.len() as u32;
@@ -85,15 +88,13 @@ impl<V: VdevLeafWrite> Mirror<V> {
 }
 
 #[async_trait]
-impl<C: Checksum, V: Vdev + VdevRead<C> + VdevLeafRead<Box<[u8]>> + VdevLeafWrite + 'static>
-    VdevRead<C> for Mirror<V>
-{
-    async fn read(
+impl<V: Vdev + VdevRead + VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Mirror<V> {
+    async fn read<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<Box<[u8]>, Error> {
+    ) -> Result<Buf> {
         // Switch disk every 32 MiB. (which is 2^25 bytes)
         // TODO 32 MiB too large?
         let start_idx = (offset.to_bytes() >> 25) as usize % self.vdevs.len();
@@ -115,12 +116,12 @@ impl<C: Checksum, V: Vdev + VdevRead<C> + VdevLeafRead<Box<[u8]>> + VdevLeafWrit
         self.handle_repair(size, offset, r).await
     }
 
-    async fn scrub(
+    async fn scrub<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<ScrubResult, Error> {
+    ) -> Result<ScrubResult> {
         let futures: FuturesOrdered<_> = self
             .vdevs
             .iter()
@@ -139,28 +140,24 @@ impl<C: Checksum, V: Vdev + VdevRead<C> + VdevLeafRead<Box<[u8]>> + VdevLeafWrit
         self.handle_repair(size, offset, r).await
     }
 
-    async fn read_raw(
-        &self,
-        size: Block<u32>,
-        offset: Block<u64>,
-    ) -> Result<Vec<Box<[u8]>>, Error> {
+    async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
         let futures: FuturesUnordered<_> = self
             .vdevs
             .iter()
             .map(|disk| {
-                let data = alloc_uninitialized(size.to_bytes() as usize);
-                VdevLeafRead::<Box<[u8]>>::read_raw(disk, data, offset).into_future()
+                let data = Buf::zeroed(size).into_full_mut();
+                VdevLeafRead::read_raw(disk, data, offset).into_future()
             })
             .collect();
         let result = futures.collect::<Vec<_>>().await;
         let mut v = Vec::new();
         for r in result {
             if let Ok(x) = r {
-                v.push(x);
+                v.push(x.into_full_buf());
             }
         }
         if v.is_empty() {
-            Err(Error::from(ErrorKind::ReadError(self.id.clone())))
+            Err(VdevError::Read(self.id.clone()))
         } else {
             Ok(v)
         }
@@ -169,9 +166,8 @@ impl<C: Checksum, V: Vdev + VdevRead<C> + VdevLeafRead<Box<[u8]>> + VdevLeafWrit
 
 #[async_trait]
 impl<V: VdevLeafWrite + 'static> VdevWrite for Mirror<V> {
-    async fn write(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error> {
+    async fn write(&self, data: Buf, offset: Block<u64>) -> Result<()> {
         let size = Block::from_bytes(data.len() as u32);
-        let data = SplittableBuffer::new(data);
         self.stats
             .written
             .fetch_add(size.as_u64(), Ordering::Relaxed);
@@ -192,19 +188,18 @@ impl<V: VdevLeafWrite + 'static> VdevWrite for Mirror<V> {
             self.stats
                 .failed_writes
                 .fetch_add(size.as_u64(), Ordering::Relaxed);
-            bail!(ErrorKind::WriteError(self.id.clone()))
+            return Err(VdevError::Write(self.id.clone()));
         }
     }
 
-    fn flush(&self) -> Result<(), Error> {
+    fn flush(&self) -> Result<()> {
         for vdev in self.vdevs.iter() {
             vdev.flush()?;
         }
         Ok(())
     }
 
-    async fn write_raw(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error> {
-        let data = SplittableBuffer::new(data);
+    async fn write_raw(&self, data: Buf, offset: Block<u64>) -> Result<()> {
         let futures: FuturesUnordered<_> = self
             .vdevs
             .iter()
@@ -262,6 +257,7 @@ impl<V: Vdev> Vdev for Mirror<V> {
 mod tests {
     use super::Mirror;
     use crate::{
+        buffer::Buf,
         checksum::{Builder, Checksum, State, XxHashBuilder},
         vdev::{
             test::{generate_data, test_writes_are_persistent, FailingLeafVdev, FailureMode},
@@ -400,7 +396,7 @@ mod tests {
             disk.fail_writes(FailureMode::FailOperation);
         }
         let vdev = Mirror::new(disks.into_boxed_slice(), String::from("mirror"));
-        assert!(block_on(vdev.write(data, Block(0))).is_err());
+        assert!(block_on(vdev.write(Buf::from(data), Block(0))).is_err());
     }
 
     #[quickcheck]

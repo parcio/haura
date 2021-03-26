@@ -1,8 +1,11 @@
 use super::{
-    errors::*, util::alloc_uninitialized, AtomicStatistics, Block, ScrubResult, Statistics, Vdev,
-    VdevLeafRead, VdevLeafWrite, VdevRead,
+    errors::*, util::alloc_uninitialized, AtomicStatistics, Block, Result, ScrubResult, Statistics,
+    Vdev, VdevLeafRead, VdevLeafWrite, VdevRead,
 };
-use crate::checksum::Checksum;
+use crate::{
+    buffer::{Buf, MutBuf},
+    checksum::Checksum,
+};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
 use std::{
@@ -24,7 +27,7 @@ pub struct File {
 
 impl File {
     /// Creates a new `File`.
-    pub fn new(file: fs::File, id: String) -> Result<Self, io::Error> {
+    pub fn new(file: fs::File, id: String) -> io::Result<Self> {
         let file_type = file.metadata()?.file_type();
         let size = if file_type.is_file() {
             Block::from_bytes(file.metadata()?.len())
@@ -46,7 +49,7 @@ impl File {
 }
 
 #[cfg(target_os = "linux")]
-fn get_block_device_size(file: &fs::File) -> Result<Block<u64>, io::Error> {
+fn get_block_device_size(file: &fs::File) -> io::Result<Block<u64>> {
     use std::convert::TryInto;
 
     const BLKGETSIZE64: c_ulong = 2148012658;
@@ -67,27 +70,26 @@ fn get_block_device_size(file: &fs::File) -> Result<Block<u64>, io::Error> {
 }
 
 #[async_trait]
-impl<C: Checksum> VdevRead<C> for File {
-    async fn read(
+impl VdevRead for File {
+    async fn read<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<Box<[u8]>, Error> {
+    ) -> Result<Buf> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
-        let size_in_bytes = size.to_bytes() as usize;
-        let mut buf = alloc_uninitialized(size_in_bytes);
-        if let Err(e) = self.file.read_exact_at(&mut buf, offset.to_bytes()) {
-            self.stats
-                .failed_reads
-                .fetch_add(size.as_u64(), Ordering::Relaxed);
-            bail!(e)
-        }
-        match checksum
-            .verify(&buf)
-            .map_err(Error::from)
-            .chain_err(|| ErrorKind::ReadError(self.id.clone()))
-        {
+        let buf = {
+            let mut buf = Buf::zeroed(size).into_full_mut();
+            if let Err(e) = self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
+                self.stats
+                    .failed_reads
+                    .fetch_add(size.as_u64(), Ordering::Relaxed);
+                bail!(e)
+            }
+            buf.into_full_buf()
+        };
+
+        match checksum.verify(&buf).map_err(VdevError::from) {
             Ok(()) => Ok(buf),
             Err(e) => {
                 self.stats
@@ -98,12 +100,12 @@ impl<C: Checksum> VdevRead<C> for File {
         }
     }
 
-    async fn scrub(
+    async fn scrub<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<ScrubResult, Error> {
+    ) -> Result<ScrubResult> {
         let data = self.read(size, offset, checksum).await?;
         Ok(ScrubResult {
             data,
@@ -112,16 +114,11 @@ impl<C: Checksum> VdevRead<C> for File {
         })
     }
 
-    async fn read_raw(
-        &self,
-        size: Block<u32>,
-        offset: Block<u64>,
-    ) -> Result<Vec<Box<[u8]>>, Error> {
+    async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
-        let size_in_bytes = size.to_bytes() as usize;
-        let mut buf = alloc_uninitialized(size_in_bytes);
-        match self.file.read_exact_at(&mut buf, offset.to_bytes()) {
-            Ok(()) => Ok(vec![buf]),
+        let mut buf = Buf::zeroed(size).into_full_mut();
+        match self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
+            Ok(()) => Ok(vec![buf.into_full_buf()]),
             Err(e) => {
                 self.stats
                     .failed_reads
@@ -161,8 +158,8 @@ impl Vdev for File {
 }
 
 #[async_trait]
-impl<T: AsMut<[u8]> + Send + 'static> VdevLeafRead<T> for File {
-    async fn read_raw(&self, mut buf: T, offset: Block<u64>) -> Result<T, Error> {
+impl VdevLeafRead for File {
+    async fn read_raw<T: AsMut<[u8]> + Send>(&self, mut buf: T, offset: Block<u64>) -> Result<T> {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         match self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
@@ -185,19 +182,18 @@ impl<T: AsMut<[u8]> + Send + 'static> VdevLeafRead<T> for File {
 
 #[async_trait]
 impl VdevLeafWrite for File {
-    async fn write_raw<T: AsRef<[u8]> + Send + 'static>(
+    async fn write_raw<W: AsRef<[u8]> + Send>(
         &self,
-        data: T,
+        data: W,
         offset: Block<u64>,
         is_repair: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let block_cnt = Block::from_bytes(data.as_ref().len() as u64).as_u64();
         self.stats.written.fetch_add(block_cnt, Ordering::Relaxed);
         match self
             .file
             .write_all_at(data.as_ref(), offset.to_bytes())
-            .map_err(Error::from)
-            .chain_err(|| ErrorKind::WriteError(self.id.clone()))
+            .map_err(|_| VdevError::Write(self.id.clone()))
         {
             Ok(()) => {
                 if is_repair {
@@ -213,7 +209,7 @@ impl VdevLeafWrite for File {
             }
         }
     }
-    fn flush(&self) -> Result<(), Error> {
+    fn flush(&self) -> Result<()> {
         Ok(self.file.sync_data()?)
     }
 }

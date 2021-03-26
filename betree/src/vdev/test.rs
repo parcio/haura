@@ -2,7 +2,10 @@ use super::{
     AtomicStatistics, Block, Error, ErrorKind, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead, VdevWrite,
 };
-use crate::checksum::{Builder, Checksum, State, XxHash, XxHashBuilder};
+use crate::{
+    buffer::Buf,
+    checksum::{Builder, Checksum, State, XxHash, XxHashBuilder},
+};
 use async_trait::async_trait;
 use futures::{executor::block_on, prelude::*};
 use parking_lot::Mutex;
@@ -84,21 +87,21 @@ impl FailingLeafVdev {
 }
 
 #[async_trait]
-impl<C: Checksum> VdevRead<C> for FailingLeafVdev {
-    async fn read(
+impl VdevRead for FailingLeafVdev {
+    async fn read<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<Box<[u8]>, Error> {
+    ) -> Result<Buf, Error> {
         let b = self.handle_read(size, offset)?;
         match checksum.verify(&b) {
-            Ok(()) => Ok(b),
+            Ok(()) => Ok(Buf::from_zero_padded(b.to_vec())),
             Err(_) => Err(ErrorKind::ReadError(self.id.clone()).into()),
         }
     }
 
-    async fn scrub(
+    async fn scrub<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
@@ -112,13 +115,9 @@ impl<C: Checksum> VdevRead<C> for FailingLeafVdev {
         })
     }
 
-    async fn read_raw(
-        &self,
-        size: Block<u32>,
-        offset: Block<u64>,
-    ) -> Result<Vec<Box<[u8]>>, Error> {
+    async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>, Error> {
         let b = self.handle_read(size, offset)?;
-        Ok(vec![b])
+        Ok(vec![Buf::from_zero_padded(b.to_vec())])
     }
 }
 
@@ -151,8 +150,12 @@ impl Vdev for FailingLeafVdev {
 }
 
 #[async_trait]
-impl<T: AsMut<[u8]> + Send + 'static> VdevLeafRead<T> for FailingLeafVdev {
-    async fn read_raw(&self, mut buf: T, offset: Block<u64>) -> Result<T, Error> {
+impl VdevLeafRead for FailingLeafVdev {
+    async fn read_raw<T: AsMut<[u8]> + Send>(
+        &self,
+        mut buf: T,
+        offset: Block<u64>,
+    ) -> Result<T, Error> {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
 
@@ -248,7 +251,7 @@ macro_rules! try_ret {
     };
 }
 
-pub fn generate_data(idx: usize, offset: Block<u64>, size: Block<u32>) -> Box<[u8]> {
+pub fn generate_data(idx: usize, offset: Block<u64>, size: Block<u32>) -> Buf {
     let seed = [
         size.as_u32() + 1,
         idx as u32,
@@ -259,7 +262,7 @@ pub fn generate_data(idx: usize, offset: Block<u64>, size: Block<u32>) -> Box<[u
 
     let mut data = vec![0; size.to_bytes() as usize].into_boxed_slice();
     rng.fill_bytes(&mut data);
-    data
+    Buf::from(data)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -275,10 +278,7 @@ impl Arbitrary for NonZeroU8 {
     }
 }
 
-pub fn test_writes_are_persistent<V: Vdev + VdevRead<XxHash> + VdevWrite>(
-    writes: &[(u8, u8)],
-    vdev: &V,
-) {
+pub fn test_writes_are_persistent<V: Vdev + VdevRead + VdevWrite>(writes: &[(u8, u8)], vdev: &V) {
     let mut marker = vec![0; vdev.size().as_u64() as usize];
     let mut checksums = HashMap::new();
     for (idx, &(offset, size)) in writes.iter().enumerate() {
@@ -316,6 +316,6 @@ pub fn test_writes_are_persistent<V: Vdev + VdevRead<XxHash> + VdevWrite>(
         let gen_data = generate_data(idx, offset, size);
         assert!(checksum.verify(&data).is_ok());
         assert!(checksum.verify(&gen_data).is_ok());
-        assert_eq!(data, gen_data);
+        assert_eq!(data.into_boxed_slice(), gen_data.into_boxed_slice());
     }
 }
