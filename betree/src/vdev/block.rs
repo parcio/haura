@@ -21,6 +21,7 @@ pub trait Uint:
     + sealed::Sealed
 {
     const ZERO: Self;
+    const ONE: Self;
     const BLOCK_SIZE: Self;
 }
 mod sealed {
@@ -33,14 +34,17 @@ impl sealed::Sealed for usize {}
 
 impl Uint for u32 {
     const ZERO: Self = 0;
+    const ONE: Self = 1;
     const BLOCK_SIZE: Self = BLOCK_SIZE as Self;
 }
 impl Uint for u64 {
     const ZERO: Self = 0;
+    const ONE: Self = 1;
     const BLOCK_SIZE: Self = BLOCK_SIZE as Self;
 }
 impl Uint for usize {
     const ZERO: Self = 0;
+    const ONE: Self = 1;
     const BLOCK_SIZE: Self = BLOCK_SIZE;
 }
 
@@ -53,6 +57,15 @@ impl<T: Uint> Block<T> {
     pub fn from_bytes(bytes: T) -> Self {
         debug_assert!(bytes % T::BLOCK_SIZE == T::ZERO);
         Block(bytes / T::BLOCK_SIZE)
+    }
+
+    pub fn round_up_from_bytes(bytes: T) -> Self {
+        let full_blocks = bytes / T::BLOCK_SIZE;
+        if bytes % T::BLOCK_SIZE == T::ZERO {
+            Block(full_blocks)
+        } else {
+            Block(full_blocks + T::ONE)
+        }
     }
 
     /// Returns the number of `Block`s as a number of bytes.
