@@ -16,22 +16,19 @@ harness = false
 name = "allocator"
 harness = false
 
-[[bench]]
-name = "serialisation"
-harness = false
-
 [dependencies]
 futures = { version = "0.3", features = ["thread-pool"] }
 serde = { version = "1.0", features = [ "derive" ] }
 bincode = "1.0"
 error-chain = "0.12"
+thiserror = "1.0"
 libc = "0.2"
 parking_lot = "0.11"
 lock_api = { version = "0.4", features = ["owning_ref"] }
 owning_ref = "0.4"
-log = { version = "0.4", features = [ "release_max_level_info" ] }
+log = { version = "0.4", features = ["release_max_level_info"] }
 byteorder = "1.0"
-lz4 = "1.21"
+lz4-sys = "1.9"
 seqlock = { path = "seqlock/" }
 twox-hash = "1.6"
 stable_deref_trait = "1.1"
@@ -39,8 +36,7 @@ toml = "0.5"
 itertools = "0.10"
 ref_slice = "1.1"
 env_logger = { version = "0.8", optional = true }
-scoped_threadpool = "0.1"
-indicatif = "0.15"
+core_affinity = "0.5"
 async-trait = "0.1"
 jemallocator = { version = "0.3", features = [ "background_threads" ] }
 
@@ -48,6 +44,12 @@ zstd = { version = "0.6", default-features = false }
 zstd-safe = { version = "3.0", default-features = false }
 
 speedy = "0.7"
+
+enum_dispatch = "0.3"
+
+figment = { version = "0.10", optional = true, features = ["env"] }
+
+indexmap = "1.6"
 
 [dev-dependencies]
 rand = "0.7"
@@ -63,9 +65,10 @@ unbytify = "0.2"
 criterion = "0.3"
 
 [features]
-default = ["init_env_logger"]
+default = ["init_env_logger", "figment_config"]
 
 # unlock unstable API for consumption by bectl and other debugging tools
 internal-api = []
 debug-tree-dump = []
 init_env_logger = ["env_logger"]
+figment_config = ["figment"]
