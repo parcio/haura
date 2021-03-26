@@ -41,13 +41,16 @@ impl<P: DeserializeOwned> Superblock<P> {
 }
 
 impl Superblock<super::ObjectPointer> {
-    pub fn fetch_superblocks<S: StoragePoolLayer>(pool: &S) -> Option<super::ObjectPointer> {
-        let v1 = pool.read_raw(Block(1), Block(0));
-        let v2 = pool.read_raw(Block(1), Block(1));
-        v1.into_iter()
+    pub fn fetch_superblocks<S: StoragePoolLayer>(
+        pool: &S,
+    ) -> Result<Option<super::ObjectPointer>> {
+        let v1 = pool.read_raw(Block(1), Block(0))?;
+        let v2 = pool.read_raw(Block(1), Block(1))?;
+        Ok(v1
+            .into_iter()
             .chain(v2)
             .filter_map(|sb_data| Self::unpack(&sb_data).ok())
-            .max_by_key(|ptr| ptr.generation())
+            .max_by_key(|ptr| ptr.generation()))
     }
 
     pub fn write_superblock<S: StoragePoolLayer>(
