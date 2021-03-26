@@ -32,7 +32,6 @@ use std::{
 mod dataset;
 mod errors;
 mod handler;
-mod in_memory;
 mod snapshot;
 mod superblock;
 pub use self::{handler::Handler, superblock::Superblock};
