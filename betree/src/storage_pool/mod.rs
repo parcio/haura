@@ -3,12 +3,17 @@
 //! ordering.
 
 use crate::{
+    buffer::Buf,
     checksum::Checksum,
-    vdev::{Block, Error as VdevError},
+    vdev::{Block, Error as VdevError, Result as VdevResult},
 };
 use futures::{executor::block_on, prelude::*, TryFuture};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt, io};
+
+pub mod errors;
+pub use self::errors::*;
+use errors::Result as StoragePoolResult;
 
 // TODO read-only storage pool layer?
 // TODO Clone necessary?
@@ -19,10 +24,10 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
     type Checksum: Checksum;
 
     /// A serializable configuration type for this `StoragePoolLayer` object.
-    type Configuration: Serialize + DeserializeOwned + fmt::Display + fmt::Debug;
+    type Configuration: Serialize + DeserializeOwned + fmt::Debug;
 
     /// Constructs a new object using the given `Configuration`.
-    fn new(configuration: &Self::Configuration) -> Result<Self, io::Error>;
+    fn new(configuration: &Self::Configuration) -> StoragePoolResult<Self>;
 
     /// Reads `size` blocks from the given `offset`.
     fn read(
@@ -30,12 +35,12 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
         size: Block<u32>,
         offset: DiskOffset,
         checksum: Self::Checksum,
-    ) -> Result<Box<[u8]>, VdevError> {
+    ) -> VdevResult<Buf> {
         block_on(self.read_async(size, offset, checksum)?.into_future())
     }
 
     /// Future returned by `read_async`.
-    type ReadAsync: TryFuture<Ok = Box<[u8]>, Error = VdevError> + Send;
+    type ReadAsync: TryFuture<Ok = Buf, Error = VdevError> + Send;
 
     /// Reads `size` blocks asynchronously from the given `offset`.
     fn read_async(
@@ -43,42 +48,50 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
         size: Block<u32>,
         offset: DiskOffset,
         checksum: Self::Checksum,
-    ) -> Result<Self::ReadAsync, VdevError>;
+    ) -> VdevResult<Self::ReadAsync>;
 
     /// Issues a write request that might happen in the background.
-    fn begin_write(&self, data: Box<[u8]>, offset: DiskOffset) -> Result<(), VdevError>;
+    fn begin_write(&self, data: Buf, offset: DiskOffset) -> VdevResult<()>;
 
     /// Writes the given `data` at `offset` for every `LeafVdev`.
-    fn write_raw(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), VdevError>;
+    fn write_raw(&self, data: Buf, offset: Block<u64>) -> VdevResult<()>;
 
     /// Reads `size` blocks from  the given `offset` for every `LeafVdev`.
-    fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Vec<Box<[u8]>>;
+    fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> VdevResult<Vec<Buf>>;
 
     /// Returns the actual size of a data block for a specific `Vdev`
     /// which may be larger due to parity data.
-    fn actual_size(&self, disk_id: u16, size: Block<u32>) -> Block<u32>;
+    fn actual_size(&self, storage_class: u8, disk_id: u16, size: Block<u32>) -> Block<u32>;
 
     /// Returns the size for a specific `Vdev`.
-    fn size_in_blocks(&self, disk_id: u16) -> Block<u64>;
+    fn size_in_blocks(&self, storage_class: u8, disk_id: u16) -> Block<u64>;
 
     /// Return the number of leaf vdevs for a specific `Vdev`.
-    fn num_disks(&self, disk_id: u16) -> usize;
+    fn num_disks(&self, storage_class: u8, disk_id: u16) -> usize;
 
     /// Returns the effective free size for a specific `Vdev`.
-    fn effective_free_size(&self, disk_id: u16, free_size: Block<u64>) -> Block<u64>;
+    fn effective_free_size(
+        &self,
+        storage_class: u8,
+        disk_id: u16,
+        free_size: Block<u64>,
+    ) -> Block<u64>;
 
     /// Returns the number of `Vdev`s.
-    fn disk_count(&self) -> u16;
+    fn disk_count(&self, storage_class: u8) -> u16;
+
+    /// Returns the number of storage classes.
+    fn storage_class_count(&self) -> u8;
 
     /// Flushes the write-back queue and the underlying storage backend.
-    fn flush(&self) -> Result<(), VdevError>;
+    fn flush(&self) -> VdevResult<()>;
 }
 
 mod disk_offset;
 pub use self::disk_offset::DiskOffset;
 
 pub mod configuration;
-pub use self::configuration::StorageConfiguration;
+pub use self::configuration::{StoragePoolConfiguration, TierConfiguration};
 
 mod unit;
 pub use self::unit::StoragePoolUnit;
