@@ -155,7 +155,7 @@ impl SegmentId {
     }
 
     /// Returns the ID of the disk that belongs to this segment.
-    pub fn disk_id(&self) -> usize {
+    pub fn disk_id(&self) -> u16 {
         self.as_disk_offset().disk_id()
     }
 
@@ -164,9 +164,32 @@ impl SegmentId {
     pub fn next(&self, disk_size: Block<u64>) -> SegmentId {
         let disk_offset = self.as_disk_offset();
         if disk_offset.block_offset().as_u64() + SEGMENT_SIZE as u64 >= disk_size.as_u64() {
-            SegmentId::get(DiskOffset::new(disk_offset.disk_id(), Block(0)))
+            SegmentId::get(DiskOffset::new(
+                disk_offset.storage_class(),
+                disk_offset.disk_id(),
+                Block(0),
+            ))
         } else {
             SegmentId(self.0 + SEGMENT_SIZE as u64)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segment_id() {
+        let offset = DiskOffset::new(1, 2, Block::from_bytes(4096));
+        let segment = SegmentId::get(offset);
+
+        assert_eq!(segment.as_disk_offset().storage_class(), 1);
+        assert_eq!(segment.disk_id(), 2);
+        assert_eq!(
+            segment.as_disk_offset().block_offset(),
+            Block::from_bytes(0)
+        );
+        assert_eq!(SegmentId::get_block_offset(offset), 1);
     }
 }
