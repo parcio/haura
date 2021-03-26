@@ -2,8 +2,9 @@
 //! *vdev*)
 //! that are built on top of storage devices.
 
-use crate::checksum::Checksum;
+use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
+use enum_dispatch::enum_dispatch;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Internal block size (4KiB)
@@ -51,7 +52,7 @@ impl AtomicStatistics {
 #[derive(Debug)]
 pub struct ScrubResult {
     /// The actual data scrubbed
-    pub data: Box<[u8]>,
+    pub data: Buf,
     /// The total number of faulted blocks detected
     pub faulted: Block<u32>,
     /// The total number of successfully rewritten blocks
@@ -61,7 +62,7 @@ pub struct ScrubResult {
     pub repaired: Block<u32>,
 }
 
-impl From<ScrubResult> for Box<[u8]> {
+impl From<ScrubResult> for Buf {
     fn from(x: ScrubResult) -> Self {
         x.data
     }
@@ -69,47 +70,48 @@ impl From<ScrubResult> for Box<[u8]> {
 
 /// Trait for reading blocks of data.
 #[async_trait]
-pub trait VdevRead<C: Checksum>: Send + Sync {
+#[enum_dispatch]
+pub trait VdevRead: Send + Sync {
     /// Reads `size` data blocks at `offset` and verifies the data with the
     /// `checksum`.
     /// May issue write operations to repair faulted data blocks of components.
-    async fn read(
+    async fn read<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<Box<[u8]>, Error>;
+    ) -> Result<Buf>;
 
     /// Reads `size` blocks at `offset` and verifies the data with the
     /// `checksum`.
     /// In contrast to `read`, this function will read and verify data from
     /// every child vdev.
     /// May issue write operations to repair faulted data blocks of child vdevs.
-    async fn scrub(
+    async fn scrub<C: Checksum>(
         &self,
         size: Block<u32>,
         offset: Block<u64>,
         checksum: C,
-    ) -> Result<ScrubResult, Error>;
+    ) -> Result<ScrubResult>;
 
     /// Reads `size` blocks at `offset` of every child vdev. Does not verify
     /// the data.
-    async fn read_raw(&self, size: Block<u32>, offset: Block<u64>)
-        -> Result<Vec<Box<[u8]>>, Error>;
+    async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>>;
 }
 
 /// Trait for writing blocks of data.
 #[async_trait]
+#[enum_dispatch]
 pub trait VdevWrite {
     /// Writes the `data` at `offset`. Returns success if the data has been
     /// written to
     /// enough replicas so that the data can be retrieved later on.
     ///
     /// Note: `data.len()` must be a multiple of `BLOCK_SIZE`.
-    async fn write(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error>;
+    async fn write(&self, data: Buf, offset: Block<u64>) -> Result<()>;
 
     /// Flushes pending data (in caches) to disk.
-    fn flush(&self) -> Result<(), Error>;
+    fn flush(&self) -> Result<()>;
 
     /// Writes the `data` at `offset` on all child vdevs like mirroring.
     /// Returns success
@@ -117,9 +119,10 @@ pub trait VdevWrite {
     /// retrieved later on.
     ///
     /// Note: `data.len()` must be a multiple of `BLOCK_SIZE`.
-    async fn write_raw(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error>;
+    async fn write_raw(&self, data: Buf, offset: Block<u64>) -> Result<()>;
 }
 
+#[enum_dispatch]
 /// Trait for general information about a vdev.
 pub trait Vdev: Send + Sync {
     /// Returns the actual size of a data block which may be larger due to
@@ -135,14 +138,6 @@ pub trait Vdev: Send + Sync {
     /// Returns the effective free size which may be smaller due to parity data.
     fn effective_free_size(&self, free_size: Block<u64>) -> Block<u64>;
 
-    /// Turns self into a trait object.
-    fn boxed<C: Checksum>(self) -> Box<dyn VdevBoxed<C>>
-    where
-        Self: VdevRead<C> + VdevWrite + Sized + 'static,
-    {
-        Box::new(self)
-    }
-
     /// Returns the (unique) ID of this vdev.
     fn id(&self) -> &str;
 
@@ -155,10 +150,11 @@ pub trait Vdev: Send + Sync {
 
 /// Trait for reading from a leaf vdev.
 #[async_trait]
-pub trait VdevLeafRead<R: AsMut<[u8]> + Send>: Send + Sync {
+#[enum_dispatch]
+pub trait VdevLeafRead: Send + Sync {
     /// Reads `buffer.as_mut().len()` bytes at `offset`. Does not verify the
     /// data.
-    async fn read_raw(&self, buffer: R, offset: Block<u64>) -> Result<R, Error>;
+    async fn read_raw<R: AsMut<[u8]> + Send>(&self, buffer: R, offset: Block<u64>) -> Result<R>;
 
     /// Shall be called if this vdev returned faulty data for a read request
     /// so that the statistics for this vdev show this incident.
@@ -167,6 +163,7 @@ pub trait VdevLeafRead<R: AsMut<[u8]> + Send>: Send + Sync {
 
 /// Trait for writing to a leaf vdev.
 #[async_trait]
+#[enum_dispatch]
 pub trait VdevLeafWrite: Send + Sync {
     /// Writes the `data` at `offset`.
     ///
@@ -180,28 +177,23 @@ pub trait VdevLeafWrite: Send + Sync {
         data: W,
         offset: Block<u64>,
         is_repair: bool,
-    ) -> Result<(), Error>;
+    ) -> Result<()>;
 
     /// Flushes pending data (in caches) to disk.
-    fn flush(&self) -> Result<(), Error>;
+    fn flush(&self) -> Result<()>;
 }
-
-/// Just a super trait of `Vdev + VdevRead<C> + VdevWrite`.
-pub trait VdevBoxed<C: Checksum>: Vdev + VdevRead<C> + VdevWrite + Send + Sync {}
-
-impl<C: Checksum, V: Vdev + VdevWrite + VdevRead<C>> VdevBoxed<C> for V {}
 
 #[async_trait]
 impl<T: VdevLeafWrite> VdevWrite for T {
-    async fn write(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error> {
+    async fn write(&self, data: Buf, offset: Block<u64>) -> Result<()> {
         VdevLeafWrite::write_raw(self, data, offset, false).await
     }
 
-    fn flush(&self) -> Result<(), Error> {
+    fn flush(&self) -> Result<()> {
         VdevLeafWrite::flush(self)
     }
 
-    async fn write_raw(&self, data: Box<[u8]>, offset: Block<u64>) -> Result<(), Error> {
+    async fn write_raw(&self, data: Buf, offset: Block<u64>) -> Result<()> {
         VdevLeafWrite::write_raw(self, data, offset, false).await
     }
 }
@@ -214,7 +206,8 @@ mod block;
 pub use self::block::Block;
 
 mod errors;
-pub use self::errors::{Error, ErrorKind};
+pub type Result<T> = std::result::Result<T, errors::VdevError>;
+pub use errors::VdevError as Error;
 
 #[macro_use]
 mod util;
@@ -227,3 +220,19 @@ pub use self::parity1::Parity1;
 
 mod mirror;
 pub use self::mirror::Mirror;
+
+mod mem;
+pub use self::mem::Memory;
+
+#[enum_dispatch(Vdev, VdevRead, VdevLeafWrite, VdevLeafRead)]
+pub enum Leaf {
+    File,
+    Memory,
+}
+
+#[enum_dispatch(Vdev, VdevWrite, VdevRead)]
+pub enum Dev {
+    Leaf(Leaf),
+    Mirror(Mirror<Leaf>),
+    Parity1(Parity1<Leaf>),
+}
