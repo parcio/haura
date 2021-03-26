@@ -6,18 +6,18 @@ use std::{
     fs::File,
     pin::Pin,
     ptr, result, slice,
-    sync::{Arc, RwLock},
+    sync::Arc,
     thread,
     time::UNIX_EPOCH,
 };
 
 use dashmap::DashMap;
 use log::error;
+use parking_lot::RwLock;
 
 use betree_storage_stack::{
     database::{self, DatabaseConfiguration},
-    object,
-    storage_pool::StorageConfiguration,
+    object, StoragePreference,
 };
 
 mod jtrace;
@@ -38,13 +38,13 @@ error_chain::error_chain! {
 type Database = database::Database<DatabaseConfiguration>;
 type ObjectStore = object::ObjectStore<DatabaseConfiguration>;
 type ObjectStoreRef<'b> = dashmap::mapref::one::Ref<'b, CString, Pin<Box<ObjectStore>>>;
-type Object<'os> = object::Object<'os, DatabaseConfiguration>;
+type ObjectHandle<'os> = object::ObjectHandle<'os, DatabaseConfiguration>;
 
 const DEFAULT_SYNC_TIMEOUT_MS: u64 = 5000;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Configuration {
-    storage: Vec<String>,
+    database: DatabaseConfiguration,
     sync_timeout_ms: Option<u64>,
 }
 
@@ -68,8 +68,7 @@ impl Backend {
                 .insert(Box::pin(
                     self.database
                         .write()
-                        .expect("Unable to lock database for writing")
-                        .open_named_object_store(namespace.to_bytes())
+                        .open_named_object_store(namespace.to_bytes(), StoragePreference::NONE)
                         .expect("Unable to open object store"),
                 ))
                 .downgrade(),
@@ -88,6 +87,7 @@ unsafe fn return_box<T, E: Display>(
             TRUE
         }
         Err(err) => {
+            out_ptr.cast::<*mut T>().write(ptr::null_mut());
             error!("couldn't {}: {}", task, err);
             FALSE
         }
@@ -102,10 +102,7 @@ unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointe
         let file = File::open(&path)?;
         let config: Configuration = serde_json::from_reader(&file)?;
 
-        let db = Database::build(DatabaseConfiguration {
-            storage: StorageConfiguration::parse_zfs_like(config.storage)?,
-            ..Default::default()
-        })?;
+        let db = Database::build(config.database)?;
         let db = Arc::new(RwLock::new(db));
 
         thread::spawn({
@@ -139,7 +136,7 @@ unsafe extern "C" fn backend_create(
     let key = CStr::from_ptr(path);
 
     let (obj, _) = jtrace::with(J_TRACE_FILE_CREATE, path, || {
-        let obj = ns.create_object(key.to_bytes());
+        let obj = ns.create_object(key.to_bytes(), StoragePreference::NONE);
         (obj, (0, 0))
     });
 
@@ -157,7 +154,7 @@ unsafe extern "C" fn backend_open(
     let key = CStr::from_ptr(path);
 
     let (obj, _) = jtrace::with(J_TRACE_FILE_OPEN, path, || {
-        let obj = ns.open_object(key.to_bytes());
+        let obj = ns.open_object(key.to_bytes(), StoragePreference::NONE);
         (obj, (0, 0))
     });
 
@@ -165,11 +162,11 @@ unsafe extern "C" fn backend_open(
 }
 
 unsafe extern "C" fn backend_delete(_backend_data: gpointer, backend_object: gpointer) -> gboolean {
-    let obj = Box::from_raw(backend_object.cast::<Object>());
-    let key = obj.key.clone();
+    let handle = Box::from_raw(backend_object.cast::<ObjectHandle>());
+    let key = handle.object.key.clone();
 
     let (res, _) = jtrace::with_once(J_TRACE_FILE_DELETE, &key, || {
-        let res = obj.delete();
+        let res = handle.delete();
         (res, (0, 0))
     });
 
@@ -182,11 +179,11 @@ unsafe extern "C" fn backend_delete(_backend_data: gpointer, backend_object: gpo
 }
 
 unsafe extern "C" fn backend_close(_backend_data: gpointer, backend_object: gpointer) -> gboolean {
-    let obj = Box::from_raw(backend_object.cast::<Object>());
-    let key = obj.key.clone();
+    let handle = Box::from_raw(backend_object.cast::<ObjectHandle>());
+    let key = handle.object.key.clone();
 
     let (res, _) = jtrace::with_once(J_TRACE_FILE_CLOSE, &key, || {
-        let res = obj.close();
+        let res = handle.close();
         (res, (0, 0))
     });
 
@@ -204,18 +201,20 @@ unsafe extern "C" fn backend_status(
     modification_time: *mut gint64,
     size: *mut guint64,
 ) -> gboolean {
-    let obj = &*backend_object.cast::<Object>();
-    let key = obj.key.as_ptr().cast::<i8>();
+    let handle = &*backend_object.cast::<ObjectHandle>();
+    let key = handle.object.key.as_ptr().cast::<i8>();
 
     let (res, _): (Result<()>, _) = jtrace::with(J_TRACE_FILE_STATUS, key, || {
         let res = (|| {
-            modification_time.write(
-                obj.modification_time()
-                    .duration_since(UNIX_EPOCH)?
-                    .as_micros()
-                    .try_into()?,
-            );
-            size.write(obj.size());
+            if let Ok(Some(info)) = handle.info() {
+                modification_time.write(
+                    info.mtime
+                        .duration_since(UNIX_EPOCH)?
+                        .as_micros()
+                        .try_into()?,
+                );
+                size.write(info.size);
+            }
             Ok(())
         })();
         (res, (0, 0))
@@ -231,12 +230,16 @@ unsafe extern "C" fn backend_status(
 
 unsafe extern "C" fn backend_sync(backend_data: gpointer, backend_object: gpointer) -> gboolean {
     let backend = &mut *backend_data.cast::<Backend>();
-    let obj = &*backend_object.cast::<Object>();
+    let handle = &*backend_object.cast::<ObjectHandle>();
 
-    let (res, _) = jtrace::with(J_TRACE_FILE_SYNC, obj.key.as_ptr().cast::<i8>(), || {
-        let res = backend.database.write().unwrap().sync();
-        (res, (0, 0))
-    });
+    let (res, _) = jtrace::with(
+        J_TRACE_FILE_SYNC,
+        handle.object.key.as_ptr().cast::<i8>(),
+        || {
+            let res = backend.database.write().sync();
+            (res, (0, 0))
+        },
+    );
 
     if let Err(err) = res {
         error!("couldn't sync database: {}", err);
@@ -254,19 +257,23 @@ unsafe extern "C" fn backend_read(
     offset: guint64,
     bytes_read: *mut guint64,
 ) -> gboolean {
-    let obj = &*backend_object.cast::<Object>();
+    let handle = &*backend_object.cast::<ObjectHandle>();
 
-    let (res, (n_read, _)) = jtrace::with(J_TRACE_FILE_READ, obj.key.as_ptr().cast::<i8>(), || {
-        let res = obj.read_at(
-            slice::from_raw_parts_mut(buffer.cast::<u8>(), length as usize),
-            offset,
-        );
-        let bytes_read = match &res {
-            Ok(n) => *n,
-            Err((n, _)) => *n,
-        };
-        (res, (bytes_read, offset))
-    });
+    let (res, (n_read, _)) = jtrace::with(
+        J_TRACE_FILE_READ,
+        handle.object.key.as_ptr().cast::<i8>(),
+        || {
+            let res = handle.read_at(
+                slice::from_raw_parts_mut(buffer.cast::<u8>(), length as usize),
+                offset,
+            );
+            let bytes_read = match &res {
+                Ok(n) => *n,
+                Err((n, _)) => *n,
+            };
+            (res, (bytes_read, offset))
+        },
+    );
 
     if !bytes_read.is_null() {
         bytes_read.write(n_read);
@@ -289,11 +296,13 @@ unsafe extern "C" fn backend_write(
     offset: guint64,
     bytes_written: *mut guint64,
 ) -> gboolean {
-    let obj = &mut *backend_object.cast::<Object>();
+    let handle = &mut *backend_object.cast::<ObjectHandle>();
 
-    let (res, (n_written, _)) =
-        jtrace::with(J_TRACE_FILE_WRITE, obj.key.as_ptr().cast::<i8>(), || {
-            let res = obj.write_at(
+    let (res, (n_written, _)) = jtrace::with(
+        J_TRACE_FILE_WRITE,
+        handle.object.key.as_ptr().cast::<i8>(),
+        || {
+            let res = handle.write_at(
                 slice::from_raw_parts(buffer.cast::<u8>(), length as usize),
                 offset,
             );
@@ -302,7 +311,8 @@ unsafe extern "C" fn backend_write(
                 Err((n, _)) => *n,
             };
             (res, (bytes_written, offset))
-        });
+        },
+    );
 
     if !bytes_written.is_null() {
         bytes_written.write(n_written);

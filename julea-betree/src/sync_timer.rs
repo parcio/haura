@@ -1,9 +1,6 @@
 use super::Database;
-use std::{
-    sync::{Arc, RwLock},
-    thread,
-    time::Duration,
-};
+use parking_lot::RwLock;
+use std::{sync::Arc, thread, time::Duration};
 
 pub fn sync_timer<'b>(timeout_ms: u64, db: Arc<RwLock<Database>>) {
     let timeout = Duration::from_millis(timeout_ms);
@@ -12,7 +9,7 @@ pub fn sync_timer<'b>(timeout_ms: u64, db: Arc<RwLock<Database>>) {
         thread::sleep(timeout);
 
         log::debug!("syncing db");
-        if let Err(err) = db.write().unwrap().sync() {
+        if let Err(err) = db.write().sync() {
             log::error!("couldn't sync db: {}", err);
         }
     }
