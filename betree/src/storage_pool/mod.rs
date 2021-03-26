@@ -96,5 +96,49 @@ pub use self::configuration::{StoragePoolConfiguration, TierConfiguration};
 mod unit;
 pub use self::unit::StoragePoolUnit;
 
-mod in_memory;
-pub use self::in_memory::InMemory;
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(transparent)]
+pub struct StoragePreference(u8);
+impl StoragePreference {
+    pub const NONE: Self = Self(u8::MAX);
+    pub const FASTEST: Self = Self(0);
+    pub const FAST: Self = Self(1);
+    pub const SLOW: Self = Self(2);
+    pub const SLOWEST: Self = Self(3);
+
+    pub fn new(class: u8) -> Self {
+        Self(class)
+    }
+
+    pub fn or(self, other: Self) -> Self {
+        if self == Self::NONE {
+            other
+        } else {
+            self
+        }
+    }
+
+    pub fn choose_faster(a: Self, b: Self) -> Self {
+        // Only works if NONE stays large than any actual class
+        Self(a.0.min(b.0))
+    }
+
+    pub fn preferred_class(self) -> Option<u8> {
+        if self == Self::NONE {
+            None
+        } else {
+            Some(self.0)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pref_choose_faster() {
+        use super::StoragePreference as S;
+        assert_eq!(S::choose_faster(S::SLOWEST, S::FASTEST), S::FASTEST);
+        assert_eq!(S::choose_faster(S::FASTEST, S::NONE), S::FASTEST);
+        assert_eq!(S::choose_faster(S::NONE, S::SLOWEST), S::SLOWEST);
+    }
+}
