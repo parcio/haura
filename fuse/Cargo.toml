@@ -1,0 +1,13 @@
+[package]
+name = "betree_fuse"
+version = "0.1.0"
+authors = ["tilpner <till@hoeppner.ws>"]
+edition = "2018"
+
+[dependencies]
+betree_storage_stack = { path = "../betree", features = [ "internal-api" ] }
+fuser = { version = "0.7", features = [ "abi-7-11" ] }
+libc = "0.2"
+time = "0.1"
+log = "0.4"
+dashmap = "4.0"
