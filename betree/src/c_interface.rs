@@ -8,21 +8,24 @@ use std::{
     ptr::{null_mut, read, write},
     slice::{from_raw_parts, from_raw_parts_mut},
     sync::Arc,
-    time::UNIX_EPOCH,
 };
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
-    object::{Object, ObjectStore},
-    storage_pool::StorageConfiguration,
+    object::{ObjectHandle, ObjectStore},
+    storage_pool::{StoragePoolConfiguration, TierConfiguration},
+    StoragePreference,
 };
 use error_chain::ChainedError;
 
 /// The type for a storage pool configuration
-pub struct cfg_t(StorageConfiguration);
+pub struct cfg_t(StoragePoolConfiguration);
 /// The general error type
 pub struct err_t(Error);
+/// The storage preference
+#[repr(C)]
+pub struct storage_pref_t(StoragePreference);
 /// The database type
 pub struct db_t(Database<DatabaseConfiguration>);
 /// The data set type
@@ -37,7 +40,11 @@ pub struct range_iter_t(Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes
 /// The object store wrapper type
 pub struct obj_store_t(ObjectStore<DatabaseConfiguration>);
 /// The handle of an object in the corresponding object store
-pub struct obj_t<'os>(Object<'os, DatabaseConfiguration>);
+pub struct obj_t<'os>(ObjectHandle<'os, DatabaseConfiguration>);
+
+pub static STORAGE_PREF_NONE: storage_pref_t = storage_pref_t(StoragePreference::NONE);
+pub static STORAGE_PREF_FASTEST: storage_pref_t = storage_pref_t(StoragePreference::FASTEST);
+pub static STORAGE_PREF_SLOWEST: storage_pref_t = storage_pref_t(StoragePreference::SLOWEST);
 
 /// A reference counted byte slice
 #[repr(C)]
@@ -91,7 +98,7 @@ impl HandleResult for () {
     }
 }
 
-impl HandleResult for StorageConfiguration {
+impl HandleResult for StoragePoolConfiguration {
     type Result = *mut cfg_t;
     fn success(self) -> *mut cfg_t {
         b(cfg_t(self))
@@ -161,7 +168,7 @@ impl HandleResult for ObjectStore<DatabaseConfiguration> {
     }
 }
 
-impl<'os> HandleResult for Object<'os, DatabaseConfiguration> {
+impl<'os> HandleResult for ObjectHandle<'os, DatabaseConfiguration> {
     type Result = *mut obj_t<'os>;
     fn success(self) -> *mut obj_t<'os> {
         b(obj_t(self))
@@ -229,7 +236,11 @@ pub unsafe extern "C" fn betree_parse_configuration(
         .iter()
         .map(|&p| CStr::from_ptr(p).to_string_lossy());
 
-    StorageConfiguration::parse_zfs_like(cfg_string_iter)
+    TierConfiguration::parse_zfs_like(cfg_string_iter)
+        .map(|tier_cfg| StoragePoolConfiguration {
+            tiers: vec![tier_cfg],
+            ..Default::default()
+        })
         .map_err(Error::from)
         .handle_result(err)
 }
@@ -318,11 +329,12 @@ pub unsafe extern "C" fn betree_open_ds(
     db: *mut db_t,
     name: *const c_char,
     len: c_uint,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> *mut ds_t {
     let db = &mut (*db).0;
     let name = from_raw_parts(name as *const u8, len as usize);
-    db.open_dataset(name).handle_result(err)
+    db.open_dataset(name, storage_pref.0).handle_result(err)
 }
 
 /// Create a new data set with the given name.
@@ -336,11 +348,12 @@ pub unsafe extern "C" fn betree_create_ds(
     db: *mut db_t,
     name: *const c_char,
     len: c_uint,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> c_int {
     let db = &mut (*db).0;
     let name = from_raw_parts(name as *const u8, len as usize);
-    db.create_dataset(name).handle_result(err)
+    db.create_dataset(name, storage_pref.0).handle_result(err)
 }
 
 /// Close a data set.
@@ -550,12 +563,14 @@ pub unsafe extern "C" fn betree_dataset_insert(
     key_len: c_uint,
     data: *const c_char,
     data_len: c_uint,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> c_int {
     let ds = &(*ds).0;
     let key = from_raw_parts(key as *const u8, key_len as usize);
     let data = from_raw_parts(data as *const u8, data_len as usize);
-    ds.insert(key, data).handle_result(err)
+    ds.insert_with_pref(key, data, storage_pref.0)
+        .handle_result(err)
 }
 
 /// Upsert the value for the given key at the given offset.
@@ -572,12 +587,14 @@ pub unsafe extern "C" fn betree_dataset_upsert(
     data: *const c_char,
     data_len: c_uint,
     offset: c_uint,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> c_int {
     let ds = &(*ds).0;
     let key = from_raw_parts(key as *const u8, key_len as usize);
     let data = from_raw_parts(data as *const u8, data_len as usize);
-    ds.upsert(key, data, offset as u32).handle_result(err)
+    ds.upsert_with_pref(key, data, offset as u32, storage_pref.0)
+        .handle_result(err)
 }
 
 /// Delete all key-value pairs in the given key range.
@@ -694,10 +711,11 @@ pub unsafe extern "C" fn betree_print_error(err: *mut err_t) {
 #[no_mangle]
 pub unsafe extern "C" fn betree_create_object_store(
     db: *mut db_t,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> *mut obj_store_t {
     let db = &mut (*db).0;
-    db.open_object_store().handle_result(err)
+    db.open_object_store(storage_pref.0).handle_result(err)
 }
 
 /// Open an existing object.
@@ -706,11 +724,16 @@ pub unsafe extern "C" fn betree_object_open<'os>(
     os: *mut obj_store_t,
     key: *const c_char,
     key_len: c_uint,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> *mut obj_t<'os> {
     let os = &mut (*os).0;
-    os.open_object(from_raw_parts(key as *const u8, key_len as usize))
-        .handle_result(err)
+    os.open_object(
+        from_raw_parts(key as *const u8, key_len as usize),
+        storage_pref.0,
+    )
+    .map(|res| res.map(|(obj, _info)| obj))
+    .handle_result(err)
 }
 
 /// Create a new object.
@@ -719,11 +742,16 @@ pub unsafe extern "C" fn betree_object_create<'os>(
     os: *mut obj_store_t,
     key: *const c_char,
     key_len: c_uint,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> *mut obj_t<'os> {
     let os = &mut (*os).0;
-    os.create_object(from_raw_parts(key as *const u8, key_len as usize))
-        .handle_result(err)
+    os.create_object(
+        from_raw_parts(key as *const u8, key_len as usize),
+        storage_pref.0,
+    )
+    .map(|(obj, _info)| obj)
+    .handle_result(err)
 }
 
 /// Try to open an existing object, create it if none exists.
@@ -732,11 +760,16 @@ pub unsafe extern "C" fn betree_object_open_or_create<'os>(
     os: *mut obj_store_t,
     key: *const c_char,
     key_len: c_uint,
+    storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> *mut obj_t<'os> {
     let os = &mut (*os).0;
-    os.open_or_create_object(from_raw_parts(key as *const u8, key_len as usize))
-        .handle_result(err)
+    os.open_or_create_object(
+        from_raw_parts(key as *const u8, key_len as usize),
+        storage_pref.0,
+    )
+    .map(|(obj, _info)| obj)
+    .handle_result(err)
 }
 
 /// Delete an existing object. The handle may not be used afterwards.
@@ -802,10 +835,13 @@ pub unsafe extern "C" fn betree_object_write_at(
         .handle_result(err)
 }
 
+/*
 /// Return the objects size in bytes.
 #[no_mangle]
-pub unsafe extern "C" fn betree_object_size(obj: *const obj_t) -> c_ulong {
+pub unsafe extern "C" fn betree_object_status(obj: *const obj_t, err: *mut *mut err_t) -> c_ulong {
     let obj = &(*obj).0;
+    let info = obj.info();
+    obj.
     obj.size()
 }
 
@@ -818,3 +854,4 @@ pub unsafe extern "C" fn betree_object_mtime_us(obj: *const obj_t) -> c_ulong {
         .map(|d| d.as_micros() as u64)
         .unwrap_or(0)
 }
+*/

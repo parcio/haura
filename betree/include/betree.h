@@ -76,6 +76,15 @@ typedef struct range_iter_t range_iter_t;
  */
 typedef struct ss_t ss_t;
 
+typedef uint8_t StoragePreference;
+
+/**
+ * The storage preference
+ */
+typedef struct storage_pref_t {
+  StoragePreference _0;
+} storage_pref_t;
+
 /**
  * A reference counted byte slice
  */
@@ -120,12 +129,16 @@ db_t *betree_create_db(const cfg_t *cfg, err_t **err);
  *
  * Note that the creation fails if a data set with same name exists already.
  */
-int betree_create_ds(db_t *db, const char *name, unsigned int len, err_t **err);
+int betree_create_ds(db_t *db,
+                     const char *name,
+                     unsigned int len,
+                     storage_pref_t storage_pref,
+                     err_t **err);
 
 /**
  * Create an object store interface.
  */
-obj_store_t *betree_create_object_store(db_t *db, err_t **err);
+obj_store_t *betree_create_object_store(db_t *db, storage_pref_t storage_pref, err_t **err);
 
 /**
  * Create a new snapshot for the given data set with the given name.
@@ -173,6 +186,7 @@ int betree_dataset_insert(const ds_t *ds,
                           unsigned int key_len,
                           const char *data,
                           unsigned int data_len,
+                          storage_pref_t storage_pref,
                           err_t **err);
 
 /**
@@ -223,6 +237,7 @@ int betree_dataset_upsert(const ds_t *ds,
                           const char *data,
                           unsigned int data_len,
                           unsigned int offset,
+                          storage_pref_t storage_pref,
                           err_t **err);
 
 /**
@@ -303,7 +318,11 @@ int betree_object_close(obj_t *obj, err_t **err);
 /**
  * Create a new object.
  */
-obj_t *betree_object_create(obj_store_t *os, const char *key, unsigned int key_len, err_t **err);
+obj_t *betree_object_create(obj_store_t *os,
+                            const char *key,
+                            unsigned int key_len,
+                            storage_pref_t storage_pref,
+                            err_t **err);
 
 /**
  * Delete an existing object. The handle may not be used afterwards.
@@ -311,14 +330,13 @@ obj_t *betree_object_create(obj_store_t *os, const char *key, unsigned int key_l
 int betree_object_delete(obj_t *obj, err_t **err);
 
 /**
- * Returns the last modification timestamp in microseconds since the Unix epoch.
- */
-unsigned long betree_object_mtime_us(const obj_t *obj);
-
-/**
  * Open an existing object.
  */
-obj_t *betree_object_open(obj_store_t *os, const char *key, unsigned int key_len, err_t **err);
+obj_t *betree_object_open(obj_store_t *os,
+                          const char *key,
+                          unsigned int key_len,
+                          storage_pref_t storage_pref,
+                          err_t **err);
 
 /**
  * Try to open an existing object, create it if none exists.
@@ -326,6 +344,7 @@ obj_t *betree_object_open(obj_store_t *os, const char *key, unsigned int key_len
 obj_t *betree_object_open_or_create(obj_store_t *os,
                                     const char *key,
                                     unsigned int key_len,
+                                    storage_pref_t storage_pref,
                                     err_t **err);
 
 /**
@@ -339,11 +358,6 @@ int betree_object_read_at(obj_t *obj,
                           unsigned long offset,
                           unsigned long *n_read,
                           err_t **err);
-
-/**
- * Return the objects size in bytes.
- */
-unsigned long betree_object_size(const obj_t *obj);
 
 /**
  * Try to write `buf_len` bytes from `buf` into `obj`, starting at `offset` bytes into the objects
@@ -370,7 +384,11 @@ db_t *betree_open_db(const cfg_t *cfg, err_t **err);
  * On success, return a `ds_t` which has to be freed with `betree_close_ds`.
  * On error, return null.  If `err` is not null, store an error in `err`.
  */
-ds_t *betree_open_ds(db_t *db, const char *name, unsigned int len, err_t **err);
+ds_t *betree_open_ds(db_t *db,
+                     const char *name,
+                     unsigned int len,
+                     storage_pref_t storage_pref,
+                     err_t **err);
 
 /**
  * Parse the configuration string for a storage pool.
