@@ -1,147 +1,457 @@
-//! This module provides reference counted buffers that can be splitted.
+//! This module provides block-aligned buffers.
+//!
+//! There are three public buffer types, [Buf], [MutBuf], and [BufWrite]. They can be converted into
+//! each other without reallocation of the backing buffer.
+//!
+//! [Buf] and [MutBuf] are shared (Arc) and splittable, for immutable and mutable access, respectively.
+//! [BufWrite] is uniquely owned, and thus can allow both immutable and mutable access, as well as
+//! a growable buffer.
+//!
+//! [MutBuf] does not support growing with [io::Write] because the semantics of growing an inner split buffer are unclear.
 
-use owning_ref::OwningRef;
+use crate::vdev::{Block, BLOCK_SIZE};
 use std::{
-    mem::replace,
-    ops::{Deref, DerefMut},
+    alloc::{self, Layout},
+    cell::UnsafeCell,
+    fmt, io, mem,
+    ops::{Deref, Range},
+    ptr, slice,
     sync::Arc,
 };
 
-/// Returns a new splittable, mutable buffer that holds `data`
-/// and a `Handle` to recover the data later on.
-pub fn new_buffer(data: Box<[u8]>) -> (Handle, SplittableMutBuffer) {
-    let x = Arc::new(());
-    let data = Box::into_raw(data);
+const MIN_GROWTH_SIZE: Block<u32> = Block(1);
+const GROWTH_FACTOR: f32 = 1.5;
 
-    let handle = Handle {
-        x: Arc::clone(&x),
-        data,
-    };
-    let buffer = SplittableMutBuffer {
-        x,
-        data: unsafe { &mut *data },
-    };
-    (handle, buffer)
+fn is_aligned(buf: &[u8]) -> bool {
+    buf.as_ptr() as usize % BLOCK_SIZE == 0 && buf.len() % BLOCK_SIZE == 0
 }
 
-/// A handle to `SplittableMutBuffer`s.  Can be used to regain access to the
-/// underlying data.
-pub struct Handle {
-    x: Arc<()>,
-    data: *mut [u8],
-}
-
-unsafe impl Send for Handle {}
-
-impl Handle {
-    /// Tries to recover the inner data.
-    /// Fails if there are active `SplittableMutBuffer`s that reference this
-    /// data.
-    pub fn into_inner(mut self) -> Result<Box<[u8]>, Self> {
-        if Arc::get_mut(&mut self.x).is_none() {
-            return Err(self);
+fn split_range_at(
+    range: &Range<Block<u32>>,
+    mid: Block<u32>,
+) -> (Range<Block<u32>>, Range<Block<u32>>) {
+    if mid <= range.end {
+        if mid >= range.start {
+            // mid is in range
+            (range.start..mid, mid..range.end)
+        } else {
+            // mid is before range
+            (range.start..range.start, range.clone())
         }
-        unsafe { Ok(Box::from_raw(self.data)) }
+    } else {
+        // mid is past range
+        (range.clone(), range.end..range.end)
     }
 }
 
-/// A splittable buffer with mutable access.
-pub struct SplittableMutBuffer {
-    x: Arc<()>,
-    data: &'static mut [u8],
+#[derive(Debug)]
+struct AlignedStorage {
+    ptr: *mut u8,
+    capacity: Block<u32>,
 }
 
-impl SplittableMutBuffer {
-    /// Splits the buffer at `mid`.
-    /// The returned `SplittableMutBuffer` will contain all indices from `[0,
-    /// mid)` and this Buffer will contain `[mid, len)`.
-    pub fn split_off(&mut self, mid: usize) -> Self {
-        let (left, right) = replace(&mut self.data, &mut []).split_at_mut(mid);
-        self.data = right;
-        SplittableMutBuffer {
-            x: Arc::clone(&self.x),
-            data: left,
+impl Default for AlignedStorage {
+    fn default() -> Self {
+        AlignedStorage {
+            ptr: ptr::null_mut(),
+            capacity: Block(0),
         }
     }
 }
 
-impl Deref for SplittableMutBuffer {
-    type Target = [u8];
-    fn deref(&self) -> &[u8] {
-        self.data
-    }
-}
-
-impl DerefMut for SplittableMutBuffer {
-    fn deref_mut(&mut self) -> &mut [u8] {
-        &mut self.data
-    }
-}
-
-impl AsMut<[u8]> for SplittableMutBuffer {
-    fn as_mut(&mut self) -> &mut [u8] {
-        &mut *self
-    }
-}
-
-/// Read-only buffer of bytes that can be split into disjoint parts.
-#[derive(Clone)]
-pub struct SplittableBuffer {
-    inner: OwningRef<Arc<Box<[u8]>>, [u8]>,
-}
-
-impl SplittableBuffer {
-    /// Constructs a new `SplittableBuffer` which holds the given data.
-    pub fn new(b: Box<[u8]>) -> Self {
-        Self::from(b)
+impl AlignedStorage {
+    fn zeroed(capacity: Block<u32>) -> Self {
+        let mut storage = Self::default();
+        storage.ensure_capacity(capacity);
+        storage
     }
 
-    /// Splits the buffer into two parts. Afterwards, `self` contains the
-    /// elements `[0, at)`
-    /// and the returned buffer contains the elements `[at, len)`.
-    pub fn split_to(&mut self, at: usize) -> Self {
-        let left_part = self.inner.clone().map(|x| &x[..at]);
-        let other = replace(&mut self.inner, left_part);
-        SplittableBuffer {
-            inner: other.map(|x| &x[at..]),
+    fn ensure_capacity(&mut self, requested_capacity: Block<u32>) {
+        if requested_capacity <= self.capacity {
+            return;
+        }
+
+        let wanted_capacity = requested_capacity
+            .max(Block::round_up_from_bytes(
+                (self.capacity.to_bytes() as f32 * GROWTH_FACTOR) as u32,
+            ))
+            .max(self.capacity + MIN_GROWTH_SIZE);
+
+        unsafe {
+            let curr_layout =
+                Layout::from_size_align_unchecked(self.capacity.to_bytes() as usize, BLOCK_SIZE);
+            let new_layout =
+                Layout::from_size_align_unchecked(wanted_capacity.to_bytes() as usize, BLOCK_SIZE);
+            // TODO: benchmark uninit
+            // NOTE: this might not call calloc as initially thought. The default impl just allocs uninitialised
+            // memory, and then writes 0 to it
+
+            let new_ptr = if self.ptr.is_null() {
+                alloc::alloc_zeroed(new_layout)
+            } else {
+                let realloc_ptr =
+                    alloc::realloc(self.ptr, curr_layout, wanted_capacity.to_bytes() as usize);
+                if realloc_ptr.is_null() {
+                    let new_ptr = alloc::alloc_zeroed(new_layout);
+                    if !self.ptr.is_null() {
+                        self.ptr
+                            .copy_to_nonoverlapping(new_ptr, self.capacity.to_bytes() as usize);
+                        alloc::dealloc(self.ptr, curr_layout);
+                    }
+                    new_ptr
+                } else {
+                    realloc_ptr
+                }
+            };
+
+            self.ptr = new_ptr;
+            self.capacity = wanted_capacity;
         }
     }
+}
 
-    /// Splits the buffer into two parts. Afterwards, `self` contains the
-    /// elements `[at, len)`
-    /// and the returned buffer contains the elements `[0, at)`.
-    pub fn split_off(&mut self, at: usize) -> Self {
-        let left_part = self.inner.clone().map(|x| &x[at..]);
-        let other = replace(&mut self.inner, left_part);
-        SplittableBuffer {
-            inner: other.map(|x| &x[..at]),
+impl Drop for AlignedStorage {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe {
+                let layout = Layout::from_size_align_unchecked(
+                    self.capacity.to_bytes() as usize,
+                    BLOCK_SIZE,
+                );
+                alloc::dealloc(self.ptr, layout)
+            }
         }
-    }
-
-    /// Returns the underlying buffer if it has exactly one reference.
-    pub fn try_unwrap(self) -> Result<Box<[u8]>, Arc<Box<[u8]>>> {
-        Arc::try_unwrap(self.inner.into_owner())
     }
 }
 
-impl From<Box<[u8]>> for SplittableBuffer {
+impl From<Box<[u8]>> for AlignedStorage {
     fn from(b: Box<[u8]>) -> Self {
-        SplittableBuffer {
-            inner: OwningRef::new(Arc::new(b)).map(|x| &x[..]),
+        assert!(is_aligned(&b));
+        if is_aligned(&b) {
+            AlignedStorage {
+                capacity: Block::from_bytes(b.len() as u32),
+                ptr: unsafe { (*Box::into_raw(b)).as_mut_ptr() },
+            }
+        } else {
+            assert!(
+                b.len() % BLOCK_SIZE == 0,
+                "Box length is not a multiple of block size"
+            );
+            log::warn!("Unaligned buffer, copying {} bytes", b.len());
+            let size = Block::round_up_from_bytes(b.len() as u32);
+            let storage = AlignedStorage::zeroed(size);
+            unsafe {
+                storage.ptr.copy_from_nonoverlapping(b.as_ptr(), b.len());
+            }
+            storage
         }
     }
 }
 
-impl Deref for SplittableBuffer {
-    type Target = [u8];
+// Unsafe private buffer
+#[derive(Clone)]
+struct AlignedBuf {
+    buf: Arc<UnsafeCell<AlignedStorage>>,
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+// UnsafeCell is not Send, and Arc<T> is only Send if T: Send.
+// Orphan rules forbid `unsafe impl Send for UnsafeCell<Box<[u8]>> {}`, so this
+// impl is for AlignedBuf instead.
+//
+// AlignedBuf is mutated only in the Arc reference counts, which are atomic,
+// and in disjoint pieces via MutBufs. Conversion between Buf and MutBuf panics
+// if the convertee is not unique, ensuring an AlignedBuf will not be accessed
+// mutable and non-mutably at the same time. Since MutBuf can't be cloned, mutable access
+// to each partition is unique. No synchronisation should be necessary, even if different
+// threads can mutate different disjoint pieces of buf, if there's nobody to observe
+// those changes until buf is unique again.
+unsafe impl Send for AlignedBuf {}
+
+impl AlignedBuf {
+    fn zeroed(capacity: Block<u32>) -> Self {
+        let vec = AlignedStorage::zeroed(capacity);
+        Self {
+            buf: Arc::new(UnsafeCell::new(vec)),
+        }
+    }
+
+    fn full_range(&self) -> Range<Block<u32>> {
+        let buf = unsafe { &*self.buf.get() };
+        Block(0)..buf.capacity
+    }
+
+    fn unwrap_unique(mut self) -> Self {
+        Arc::get_mut(&mut self.buf).expect("AlignedBuf was not unique");
+        self
     }
 }
 
-impl AsRef<[u8]> for SplittableBuffer {
+impl From<Box<[u8]>> for AlignedBuf {
+    fn from(b: Box<[u8]>) -> Self {
+        let storage = AlignedStorage::from(b);
+        AlignedBuf {
+            buf: Arc::new(UnsafeCell::new(storage)),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Buf {
+    buf: AlignedBuf,
+    range: Range<Block<u32>>,
+}
+
+impl fmt::Debug for Buf {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Buf").field("range", &self.range).finish()
+    }
+}
+
+// This is only safe as long as no 2 MutBufs with overlapping ranges share the same Arc.
+pub struct MutBuf {
+    buf: AlignedBuf,
+    range: Range<Block<u32>>,
+}
+
+pub struct BufWrite {
+    buf: AlignedStorage,
+    size: u32,
+}
+
+impl BufWrite {
+    pub fn with_capacity(capacity: Block<u32>) -> Self {
+        Self {
+            buf: AlignedStorage::zeroed(capacity),
+            size: 0,
+        }
+    }
+
+    pub fn into_buf(self) -> Buf {
+        Buf::from_aligned(AlignedBuf {
+            buf: Arc::new(UnsafeCell::new(self.buf)),
+        })
+    }
+}
+
+impl io::Write for BufWrite {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        let required_size = self.size + data.len() as u32;
+        self.buf
+            .ensure_capacity(Block::round_up_from_bytes(required_size));
+
+        unsafe {
+            self.buf
+                .ptr
+                .offset(self.size as isize)
+                .copy_from_nonoverlapping(data.as_ptr(), data.len());
+            self.size = required_size;
+        }
+
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl io::Seek for BufWrite {
+    fn seek(&mut self, seek: io::SeekFrom) -> io::Result<u64> {
+        use io::SeekFrom::*;
+        let new_size = match seek {
+            Start(offset) => offset as i64,
+            End(offset) => self.buf.capacity.to_bytes() as i64 + offset,
+            Current(offset) => self.size as i64 + offset,
+        } as u32;
+
+        if new_size <= self.buf.capacity.to_bytes() {
+            self.size = new_size;
+            Ok(new_size as u64)
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid seek"))
+        }
+    }
+}
+
+impl AsRef<[u8]> for BufWrite {
     fn as_ref(&self) -> &[u8] {
-        &*self
+        unsafe {
+            let slice = slice::from_raw_parts(self.buf.ptr, self.buf.capacity.to_bytes() as usize);
+            &slice[..self.size as usize]
+        }
+    }
+}
+
+impl AsMut<[u8]> for BufWrite {
+    fn as_mut(&mut self) -> &mut [u8] {
+        unsafe {
+            let slice =
+                slice::from_raw_parts_mut(self.buf.ptr, self.buf.capacity.to_bytes() as usize);
+            &mut slice[..self.size as usize]
+        }
+    }
+}
+
+impl Buf {
+    fn from_aligned(aligned: AlignedBuf) -> Self {
+        Self {
+            range: aligned.full_range(),
+            buf: aligned,
+        }
+    }
+
+    pub fn from_zero_padded(mut b: Vec<u8>) -> Self {
+        let padded_size = Block::round_up_from_bytes(b.len());
+        b.resize(padded_size.to_bytes(), 0);
+        Self::from(b.into_boxed_slice())
+    }
+
+    pub fn zeroed(size: Block<u32>) -> Self {
+        Self::from_aligned(AlignedBuf::zeroed(size))
+    }
+
+    /// Panics if Buf was not unique, to ensure no readable references remain
+    pub fn into_full_mut(self) -> MutBuf {
+        let range = self.buf.full_range();
+        MutBuf {
+            buf: self.buf.unwrap_unique(),
+            range,
+        }
+    }
+
+    pub fn into_buf_write(self) -> BufWrite {
+        let storage = Arc::try_unwrap(self.buf.buf)
+            .expect("AlignedBuf was not unique")
+            .into_inner();
+        BufWrite {
+            buf: storage,
+            size: self.range.end.to_bytes(),
+        }
+    }
+
+    pub fn into_boxed_slice(self) -> Box<[u8]> {
+        let storage = Arc::try_unwrap(self.buf.buf)
+            .expect("AlignedBuf was not unique")
+            .into_inner();
+
+        let boxed = unsafe {
+            Box::from_raw(slice::from_raw_parts_mut(
+                storage.ptr,
+                storage.capacity.to_bytes() as usize,
+            ))
+        };
+        mem::forget(storage);
+        boxed
+    }
+
+    pub fn range(&self) -> &Range<Block<u32>> {
+        &self.range
+    }
+
+    pub fn size(&self) -> Block<u32> {
+        Block(self.range.end.as_u32() - self.range.start.as_u32())
+    }
+
+    pub fn split_at(self, mid: Block<u32>) -> (Self, Self) {
+        let (left, right) = split_range_at(&self.range, mid);
+
+        (
+            Self {
+                buf: self.buf.clone(),
+                range: left,
+            },
+            Self {
+                buf: self.buf,
+                range: right,
+            },
+        )
+    }
+}
+
+impl MutBuf {
+    pub fn split_at(self, mid: Block<u32>) -> (Self, Self) {
+        let (left, right) = split_range_at(&self.range, mid);
+
+        (
+            Self {
+                buf: self.buf.clone(),
+                range: left,
+            },
+            Self {
+                buf: self.buf,
+                range: right,
+            },
+        )
+    }
+
+    /// Panics if MutBuf was not unique, to ensure no mutable references remain
+    pub fn into_full_buf(self) -> Buf {
+        Buf::from_aligned(self.buf.unwrap_unique())
+    }
+
+    pub fn range(&self) -> &Range<Block<u32>> {
+        &self.range
+    }
+}
+
+impl Deref for Buf {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
+}
+
+impl AsRef<[u8]> for Buf {
+    fn as_ref(&self) -> &[u8] {
+        unsafe {
+            let start = self.range.start.to_bytes() as usize;
+            let end = self.range.end.to_bytes() as usize;
+            let buf = &*self.buf.buf.get();
+            let slice = slice::from_raw_parts(buf.ptr, buf.capacity.to_bytes() as usize);
+            &slice[start..end]
+        }
+    }
+}
+
+impl AsMut<[u8]> for MutBuf {
+    fn as_mut(&mut self) -> &mut [u8] {
+        // This can be cast to a pointer of any kind. Ensure that the access is unique (no active references, mutable or not) when casting to &mut T, and ensure that there are no mutations or mutable aliases going on when casting to &T
+        // -- UnsafeCell::get
+
+        // Unique access to each element is an invariant of MutBuf, first ensured by Buf::into_mut by
+        // ensuring no other Bufs share the same backing data.
+        // During MutBuf::split_at, two new MutBufs are created with disjoint ranges.
+
+        unsafe {
+            let start = self.range.start.to_bytes() as usize;
+            let end = self.range.end.to_bytes() as usize;
+            let buf = &*self.buf.buf.get();
+            let slice = slice::from_raw_parts_mut(buf.ptr, buf.capacity.to_bytes() as usize);
+            &mut slice[start..end]
+        }
+    }
+}
+
+impl From<Box<[u8]>> for Buf {
+    fn from(b: Box<[u8]>) -> Self {
+        let aligned = AlignedBuf::from(b);
+        Buf {
+            range: aligned.full_range(),
+            buf: aligned,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buf_round_trip() {
+        let b = vec![3; BLOCK_SIZE].into_boxed_slice();
+        let b2 = b.clone();
+        let buf = Buf::from(b);
+
+        assert_eq!(&b2[..], &buf[..]);
     }
 }
