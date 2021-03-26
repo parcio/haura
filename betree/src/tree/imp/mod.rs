@@ -9,6 +9,7 @@ use crate::{
     data_management::{Dml, DmlBase, HandlerDml, ObjectRef},
     range_validation::is_inclusive_non_empty,
     tree::MessageAction,
+    StoragePreference,
 };
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
@@ -36,6 +37,7 @@ pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     dml: X,
     evict: bool,
     marker: PhantomData<M>,
+    storage_preference: StoragePreference,
 }
 
 impl<X: Clone + DmlBase, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clone
@@ -47,6 +49,7 @@ impl<X: Clone + DmlBase, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> 
             dml: self.dml.clone(),
             evict: self.evict,
             marker: PhantomData,
+            storage_preference: self.storage_preference,
         }
     }
 }
@@ -90,22 +93,46 @@ where
     I: Borrow<Inner<X::ObjectRef, X::Info, M>> + From<Inner<X::ObjectRef, X::Info, M>>,
 {
     /// Returns a new, empty tree.
-    pub fn empty_tree(tree_id: X::Info, msg_action: M, dml: X) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(), tree_id);
-        Tree::new(root_node, tree_id, msg_action, dml)
+    pub fn empty_tree(
+        tree_id: X::Info,
+        msg_action: M,
+        dml: X,
+        storage_preference: StoragePreference,
+    ) -> Self {
+        let root_node = dml.insert(Node::empty_leaf(storage_preference), tree_id);
+        Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 
     /// Opens a tree identified by the given root node.
-    pub fn open(tree_id: X::Info, root_node_ptr: X::ObjectPointer, msg_action: M, dml: X) -> Self {
-        Tree::new(X::ref_from_ptr(root_node_ptr), tree_id, msg_action, dml)
+    pub fn open(
+        tree_id: X::Info,
+        root_node_ptr: X::ObjectPointer,
+        msg_action: M,
+        dml: X,
+        storage_preference: StoragePreference,
+    ) -> Self {
+        Tree::new(
+            X::ref_from_ptr(root_node_ptr),
+            tree_id,
+            msg_action,
+            dml,
+            storage_preference,
+        )
     }
 
-    fn new(root_node: R, tree_id: X::Info, msg_action: M, dml: X) -> Self {
+    fn new(
+        root_node: R,
+        tree_id: X::Info,
+        msg_action: M,
+        dml: X,
+        storage_preference: StoragePreference,
+    ) -> Self {
         Tree {
             inner: I::from(Inner::new(tree_id, root_node, msg_action)),
             dml,
             evict: true,
             marker: PhantomData,
+            storage_preference,
         }
     }
 }
@@ -123,12 +150,18 @@ where
     }
 
     /// Returns a new tree with the given inner.
-    pub fn from_inner(inner: I, dml: X, evict: bool) -> Self {
+    pub fn from_inner(
+        inner: I,
+        dml: X,
+        evict: bool,
+        storage_preference: StoragePreference,
+    ) -> Self {
         Tree {
             inner,
             dml,
             evict,
             marker: PhantomData,
+            storage_preference,
         }
     }
 
@@ -308,7 +341,12 @@ where
         Ok(data)
     }
 
-    fn insert<K>(&self, key: K, msg: SlicedCowBytes) -> Result<(), Error>
+    fn insert<K>(
+        &self,
+        key: K,
+        msg: SlicedCowBytes,
+        storage_preference: StoragePreference,
+    ) -> Result<(), Error>
     where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
@@ -333,7 +371,8 @@ where
             }
         };
 
-        let added_size = node.insert(key, msg, self.msg_action());
+        let op_preference = storage_preference.or(self.storage_preference);
+        let added_size = node.insert(key, msg, self.msg_action(), op_preference);
         node.add_size(added_size);
 
         if parent.is_none() && node.root_needs_merge() {

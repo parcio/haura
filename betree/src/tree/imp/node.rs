@@ -12,6 +12,7 @@ use crate::{
     data_management::{Object, ObjectRef},
     size::{Size, SizeMut, StaticSize},
     tree::MessageAction,
+    StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
@@ -24,7 +25,7 @@ use std::{
 
 /// The tree node type.
 #[derive(Debug)]
-pub struct Node<N: 'static>(Inner<N>);
+pub struct Node<N: 'static>(Inner<N>, pub(super) StoragePreference);
 
 #[derive(Debug)]
 pub(super) enum Inner<N: 'static> {
@@ -49,11 +50,14 @@ impl<R: ObjectRef> Object<R> for Node<R> {
     fn unpack(data: Box<[u8]>) -> Result<Self, io::Error> {
         if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
             match deserialize(&data[4..]) {
-                Ok(internal) => Ok(Node(Internal(internal))),
+                Ok(internal) => Ok(Node(Internal(internal), StoragePreference::NONE)),
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
         } else {
-            Ok(Node(PackedLeaf(PackedMap::new(data.into_vec()))))
+            Ok(Node(
+                PackedLeaf(PackedMap::new(data.into_vec())),
+                StoragePreference::NONE,
+            ))
         }
     }
 
@@ -77,6 +81,10 @@ impl<R: ObjectRef> Object<R> for Node<R> {
             }
         }
         Ok(())
+    }
+
+    fn storage_preference(&self) -> StoragePreference {
+        self.1
     }
 }
 
@@ -138,11 +146,11 @@ impl<N> Node<N> {
         } else {
             return;
         };
-        *self = Node(Leaf(leaf));
+        self.0 = Leaf(leaf);
     }
 
     fn take(&mut self) -> Self {
-        replace(self, Self::empty_leaf())
+        replace(self, Self::empty_leaf(self.1))
     }
 
     pub(super) fn has_too_low_fanout(&self) -> bool {
@@ -183,8 +191,8 @@ impl<N> Node<N> {
         }
     }
 
-    pub(super) fn empty_leaf() -> Self {
-        Node(Leaf(LeafNode::new()))
+    pub(super) fn empty_leaf(storage_preference: StoragePreference) -> Self {
+        Node(Leaf(LeafNode::new()), storage_preference)
     }
 
     pub(super) fn level(&self) -> u32 {
@@ -213,22 +221,30 @@ impl<N: StaticSize> Node<N> {
         let (right_sibling, pivot_key, cur_level) = match left_sibling.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
-                let (right_sibiling, pivot_key, _) =
+                let (right_sibling, pivot_key, _) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
-                (Node(Leaf(right_sibiling)), pivot_key, 0)
+                (Node(Leaf(right_sibling), left_sibling.1), pivot_key, 0)
             }
             Internal(ref mut internal) => {
-                let (right_sibiling, pivot_key, _) = internal.split();
-                (Node(Internal(right_sibiling)), pivot_key, internal.level())
+                let (right_sibling, pivot_key, _) = internal.split();
+                (
+                    Node(Internal(right_sibling), left_sibling.1),
+                    pivot_key,
+                    internal.level(),
+                )
             }
         };
         debug!("Root split pivot key: {:?}", pivot_key);
-        *self = Node(Internal(InternalNode::new(
-            ChildBuffer::new(allocate_obj(left_sibling)),
-            ChildBuffer::new(allocate_obj(right_sibling)),
-            pivot_key,
-            cur_level + 1,
-        )));
+        let storage_pref = left_sibling.1;
+        *self = Node(
+            Internal(InternalNode::new(
+                ChildBuffer::new(allocate_obj(left_sibling)),
+                ChildBuffer::new(allocate_obj(right_sibling)),
+                pivot_key,
+                cur_level + 1,
+            )),
+            storage_pref,
+        );
         let size_after = self.size();
         size_after as isize - size_before as isize
     }
@@ -291,12 +307,19 @@ impl<N> Node<N> {
 }
 
 impl<N> Node<N> {
-    pub(super) fn insert<K, M>(&mut self, key: K, msg: SlicedCowBytes, msg_action: M) -> isize
+    pub(super) fn insert<K, M>(
+        &mut self,
+        key: K,
+        msg: SlicedCowBytes,
+        msg_action: M,
+        storage_preference: StoragePreference,
+    ) -> isize
     where
         K: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
         self.ensure_unpacked();
+        self.1 = StoragePreference::choose_faster(self.1, storage_preference);
         match self.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => leaf.insert(key, msg, msg_action),
@@ -304,12 +327,18 @@ impl<N> Node<N> {
         }
     }
 
-    pub(super) fn insert_msg_buffer<I, M>(&mut self, msg_buffer: I, msg_action: M) -> isize
+    pub(super) fn insert_msg_buffer<I, M>(
+        &mut self,
+        msg_buffer: I,
+        msg_action: M,
+        storage_preference: StoragePreference,
+    ) -> isize
     where
         I: IntoIterator<Item = (CowBytes, SlicedCowBytes)>,
         M: MessageAction,
     {
         self.ensure_unpacked();
+        self.1 = StoragePreference::choose_faster(self.1, storage_preference);
         match self.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
@@ -348,7 +377,7 @@ impl<N: StaticSize> Node<N> {
             Leaf(ref mut leaf) => {
                 let (node, pivot_key, size_delta) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
-                (Node(Leaf(node)), pivot_key, size_delta)
+                (Node(Leaf(node), self.1), pivot_key, size_delta)
             }
             Internal(ref mut internal) => {
                 assert!(
@@ -359,7 +388,7 @@ impl<N: StaticSize> Node<N> {
                     internal.actual_size()
                 );
                 let (node, pivot_key, size_delta) = internal.split();
-                (Node(Internal(node)), pivot_key, size_delta)
+                (Node(Internal(node), self.1), pivot_key, size_delta)
             }
         }
     }

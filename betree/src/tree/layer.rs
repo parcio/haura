@@ -1,5 +1,8 @@
 use super::MessageAction;
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    StoragePreference,
+};
 use owning_ref::OwningRef;
 use parking_lot::RwLockWriteGuard;
 use serde::{de::DeserializeOwned, Serialize};
@@ -18,6 +21,7 @@ pub trait TreeBaseLayer<M: MessageAction> {
         &self,
         key: K,
         msg: SlicedCowBytes,
+        storage_preference: StoragePreference,
     ) -> Result<(), Error>;
 
     /// Gets the entry for the given `key` if it exists.
