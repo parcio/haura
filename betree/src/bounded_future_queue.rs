@@ -1,144 +1,142 @@
 //! This module provides a bounded queue of futures which are identified by a
 //! key.
+//!
+//! This module tries to uphold the following guarantees:
+//!
+//! - During a flush, no further futures can be enqueued
+//! - wait, wait_async, and contains_key can only indicate future completion if it has actually
+//!   been completed, either via block_on or .await
+//!
 
 use futures::{
     executor::block_on,
-    future::{ok, ready, IntoFuture},
+    future::{IntoFuture, Shared},
     prelude::*,
-    ready,
-    stream::FuturesUnordered,
-    task::{Context, Poll},
-    TryFuture,
 };
-use std::{borrow::Borrow, collections::HashSet, hash::Hash, pin::Pin};
+use parking_lot::{Mutex, RwLock};
+use std::{borrow::Borrow, hash::Hash};
 
-struct Helper<K, F> {
-    key: Option<K>,
-    future: F,
-}
-
-impl<K, F> Future for Helper<K, F>
-where
-    F: TryFuture<Ok = ()>,
-{
-    type Output = Result<K, F::Error>;
-
-    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-        let this = unsafe { Pin::get_unchecked_mut(self) };
-        let f = unsafe { Pin::new_unchecked(&mut this.future) };
-        ready!(f.try_poll(ctx))?;
-        Poll::Ready(Ok(this.key.take().unwrap()))
-    }
-}
+use indexmap::IndexMap;
 
 /// A bounded queue of `F`s which are identified by a key `K`.
-pub struct BoundedFutureQueue<K, F> {
-    map: HashSet<K>,
-    queue: FuturesUnordered<IntoFuture<Helper<K, F>>>,
+pub struct BoundedFutureQueue<K, F>
+where
+    F: TryFuture,
+    F::Output: Clone,
+{
+    futures: RwLock<IndexMap<K, Shared<IntoFuture<F>>>>,
     limit: usize,
+    flush_lock: Mutex<()>,
 }
 
-impl<K: Eq + Hash, F: TryFuture<Ok = ()>> BoundedFutureQueue<K, F> {
+impl<K: Clone + Eq + Hash, F: TryFuture<Ok = ()>> BoundedFutureQueue<K, F>
+where
+    F::Output: Clone,
+    F::Error: Clone,
+{
     /// Creates a new queue with the given `limit`.
     pub fn new(limit: usize) -> Self {
         BoundedFutureQueue {
-            map: HashSet::new(),
-            queue: FuturesUnordered::new(),
+            futures: RwLock::new(IndexMap::new()),
             limit,
+            flush_lock: Mutex::new(()),
         }
     }
 
     /// Enqueues a new `Future`. This function will block if the queue is full.
-    pub fn enqueue(&mut self, key: K, future: F) -> Result<(), F::Error>
+    pub fn enqueue(&self, key: K, future: F) -> Result<(), F::Error>
     where
         K: Clone,
     {
-        self.wait(&key)?;
-        self.queue.push(
-            Helper {
-                future,
-                key: Some(key.clone()),
-            }
-            .into_future(),
-        );
-        self.map.insert(key);
-        let limit = self.limit;
-        self.drain_while_above_limit(limit)?;
+        {
+            let _lock = self.flush_lock.lock();
+            self.wait(&key)?;
+            let previous = self
+                .futures
+                .write()
+                .insert(key, future.into_future().shared());
+            assert!(previous.is_none());
+        }
+
+        if self.futures.read().len() > self.limit {
+            self.drain_while_above_limit(self.limit)?;
+        }
         Ok(())
     }
 
-    /// Returns false if the queue does not contain `key`.
-    pub fn may_contains_key(&self, key: &K) -> bool {
-        self.map.contains(key)
+    /// Remove a task from the queue
+    pub async fn mark_completed(&self, key: &K) {
+        self.futures.write().shift_remove(key);
+    }
+
+    fn drain_any_future(&self) -> Option<Result<(), F::Error>> {
+        let maybe_entry = self
+            .futures
+            .write()
+            .get_index(0)
+            .map(|(k, v)| (k.clone(), v.clone()));
+
+        if let Some((k, v)) = maybe_entry {
+            let ret = block_on(v);
+
+            self.futures.write().shift_remove(&k);
+
+            Some(ret)
+        } else {
+            None
+        }
+    }
+
+    async fn drain_specific_future(&self, key: K) -> Option<Result<(), F::Error>> {
+        let maybe_fut = self
+            .futures
+            .write()
+            .get_key_value(&key)
+            .map(|(k, v)| (k.clone(), v.clone()));
+
+        if let Some((key, fut)) = maybe_fut {
+            let ret = Some(fut.await);
+            self.futures.write().shift_remove(&key);
+            ret
+        } else {
+            None
+        }
+    }
+
+    fn drain_while_above_limit(&self, limit: usize) -> Result<(), F::Error> {
+        while self.futures.read().len() > limit {
+            match self.drain_any_future() {
+                None => break,
+                Some(res) => res?,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Flushes the queue.
+    pub fn flush(&self) -> Result<(), F::Error> {
+        let _lock = self.flush_lock.lock();
+
+        self.drain_while_above_limit(0)
     }
 
     /// Waits asynchronously for the given `key`.
     /// May flush the whole queue if a future returned an error beforehand.
     pub fn wait_async<'a, Q: Borrow<K> + 'a>(
-        &'a mut self,
+        &'a self,
         key: Q,
     ) -> impl TryFuture<Ok = (), Error = F::Error> + 'a {
-        // If `map` does not contain `key`,
-        // `key` is not in the queue. By setting found to false,
-        // we don't actually wait for any futures in the queue.
-        let mut found = !self.map.contains(key.borrow());
-        self.drain_while(move |finished_key| {
-            if found {
-                false
-            } else {
-                found = finished_key == key.borrow();
-                true
-            }
-        })
+        async move {
+            self.drain_specific_future(key.borrow().clone())
+                .await
+                .unwrap_or(Ok(()))
+        }
     }
 
     /// Waits for the given `key`.
     /// May flush the whole queue if a future returned an error beforehand.
-    pub fn wait(&mut self, key: &K) -> Result<(), F::Error> {
+    pub fn wait(&self, key: &K) -> Result<(), F::Error> {
         block_on(self.wait_async(key).into_future())
-    }
-
-    /// Flushes the queue.
-    pub fn flush(&mut self) -> Result<(), F::Error> {
-        self.map.clear();
-        block_on(self.queue.by_ref().map_ok(|_| ()).try_collect::<Vec<()>>()).map(|_| ())
-    }
-
-    /// Returns true iff the queue's size is at the limit.
-    pub fn full(&self) -> bool {
-        self.map.len() >= self.limit
-    }
-
-    fn drain_while_above_limit(&mut self, limit: usize) -> Result<(), F::Error> {
-        if self.map.len() > limit {
-            let amount = self.map.len() - limit;
-            let keys: Vec<_> = block_on(self.queue.by_ref().take(amount).try_collect())?;
-            for key in keys {
-                self.map.remove(&key);
-            }
-        }
-        Ok(())
-    }
-
-    fn drain_while<'a, G: 'a>(
-        &'a mut self,
-        mut f: G,
-    ) -> impl TryFuture<Ok = (), Error = F::Error> + 'a
-    where
-        G: FnMut(&K) -> bool,
-    {
-        let map = &mut self.map;
-        self.queue
-            .by_ref()
-            .take_while(move |key| {
-                ready(match key {
-                    Ok(key) => f(key),
-                    Err(_) => false,
-                })
-            })
-            .try_for_each(move |key| {
-                map.remove(&key);
-                ok(())
-            })
     }
 }
