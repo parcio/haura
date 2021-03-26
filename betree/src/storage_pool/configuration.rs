@@ -1,8 +1,5 @@
 //! Storage Pool configuration.
-use crate::{
-    checksum::Checksum,
-    vdev::{self, Vdev as VdevTrait, VdevBoxed},
-};
+use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
 use libc;
 use ref_slice::ref_slice;
@@ -11,14 +8,41 @@ use std::{
     fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
 };
 
-/// `StorageConfiguration` type for `StoragePoolUnit`.
+/// Configuration of a single storage class.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorageConfiguration {
+#[serde(transparent)]
+pub struct TierConfiguration {
     top_level_vdevs: Vec<Vdev>,
+}
+
+/// Configuration for the storage pool unit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct StoragePoolConfiguration {
+    /// Storage classes to make use of
+    pub tiers: Vec<TierConfiguration>,
+    /// The queue length is the product of this factor and the number of disks involved
+    pub queue_depth_factor: u32,
+    /// Upper limit for concurrent IO operations
+    pub thread_pool_size: Option<u32>,
+    /// Whether to pin each worker thread to a CPU core
+    pub thread_pool_pinned: bool,
+}
+
+impl Default for StoragePoolConfiguration {
+    fn default() -> Self {
+        Self {
+            tiers: Vec::new(),
+            queue_depth_factor: 20,
+            thread_pool_size: None,
+            thread_pool_pinned: false,
+        }
+    }
 }
 
 /// Represents a top-level vdev.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum Vdev {
     /// This vdev is a leaf vdev.
     Leaf(LeafVdev),
@@ -30,7 +54,13 @@ pub enum Vdev {
 
 /// Represents a leaf vdev.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LeafVdev(PathBuf);
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub enum LeafVdev {
+    /// Backed by a file or disk.
+    File(PathBuf),
+    /// Backed by a memory buffer.
+    Memory(usize),
+}
 
 error_chain! {
     errors {
@@ -39,13 +69,14 @@ error_chain! {
     }
 }
 
-impl StorageConfiguration {
+impl TierConfiguration {
     /// Returns a new `StorageConfiguration` based on the given top-level vdevs.
     pub fn new(top_level_vdevs: Vec<Vdev>) -> Self {
-        StorageConfiguration { top_level_vdevs }
+        TierConfiguration { top_level_vdevs }
     }
+
     /// Opens file and devices and constructs a `Vec<Vdev>`.
-    pub fn build<C: Checksum>(&self) -> io::Result<Vec<Box<dyn VdevBoxed<C>>>> {
+    pub fn build(&self) -> io::Result<Vec<Dev>> {
         self.top_level_vdevs
             .iter()
             .enumerate()
@@ -88,7 +119,7 @@ impl StorageConfiguration {
                 .collect();
             v.push(f(leaves));
         }
-        Ok(StorageConfiguration { top_level_vdevs: v })
+        Ok(TierConfiguration { top_level_vdevs: v })
     }
 
     /// Returns the configuration in a ZFS-like string representation.
@@ -104,7 +135,10 @@ impl StorageConfiguration {
             };
             s.push_str(keyword);
             for leaf in leaves {
-                write!(s, "{} ", leaf.0.display()).unwrap();
+                match leaf {
+                    LeafVdev::File(path) => write!(s, "{} ", path.display()).unwrap(),
+                    LeafVdev::Memory(size) => write!(s, "memory({}) ", size).unwrap(),
+                }
             }
         }
         s.pop();
@@ -119,9 +153,9 @@ fn is_path<S: AsRef<str> + ?Sized>(s: &S) -> bool {
     }
 }
 
-impl FromIterator<Vdev> for StorageConfiguration {
+impl FromIterator<Vdev> for TierConfiguration {
     fn from_iter<T: IntoIterator<Item = Vdev>>(iter: T) -> Self {
-        StorageConfiguration {
+        TierConfiguration {
             top_level_vdevs: iter.into_iter().collect(),
         }
     }
@@ -129,54 +163,66 @@ impl FromIterator<Vdev> for StorageConfiguration {
 
 impl Vdev {
     /// Opens file and devices and constructs a `Vdev`.
-    fn build<C: Checksum>(&self, n: usize) -> io::Result<Box<dyn VdevBoxed<C>>> {
+    fn build(&self, n: usize) -> io::Result<Dev> {
         match *self {
             Vdev::Mirror(ref vec) => {
-                let leaves: io::Result<Vec<_>> = vec.iter().map(LeafVdev::build).collect();
-                let leaves = leaves?.into_boxed_slice();
-                Ok(Box::new(vdev::Mirror::new(leaves, format!("mirror-{}", n))))
+                let leaves: io::Result<Vec<Leaf>> = vec.iter().map(LeafVdev::build).collect();
+                let leaves: Box<[Leaf]> = leaves?.into_boxed_slice();
+                Ok(Dev::Mirror(vdev::Mirror::new(
+                    leaves,
+                    format!("mirror-{}", n),
+                )))
             }
             Vdev::Parity1(ref vec) => {
                 let leaves: io::Result<Vec<_>> = vec.iter().map(LeafVdev::build).collect();
                 let leaves = leaves?.into_boxed_slice();
-                Ok(Box::new(vdev::Parity1::new(
+                Ok(Dev::Parity1(vdev::Parity1::new(
                     leaves,
                     format!("parity-{}", n),
                 )))
             }
-            Vdev::Leaf(ref leaf) => leaf.build().map(VdevTrait::boxed),
+            Vdev::Leaf(ref leaf) => leaf.build().map(Dev::Leaf),
         }
     }
 }
 
 impl LeafVdev {
-    fn build(&self) -> io::Result<vdev::File> {
+    fn build(&self) -> io::Result<Leaf> {
         use std::os::unix::fs::OpenOptionsExt;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            // TODO needs some work
-            // .custom_flags(libc::O_DIRECT)
-            .custom_flags(libc::O_DSYNC)
-            .open(&self.0)?;
-        if unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
 
-        Ok(vdev::File::new(
-            file,
-            self.0.to_string_lossy().into_owned(),
-        )?)
+        match *self {
+            LeafVdev::File(ref path) => {
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .custom_flags(libc::O_DIRECT)
+                    .open(&path)?;
+                if unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) }
+                    != 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+
+                Ok(Leaf::File(vdev::File::new(
+                    file,
+                    path.to_string_lossy().into_owned(),
+                )?))
+            }
+            LeafVdev::Memory(size) => Ok(Leaf::Memory(vdev::Memory::new(
+                size,
+                format!("memory-{}", size),
+            )?)),
+        }
     }
 }
 
 impl<'a> From<&'a str> for LeafVdev {
     fn from(s: &'a str) -> Self {
-        LeafVdev(PathBuf::from(s))
+        LeafVdev::File(PathBuf::from(s))
     }
 }
 
-impl fmt::Display for StorageConfiguration {
+impl fmt::Display for TierConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for vdev in &self.top_level_vdevs {
             vdev.display(0, f)?;
@@ -209,6 +255,13 @@ impl Vdev {
 
 impl LeafVdev {
     fn display(&self, indent: usize, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{:indent$}{}", "", &self.0.display(), indent = indent)
+        match self {
+            LeafVdev::File(path) => {
+                writeln!(f, "{:indent$}{}", "", path.display(), indent = indent)
+            }
+            LeafVdev::Memory(size) => {
+                writeln!(f, "{:indent$}memory({})", "", size, indent = indent)
+            }
+        }
     }
 }
