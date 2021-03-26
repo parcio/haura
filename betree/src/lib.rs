@@ -54,5 +54,5 @@ pub mod env_logger;
 
 pub use self::{
     database::{Database, Dataset, Error, Snapshot},
-    storage_pool::StorageConfiguration,
+    storage_pool::{StoragePoolConfiguration, StoragePreference},
 };
