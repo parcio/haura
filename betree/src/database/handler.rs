@@ -10,6 +10,7 @@ use crate::{
     storage_pool::DiskOffset,
     tree::{DefaultMessageAction, Tree, TreeBaseLayer},
     vdev::Block,
+    StoragePreference,
 };
 use byteorder::{BigEndian, ByteOrder};
 use owning_ref::OwningRef;
@@ -38,7 +39,7 @@ pub struct Handler {
     pub root_tree_inner: AtomicOption<Arc<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
     pub root_tree_snapshot: RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
     pub current_generation: SeqLock<Generation>,
-    pub free_space: HashMap<u16, AtomicU64>,
+    pub free_space: HashMap<(u8, u16), AtomicU64>,
     pub delayed_messages: Mutex<Vec<(Box<[u8]>, SlicedCowBytes)>>,
     pub last_snapshot_generation: RwLock<HashMap<DatasetId, Generation>>,
     pub allocations: AtomicU64,
@@ -58,7 +59,12 @@ impl Handler {
             Info = DatasetId,
         >,
     {
-        Tree::from_inner(self.root_tree_inner.get().unwrap().as_ref(), dmu, false)
+        Tree::from_inner(
+            self.root_tree_inner.get().unwrap().as_ref(),
+            dmu,
+            false,
+            super::ROOT_TREE_STORAGE_PREFERENCE,
+        )
     }
 
     fn last_root_tree<'a, X>(
@@ -76,7 +82,7 @@ impl Handler {
         OwningRef::new(self.root_tree_snapshot.read())
             .try_map(|lock| lock.as_ref().ok_or(()))
             .ok()
-            .map(|inner| Tree::from_inner(inner, dmu, false))
+            .map(|inner| Tree::from_inner(inner, dmu, false, super::ROOT_TREE_STORAGE_PREFERENCE))
     }
 
     pub(super) fn bump_generation(&self) {
@@ -121,7 +127,8 @@ impl data_management::Handler<ObjectRef> for Handler {
         self.allocations.fetch_add(1, Ordering::Release);
         let key = segment_id_to_key(SegmentId::get(offset));
         let msg = update_allocation_bitmap_msg(offset, size, action);
-        self.current_root_tree(dmu).insert(&key[..], msg)?;
+        self.current_root_tree(dmu)
+            .insert(&key[..], msg, StoragePreference::NONE)?;
         Ok(())
     }
 

@@ -10,6 +10,7 @@ use crate::{
     data_management::{DmlWithHandler, Handler},
     database::DatabaseBuilder,
     tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer},
+    StoragePreference,
 };
 use byteorder::{BigEndian, ByteOrder};
 use std::{borrow::Borrow, ops::RangeBounds, sync::Arc};
@@ -41,6 +42,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
                 ptr,
                 DefaultMessageAction,
                 Arc::clone(self.root_tree.dmu()),
+                StoragePreference::NONE,
             ),
             name: Box::from(name),
         })
@@ -68,12 +70,16 @@ impl<Config: DatabaseBuilder> Database<Config> {
         let ss_id = data.ptr.generation();
         let key = &ss_data_key(ds.id, ss_id) as &[_];
         let data = data.pack()?;
-        self.root_tree
-            .insert(key, DefaultMessageAction::insert_msg(&data))?;
+        self.root_tree.insert(
+            key,
+            DefaultMessageAction::insert_msg(&data),
+            StoragePreference::NONE,
+        )?;
         let key = &ds_data_key(ds.id) as &[_];
         self.root_tree.insert(
             key,
             DatasetData::<ObjectPointer>::update_previous_snapshot(Some(ss_id)),
+            StoragePreference::NONE,
         )?;
         self.sync()
     }
@@ -104,8 +110,11 @@ impl<Config: DatabaseBuilder> Database<Config> {
             bail!(ErrorKind::InUse)
         }
 
-        self.root_tree
-            .insert(ss_key(ds.id, name), DefaultMessageAction::delete_msg())?;
+        self.root_tree.insert(
+            ss_key(ds.id, name),
+            DefaultMessageAction::delete_msg(),
+            StoragePreference::NONE,
+        )?;
 
         let previous_ss_id = fetch_ss_data(&self.root_tree, ds.id, ss_id)?.previous_snapshot;
         let update_previous_ss_msg =
@@ -118,12 +127,16 @@ impl<Config: DatabaseBuilder> Database<Config> {
             self.root_tree.insert(
                 &ss_data_key(ds.id, next_ss_id) as &[_],
                 update_previous_ss_msg,
+                StoragePreference::NONE,
             )?;
             max_key_snapshot = dead_list_max_key(ds.id, next_ss_id);
             &max_key_snapshot as &[_]
         } else {
-            self.root_tree
-                .insert(&ds_data_key(ds.id) as &[_], update_previous_ss_msg)?;
+            self.root_tree.insert(
+                &ds_data_key(ds.id) as &[_],
+                update_previous_ss_msg,
+                StoragePreference::NONE,
+            )?;
             max_key_dataset = dead_list_max_key_ds(ds.id);
             &max_key_dataset as &[_]
         };
@@ -140,8 +153,11 @@ impl<Config: DatabaseBuilder> Database<Config> {
                     Action::Deallocate,
                     self.root_tree.dmu(),
                 )?;
-                self.root_tree
-                    .insert(key, DefaultMessageAction::delete_msg())?;
+                self.root_tree.insert(
+                    key,
+                    DefaultMessageAction::delete_msg(),
+                    StoragePreference::NONE,
+                )?;
             }
         }
 

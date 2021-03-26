@@ -7,6 +7,7 @@ use crate::{
     data_management::DmlWithHandler,
     database::DatabaseBuilder,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
+    StoragePreference,
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
@@ -19,6 +20,7 @@ where
     pub(super) id: DatasetId,
     name: Box<[u8]>,
     pub(super) open_snapshots: HashSet<Generation>,
+    storage_preference: StoragePreference,
 }
 
 impl<Config: DatabaseBuilder> Database<Config> {
@@ -30,12 +32,20 @@ impl<Config: DatabaseBuilder> Database<Config> {
         Ok(DatasetId::unpack(&data))
     }
 
-    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
-        self.open_custom_dataset::<DefaultMessageAction>(name)
+    pub fn open_dataset(
+        &mut self,
+        name: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<Dataset<Config>> {
+        self.open_custom_dataset::<DefaultMessageAction>(name, storage_preference)
     }
 
-    pub fn create_dataset(&mut self, name: &[u8]) -> Result<()> {
-        self.create_custom_dataset::<DefaultMessageAction>(name)
+    pub fn create_dataset(
+        &mut self,
+        name: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
+        self.create_custom_dataset::<DefaultMessageAction>(name, storage_preference)
     }
 
     /// Opens a data set identified by the given name.
@@ -44,6 +54,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     pub fn open_custom_dataset<M: MessageAction + Default + 'static>(
         &mut self,
         name: &[u8],
+        storage_preference: StoragePreference,
     ) -> Result<Dataset<Config, M>> {
         let id = self.lookup_dataset_id(name)?;
         let ds_data = fetch_ds_data(&self.root_tree, id)?;
@@ -55,6 +66,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
             ds_data.ptr,
             M::default(),
             Arc::clone(self.root_tree.dmu()),
+            storage_preference,
         );
 
         if let Some(ss_id) = ds_data.previous_snapshot {
@@ -73,13 +85,18 @@ impl<Config: DatabaseBuilder> Database<Config> {
             id,
             name: Box::from(name),
             open_snapshots: Default::default(),
+            storage_preference,
         })
     }
 
     /// Creates a new data set identified by the given name.
     ///
     /// Fails if a data set with the same name exists already.
-    pub fn create_custom_dataset<M: MessageAction>(&mut self, name: &[u8]) -> Result<()> {
+    pub fn create_custom_dataset<M: MessageAction>(
+        &mut self,
+        name: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
         match self.lookup_dataset_id(name) {
             Ok(_) => bail!(ErrorKind::AlreadyExists),
             Err(Error(ErrorKind::DoesNotExist, _)) => {}
@@ -90,6 +107,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
             ds_id,
             DefaultMessageAction,
             Arc::clone(self.root_tree.dmu()),
+            storage_preference,
         );
         let ptr = tree.sync()?;
 
@@ -99,12 +117,18 @@ impl<Config: DatabaseBuilder> Database<Config> {
             previous_snapshot: None,
         }
         .pack()?;
-        self.root_tree
-            .insert(key, DefaultMessageAction::insert_msg(&data))?;
+        self.root_tree.insert(
+            key,
+            DefaultMessageAction::insert_msg(&data),
+            StoragePreference::NONE,
+        )?;
         let mut key = vec![1];
         key.extend(name);
-        self.root_tree
-            .insert(key, DefaultMessageAction::insert_msg(&ds_id.pack()))?;
+        self.root_tree.insert(
+            key,
+            DefaultMessageAction::insert_msg(&ds_id.pack()),
+            StoragePreference::NONE,
+        )?;
         Ok(())
     }
 
@@ -112,12 +136,13 @@ impl<Config: DatabaseBuilder> Database<Config> {
     pub fn open_or_create_dataset<M: MessageAction + Default + 'static>(
         &mut self,
         name: &[u8],
+        storage_preference: StoragePreference,
     ) -> Result<Dataset<Config, M>> {
         match self.lookup_dataset_id(name) {
-            Ok(_) => self.open_custom_dataset(name),
+            Ok(_) => self.open_custom_dataset(name, storage_preference),
             Err(Error(ErrorKind::DoesNotExist, _)) => self
-                .create_custom_dataset::<M>(name)
-                .and_then(|()| self.open_custom_dataset(name)),
+                .create_custom_dataset::<M>(name, storage_preference)
+                .and_then(|()| self.open_custom_dataset(name, storage_preference)),
             Err(e) => Err(e),
         }
     }
@@ -131,8 +156,11 @@ impl<Config: DatabaseBuilder> Database<Config> {
             .unwrap_or_default();
         let next_ds_id = last_ds_id.next();
         let data = &next_ds_id.pack() as &[_];
-        self.root_tree
-            .insert(key, DefaultMessageAction::insert_msg(data))?;
+        self.root_tree.insert(
+            key,
+            DefaultMessageAction::insert_msg(data),
+            StoragePreference::NONE,
+        )?;
         Ok(next_ds_id)
     }
 
@@ -172,7 +200,18 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         key: K,
         msg: SlicedCowBytes,
     ) -> Result<()> {
-        Ok(self.tree.insert(key, msg)?)
+        self.insert_msg_with_pref(key, msg, StoragePreference::NONE)
+    }
+
+    pub fn insert_msg_with_pref<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        msg: SlicedCowBytes,
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
+        Ok(self
+            .tree
+            .insert(key, msg, storage_preference.or(self.storage_preference))?)
     }
 
     /// Returns the value for the given key if existing.
@@ -202,12 +241,49 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     /// Inserts the given key-value pair.
     ///
     /// Note that any existing value will be overwritten.
-    pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
+    pub fn insert_with_pref<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        data: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
         ensure!(
             data.len() <= tree::MAX_MESSAGE_SIZE,
             ErrorKind::MessageTooLarge
         );
-        self.insert_msg(key, DefaultMessageAction::insert_msg(data))
+        self.insert_msg_with_pref(
+            key,
+            DefaultMessageAction::insert_msg(data),
+            storage_preference,
+        )
+    }
+
+    /// Inserts the given key-value pair.
+    ///
+    /// Note that any existing value will be overwritten.
+    pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
+        self.insert_with_pref(key, data, StoragePreference::NONE)
+    }
+
+    /// Upserts the value for the given key at the given offset.
+    ///
+    /// Note that the value will be zeropadded as needed.
+    pub fn upsert_with_pref<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        data: &[u8],
+        offset: u32,
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
+        ensure!(
+            offset as usize + data.len() <= tree::MAX_MESSAGE_SIZE,
+            ErrorKind::MessageTooLarge
+        );
+        self.insert_msg_with_pref(
+            key,
+            DefaultMessageAction::upsert_msg(offset, data),
+            storage_preference,
+        )
     }
 
     /// Upserts the value for the given key at the given offset.
@@ -219,16 +295,16 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         data: &[u8],
         offset: u32,
     ) -> Result<()> {
-        ensure!(
-            offset as usize + data.len() <= tree::MAX_MESSAGE_SIZE,
-            ErrorKind::MessageTooLarge
-        );
-        self.insert_msg(key, DefaultMessageAction::upsert_msg(offset, data))
+        self.upsert_with_pref(key, data, offset, StoragePreference::NONE)
     }
 
     /// Deletes the key-value pair if existing.
     pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
-        self.insert_msg(key, DefaultMessageAction::delete_msg())
+        self.insert_msg_with_pref(
+            key,
+            DefaultMessageAction::delete_msg(),
+            StoragePreference::NONE,
+        )
     }
 
     /// Removes all key-value pairs in the given key range.

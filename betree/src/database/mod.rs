@@ -3,16 +3,19 @@ use crate::{
     atomic_option::AtomicOption,
     cache::ClockCache,
     checksum::{XxHash, XxHashBuilder},
-    compression,
+    compression::{self, CompressionConfiguration},
     cow_bytes::SlicedCowBytes,
     data_management::{self, Dml, DmlBase, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml},
     size::StaticSize,
-    storage_pool::{DiskOffset, StorageConfiguration, StoragePoolLayer, StoragePoolUnit},
+    storage_pool::{
+        DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit, TierConfiguration,
+    },
     tree::{
-        MessageAction, DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
-        TreeLayer,
+        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, MessageAction, Node, Tree,
+        TreeBaseLayer, TreeLayer,
     },
     vdev::Block,
+    StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
@@ -34,26 +37,27 @@ mod errors;
 mod handler;
 mod snapshot;
 mod superblock;
+
+#[cfg(feature = "figment_config")]
+mod figment;
+
 pub use self::{handler::Handler, superblock::Superblock};
 
 pub use self::{
-    dataset::Dataset, errors::*, handler::update_allocation_bitmap_msg,
-    in_memory::InMemoryConfiguration, snapshot::Snapshot,
+    dataset::Dataset, errors::*, handler::update_allocation_bitmap_msg, snapshot::Snapshot,
 };
 
 const ROOT_DATASET_ID: DatasetId = DatasetId(0);
+const ROOT_TREE_STORAGE_PREFERENCE: StoragePreference = StoragePreference::FASTEST;
 const DEFAULT_CACHE_SIZE: usize = 256 * 1024 * 1024;
 
-type Compression = compression::None;
 type Checksum = XxHash;
 
-type ObjectPointer =
-    data_management::impls::ObjectPointer<Compression, Checksum, DatasetId, Generation>;
+type ObjectPointer = data_management::impls::ObjectPointer<Checksum, DatasetId, Generation>;
 type ObjectRef = data_management::impls::ObjectRef<ObjectPointer>;
 type Object = Node<ObjectRef>;
 
 pub(crate) type RootDmu = Dmu<
-    compression::None,
     ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>,
     StoragePoolUnit<XxHash>,
     Handler,
@@ -79,7 +83,9 @@ where
         + 'static,
 {
     type Spu: StoragePoolLayer;
-    type Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId> + Send + Sync;
+    type Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>
+        + Send
+        + Sync;
 
     fn new_spu(&self) -> Result<Self::Spu>;
     fn new_handler(&self, spu: &Self::Spu) -> handler::Handler;
@@ -88,7 +94,7 @@ where
         -> Result<(RootTree<Self::Dmu>, ObjectPointer)>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum AccessMode {
     /// Read and use an existing superblock, abort if none is found.
     OpenIfExists,
@@ -98,9 +104,12 @@ pub enum AccessMode {
     OpenOrCreate,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct DatabaseConfiguration {
     /// Backing storage to be used
-    pub storage: StorageConfiguration,
+    pub storage: StoragePoolConfiguration,
+    pub compression: CompressionConfiguration,
     /// Size of cache in TODO
     pub cache_size: usize,
     /// Whether to check for and open an existing database, or overwrite it
@@ -110,9 +119,10 @@ pub struct DatabaseConfiguration {
 impl Default for DatabaseConfiguration {
     fn default() -> Self {
         Self {
-            storage: StorageConfiguration::new(Vec::new()),
+            storage: StoragePoolConfiguration::default(),
+            compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
-            access_mode: AccessMode::OpenOrCreate,
+            access_mode: AccessMode::OpenIfExists,
         }
     }
 }
@@ -122,7 +132,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
     type Dmu = RootDmu;
 
     fn new_spu(&self) -> Result<Self::Spu> {
-        StoragePoolUnit::<XxHash>::new(&self.storage).chain_err(|| ErrorKind::SplConfiguration)
+        Ok(StoragePoolUnit::<XxHash>::new(&self.storage)?)
     }
 
     fn new_handler(&self, spu: &Self::Spu) -> handler::Handler {
@@ -130,9 +140,9 @@ impl DatabaseBuilder for DatabaseConfiguration {
             root_tree_inner: AtomicOption::new(),
             root_tree_snapshot: RwLock::new(None),
             current_generation: SeqLock::new(Generation(1)),
-            free_space: HashMap::from_iter(
-                (0..spu.disk_count()).map(|disk_id| (disk_id, AtomicU64::new(0))),
-            ),
+            free_space: HashMap::from_iter((0..spu.storage_class_count()).flat_map(|class| {
+                (0..spu.disk_count(class)).map(move |disk_id| ((class, disk_id), AtomicU64::new(0)))
+            })),
             delayed_messages: Mutex::new(Vec::new()),
             last_snapshot_generation: RwLock::new(HashMap::new()),
             allocations: AtomicU64::new(0),
@@ -142,7 +152,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
 
     fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> RootDmu {
         Dmu::new(
-            compression::None,
+            self.compression.to_builder(),
             XxHashBuilder,
             spu,
             ClockCache::new(self.cache_size),
@@ -154,17 +164,24 @@ impl DatabaseBuilder for DatabaseConfiguration {
         let root_ptr = if let AccessMode::OpenIfExists | AccessMode::OpenOrCreate = self.access_mode
         {
             match Superblock::<ObjectPointer>::fetch_superblocks(dmu.pool()) {
-                None if self.access_mode == AccessMode::OpenIfExists => {
+                Ok(None) if self.access_mode == AccessMode::OpenIfExists => {
                     bail!(ErrorKind::InvalidSuperblock)
                 }
-                ptr => ptr,
+                Ok(ptr) => ptr,
+                Err(e) => return Err(e),
             }
         } else {
             None
         };
 
         if let Some(root_ptr) = root_ptr {
-            let tree = RootTree::open(ROOT_DATASET_ID, root_ptr.clone(), DefaultMessageAction, dmu);
+            let tree = RootTree::open(
+                ROOT_DATASET_ID,
+                root_ptr.clone(),
+                DefaultMessageAction,
+                dmu,
+                ROOT_TREE_STORAGE_PREFERENCE,
+            );
             *tree.dmu().handler().old_root_allocation.lock_write() =
                 Some((root_ptr.offset(), root_ptr.size()));
             tree.dmu()
@@ -174,16 +191,23 @@ impl DatabaseBuilder for DatabaseConfiguration {
             Ok((tree, root_ptr))
         } else {
             Superblock::<ObjectPointer>::clear_superblock(dmu.pool())?;
-            let tree = RootTree::empty_tree(ROOT_DATASET_ID, DefaultMessageAction, dmu.clone());
+            let tree = RootTree::empty_tree(
+                ROOT_DATASET_ID,
+                DefaultMessageAction,
+                dmu.clone(),
+                ROOT_TREE_STORAGE_PREFERENCE,
+            );
             tree.dmu()
                 .handler()
                 .root_tree_inner
                 .set(Arc::clone(tree.inner()));
             {
                 let dmu = tree.dmu();
-                for disk_id in 0..dmu.pool().disk_count() {
-                    dmu.allocate_raw_at(DiskOffset::new(disk_id as usize, Block(0)), Block(2))
-                        .chain_err(|| "Superblock allocation failed")?;
+                for class in 0..dmu.pool().storage_class_count() {
+                    for disk_id in 0..dmu.pool().disk_count(class) {
+                        dmu.allocate_raw_at(DiskOffset::new(class, disk_id, Block(0)), Block(2))
+                            .chain_err(|| "Superblock allocation failed")?;
+                    }
                 }
             }
             let root_ptr = tree.sync()?;
@@ -193,9 +217,10 @@ impl DatabaseBuilder for DatabaseConfiguration {
 }
 
 type ErasedTree = dyn ErasedTreeSync<
-    Pointer = <RootDmu as DmlBase>::ObjectPointer,
-    ObjectRef = <RootDmu as DmlBase>::ObjectRef,
-> + Send + Sync;
+        Pointer = <RootDmu as DmlBase>::ObjectPointer,
+        ObjectRef = <RootDmu as DmlBase>::ObjectRef,
+    > + Send
+    + Sync;
 
 /// The database type.
 pub struct Database<Config: DatabaseBuilder> {
@@ -205,7 +230,7 @@ pub struct Database<Config: DatabaseBuilder> {
 
 impl Database<DatabaseConfiguration> {
     /// Opens a database given by the storage pool configuration.
-    pub fn open(cfg: StorageConfiguration) -> Result<Self> {
+    pub fn open(cfg: StoragePoolConfiguration) -> Result<Self> {
         Self::build(DatabaseConfiguration {
             storage: cfg,
             access_mode: AccessMode::OpenIfExists,
@@ -216,7 +241,7 @@ impl Database<DatabaseConfiguration> {
     /// Creates a database given by the storage pool configuration.
     ///
     /// Note that any existing database will be overwritten!
-    pub fn create(cfg: StorageConfiguration) -> Result<Self> {
+    pub fn create(cfg: StoragePoolConfiguration) -> Result<Self> {
         Self::build(DatabaseConfiguration {
             storage: cfg,
             access_mode: AccessMode::AlwaysCreateNew,
@@ -225,7 +250,7 @@ impl Database<DatabaseConfiguration> {
     }
 
     /// Opens or creates a database given by the storage pool configuration.
-    pub fn open_or_create(cfg: StorageConfiguration) -> Result<Self> {
+    pub fn open_or_create(cfg: StoragePoolConfiguration) -> Result<Self> {
         Self::build(DatabaseConfiguration {
             storage: cfg,
             access_mode: AccessMode::OpenOrCreate,
@@ -259,7 +284,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
         let ptr = ds_tree.erased_sync()?;
         let msg = DatasetData::update_ptr(ptr)?;
         let key = &ds_data_key(ds_id) as &[_];
-        self.root_tree.insert(key, msg)?;
+        self.root_tree.insert(key, msg, StoragePreference::NONE)?;
         Ok(())
     }
 
@@ -273,7 +298,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
                 break;
             }
             for (key, msg) in v {
-                self.root_tree.insert(key, msg)?;
+                self.root_tree.insert(key, msg, StoragePreference::NONE)?;
             }
         }
         Ok(())
