@@ -3,6 +3,7 @@ use speedy::{Endianness, Readable, Writable};
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    object::ObjectId,
     tree::MessageAction,
 };
 
@@ -16,9 +17,9 @@ pub(crate) static ENDIAN: Endianness = Endianness::LittleEndian;
 
 #[derive(Debug, Clone, Readable, Writable)]
 pub struct ObjectInfo {
-    pub(crate) object_id: u64,
-    pub(crate) size: u64,
-    pub(crate) mtime: SystemTime,
+    pub object_id: ObjectId,
+    pub size: u64,
+    pub mtime: SystemTime,
 }
 
 /// Every message represents an overwrite or merge of a set of [ObjectInfo] properties.
@@ -27,15 +28,15 @@ pub struct ObjectInfo {
 /// The `max` merge is required to allow concurrent writes of mutually ignorant clients
 /// without writing over a larger `size` message.
 #[derive(Default)]
-pub(crate) struct MetaMessage {
-    object_id: Option<u64>,
-    size: Option<u64>,
-    mtime: Option<SystemTime>,
+pub(super) struct MetaMessage {
+    pub(super) object_id: Option<ObjectId>,
+    pub(super) size: Option<u64>,
+    pub(super) mtime: Option<SystemTime>,
 }
 
 const CONTENT_FLAG_NONE: u8 = MetaMessage::delete().to_content_flags();
 const CONTENT_FLAG_ALL: u8 = (MetaMessage {
-    object_id: Some(0),
+    object_id: Some(ObjectId(0)),
     size: Some(0),
     mtime: Some(UNIX_EPOCH),
 })
@@ -44,7 +45,11 @@ const CONTENT_FLAG_ALL: u8 = (MetaMessage {
 /// Following functions are closely coupled together, any change to [MetaMessage] must be reflected
 /// in all of them.
 impl MetaMessage {
-    pub const fn new(object_id: Option<u64>, size: Option<u64>, mtime: Option<SystemTime>) -> Self {
+    pub const fn new(
+        object_id: Option<ObjectId>,
+        size: Option<u64>,
+        mtime: Option<SystemTime>,
+    ) -> Self {
         MetaMessage {
             object_id,
             size,
@@ -78,7 +83,7 @@ impl MetaMessage {
         v.push(self.to_content_flags());
 
         if let Some(object_id) = self.object_id {
-            let _ = v.write_u64::<LittleEndian>(object_id);
+            let _ = v.write_u64::<LittleEndian>(object_id.0);
         }
         if let Some(size) = self.size {
             let _ = v.write_u64::<LittleEndian>(size);
@@ -103,7 +108,7 @@ impl MetaMessage {
 
         let content_flags = cursor.read_u8()?;
         if content_flags & 1 != 0 {
-            message.object_id = Some(cursor.read_u64::<LittleEndian>()?);
+            message.object_id = Some(ObjectId(cursor.read_u64::<LittleEndian>()?));
         }
         if content_flags & 2 != 0 {
             message.size = Some(cursor.read_u64::<LittleEndian>()?);
@@ -184,7 +189,7 @@ impl MessageAction for MetaMessageAction {
             match (a, b) {
                 (None, None) => None,
                 (Some(x), None) | (None, Some(x)) => Some(x),
-                (Some(a), Some(b)) => Some(a.max(b))
+                (Some(a), Some(b)) => Some(a.max(b)),
             }
         }
 
@@ -199,7 +204,7 @@ impl MessageAction for MetaMessageAction {
                 let new = MetaMessage {
                     object_id: upper.object_id.or(lower.object_id),
                     size: or_max(upper.size, lower.size),
-                    mtime: or_max(upper.mtime, lower.mtime)
+                    mtime: or_max(upper.mtime, lower.mtime),
                 };
                 CowBytes::from(new.pack()).into()
             }

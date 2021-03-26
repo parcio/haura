@@ -49,10 +49,10 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{DatabaseBuilder, Error, Result},
-    Database, Dataset,
+    Database, Dataset, StoragePreference,
 };
 
-use speedy::Readable;
+use speedy::{Readable, Writable};
 
 use std::{
     borrow::Borrow,
@@ -66,10 +66,22 @@ use std::{
 mod chunk;
 mod meta;
 use self::{chunk::*, meta::*};
+pub use meta::ObjectInfo;
 
 const OBJECT_ID_COUNTER_KEY: &[u8] = b"\0oid";
 
-fn object_chunk_key(object_id: u64, chunk_id: u32) -> [u8; 8 + 4] {
+#[derive(Debug, Clone, Copy, Readable, Writable)]
+/// The internal id of an object after name resolution, to be treated as an opaque identifier of
+/// fixed but unreliable size.
+pub struct ObjectId(u64);
+impl ObjectId {
+    #[cfg(feature = "internal-api")]
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+fn object_chunk_key(ObjectId(object_id): ObjectId, chunk_id: u32) -> [u8; 8 + 4] {
     let mut b = [0; 8 + 4];
     let (object, chunk) = b.split_at_mut(8);
     object.copy_from_slice(&object_id.to_be_bytes());
@@ -86,15 +98,22 @@ pub struct ObjectStore<Config: DatabaseBuilder> {
 
 impl<Config: DatabaseBuilder> Database<Config> {
     /// Create an object store backed by a single database.
-    pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
+    pub fn open_object_store(
+        &mut self,
+        storage_preference: StoragePreference,
+    ) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
-            self.open_or_create_dataset(b"data")?,
-            self.open_or_create_dataset(b"meta")?,
+            self.open_or_create_dataset(b"data", storage_preference)?,
+            self.open_or_create_dataset(b"meta", storage_preference)?,
         )
     }
 
     /// Create a namespaced object store, with the datasets "{name}\0data" and "{name}\0meta".
-    pub fn open_named_object_store(&mut self, name: &[u8]) -> Result<ObjectStore<Config>> {
+    pub fn open_named_object_store(
+        &mut self,
+        name: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<ObjectStore<Config>> {
         assert!(!name.contains(&0));
         let mut v = name.to_vec();
         v.push(0);
@@ -105,8 +124,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
         meta_name.extend_from_slice(b"meta");
 
         ObjectStore::with_datasets(
-            self.open_or_create_dataset(&data_name)?,
-            self.open_or_create_dataset(&meta_name)?
+            self.open_or_create_dataset(&data_name, storage_preference)?,
+            self.open_or_create_dataset(&meta_name, storage_preference)?,
         )
     }
 }
@@ -136,15 +155,19 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     }
 
     /// Create a new object handle.
-    pub fn create_object(&'os self, key: &[u8]) -> Result<Object<'os, Config>> {
+    pub fn create_object(
+        &'os self,
+        key: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
         assert!(!key.contains(&0));
 
         let oid = loop {
-            let oid = self.object_id_counter.fetch_add(1, Ordering::SeqCst);
+            let oid = ObjectId(self.object_id_counter.fetch_add(1, Ordering::SeqCst));
 
             // check for existing object with this oid
             if let Some(_existing_chunk) = self.data.get(object_chunk_key(oid, 0))? {
-                warn!("oid collision: {}", oid);
+                warn!("oid collision: {:?}", oid);
             } else {
                 break oid;
             }
@@ -156,58 +179,96 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             mtime: SystemTime::now(),
         };
 
-        self.metadata
-            .insert_msg(key, MetaMessage::set_info(&info).pack().into())?;
+        self.update_object_info(key, &MetaMessage::set_info(&info), storage_preference)?;
+        self.data.insert_with_pref(
+            OBJECT_ID_COUNTER_KEY,
+            &oid.0.to_le_bytes(),
+            storage_preference,
+        )?;
 
-        self.data
-            .insert(OBJECT_ID_COUNTER_KEY, &oid.to_le_bytes());
-
-        Ok(Object {
-            store: self,
-            key: key.to_vec(),
+        Ok((
+            ObjectHandle {
+                store: self,
+                object: Object {
+                    key: key.to_vec(),
+                    id: oid,
+                    storage_preference,
+                },
+            },
             info,
-        })
+        ))
     }
 
-    pub fn open_object(&'os self, key: &[u8]) -> Result<Option<Object<'os, Config>>> {
+    pub fn open_object(
+        &'os self,
+        key: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<Option<(ObjectHandle<'os, Config>, ObjectInfo)>> {
         assert!(!key.contains(&0));
 
-        Ok(self.metadata.get(key)?.map(|info| Object {
-            store: self,
-            key: key.to_vec(),
-            info: ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &info).unwrap(),
+        let info = self.read_object_info(key)?;
+
+        Ok(info.map(|info| {
+            (
+                ObjectHandle {
+                    store: self,
+                    object: Object {
+                        key: key.to_vec(),
+                        id: info.object_id,
+                        storage_preference,
+                    },
+                },
+                info,
+            )
         }))
     }
 
-    pub fn open_or_create_object(&'os self, key: &[u8]) -> Result<Object<'os, Config>> {
-        if let Some(obj) = self.open_object(key)? {
+    pub fn open_or_create_object(
+        &'os self,
+        key: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+        if let Some(obj) = self.open_object(key, storage_preference)? {
             Ok(obj)
         } else {
-            self.create_object(key)
+            self.create_object(key, storage_preference)
         }
     }
 
-    pub fn delete_object(&'os self, object: &Object<Config>) -> Result<()> {
+    pub fn handle_from_object(&'os self, object: Object) -> ObjectHandle<'os, Config> {
+        ObjectHandle {
+            store: self,
+            object,
+        }
+    }
+
+    pub fn delete_object(&'os self, handle: &ObjectHandle<Config>) -> Result<()> {
         // FIXME: bad error handling, object can end up partially deleted
-        // TODO: is this proper deletion, or marked as deleted?
-        self.metadata
-            .insert_msg(&object.key[..], MetaMessage::delete().pack().into())?;
+        // Delete metadata before data, otherwise object could be concurrently reopened,
+        // rewritten, and deleted with a live handle.
+        self.update_object_info(
+            &handle.object.key[..],
+            &MetaMessage::delete(),
+            StoragePreference::NONE,
+        )?;
 
         self.data.range_delete(
-            &object_chunk_key(object.info.object_id, 0)[..]
-                ..&object_chunk_key(object.info.object_id, u32::MAX)[..],
+            &object_chunk_key(handle.object.id, 0)[..]
+                ..&object_chunk_key(handle.object.id, u32::MAX)[..],
         )?;
 
         Ok(())
     }
 
-    pub fn close_object(&'os self, object: &Object<Config>) -> Result<()> { Ok(()) }
+    pub fn close_object(&'os self, object: &ObjectHandle<Config>) -> Result<()> {
+        Ok(())
+    }
 
     // TODO: return actual objects instead of objectinfos
     pub fn list_objects<R, K>(
         &'os self,
         range: R,
-    ) -> Result<Box<dyn Iterator<Item = Object<'os, Config>> + 'os>>
+    ) -> Result<Box<dyn Iterator<Item = (ObjectHandle<'os, Config>, ObjectInfo)> + 'os>>
     where
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
@@ -217,27 +278,60 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             .flat_map(Result::ok) // FIXME
             .map(move |(key, value)| {
                 let info = ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &value).unwrap();
-                Object {
-                    store: self,
-                    key: key.to_vec(),
+                (
+                    ObjectHandle {
+                        store: self,
+                        object: Object {
+                            key: key.to_vec(),
+                            id: info.object_id,
+                            storage_preference: StoragePreference::NONE, // FIXME: retrieve stored preference
+                        },
+                    },
                     info,
-                }
+                )
             });
 
         Ok(Box::new(iter))
     }
+
+    fn read_object_info(&'os self, key: &[u8]) -> Result<Option<ObjectInfo>> {
+        if let Some(meta) = self.metadata.get(key)? {
+            Ok(Some(
+                ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &meta).unwrap(),
+            ))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn update_object_info(
+        &'os self,
+        key: &[u8],
+        info: &MetaMessage,
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
+        self.metadata
+            .insert_msg_with_pref(key, info.pack().into(), storage_preference)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Object {
+    /// The key for which this object was opened.
+    /// Required to interact with its metadata, which is indexed by the full object name.
+    pub key: Vec<u8>,
+    id: ObjectId,
+    storage_preference: StoragePreference,
 }
 
 /// A handle to an object which may or may not exist in the [ObjectStore] it was created from.
 #[must_use]
-pub struct Object<'os, Config: DatabaseBuilder> {
+pub struct ObjectHandle<'os, Config: DatabaseBuilder> {
     store: &'os ObjectStore<Config>,
-    /// The key for which this object was opened
-    pub key: Vec<u8>,
-    info: ObjectInfo
+    pub object: Object,
 }
 
-impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
+impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// Close this object, writing out its metadata
     pub fn close(self) -> Result<()> {
         self.store.close_object(&self)
@@ -252,7 +346,7 @@ impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
     /// actually read bytes.
     pub fn read_at(&self, mut buf: &mut [u8], offset: u64) -> result::Result<u64, (u64, Error)> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
-        let oid = self.info.object_id;
+        let oid = self.object.id;
 
         let mut total_read = 0;
         for chunk in chunk_range.split_at_chunk_bounds() {
@@ -286,8 +380,8 @@ impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
         chunk_range: Range<u32>,
     ) -> Result<Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes)>>>> {
         self.store.data.range(
-            &object_chunk_key(self.info.object_id, chunk_range.start)[..]
-                ..&object_chunk_key(self.info.object_id, chunk_range.end),
+            &object_chunk_key(self.object.id, chunk_range.start)[..]
+                ..&object_chunk_key(self.object.id, chunk_range.end),
         )
     }
 
@@ -301,90 +395,58 @@ impl<'ds, Config: DatabaseBuilder> Object<'ds, Config> {
     /// Write `buf.len()` bytes from `buf` to this objects data, starting at offset `offset`.
     /// This will update the objects size to the largest byte index that has been inserted,
     /// and set the modification time to the current system time when the write was started.
-    pub fn write_at(&mut self, mut buf: &[u8], offset: u64) -> result::Result<u64, (u64, Error)> {
+    pub fn write_at(&self, mut buf: &[u8], offset: u64) -> result::Result<u64, (u64, Error)> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
-        self.info.mtime = SystemTime::now();
+        let mut meta_change = MetaMessage::default();
+        meta_change.mtime = Some(SystemTime::now());
 
         let mut total_written = 0;
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;
-            let key = object_chunk_key(self.info.object_id, chunk.start.chunk_id);
+            let key = object_chunk_key(self.object.id, chunk.start.chunk_id);
 
             self.store
                 .data
-                .upsert(&key[..], &buf[..len], chunk.start.offset)
+                .upsert_with_pref(
+                    &key[..],
+                    &buf[..len],
+                    chunk.start.offset,
+                    self.object.storage_preference,
+                )
                 .map_err(|err| {
-                    let _ = self.write_size_mtime();
+                    self.store.update_object_info(
+                        &self.object.key,
+                        &meta_change,
+                        self.object.storage_preference,
+                    );
                     (total_written, err)
                 })?;
             buf = &buf[len..];
 
             total_written += len as u64;
 
-            self.info.size = self.info.size.max(chunk.end.as_bytes());
+            // Can overwrite without checking previous value, offsets monotically increase during
+            // a single write_at invocation, and message merging combines sizes by max.
+            meta_change.size = Some(chunk.end.as_bytes());
         }
 
-        self.write_size_mtime()
+        self.store
+            .update_object_info(
+                &self.object.key,
+                &meta_change,
+                self.object.storage_preference,
+            )
             .map(|()| total_written)
             .map_err(|err| (total_written, err))
     }
 
+    /// Fetches this objects metadata.
     /// Return this objects size in bytes. Size is defined as the largest offset of any byte in
     /// this objects data, and not the total count of bytes, as there could be sparsely allocated
     /// objects.
-    pub fn size(&self) -> u64 {
-        self.info.size
+    ///
+    /// Ok(None) is only returned if the object was deleted concurrently.
+    pub fn info(&self) -> Result<Option<ObjectInfo>> {
+        self.store.read_object_info(&self.object.key)
     }
-
-    /// Return the time at which this object was last modified.
-    pub fn modification_time(&self) -> SystemTime {
-        self.info.mtime
-    }
-
-    fn write_size_mtime(&self) -> Result<()> {
-        self.store.metadata.insert_msg(
-            &self.key[..],
-            MetaMessage::new(None, Some(self.info.size), Some(self.info.mtime))
-                .pack()
-                .into(),
-        )
-    }
-
-    fn write_metadata(&self) -> Result<()> {
-        self.store.metadata.insert_msg(
-            &self.key[..],
-            MetaMessage::set_info(&self.info).pack().into(),
-        )
-    }
-
-    /*
-    pub fn truncate(&mut self, size: u64) {}
-
-    pub fn cursor(&self) {}
-    pub fn mut_cursor(&mut self) {}
-
-    fn key_chunk(&self, chunk_id: u32) -> Vec<u8> {
-        assert!(chunk_id <= CHUNK_MAX);
-        let mut key = self.key.clone();
-        key.push(0);
-        key.extend_from_slice(&chunk_id.to_be_bytes());
-        key
-    }
-
-    fn key_size(&self) -> Vec<u8> {
-        // static KEY_SUFFIX: &[u8; 2] = &[0, CHUNK_META_SIZE];
-        let mut key = self.key.clone();
-        key.push(0);
-        key.extend_from_slice(&CHUNK_META_SIZE.to_be_bytes());
-        key
-    }
-
-    fn key_mtime(&self) -> Vec<u8> {
-        // static MTIME_SUFFIX: &[u8; 2] = &[0, CHUNK_META_MODIFICATION_TIME];
-        let mut key = self.key.clone();
-        key.push(0);
-        key.extend_from_slice(&CHUNK_META_MODIFICATION_TIME.to_be_bytes());
-        key
-    }
-    */
 }
