@@ -208,7 +208,8 @@ impl LeafNode {
 mod tests {
     use super::{BTreeMap, CowBytes, LeafNode, Size, SlicedCowBytes};
     use crate::tree::{
-        imp::packed::PackedMap, message_action::DefaultMessageActionMsg, DefaultMessageAction,
+        default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
+        imp::packed::PackedMap,
     };
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;

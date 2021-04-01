@@ -350,7 +350,9 @@ impl<N> Node<N> {
 }
 
 impl<N> Node<N> {
-    fn child_pointer_iter<'a>(&'a mut self) -> Option<impl Iterator<Item = &'a mut N> + 'a> {
+    pub(super) fn child_pointer_iter<'a>(
+        &'a mut self,
+    ) -> Option<impl Iterator<Item = &'a mut N> + 'a> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => Some(

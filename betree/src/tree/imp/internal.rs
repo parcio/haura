@@ -411,7 +411,7 @@ impl<'a, N: Size> TakeChildBuffer<'a, ChildBuffer<N>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::{message_action::DefaultMessageActionMsg, DefaultMessageAction};
+    use crate::tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg};
     use bincode::serialized_size;
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;

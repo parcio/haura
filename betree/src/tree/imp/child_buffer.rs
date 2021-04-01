@@ -195,7 +195,7 @@ impl<N> ChildBuffer<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::message_action::DefaultMessageActionMsg;
+    use crate::tree::default_message_action::DefaultMessageActionMsg;
     use bincode::serialized_size;
     use quickcheck::{Arbitrary, Gen};
     use rand::Rng;
