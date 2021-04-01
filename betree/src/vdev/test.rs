@@ -1,6 +1,6 @@
 use super::{
-    AtomicStatistics, Block, Error, ErrorKind, ScrubResult, Statistics, Vdev, VdevLeafRead,
-    VdevLeafWrite, VdevRead, VdevWrite,
+    AtomicStatistics, Block, Error, ScrubResult, Statistics, Vdev, VdevLeafRead, VdevLeafWrite,
+    VdevRead, VdevWrite,
 };
 use crate::{
     buffer::Buf,
@@ -79,7 +79,7 @@ impl FailingLeafVdev {
                 Ok(b)
             }
             FailureMode::FailOperation | FailureMode::BadData => {
-                Err(ErrorKind::ReadError(self.id.clone()).into())
+                Err(Error::Read(self.id.clone()).into())
             }
             FailureMode::Panic => panic!(),
         }
@@ -97,7 +97,7 @@ impl VdevRead for FailingLeafVdev {
         let b = self.handle_read(size, offset)?;
         match checksum.verify(&b) {
             Ok(()) => Ok(Buf::from_zero_padded(b.to_vec())),
-            Err(_) => Err(ErrorKind::ReadError(self.id.clone()).into()),
+            Err(_) => Err(Error::Read(self.id.clone()).into()),
         }
     }
 
@@ -173,7 +173,7 @@ impl VdevLeafRead for FailingLeafVdev {
                 self.stats
                     .failed_reads
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
-                return Err(Error::from(ErrorKind::ReadError(self.id.clone())));
+                return Err(Error::Read(self.id.clone()));
             }
             FailureMode::BadData => (0..byte_size)
                 .map(|x| (3 * x + offset) as u8)
@@ -213,7 +213,7 @@ impl VdevLeafWrite for FailingLeafVdev {
                 self.stats
                     .failed_writes
                     .fetch_add(size_in_blocks, Ordering::Relaxed);
-                return Err(Error::from(ErrorKind::WriteError(self.id.clone())));
+                return Err(Error::Write(self.id.clone()));
             }
             FailureMode::BadData => {
                 bad_data = (0..data.as_ref().len())
@@ -234,7 +234,7 @@ impl VdevLeafWrite for FailingLeafVdev {
 
     fn flush(&self) -> Result<(), Error> {
         if self.fail_flushes.read() {
-            Err(Error::from(ErrorKind::WriteError(self.id.clone())))
+            Err(Error::Write(self.id.clone()))
         } else {
             Ok(())
         }
