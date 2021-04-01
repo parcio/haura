@@ -358,16 +358,16 @@ unsafe extern "C" fn backend_get_by_prefix(
     let backend = &*backend_data.cast::<Backend>();
     let ns = backend.ns(CStr::from_ptr(namespace));
 
-    let start = CStr::from_ptr(prefix).to_owned().into_bytes();
+    // Prefix listing is a special-case of range listing
+    // A prefix search for "foo" can be implemented (and is here)
+    // by a range search from "foo" to "foo\xFF"
+    let mut key = CStr::from_ptr(prefix).to_owned().into_bytes();
+    key.push(0xFF);
 
-    let end = {
-        let mut v = start.clone();
-        let last_pos = v.len() - 1;
-        v[last_pos] += 1;
-        v
-    };
+    let start = &key[..key.len() - 1];
+    let end = &key[..];
 
-    let iter = ns.list_objects::<_, Vec<u8>>(start..end).map(|iter| Iter {
+    let iter = ns.list_objects(start..end).map(|iter| Iter {
         iter,
         name: Vec::new(),
     });
