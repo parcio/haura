@@ -39,21 +39,6 @@ impl StaticSize for () {
     }
 }
 
-impl<T: Size> Size for Vec<T> {
-    fn size(&self) -> usize {
-        8 + self.iter().map(Size::size).sum::<usize>()
-    }
-}
-
-impl<K: Size, V: Size> Size for BTreeMap<K, V> {
-    fn size(&self) -> usize {
-        8 + self
-            .iter()
-            .map(|(key, value)| key.size() + value.size())
-            .sum::<usize>()
-    }
-}
-
 impl<T: Size> SizeMut for T {
     fn size(&mut self) -> usize {
         Size::size(self)
