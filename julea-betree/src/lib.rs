@@ -137,9 +137,11 @@ unsafe extern "C" fn backend_create(
     let key = CStr::from_ptr(path);
 
     let (obj, _) = jtrace::with(J_TRACE_FILE_CREATE, path, || {
-        let obj = ns.create_object(key.to_bytes(), StoragePreference::NONE);
+        let obj = ns.create_object(key.to_bytes(), StoragePreference::NONE)
+            .map(|(handle, _info)| handle);
         (obj, (0, 0))
     });
+
 
     return_box(obj, "create object", backend_object)
 }
@@ -159,7 +161,13 @@ unsafe extern "C" fn backend_open(
         (obj, (0, 0))
     });
 
-    return_box(obj, "open object", backend_object)
+    let result = match obj {
+        Ok(None) => return FALSE,
+        Ok(Some((handle, _info))) => Ok(handle),
+        Err(err) => Err(err)
+    };
+
+    return_box::<ObjectHandle, _>(result, "open object", backend_object)
 }
 
 unsafe extern "C" fn backend_delete(_backend_data: gpointer, backend_object: gpointer) -> gboolean {
