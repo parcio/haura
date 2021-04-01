@@ -11,7 +11,6 @@ extern crate itertools;
 extern crate libc;
 #[macro_use]
 extern crate log;
-extern crate lz4;
 extern crate owning_ref;
 extern crate parking_lot;
 #[cfg(test)]
@@ -21,7 +20,6 @@ extern crate quickcheck;
 extern crate quickcheck_macros;
 #[cfg(test)]
 extern crate rand;
-extern crate ref_slice;
 extern crate seqlock;
 extern crate serde;
 extern crate stable_deref_trait;
@@ -53,6 +51,6 @@ pub mod object;
 pub mod env_logger;
 
 pub use self::{
-    database::{Database, Dataset, Error, Snapshot},
+    database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
     storage_pool::{StoragePoolConfiguration, StoragePreference},
 };
