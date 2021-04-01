@@ -17,7 +17,8 @@ use parking_lot::RwLock;
 
 use betree_storage_stack::{
     database::{self, DatabaseConfiguration},
-    object, StoragePreference,
+    object::{self, ObjectInfo},
+    StoragePreference,
 };
 
 mod jtrace;
@@ -327,6 +328,70 @@ unsafe extern "C" fn backend_write(
     }
 }
 
+struct Iter<'os> {
+    iter: Box<dyn Iterator<Item = (ObjectHandle<'os>, ObjectInfo)> + 'os>,
+    name: Vec<u8>,
+}
+
+unsafe extern "C" fn backend_get_all(
+    backend_data: gpointer,
+    namespace: *const gchar,
+    backend_iterator: *mut gpointer,
+) -> gboolean {
+    let backend = &*backend_data.cast::<Backend>();
+    let ns = backend.ns(CStr::from_ptr(namespace));
+
+    let iter = ns.list_objects::<_, &[u8]>(..).map(|iter| Iter {
+        iter,
+        name: Vec::new(),
+    });
+
+    return_box(iter, "iterate all objects", backend_iterator)
+}
+
+unsafe extern "C" fn backend_get_by_prefix(
+    backend_data: gpointer,
+    namespace: *const gchar,
+    prefix: *const gchar,
+    backend_iterator: *mut gpointer,
+) -> gboolean {
+    let backend = &*backend_data.cast::<Backend>();
+    let ns = backend.ns(CStr::from_ptr(namespace));
+
+    let start = CStr::from_ptr(prefix).to_owned().into_bytes();
+
+    let end = {
+        let mut v = start.clone();
+        let last_pos = v.len() - 1;
+        v[last_pos] += 1;
+        v
+    };
+
+    let iter = ns.list_objects::<_, Vec<u8>>(start..end).map(|iter| Iter {
+        iter,
+        name: Vec::new(),
+    });
+
+    return_box(iter, "iterate by prefix", backend_iterator)
+}
+
+unsafe extern "C" fn backend_iterate(
+    _backend_data: gpointer,
+    backend_iterator: gpointer,
+    name: *mut *const gchar,
+) -> gboolean {
+    let iter = &mut *backend_iterator.cast::<Iter>();
+    if let Some((handle, _info)) = iter.iter.next() {
+        iter.name.clear();
+        iter.name.extend_from_slice(&handle.object.key);
+        name.write(iter.name.as_ptr().cast::<i8>());
+        TRUE
+    } else {
+        let _ = Box::from_raw(backend_iterator.cast::<Iter>());
+        FALSE
+    }
+}
+
 static mut BETREE_BACKEND: JBackend = JBackend {
     type_: JBackendType::J_BACKEND_TYPE_OBJECT,
     component: JBackendComponent::J_BACKEND_COMPONENT_SERVER
@@ -345,6 +410,9 @@ static mut BETREE_BACKEND: JBackend = JBackend {
             backend_sync: Some(backend_sync),
             backend_read: Some(backend_read),
             backend_write: Some(backend_write),
+            backend_get_all: Some(backend_get_all),
+            backend_get_by_prefix: Some(backend_get_by_prefix),
+            backend_iterate: Some(backend_iterate),
         },
     },
 };
