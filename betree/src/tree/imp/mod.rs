@@ -294,6 +294,31 @@ where
         Ok(())
     }
 
+    #[cfg(feature = "internal-api")]
+    pub fn debug_for_each(&self, start: Option<X::CacheValueRefMut>) {
+        let mut node = start
+            .or_else(|| self.get_mut_root_node().ok())
+            .expect("No start provided, and couldn't get root node");
+
+        println!(
+            "{}: {}, fanout {:?}, size {}",
+            node.level(),
+            node.kind(),
+            node.fanout(),
+            node.actual_size()
+        );
+
+        if let Some(children) = node.child_pointer_iter() {
+            for c in children {
+                let c = self
+                    .dml
+                    .get_mut(c, self.tree_id())
+                    .expect("Failed to fetch child node");
+                self.debug_for_each(Some(c));
+            }
+        };
+    }
+
     //    pub fn is_modified(&mut self) -> bool {
     //        self.inner.borrow_mut().root_node.is_modified()
     //    }

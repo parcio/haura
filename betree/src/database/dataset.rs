@@ -235,6 +235,11 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     pub fn name(&self) -> &[u8] {
         &self.name
     }
+
+    #[cfg(feature = "internal-api")]
+    pub fn debug_for_each(&self) {
+        self.tree.debug_for_each(None);
+    }
 }
 
 impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
