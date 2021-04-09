@@ -13,7 +13,8 @@ use crate::vdev::{Block, BLOCK_SIZE};
 use std::{
     alloc::{self, Layout},
     cell::UnsafeCell,
-    fmt, io, mem,
+    fmt, io,
+    mem::ManuallyDrop,
     ops::{Deref, Range},
     ptr, slice,
     sync::Arc,
@@ -330,18 +331,18 @@ impl Buf {
     }
 
     pub fn into_boxed_slice(self) -> Box<[u8]> {
-        let storage = Arc::try_unwrap(self.buf.buf)
-            .expect("AlignedBuf was not unique")
-            .into_inner();
+        let storage = ManuallyDrop::new(
+            Arc::try_unwrap(self.buf.buf)
+                .expect("AlignedBuf was not unique")
+                .into_inner(),
+        );
 
-        let boxed = unsafe {
+        unsafe {
             Box::from_raw(slice::from_raw_parts_mut(
                 storage.ptr,
                 storage.capacity.to_bytes() as usize,
             ))
-        };
-        mem::forget(storage);
-        boxed
+        }
     }
 
     pub fn range(&self) -> &Range<Block<u32>> {
