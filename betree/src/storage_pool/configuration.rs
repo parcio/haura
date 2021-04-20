@@ -42,14 +42,18 @@ impl Default for StoragePoolConfiguration {
 
 /// Represents a top-level vdev.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
+#[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum Vdev {
     /// This vdev is a leaf vdev.
     Leaf(LeafVdev),
     /// This vdev is a mirror vdev.
-    Mirror(Vec<LeafVdev>),
+    Mirror {
+        mirror: Vec<LeafVdev>
+    },
     /// Parity1 aka RAID5.
-    Parity1(Vec<LeafVdev>),
+    Parity1 {
+        parity1: Vec<LeafVdev>
+    },
 }
 
 /// Represents a leaf vdev.
@@ -109,8 +113,8 @@ impl TierConfiguration {
                 continue;
             }
             let f = match s {
-                "mirror" => Vdev::Mirror,
-                "parity" | "parity1" => Vdev::Parity1,
+                "mirror" => |leaves| Vdev::Mirror { mirror: leaves },
+                "parity" | "parity1" => |leaves| Vdev::Parity1 { parity1: leaves },
                 _ => bail!(ErrorKind::InvalidKeyword),
             };
             let leaves = iter
@@ -130,8 +134,8 @@ impl TierConfiguration {
         for vdev in &self.top_level_vdevs {
             let (keyword, leaves) = match *vdev {
                 Vdev::Leaf(ref leaf) => ("", ref_slice(leaf)),
-                Vdev::Mirror(ref leaves) => ("mirror ", &leaves[..]),
-                Vdev::Parity1(ref leaves) => ("parity1 ", &leaves[..]),
+                Vdev::Mirror { mirror: ref leaves } => ("mirror ", &leaves[..]),
+                Vdev::Parity1 { parity1: ref leaves } => ("parity1 ", &leaves[..]),
             };
             s.push_str(keyword);
             for leaf in leaves {
@@ -165,7 +169,7 @@ impl Vdev {
     /// Opens file and devices and constructs a `Vdev`.
     fn build(&self, n: usize) -> io::Result<Dev> {
         match *self {
-            Vdev::Mirror(ref vec) => {
+            Vdev::Mirror { mirror: ref vec } => {
                 let leaves: io::Result<Vec<Leaf>> = vec.iter().map(LeafVdev::build).collect();
                 let leaves: Box<[Leaf]> = leaves?.into_boxed_slice();
                 Ok(Dev::Mirror(vdev::Mirror::new(
@@ -173,7 +177,7 @@ impl Vdev {
                     format!("mirror-{}", n),
                 )))
             }
-            Vdev::Parity1(ref vec) => {
+            Vdev::Parity1 { parity1: ref vec } => {
                 let leaves: io::Result<Vec<_>> = vec.iter().map(LeafVdev::build).collect();
                 let leaves = leaves?.into_boxed_slice();
                 Ok(Dev::Parity1(vdev::Parity1::new(
@@ -235,16 +239,16 @@ impl Vdev {
     fn display(&self, indent: usize, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Vdev::Leaf(ref leaf) => leaf.display(indent, f),
-            Vdev::Mirror(ref mirror) => {
+            Vdev::Mirror { ref mirror } => {
                 writeln!(f, "{:indent$}mirror", "", indent = indent)?;
                 for vdev in mirror {
                     vdev.display(indent + 4, f)?;
                 }
                 Ok(())
             }
-            Vdev::Parity1(ref parity) => {
+            Vdev::Parity1 { ref parity1 } => {
                 writeln!(f, "{:indent$}parity1", "", indent = indent)?;
-                for vdev in parity {
+                for vdev in parity1 {
                     vdev.display(indent + 4, f)?;
                 }
                 Ok(())
