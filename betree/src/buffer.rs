@@ -78,6 +78,13 @@ impl AlignedStorage {
             ))
             .max(self.capacity + MIN_GROWTH_SIZE);
 
+        if wanted_capacity.to_bytes() > 8 * 1024 * 1024 {
+            log::warn!(
+                "Requested allocation of >8MiB: {} byte",
+                wanted_capacity.to_bytes()
+            );
+        }
+
         unsafe {
             let curr_layout =
                 Layout::from_size_align_unchecked(self.capacity.to_bytes() as usize, BLOCK_SIZE);
@@ -127,7 +134,9 @@ impl Drop for AlignedStorage {
 
 impl From<Box<[u8]>> for AlignedStorage {
     fn from(b: Box<[u8]>) -> Self {
-        assert!(is_aligned(&b));
+        // It can be useful to re-enable this line to easily locate places where unnecessary
+        // copying takes place, but it's not suited to stay enabled unconditionally.
+        // assert!(is_aligned(&b));
         if is_aligned(&b) {
             AlignedStorage {
                 capacity: Block::from_bytes(b.len() as u32),
