@@ -9,13 +9,29 @@
 //! ```text
 //! Delete => [<0, u8>]
 //! Insert => [<1, u8>, <bytes to be inserted>] # no length marker, encoded externally
-//! Upsert => [<2, u8>, <num upserts, LE u16>, <upserts>]
+//! Upsert => [<2, u8>, <upserts>]
 //!
-//! An upsert is encoded as <offset, LE u32><length, LE u32><upsert bytes>
+//! An upsert is encoded as
+//!
+//! - mode: LE u32
+//!     - two most-significant bits indicate mode:
+//!         - 00 normal byte upsert
+//!         - 01 is reserved for bit upsert
+//!         - 10 set bits to 0
+//!         - 11 set bits to 1
+//!     - remaining 30 bits are offset in unit according to first bit
+//!
+//! - if byte upsert mode:
+//!     - number of bytes to set: LE u32
+//!     - byte content: exactly as many u8 as indicated in the preceding length field
+//!
+//! - if bit set mode:
+//!     - number of bits to set: LE u32
 //! ```
 
 use super::MessageAction;
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
+use bitvec::{order::Lsb0, view::BitView};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::{fmt::Debug, iter, mem};
 
@@ -24,22 +40,11 @@ use std::{fmt::Debug, iter, mem};
 #[derive(Default, Debug, Copy, Clone)]
 pub struct DefaultMessageAction;
 
-pub struct Upsert<'a> {
-    offset: u32,
-    data: &'a [u8],
-}
-
-impl<'a> Upsert<'a> {
-    fn estimate_size(&self) -> usize {
-        mem::size_of::<u32>() + mem::size_of::<u32>() + self.data.len()
-    }
-}
-
 #[repr(u8)]
 enum MsgType {
     OverwriteNone = 0,
     OverwriteSome = 1,
-    UpsertBytes = 2,
+    Upsert = 2,
 }
 
 impl MsgType {
@@ -47,8 +52,46 @@ impl MsgType {
         match discriminant {
             0 => Self::OverwriteNone,
             1 => Self::OverwriteSome,
-            2 => Self::UpsertBytes,
-            d => panic!("Invalid discriminant for MsgType: {}", d),
+            2 => Self::Upsert,
+            _ => unreachable!(),
+        }
+    }
+}
+
+enum UpsertType {
+    Bytes = 0b00,
+    BitsFalse = 0b10,
+    BitsTrue = 0b11,
+}
+
+impl UpsertType {
+    fn from(discriminant: u8) -> UpsertType {
+        match discriminant {
+            0b00 => Self::Bytes,
+            0b10 => Self::BitsFalse,
+            0b11 => Self::BitsTrue,
+            _ => unreachable!(),
+        }
+    }
+}
+
+pub enum Upsert<'a> {
+    Bytes {
+        offset_bytes: u32,
+        data: &'a [u8],
+    },
+    Bits {
+        offset_bits: u32,
+        amount_bits: u32,
+        value: bool,
+    },
+}
+
+impl<'a> Upsert<'a> {
+    fn estimate_size(&self) -> usize {
+        match self {
+            Self::Bytes { data, .. } => mem::size_of::<u32>() + mem::size_of::<u32>() + data.len(),
+            Self::Bits { .. } => mem::size_of::<u32>() + mem::size_of::<u32>(),
         }
     }
 }
@@ -61,12 +104,12 @@ fn as_overwrite(b: SlicedCowBytes) -> Option<Option<SlicedCowBytes>> {
     match MsgType::from(b[0]) {
         MsgType::OverwriteNone => Some(None),
         MsgType::OverwriteSome => Some(Some(b.slice_from(1))),
-        MsgType::UpsertBytes => None,
+        MsgType::Upsert => None,
     }
 }
 
 fn iter_upserts(mut b: &[u8]) -> Option<impl Iterator<Item = Upsert>> {
-    if b.get(0) != Some(&(MsgType::UpsertBytes as u8)) {
+    if b.get(0) != Some(&(MsgType::Upsert as u8)) {
         return None;
     }
     b = &b[1..];
@@ -77,81 +120,124 @@ fn iter_upserts(mut b: &[u8]) -> Option<impl Iterator<Item = Upsert>> {
             return None;
         }
 
-        let (offset, rest) = b.split_at(4);
-        let offset = LittleEndian::read_u32(offset);
+        let (mode, rest) = b.split_at(4);
+        let (mode, offset) = {
+            let b = LittleEndian::read_u32(mode);
+            (b >> 30, b & ((1 << 30) - 1))
+        };
 
+        // All modes currently read a length
         let (len, rest) = rest.split_at(4);
         let len = LittleEndian::read_u32(len);
-
-        if len as usize > rest.len() {
-            log::error!("Invalid data length in upsert");
-            return None;
-        }
-        let (data, rest) = rest.split_at(len as usize);
-
         b = rest;
 
-        Some(Upsert { offset, data })
+        match UpsertType::from(mode as u8) {
+            UpsertType::Bytes => {
+                if len as usize > rest.len() {
+                    log::error!("Invalid data length in upsert");
+                    return None;
+                }
+                let (data, rest) = rest.split_at(len as usize);
+                b = rest;
+
+                Some(Upsert::Bytes {
+                    offset_bytes: offset,
+                    data,
+                })
+            }
+
+            UpsertType::BitsFalse => Some(Upsert::Bits {
+                offset_bits: offset,
+                amount_bits: len,
+                value: false,
+            }),
+
+            UpsertType::BitsTrue => Some(Upsert::Bits {
+                offset_bits: offset,
+                amount_bits: len,
+                value: true,
+            }),
+        }
     }))
 }
 
 fn append_upsert(v: &mut Vec<u8>, upsert: &Upsert) {
-    v.write_u32::<LittleEndian>(upsert.offset).unwrap();
-    v.write_u32::<LittleEndian>(upsert.data.len() as u32)
-        .unwrap();
-    v.extend_from_slice(upsert.data);
-}
-
-/*enum MsgType<'a> {
-    Overwrite(Option<SlicedCowBytes>),
-    Upsert(Vec<Upsert<'a>>),
-}
-
-impl<'a> MsgType<'a> {
-    fn unpack(msg: &SlicedCowBytes) -> MsgType {
-        let t = msg[0];
-        match t {
-            TYPE_OVERWRITE_NONE => MsgType::Overwrite(None),
-            TYPE_OVERWRITE_SOME => MsgType::Overwrite(Some(msg.clone().subslice(1, msg.len() as u32 - 1))),
-            TYPE_UPSERT_BYTES => MsgType::Upsert(deserialize(&msg[1..]).unwrap()),
-            _ => unreachable!(),
+    // Writes to a Vec can only fail with OOM, and that can't be caught with Results,
+    // so the unwraps are fine™
+    match upsert {
+        &Upsert::Bytes { offset_bytes, data } => {
+            v.write_u32::<LittleEndian>(offset_bytes).unwrap();
+            v.write_u32::<LittleEndian>(data.len() as u32).unwrap();
+            v.extend_from_slice(data);
+        }
+        &Upsert::Bits {
+            offset_bits,
+            amount_bits,
+            value,
+        } => {
+            let tag = if value {
+                UpsertType::BitsTrue as u32
+            } else {
+                UpsertType::BitsFalse as u32
+            };
+            v.write_u32::<LittleEndian>((tag << 30) | offset_bits)
+                .unwrap();
+            v.write_u32::<LittleEndian>(amount_bits).unwrap();
         }
     }
-
-    fn as_upsert(msg: &SlicedCowBytes) -> Option<Vec<Upsert>> {
-        if msg[0] == TYPE_UPSERT_BYTES {
-            Some(deserialize(&msg[1..]).unwrap())
-        } else {
-            None
-        }
-    }
-}*/
+}
 
 impl DefaultMessageAction {
     fn apply_upserts<'upsert>(
         upserts: impl Iterator<Item = Upsert<'upsert>>,
         msg_data: &mut Option<SlicedCowBytes>,
     ) {
+        let mut n_upserts = 0;
+
         let mut data = msg_data
             .as_ref()
             .map(|b| CowBytes::from(&b[..]))
             .unwrap_or_default();
-        for Upsert {
-            offset,
-            data: new_data,
-        } in upserts
-        {
-            let end_offset = offset as usize + new_data.len();
 
-            if data.len() <= offset as usize {
-                data.fill_zeros_up_to(offset as usize);
-                data.push_slice(new_data);
-            } else {
-                data.fill_zeros_up_to(end_offset);
+        for upsert in upserts {
+            n_upserts += 1;
 
-                let slice = &mut data[offset as usize..end_offset as usize];
-                slice.copy_from_slice(new_data);
+            match upsert {
+                Upsert::Bytes {
+                    offset_bytes,
+                    data: new_data,
+                } => {
+                    let end_offset = offset_bytes as usize + new_data.len();
+
+                    if data.len() <= offset_bytes as usize {
+                        data.fill_zeros_up_to(offset_bytes as usize);
+                        data.push_slice(new_data);
+                    } else {
+                        data.fill_zeros_up_to(end_offset);
+
+                        let slice = &mut data[offset_bytes as usize..end_offset as usize];
+                        slice.copy_from_slice(new_data);
+                    }
+                }
+                Upsert::Bits {
+                    offset_bits,
+                    amount_bits,
+                    value,
+                } => {
+                    let end_bit = offset_bits + amount_bits;
+                    let end_byte = end_bit / 8 + if end_bit % 8 == 0 { 0 } else { 1 };
+                    if end_byte as usize >= data.len() {
+                        data.fill_zeros_up_to(end_byte as usize);
+                    }
+
+                    data.view_bits_mut::<Lsb0>()[offset_bits as usize..end_bit as usize]
+                        .set_all(value);
+                }
             }
+        }
+
+        if n_upserts > 8 {
+            log::warn!("Applied {} upserts", n_upserts);
         }
         *msg_data = Some(data.into());
     }
@@ -172,7 +258,7 @@ impl DefaultMessageAction {
     fn build_upsert_msg(upserts: &[Upsert]) -> SlicedCowBytes {
         let estimated_size = 1 + upserts.iter().map(Upsert::estimate_size).sum::<usize>();
         let mut v = Vec::with_capacity(estimated_size);
-        v.push(MsgType::UpsertBytes as u8);
+        v.push(MsgType::Upsert as u8);
 
         for upsert in upserts {
             append_upsert(&mut v, upsert);
@@ -182,20 +268,28 @@ impl DefaultMessageAction {
         CowBytes::from(v).into()
     }
 
-    /// Return a new messages which unconditionally inserts the given `data`.
+    /// Return a new message which unconditionally inserts the given `data`.
     pub fn insert_msg(data: &[u8]) -> SlicedCowBytes {
         Self::build_overwrite_msg(Some(data))
     }
 
-    /// Return a new messages which deletes data.
+    /// Return a new message which deletes data.
     pub fn delete_msg() -> SlicedCowBytes {
         Self::build_overwrite_msg(None)
     }
 
-    /// Return a new messages which will update or insert the given `data` at
-    /// `offset`.
-    pub fn upsert_msg(offset: u32, data: &[u8]) -> SlicedCowBytes {
-        Self::build_upsert_msg(&[Upsert { offset, data }])
+    /// Return a new message which will update or insert the given `data` at `offset`.
+    pub fn upsert_msg(offset_bytes: u32, data: &[u8]) -> SlicedCowBytes {
+        Self::build_upsert_msg(&[Upsert::Bytes { offset_bytes, data }])
+    }
+
+    /// Return a new message which will set the specified bit range to `value`.
+    pub fn upsert_bits_msg(offset_bits: u32, amount_bits: u32, value: bool) -> SlicedCowBytes {
+        Self::build_upsert_msg(&[Upsert::Bits {
+            offset_bits,
+            amount_bits,
+            value,
+        }])
     }
 }
 
@@ -206,7 +300,7 @@ impl MessageAction for DefaultMessageAction {
                 let new_data = as_overwrite(msg.clone()).expect("Message was not an overwrite");
                 *data = new_data;
             }
-            MsgType::UpsertBytes => {
+            MsgType::Upsert => {
                 // There are no upserts if len <= 1
                 if msg.len() >= 1 {
                     let upserts = iter_upserts(msg).expect("Message was not an upsert");
@@ -226,7 +320,7 @@ impl MessageAction for DefaultMessageAction {
             // upper overwrite always wins
             (MsgType::OverwriteNone, _) => upper_msg,
             (MsgType::OverwriteSome, _) => upper_msg,
-            (MsgType::UpsertBytes, lower_type) => {
+            (MsgType::Upsert, lower_type) => {
                 if upper_msg.len() <= 1 {
                     // no upserts in message
                     return lower_msg;
@@ -242,14 +336,12 @@ impl MessageAction for DefaultMessageAction {
                         Self::apply_upserts(upper_upserts, &mut data);
                         Self::build_overwrite_msg(data.as_ref().map(|b| &b[..]))
                     }
-                    MsgType::UpsertBytes => {
-                        let mut v = Vec::with_capacity(lower_msg.len());
-                        v.extend_from_slice(&lower_msg[..]);
+                    MsgType::Upsert => {
+                        // Upserts can simply be appended, (-1) because we only need one MsgType u8
+                        let mut v = Vec::with_capacity(lower_msg.len() + upper_msg.len() - 1);
 
-                        for upsert in upper_upserts {
-                            // FIXME: estimate size, reserve exactly, and only once
-                            append_upsert(&mut v, &upsert);
-                        }
+                        v.extend_from_slice(&lower_msg[..]);
+                        v.extend_from_slice(&upper_msg[1..]);
 
                         CowBytes::from(v).into()
                     }
@@ -276,7 +368,7 @@ mod tests {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let b = MsgType::from(g.gen_range(0, 3));
             match b {
-                MsgType::UpsertBytes => {
+                MsgType::Upsert => {
                     // TODO multiple?
                     let offset = g.gen_range(0, 10);
                     let data: Vec<_> = Arbitrary::arbitrary(g);
