@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const BLOCK_SIZE: usize = 4096;
 
 /// Provides statistics about (failed) requests performed by vdevs.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct Statistics {
     /// The total number of blocks of issued read requests
     pub read: Block<u64>,
@@ -208,9 +208,6 @@ pub use self::block::Block;
 mod errors;
 pub type Result<T> = std::result::Result<T, errors::VdevError>;
 pub use errors::VdevError as Error;
-
-#[macro_use]
-mod util;
 
 mod file;
 pub use self::file::File;
