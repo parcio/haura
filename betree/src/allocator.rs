@@ -2,28 +2,29 @@
 //! allocation of 1GiB segments.
 
 use crate::{cow_bytes::CowBytes, storage_pool::DiskOffset, vdev::Block};
+use bitvec::prelude::*;
 use byteorder::{BigEndian, ByteOrder};
-use std::{convert::TryInto, u32};
+use std::{convert::TryInto, mem, u32};
 
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
+/// Number of bytes required to store a segments allocation bitmap
+pub const SEGMENT_SIZE_BYTES: usize = SEGMENT_SIZE / 8;
 const SEGMENT_SIZE_LOG_2: usize = 18;
 const SEGMENT_SIZE_MASK: usize = SEGMENT_SIZE - 1;
 
 /// Simple first-fit bitmap allocator
 pub struct SegmentAllocator {
-    data: Box<[u8; SEGMENT_SIZE]>,
+    data: BitArr!(for SEGMENT_SIZE, in Lsb0, u8),
 }
 
 impl SegmentAllocator {
     /// Constructs a new `SegmentAllocator` given the segment allocation bitmap.
     /// The `bitmap` must have a length of `SEGMENT_SIZE` and must contain only
     /// `0u8` and `1u8`.
-    pub fn new(bitmap: Box<[u8]>) -> Self {
-        assert_eq!(bitmap.len(), SEGMENT_SIZE);
-        assert!(bitmap.iter().all(|&y| y <= 1));
+    pub fn new(bitmap: [u8; SEGMENT_SIZE_BYTES]) -> Self {
         SegmentAllocator {
-            data: bitmap.try_into().unwrap(),
+            data: BitArray::new(bitmap),
         }
     }
 
@@ -40,7 +41,7 @@ impl SegmentAllocator {
                     if idx + size > SEGMENT_SIZE as u32 {
                         return None;
                     }
-                    if self.data[idx as usize] == 0 {
+                    if !self.data[idx as usize] {
                         break;
                     }
                     idx += 1;
@@ -48,9 +49,7 @@ impl SegmentAllocator {
 
                 let start_idx = (idx + 1) as usize;
                 let end_idx = (idx + size) as usize;
-                if let Some(first_alloc_idx) =
-                    self.data[start_idx..end_idx].iter().position(|&e| e == 1)
-                {
+                if let Some(first_alloc_idx) = self.data[start_idx..end_idx].first_one() {
                     idx = (idx + 1) + first_alloc_idx as u32 + 1;
                 } else {
                     break idx as u32;
@@ -73,7 +72,7 @@ impl SegmentAllocator {
 
         let start_idx = offset as usize;
         let end_idx = (offset + size) as usize;
-        if !self.data[start_idx..end_idx].iter().all(|&e| e == 0) {
+        if self.data[start_idx..end_idx].any() {
             return false;
         }
         self.mark(offset, size, Action::Allocate);
@@ -88,10 +87,16 @@ impl SegmentAllocator {
     fn mark(&mut self, offset: u32, size: u32, action: Action) {
         let start_idx = offset as usize;
         let end_idx = (offset + size) as usize;
-        for x in self.data[start_idx..end_idx].iter_mut() {
-            assert_eq!(*x, 1 - action.as_byte());
-            *x = action.as_byte();
+        let range = &mut self.data[start_idx..end_idx];
+
+        match action {
+            // Is allocation, so range must be free
+            Action::Allocate => debug_assert!(!range.any()),
+            // Is deallocation, so range must be previously used
+            Action::Deallocate => debug_assert!(range.all()),
         }
+
+        range.set_all(action.as_bool());
     }
 }
 
@@ -107,10 +112,10 @@ pub enum Action {
 
 impl Action {
     /// Returns 1 if allocation and 0 if deallocation.
-    pub fn as_byte(self) -> u8 {
+    pub fn as_bool(self) -> bool {
         match self {
-            Action::Deallocate => 0,
-            Action::Allocate => 1,
+            Action::Deallocate => false,
+            Action::Allocate => true,
         }
     }
 }

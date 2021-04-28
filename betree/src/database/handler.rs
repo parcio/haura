@@ -3,7 +3,7 @@ use super::{
     ObjectRef, TreeInner,
 };
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE},
+    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
     data_management::{self, HandlerDml},
@@ -12,7 +12,7 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
-use byteorder::{BigEndian, ByteOrder};
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use owning_ref::OwningRef;
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
@@ -31,8 +31,7 @@ pub fn update_allocation_bitmap_msg(
     action: Action,
 ) -> SlicedCowBytes {
     let segment_offset = SegmentId::get_block_offset(offset);
-    let data = vec![action.as_byte(); size.0 as usize].into_boxed_slice();
-    DefaultMessageAction::upsert_msg(segment_offset, &data)
+    DefaultMessageAction::upsert_bits_msg(segment_offset, size.0, action.as_bool())
 }
 
 pub struct Handler {
@@ -141,31 +140,38 @@ impl data_management::Handler<ObjectRef> for Handler {
             Info = DatasetId,
         >,
     {
-        let key = segment_id_to_key(id);
+        let now = std::time::Instant::now();
+        let mut bitmap = [0u8; SEGMENT_SIZE_BYTES];
 
-        let mut segment = self
-            .current_root_tree(dmu)
-            .get(&key[..])?
-            .map(|b| b.to_vec())
-            .unwrap_or_default();
-        segment.resize(SEGMENT_SIZE, 0);
-        let mut segment = segment.into_boxed_slice();
+        let key = segment_id_to_key(id);
+        let segment = self.current_root_tree(dmu).get(&key[..])?;
+        log::info!(
+            "fetched {:?} bitmap elements",
+            segment.as_ref().map(|s| s.len())
+        );
+
+        if let Some(segment) = segment {
+            assert!(segment.len() <= SEGMENT_SIZE_BYTES);
+            bitmap[..segment.len()].copy_from_slice(&segment[..]);
+        }
 
         if let Some(tree) = self.last_root_tree(dmu) {
             if let Some(old_segment) = tree.get(&key[..])? {
-                for (s, &x) in segment.iter_mut().zip(&old_segment[..]) {
-                    *s |= x;
+                for (w, old) in bitmap.iter_mut().zip(old_segment.iter()) {
+                    *w |= *old;
                 }
             }
         }
 
-        let mut allocator = SegmentAllocator::new(segment);
+        let mut allocator = SegmentAllocator::new(bitmap);
 
         if let Some((offset, size)) = self.old_root_allocation.read() {
             if SegmentId::get(offset) == id {
                 allocator.allocate_at(size.as_u32(), SegmentId::get_block_offset(offset));
             }
         }
+
+        log::info!("requested allocation bitmap, took {:?}", now.elapsed());
 
         Ok(allocator)
     }

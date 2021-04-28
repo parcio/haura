@@ -1,14 +1,18 @@
 //! This module provides the Database Layer.
 use crate::{
     atomic_option::AtomicOption,
-    cache::ClockCache,
+    cache::{Cache, ClockCache},
     checksum::{XxHash, XxHashBuilder},
     compression::{self, CompressionConfiguration},
     cow_bytes::SlicedCowBytes,
-    data_management::{self, Dml, DmlBase, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml},
+    data_management::{
+        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml,
+    },
+    metrics::{metrics_init, MetricsConfiguration},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit, TierConfiguration,
+        NUM_STORAGE_CLASSES,
     },
     tree::{
         DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, MessageAction, Node, Tree,
@@ -80,6 +84,7 @@ where
         + HandlerDml<Object = Object>
         + DmlWithHandler<Handler = handler::Handler>
         + DmlWithSpl<Spl = Self::Spu>
+        + DmlWithCache
         + 'static,
 {
     type Spu: StoragePoolLayer;
@@ -87,6 +92,7 @@ where
         + Send
         + Sync;
 
+    fn pre_build(&self) {}
     fn new_spu(&self) -> Result<Self::Spu>;
     fn new_handler(&self, spu: &Self::Spu) -> handler::Handler;
     fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> Self::Dmu;
@@ -104,25 +110,45 @@ pub enum AccessMode {
     OpenOrCreate,
 }
 
+/// A bundle type of component configuration types, used during [Database::build]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct DatabaseConfiguration {
     /// Backing storage to be used
     pub storage: StoragePoolConfiguration,
+
+    /// During allocation of a request with priority p, the allocator will
+    /// try every class in alloc_strategy\[p\] in order.
+    ///
+    /// A few example strategies:
+    /// - `[[0], [1], [2], [3]]` will allocate each request in the request class,
+    ///     but doesn't allow falling back to other classes if an allocation fails
+    /// - `[[0], [1], [1], [1]]` will allocate requests for 0 and 1 in the requested classes,
+    ///     but maps 2 and 3 to 1 as well. Again, without fallback
+    /// - `[[0, 1, 2, 3], [1, 2, 3], [2, 3], [3]]` will try to allocate as requested,
+    ///     but allows falling back to higher classes if a class is full
+    pub alloc_strategy: [Vec<u8>; NUM_STORAGE_CLASSES],
+    /// Which compression type to use, and the type-specific compression parameters
     pub compression: CompressionConfiguration,
     /// Size of cache in TODO
     pub cache_size: usize,
     /// Whether to check for and open an existing database, or overwrite it
     pub access_mode: AccessMode,
+
+    /// If and how to log database metrics
+    pub metrics: Option<MetricsConfiguration>,
 }
 
 impl Default for DatabaseConfiguration {
     fn default() -> Self {
         Self {
             storage: StoragePoolConfiguration::default(),
+            // identity mapping
+            alloc_strategy: [vec![0], vec![1], vec![2], vec![3]],
             compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
             access_mode: AccessMode::OpenIfExists,
+            metrics: None,
         }
     }
 }
@@ -151,16 +177,35 @@ impl DatabaseBuilder for DatabaseConfiguration {
     }
 
     fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> RootDmu {
+        let mut strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES] =
+            [[None; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES];
+
+        for (dst, src) in strategy.iter_mut().zip(self.alloc_strategy.iter()) {
+            assert!(
+                src.len() < NUM_STORAGE_CLASSES,
+                "Invalid allocation strategy, can't try more than once per class"
+            );
+
+            for (dst, src) in dst.iter_mut().zip(src) {
+                *dst = Some(*src);
+            }
+        }
+
         Dmu::new(
             self.compression.to_builder(),
             XxHashBuilder,
             spu,
+            strategy,
             ClockCache::new(self.cache_size),
             handler,
         )
     }
 
     fn select_root_tree(&self, dmu: Arc<RootDmu>) -> Result<(RootTree<Self::Dmu>, ObjectPointer)> {
+        if let Some(cfg) = &self.metrics {
+            metrics_init::<Self>(&cfg, dmu.clone())?;
+        }
+
         let root_ptr = if let AccessMode::OpenIfExists | AccessMode::OpenOrCreate = self.access_mode
         {
             match Superblock::<ObjectPointer>::fetch_superblocks(dmu.pool()) {
@@ -263,6 +308,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     /// Opens or creates a database given by the storage pool configuration and
     /// sets the given cache size.
     pub fn build(builder: Config) -> Result<Self> {
+        builder.pre_build();
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);
         let dmu = Arc::new(builder.new_dmu(spl, handler));
