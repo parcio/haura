@@ -10,6 +10,7 @@ use super::{
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Object, ObjectRef},
+    storage_pool::DiskOffset,
     size::{Size, SizeMut, StaticSize},
     tree::MessageAction,
     StoragePreference,
@@ -47,16 +48,17 @@ impl<R: ObjectRef> Object<R> for Node<R> {
         }
     }
 
-    fn unpack(data: Box<[u8]>) -> Result<Self, io::Error> {
+    fn unpack_at(offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error> {
+        let storage_preference = StoragePreference::new(offset.storage_class());
         if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
             match deserialize(&data[4..]) {
-                Ok(internal) => Ok(Node(Internal(internal), StoragePreference::NONE)),
+                Ok(internal) => Ok(Node(Internal(internal), storage_preference)),
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
         } else {
             Ok(Node(
                 PackedLeaf(PackedMap::new(data.into_vec())),
-                StoragePreference::NONE,
+                storage_preference
             ))
         }
     }
