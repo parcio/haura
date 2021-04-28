@@ -32,7 +32,7 @@ where
             if !node.is_too_large() {
                 return Ok(());
             }
-            warn!(
+            info!(
                 "{}, {:?}, lvl: {}, size: {}, {}",
                 node.kind(),
                 node.fanout(),
@@ -83,7 +83,7 @@ where
                 continue;
             }
             let (buffer, size_delta) = child_buffer.take_buffer();
-            warn!("Flushed {}", -size_delta);
+            info!("Flushed {}", -size_delta);
             child_buffer.add_size(size_delta);
             let size_delta_child =
                 child.insert_msg_buffer(buffer, self.msg_action(), storage_preference);

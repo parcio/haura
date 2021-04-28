@@ -16,7 +16,7 @@ where
 {
     pub(super) fn split_root_node(&self, mut root_node: X::CacheValueRefMut) {
         let before = root_node.size();
-        warn!(
+        info!(
             "Splitting root. {}, {:?}, {}, {}",
             root_node.kind(),
             root_node.fanout(),
@@ -33,7 +33,7 @@ where
             );
             self.dml.insert(node, self.tree_id())
         });
-        warn!("Root split done. {}, {}", root_node.size(), size_delta);
+        info!("Root split done. {}, {}", root_node.size(), size_delta);
         assert!(before as isize + size_delta == root_node.size() as isize);
         root_node.finish(size_delta);
     }
@@ -46,7 +46,7 @@ where
         let before = node.size();
         let (sibling, pivot_key, size_delta) = node.split();
         let select_right = sibling.size() > node.size();
-        warn!(
+        info!(
             "split {}: {} -> ({}, {}), {}",
             node.kind(),
             before,
