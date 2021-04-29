@@ -50,14 +50,12 @@ impl File {
 
 #[cfg(target_os = "linux")]
 fn get_block_device_size(file: &fs::File) -> io::Result<Block<u64>> {
-    use std::convert::TryInto;
-
     const BLKGETSIZE64: c_ulong = 2148012658;
     let mut size: u64 = 0;
     let result = unsafe {
         ioctl(
             file.as_raw_fd(),
-            BLKGETSIZE64.try_into().unwrap(),
+            BLKGETSIZE64,
             &mut size,
         )
     };
