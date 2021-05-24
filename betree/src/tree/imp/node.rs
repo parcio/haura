@@ -4,14 +4,14 @@ use super::{
     internal::{InternalNode, TakeChildBuffer},
     leaf::LeafNode,
     packed::PackedMap,
-    FillUpResult, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT, MIN_FLUSH_SIZE,
+    FillUpResult, KeyInfo, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT, MIN_FLUSH_SIZE,
     MIN_LEAF_NODE_SIZE,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Object, ObjectRef},
-    storage_pool::DiskOffset,
+    data_management::{HasStoragePreference, Object, ObjectRef},
     size::{Size, SizeMut, StaticSize},
+    storage_pool::DiskOffset,
     tree::MessageAction,
     StoragePreference,
 };
@@ -26,7 +26,7 @@ use std::{
 
 /// The tree node type.
 #[derive(Debug)]
-pub struct Node<N: 'static>(Inner<N>, pub(super) StoragePreference);
+pub struct Node<N: 'static>(Inner<N>);
 
 #[derive(Debug)]
 pub(super) enum Inner<N: 'static> {
@@ -35,7 +35,27 @@ pub(super) enum Inner<N: 'static> {
     Internal(InternalNode<ChildBuffer<N>>),
 }
 
-impl<R: ObjectRef> Object<R> for Node<R> {
+impl<R: HasStoragePreference> HasStoragePreference for Node<R> {
+    fn current_preference(&self) -> Option<StoragePreference> {
+        match self.0 {
+            PackedLeaf(ref map) => None,
+            Leaf(ref leaf) => leaf.current_preference(),
+            Internal(ref internal) => internal.current_preference(),
+        }
+    }
+
+    fn recalculate(&self) -> StoragePreference {
+        match self.0 {
+            PackedLeaf(ref map) => {
+                unreachable!("packed leaves are never written back, have no preference")
+            }
+            Leaf(ref leaf) => leaf.recalculate(),
+            Internal(ref internal) => internal.recalculate(),
+        }
+    }
+}
+
+impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
     fn pack<W: Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()),
@@ -49,17 +69,22 @@ impl<R: ObjectRef> Object<R> for Node<R> {
     }
 
     fn unpack_at(offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error> {
-        let storage_preference = StoragePreference::new(offset.storage_class());
         if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
-            match deserialize(&data[4..]) {
-                Ok(internal) => Ok(Node(Internal(internal), storage_preference)),
+            match deserialize::<InternalNode<_>>(&data[4..]) {
+                Ok(internal) => {
+                    let storage_preference = StoragePreference::new(offset.storage_class());
+                    internal.storage_preference.set(storage_preference);
+                    Ok(Node(Internal(internal)))
+                }
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
         } else {
-            Ok(Node(
-                PackedLeaf(PackedMap::new(data.into_vec())),
-                storage_preference
-            ))
+            // storage_preference is not preserved for packed leaves,
+            // because they will not be written back to disk until modified,
+            // and every modification requires them to be unpacked.
+            // The leaf contents are scanned cheaply during unpacking, which
+            // recalculates the correct storage_preference for the contained keys.
+            Ok(Node(PackedLeaf(PackedMap::new(data.into_vec()))))
         }
     }
 
@@ -83,10 +108,6 @@ impl<R: ObjectRef> Object<R> for Node<R> {
             }
         }
         Ok(())
-    }
-
-    fn storage_preference(&self) -> StoragePreference {
-        self.1
     }
 }
 
@@ -152,7 +173,7 @@ impl<N> Node<N> {
     }
 
     fn take(&mut self) -> Self {
-        replace(self, Self::empty_leaf(self.1))
+        replace(self, Self::empty_leaf())
     }
 
     pub(super) fn has_too_low_fanout(&self) -> bool {
@@ -193,8 +214,8 @@ impl<N> Node<N> {
         }
     }
 
-    pub(super) fn empty_leaf(storage_preference: StoragePreference) -> Self {
-        Node(Leaf(LeafNode::new()), storage_preference)
+    pub(super) fn empty_leaf() -> Self {
+        Node(Leaf(LeafNode::new()))
     }
 
     pub(super) fn level(&self) -> u32 {
@@ -225,35 +246,27 @@ impl<N: StaticSize> Node<N> {
             Leaf(ref mut leaf) => {
                 let (right_sibling, pivot_key, _) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
-                (Node(Leaf(right_sibling), left_sibling.1), pivot_key, 0)
+                (Node(Leaf(right_sibling)), pivot_key, 0)
             }
             Internal(ref mut internal) => {
                 let (right_sibling, pivot_key, _) = internal.split();
-                (
-                    Node(Internal(right_sibling), left_sibling.1),
-                    pivot_key,
-                    internal.level(),
-                )
+                (Node(Internal(right_sibling)), pivot_key, internal.level())
             }
         };
         debug!("Root split pivot key: {:?}", pivot_key);
-        let storage_pref = left_sibling.1;
-        *self = Node(
-            Internal(InternalNode::new(
-                ChildBuffer::new(allocate_obj(left_sibling)),
-                ChildBuffer::new(allocate_obj(right_sibling)),
-                pivot_key,
-                cur_level + 1,
-            )),
-            storage_pref,
-        );
+        *self = Node(Internal(InternalNode::new(
+            ChildBuffer::new(allocate_obj(left_sibling)),
+            ChildBuffer::new(allocate_obj(right_sibling)),
+            pivot_key,
+            cur_level + 1,
+        )));
         let size_after = self.size();
         size_after as isize - size_before as isize
     }
 }
 
 pub(super) enum GetResult<'a, N: 'a> {
-    Data(Option<SlicedCowBytes>),
+    Data(Option<(KeyInfo, SlicedCowBytes)>),
     NextNode(&'a RwLock<N>),
 }
 
@@ -266,10 +279,14 @@ pub(super) enum GetRangeResult<'a, T, N: 'a> {
 }
 
 impl<N> Node<N> {
-    pub(super) fn get(&self, key: &[u8], msgs: &mut Vec<SlicedCowBytes>) -> GetResult<N> {
+    pub(super) fn get(
+        &self,
+        key: &[u8],
+        msgs: &mut Vec<(KeyInfo, SlicedCowBytes)>,
+    ) -> GetResult<N> {
         match self.0 {
             PackedLeaf(ref map) => GetResult::Data(map.get(key)),
-            Leaf(ref leaf) => GetResult::Data(leaf.get(key)),
+            Leaf(ref leaf) => GetResult::Data(leaf.get_with_info(key)),
             Internal(ref internal) => {
                 let (child_np, msg) = internal.get(key);
                 if let Some(msg) = msg {
@@ -285,8 +302,9 @@ impl<N> Node<N> {
         key: &[u8],
         left_pivot_key: &mut Option<CowBytes>,
         right_pivot_key: &mut Option<CowBytes>,
-        all_msgs: &mut BTreeMap<CowBytes, Vec<SlicedCowBytes>>,
-    ) -> GetRangeResult<Box<dyn Iterator<Item = (&'a [u8], SlicedCowBytes)> + 'a>, N> {
+        all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
+    ) -> GetRangeResult<Box<dyn Iterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))> + 'a>, N>
+    {
         match self.0 {
             PackedLeaf(ref map) => GetRangeResult::Data(Box::new(map.get_all())),
             Leaf(ref leaf) => GetRangeResult::Data(Box::new(
@@ -321,11 +339,11 @@ impl<N> Node<N> {
         M: MessageAction,
     {
         self.ensure_unpacked();
-        self.1 = StoragePreference::choose_faster(self.1, storage_preference);
+        let keyinfo = KeyInfo { storage_preference };
         match self.0 {
             PackedLeaf(_) => unreachable!(),
-            Leaf(ref mut leaf) => leaf.insert(key, msg, msg_action),
-            Internal(ref mut internal) => internal.insert(key, msg, msg_action),
+            Leaf(ref mut leaf) => leaf.insert(key, keyinfo, msg, msg_action),
+            Internal(ref mut internal) => internal.insert(key, keyinfo, msg, msg_action),
         }
     }
 
@@ -336,11 +354,11 @@ impl<N> Node<N> {
         storage_preference: StoragePreference,
     ) -> isize
     where
-        I: IntoIterator<Item = (CowBytes, SlicedCowBytes)>,
+        I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
     {
         self.ensure_unpacked();
-        self.1 = StoragePreference::choose_faster(self.1, storage_preference);
+        let keyinfo = KeyInfo { storage_preference };
         match self.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
@@ -381,7 +399,7 @@ impl<N: StaticSize> Node<N> {
             Leaf(ref mut leaf) => {
                 let (node, pivot_key, size_delta) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
-                (Node(Leaf(node), self.1), pivot_key, size_delta)
+                (Node(Leaf(node)), pivot_key, size_delta)
             }
             Internal(ref mut internal) => {
                 assert!(
@@ -392,7 +410,7 @@ impl<N: StaticSize> Node<N> {
                     internal.actual_size()
                 );
                 let (node, pivot_key, size_delta) = internal.split();
-                (Node(Internal(node), self.1), pivot_key, size_delta)
+                (Node(Internal(node)), pivot_key, size_delta)
             }
         }
     }

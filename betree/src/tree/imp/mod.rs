@@ -6,7 +6,7 @@ use super::{
 use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, DmlBase, HandlerDml, ObjectRef},
+    data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef},
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
     tree::MessageAction,
@@ -119,7 +119,7 @@ where
         dml: X,
         storage_preference: StoragePreference,
     ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(storage_preference), tree_id);
+        let root_node = dml.insert(Node::empty_leaf(), tree_id);
         Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 
@@ -359,7 +359,7 @@ where
 impl<X, R, M, I> TreeBaseLayer<M> for Tree<X, M, I>
 where
     X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
@@ -370,12 +370,12 @@ where
         let mut data = loop {
             let next_node = match node.get(key, &mut msgs) {
                 GetResult::NextNode(np) => self.get_node(np)?,
-                GetResult::Data(data) => break data,
+                GetResult::Data(data) => break data.map(|(_info, data)| data),
             };
             node = next_node;
         };
 
-        for msg in msgs.into_iter().rev() {
+        for (_keyinfo, msg) in msgs.into_iter().rev() {
             self.msg_action().apply(key, &msg, &mut data);
         }
 
@@ -442,7 +442,7 @@ where
 impl<X, R, M, I> TreeLayer<M> for Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
@@ -472,9 +472,9 @@ where
 impl<X, R, M, I> ErasedTreeSync for Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<R, X::Info, M>>,
 {
     type Pointer = X::ObjectPointer;
     type ObjectRef = R;
