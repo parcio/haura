@@ -4,7 +4,6 @@
 //! size when [`bincode`](../../bincode/index.html) is used.
 
 use parking_lot::RwLock;
-use std::collections::BTreeMap;
 
 /// A trait which represents an serializable object
 /// that can quickly calculate the size of it's
