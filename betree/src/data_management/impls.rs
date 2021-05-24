@@ -1,13 +1,14 @@
-use super::{errors::*, DmlBase, Handler, HandlerTypes, Object, PodType};
+use super::{errors::*, DmlBase, Handler, HandlerTypes, HasStoragePreference, Object, PodType};
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     buffer::Buf,
     cache::{AddSize, Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
-    compression::{CompressionBuilder, CompressionState, DecompressionState, DecompressionTag},
+    compression::{CompressionBuilder, DecompressionTag},
     size::{SizeMut, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer},
+    storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
+    StoragePreference,
 };
 use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -17,7 +18,6 @@ use serde::{
 use stable_deref_trait::StableDeref;
 use std::{
     collections::HashMap,
-    convert::TryFrom,
     mem::{replace, transmute, ManuallyDrop},
     ops::{Deref, DerefMut},
     pin::Pin,
@@ -71,6 +71,25 @@ impl<D, I, G: Copy> ObjectRef<ObjectPointer<D, I, G>> {
     }
 }
 
+impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
+    fn current_preference(&self) -> Option<StoragePreference> {
+        Some(self.correct_preference())
+    }
+
+    fn recalculate(&self) -> StoragePreference {
+        self.correct_preference()
+    }
+
+    fn correct_preference(&self) -> StoragePreference {
+        match self {
+            ObjectRef::Unmodified(p) => p.correct_preference(),
+            ObjectRef::Modified(_) | ObjectRef::InWriteback(_) => {
+                unreachable!("Can't query storage preference for modified objects")
+            }
+        }
+    }
+}
+
 impl<P: StaticSize> StaticSize for ObjectRef<P> {
     fn size() -> usize {
         P::size()
@@ -114,6 +133,20 @@ pub struct ObjectPointer<D, I, G> {
     size: Block<u32>,
     info: I,
     generation: G,
+}
+
+impl<D, I, G> HasStoragePreference for ObjectPointer<D, I, G> {
+    fn current_preference(&self) -> Option<StoragePreference> {
+        Some(self.correct_preference())
+    }
+
+    fn recalculate(&self) -> StoragePreference {
+        self.correct_preference()
+    }
+
+    fn correct_preference(&self) -> StoragePreference {
+        StoragePreference::new(self.offset.storage_class())
+    }
 }
 
 impl<D: StaticSize, I: StaticSize, G: StaticSize> StaticSize for ObjectPointer<D, I, G> {
@@ -214,12 +247,6 @@ where
     pub fn pool(&self) -> &SPL {
         &self.pool
     }
-
-    fn iter_vdevs<'s>(&'s self) -> impl Iterator<Item = (u8, u16)> + 's {
-        let spl = self.pool();
-        (0..spl.storage_class_count())
-            .flat_map(move |class| (0..spl.disk_count(class)).map(move |disk_id| (class, disk_id)))
-    }
 }
 
 impl<E, SPL, H> DmlBase for Dmu<E, SPL, H, H::Info, H::Generation>
@@ -303,7 +330,7 @@ where
 
         let object: H::Object = {
             let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack(data).chain_err(|| ErrorKind::DeserializationError)?
+            Object::unpack_at(op.offset, data).chain_err(|| ErrorKind::DeserializationError)?
         };
         let key = ObjectKey::Unmodified { offset, generation };
         self.insert_object_into_cache(key, RwLock::new(object));
@@ -425,7 +452,7 @@ where
         }
 
         let generation = self.handler.current_generation();
-        let storage_preference = object.storage_preference();
+        let storage_preference = object.correct_preference();
         let storage_class = storage_preference
             .preferred_class()
             .unwrap_or(self.default_storage_class);
@@ -513,11 +540,14 @@ where
     }
 
     fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, Error> {
+        assert!(storage_preference < NUM_STORAGE_CLASSES as u8);
         if size >= Block(2048) {
             warn!("Very large allocation requested: {:?}", size);
         }
 
-        'class: for class in storage_preference..self.pool.storage_class_count() {
+        let strategy = self.alloc_strategy[storage_preference as usize];
+
+        'class: for &class in strategy.iter().flatten() {
             let disks_in_class = self.pool.disk_count(class);
             if disks_in_class == 0 {
                 continue;
@@ -883,7 +913,7 @@ where
                 .decompression_tag
                 .new_decompression()?
                 .decompress(&compressed_data)?;
-            Object::unpack(data).chain_err(|| ErrorKind::DeserializationError)?
+            Object::unpack_at(ptr.offset, data).chain_err(|| ErrorKind::DeserializationError)?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset,
@@ -943,6 +973,23 @@ where
 
     fn spl(&self) -> &Self::Spl {
         &self.pool
+    }
+}
+
+impl<E, SPL, H, I, G> super::DmlWithCache for Dmu<E, SPL, H, I, G>
+where
+    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    SPL: StoragePoolLayer,
+    SPL::Checksum: StaticSize,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H::Object: Object<<Self as DmlBase>::ObjectRef>,
+    I: PodType,
+    G: PodType,
+{
+    type CacheStats = E::Stats;
+
+    fn cache_stats(&self) -> Self::CacheStats {
+        self.cache.read().stats()
     }
 }
 
