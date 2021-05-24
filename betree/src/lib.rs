@@ -45,6 +45,7 @@ pub mod storage_pool;
 pub mod tree;
 pub mod vdev;
 
+pub mod metrics;
 pub mod object;
 
 #[cfg(feature = "init_env_logger")]
@@ -52,5 +53,5 @@ pub mod env_logger;
 
 pub use self::{
     database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
-    storage_pool::{StoragePoolConfiguration, StoragePreference},
+    storage_pool::{AtomicStoragePreference, StoragePoolConfiguration, StoragePreference},
 };
