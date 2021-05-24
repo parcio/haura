@@ -184,6 +184,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'st
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
     default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
+    alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
     pool: SPL,
     cache: RwLock<E>,
     written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum, I, G>>>,
@@ -204,6 +205,7 @@ where
         default_compression: Box<dyn CompressionBuilder>,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
         pool: SPL,
+        alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
         handler: H,
     ) -> Self {
@@ -222,6 +224,7 @@ where
             default_compression,
             default_storage_class: 0,
             default_checksum_builder,
+            alloc_strategy,
             pool,
             cache: RwLock::new(cache),
             written_back: Mutex::new(HashMap::new()),
