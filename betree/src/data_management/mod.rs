@@ -66,12 +66,35 @@ pub trait HandlerTypes: Sized {
     type Info: PodType;
 }
 
+/// Implementing types have an allocation preference, which can be invalidated
+/// and recomputed as necessary.
+pub trait HasStoragePreference {
+    /// Return the [StoragePreference], if it is known to be correct,
+    /// return None if it was invalidated and needs to be recalculated.
+    fn current_preference(&self) -> Option<StoragePreference>;
+
+    /// Recalculate the storage preference, potentially scanning
+    /// through all data contained by this value.
+    ///
+    /// Implementations are expected to cache the computed preference,
+    /// so that immediately subsequent calls to [HasStoragePreference::current_pref] return Some.
+    fn recalculate(&self) -> StoragePreference;
+
+    /// Returns a correct preference, recalculating it if needed.
+    fn correct_preference(&self) -> StoragePreference {
+        match self.current_preference() {
+            Some(pref) => pref,
+            None => self.recalculate(),
+        }
+    }
+}
+
 /// An object managed by a `Dml`.
-pub trait Object<R>: Size + Sized {
+pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
     fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
     /// Unpacks the object from the given `data`.
-    fn unpack(data: Box<[u8]>) -> Result<Self, io::Error>;
+    fn unpack_at(disk_offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.
     fn debug_info(&self) -> String;
@@ -82,11 +105,6 @@ pub trait Object<R>: Size + Sized {
     fn for_each_child<E, F>(&mut self, f: F) -> Result<(), E>
     where
         F: FnMut(&mut R) -> Result<(), E>;
-
-    /// Object-specific storage preference
-    fn storage_preference(&self) -> StoragePreference {
-        StoragePreference::NONE
-    }
 }
 
 /// A `Dml` for a specific `Handler`.
@@ -236,6 +254,12 @@ pub trait DmlWithSpl {
     type Spl;
 
     fn spl(&self) -> &Self::Spl;
+}
+
+pub trait DmlWithCache {
+    type CacheStats: serde::Serialize;
+
+    fn cache_stats(&self) -> Self::CacheStats;
 }
 
 mod delegation;
