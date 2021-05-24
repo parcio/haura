@@ -190,9 +190,16 @@ impl AlignedBuf {
         Block(0)..buf.capacity
     }
 
-    fn unwrap_unique(mut self) -> Self {
-        Arc::get_mut(&mut self.buf).expect("AlignedBuf was not unique");
-        self
+    fn unwrap_storage(self) -> AlignedStorage {
+        Arc::try_unwrap(self.buf)
+            .expect("AlignedBuf was not unique")
+            .into_inner()
+    }
+
+    fn unwrap_unique(self) -> Self {
+        AlignedBuf {
+            buf: Arc::new(UnsafeCell::new(self.unwrap_storage())),
+        }
     }
 }
 
@@ -205,6 +212,7 @@ impl From<Box<[u8]>> for AlignedBuf {
     }
 }
 
+/// A shared read-only buffer, internally using block-aligned allocations.
 #[derive(Clone)]
 pub struct Buf {
     buf: AlignedBuf,
@@ -217,18 +225,25 @@ impl fmt::Debug for Buf {
     }
 }
 
+/// A fixed-size mutable buffer, which can be split into disjoint pieces
+/// to create multiple mutable references to a single shared buffer in a safe manner.
 // This is only safe as long as no 2 MutBufs with overlapping ranges share the same Arc.
 pub struct MutBuf {
     buf: AlignedBuf,
     range: Range<Block<u32>>,
 }
 
+/// An **un**shared mutable buffer, which can be appended to.
+/// Out of [Buf], [MutBuf], and [BufWrite], by which an existing block-aligned
+/// buffer can be grown.
 pub struct BufWrite {
     buf: AlignedStorage,
     size: u32,
 }
 
 impl BufWrite {
+    /// Create an empty [BufWrite] with the specified capacity.
+    /// The backing storage is zeroed.
     pub fn with_capacity(capacity: Block<u32>) -> Self {
         Self {
             buf: AlignedStorage::zeroed(capacity),
@@ -236,6 +251,9 @@ impl BufWrite {
         }
     }
 
+    /// Convert this to a read-only [Buf].
+    /// This is always safe because [BufWrite] can't be split,
+    /// and therefore no aliasing writable pieces can remain.
     pub fn into_buf(self) -> Buf {
         Buf::from_aligned(AlignedBuf {
             buf: Arc::new(UnsafeCell::new(self.buf)),
@@ -310,12 +328,15 @@ impl Buf {
         }
     }
 
+    /// Create a [Buf] from a byte vector. If `b.len()` is not a multiple of the block size,
+    /// the size will be rounded up to the next multiple and filled with zeroes.
     pub fn from_zero_padded(mut b: Vec<u8>) -> Self {
         let padded_size = Block::round_up_from_bytes(b.len());
         b.resize(padded_size.to_bytes(), 0);
         Self::from(b.into_boxed_slice())
     }
 
+    /// Create a [Buf] filled with the specified amount of zeroes.
     pub fn zeroed(size: Block<u32>) -> Self {
         Self::from_aligned(AlignedBuf::zeroed(size))
     }
@@ -329,6 +350,8 @@ impl Buf {
         }
     }
 
+    /// Convert to a mutable [BufWrite], if this is the only [Buf] referencing the backing storage.
+    /// Panics if this [Buf] was not unique.
     pub fn into_buf_write(self) -> BufWrite {
         let storage = Arc::try_unwrap(self.buf.buf)
             .expect("AlignedBuf was not unique")
@@ -339,6 +362,8 @@ impl Buf {
         }
     }
 
+    /// If this [Buf] is unique, return its backing buffer without reallocation or copying.
+    /// Panics if this [Buf] was not unique.
     pub fn into_boxed_slice(self) -> Box<[u8]> {
         let storage = ManuallyDrop::new(
             Arc::try_unwrap(self.buf.buf)
@@ -354,14 +379,17 @@ impl Buf {
         }
     }
 
+    /// Return the block range accessible via this [Buf].
     pub fn range(&self) -> &Range<Block<u32>> {
         &self.range
     }
 
+    /// Return the block size of this [Buf]'s [Block::range].
     pub fn size(&self) -> Block<u32> {
         Block(self.range.end.as_u32() - self.range.start.as_u32())
     }
 
+    /// Split this [Buf] into two disjoint [Buf]s at `mid`.
     pub fn split_at(self, mid: Block<u32>) -> (Self, Self) {
         let (left, right) = split_range_at(&self.range, mid);
 
@@ -379,6 +407,7 @@ impl Buf {
 }
 
 impl MutBuf {
+    /// Split this [MutBuf] into two disjoint [MutBuf]s at `mid`.
     pub fn split_at(self, mid: Block<u32>) -> (Self, Self) {
         let (left, right) = split_range_at(&self.range, mid);
 
@@ -399,6 +428,7 @@ impl MutBuf {
         Buf::from_aligned(self.buf.unwrap_unique())
     }
 
+    /// Return the block range accessible via this [MutBuf].
     pub fn range(&self) -> &Range<Block<u32>> {
         &self.range
     }
