@@ -28,6 +28,11 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
     /// A serializable configuration type for this `StoragePoolLayer` object.
     type Configuration: Serialize + DeserializeOwned + fmt::Debug;
 
+    /// A serializable type to be returned by the `metrics` function,
+    /// describing interesting statistics of this layer.
+    /// Can be (), if none are available.
+    type Metrics: Serialize;
+
     /// Constructs a new object using the given `Configuration`.
     fn new(configuration: &Self::Configuration) -> StoragePoolResult<Self>;
 
@@ -87,6 +92,9 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
 
     /// Flushes the write-back queue and the underlying storage backend.
     fn flush(&self) -> VdevResult<()>;
+
+    /// Gather layer-specific metrics.
+    fn metrics(&self) -> Self::Metrics;
 }
 
 mod disk_offset;

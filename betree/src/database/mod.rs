@@ -1,9 +1,9 @@
 //! This module provides the Database Layer.
 use crate::{
     atomic_option::AtomicOption,
-    cache::{Cache, ClockCache},
+    cache::ClockCache,
     checksum::{XxHash, XxHashBuilder},
-    compression::{self, CompressionConfiguration},
+    compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
         self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml,
@@ -11,12 +11,12 @@ use crate::{
     metrics::{metrics_init, MetricsConfiguration},
     size::StaticSize,
     storage_pool::{
-        DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit, TierConfiguration,
+        DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
         NUM_STORAGE_CLASSES,
     },
     tree::{
-        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, MessageAction, Node, Tree,
-        TreeBaseLayer, TreeLayer,
+        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
+        TreeLayer,
     },
     vdev::Block,
     StoragePreference,
@@ -45,10 +45,12 @@ mod superblock;
 #[cfg(feature = "figment_config")]
 mod figment;
 
-pub use self::{handler::Handler, superblock::Superblock};
-
 pub use self::{
-    dataset::Dataset, errors::*, handler::update_allocation_bitmap_msg, snapshot::Snapshot,
+    dataset::Dataset,
+    errors::*,
+    handler::{update_allocation_bitmap_msg, Handler},
+    snapshot::Snapshot,
+    superblock::Superblock,
 };
 
 const ROOT_DATASET_ID: DatasetId = DatasetId(0);
@@ -75,6 +77,12 @@ pub(crate) type MessageTree<Dmu, Message> =
 pub(crate) type RootTree<Dmu> = MessageTree<Dmu, DefaultMessageAction>;
 pub(crate) type DatasetTree<Dmu> = RootTree<Dmu>;
 
+/// This trait describes a multi-step database initialisation procedure.
+/// Each function is called sequentially to configure the individual components
+/// of the database.
+///
+/// Components of lower layers (Spu, Dmu) can be replaced, but the [handler::Handler] structure
+/// belongs to the database layer, and is necessary for the database to function.
 // TODO: Is this multi-step process unnecessarily rigid? Would fewer functions defeat the purpose?
 pub trait DatabaseBuilder
 where
@@ -85,21 +93,33 @@ where
         + DmlWithHandler<Handler = handler::Handler>
         + DmlWithSpl<Spl = Self::Spu>
         + DmlWithCache
+        + Send
+        + Sync
         + 'static,
 {
-    type Spu: StoragePoolLayer;
-    type Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>
-        + Send
-        + Sync;
+    /// A storage pool unit, implementing the storage pool layer trait
+    type Spu;
+    /// A data management unit
+    type Dmu;
 
+    /// Separate actions to perform before building the database, e.g. setting up metrics
     fn pre_build(&self) {}
+    /// Assemble a new storage layer unit from `self`
     fn new_spu(&self) -> Result<Self::Spu>;
+    /// Assemble a new [handler::Handler] for `spu`, optionally configured from `self`
     fn new_handler(&self, spu: &Self::Spu) -> handler::Handler;
+    /// Assemble a new data management unit for `spu` and `handler`, optionally configured from
+    /// `self`
     fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> Self::Dmu;
+    /// Find and return the location of the root tree root node to use.
+    /// This may create a new root tree, then return the location of its new root node,
+    /// or retrieve a previously written root tree.
     fn select_root_tree(&self, dmu: Arc<Self::Dmu>)
         -> Result<(RootTree<Self::Dmu>, ObjectPointer)>;
 }
 
+/// This enum controls whether to search for an existing database to reuse,
+/// and whether to create a new one if none could be found or.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum AccessMode {
     /// Read and use an existing superblock, abort if none is found.
@@ -176,7 +196,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         }
     }
 
-    fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> RootDmu {
+    fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> Self::Dmu {
         let mut strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES] =
             [[None; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES];
 
@@ -201,7 +221,10 @@ impl DatabaseBuilder for DatabaseConfiguration {
         )
     }
 
-    fn select_root_tree(&self, dmu: Arc<RootDmu>) -> Result<(RootTree<Self::Dmu>, ObjectPointer)> {
+    fn select_root_tree(
+        &self,
+        dmu: Arc<Self::Dmu>,
+    ) -> Result<(RootTree<Self::Dmu>, ObjectPointer)> {
         if let Some(cfg) = &self.metrics {
             metrics_init::<Self>(&cfg, dmu.clone())?;
         }
@@ -262,8 +285,8 @@ impl DatabaseBuilder for DatabaseConfiguration {
 }
 
 type ErasedTree = dyn ErasedTreeSync<
-        Pointer = <RootDmu as DmlBase>::ObjectPointer,
-        ObjectRef = <RootDmu as DmlBase>::ObjectRef,
+        Pointer = ObjectPointer,
+        ObjectRef = ObjectRef,
     > + Send
     + Sync;
 
@@ -402,6 +425,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
         Ok(())
     }
 
+    #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
     pub fn root_tree(&self) -> &RootTree<Config::Dmu> {
         &self.root_tree
@@ -511,6 +535,7 @@ impl DeadListData {
     }
 }
 
+/// Internal identifier for a dataset
 #[derive(
     Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -591,6 +616,7 @@ impl<P: DeserializeOwned> DatasetData<P> {
     }
 }
 
+/// Internal identifier of a generation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Generation(u64);
 
