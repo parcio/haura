@@ -8,20 +8,40 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, DmlBase, HandlerDml, ObjectRef},
     range_validation::is_inclusive_non_empty,
+    size::StaticSize,
     tree::MessageAction,
     StoragePreference,
 };
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
-use std::{
-    borrow::Borrow, cmp, collections::Bound, fmt, marker::PhantomData, mem::replace,
-    ops::RangeBounds,
-};
+use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
 
 #[derive(Debug)]
 enum FillUpResult {
     Rebalanced(CowBytes),
     Merged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct KeyInfo {
+    storage_preference: StoragePreference,
+}
+
+impl StaticSize for KeyInfo {
+    fn size() -> usize {
+        mem::size_of::<StoragePreference>()
+    }
+}
+
+impl KeyInfo {
+    pub(crate) fn merge_with_upper(self, upper: KeyInfo) -> KeyInfo {
+        KeyInfo {
+            storage_preference: StoragePreference::choose_faster(
+                self.storage_preference,
+                upper.storage_preference,
+            ),
+        }
+    }
 }
 
 pub(super) const MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
