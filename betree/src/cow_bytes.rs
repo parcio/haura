@@ -265,6 +265,16 @@ impl SlicedCowBytes {
             len,
         }
     }
+
+    /// Returns a new subslice which points to `self[pos..]`.
+    pub fn slice_from(self, pos: u32) -> Self {
+        assert!(pos <= self.len);
+        SlicedCowBytes {
+            data: self.data,
+            pos: self.pos + pos,
+            len: self.len - pos,
+        }
+    }
 }
 
 impl From<CowBytes> for SlicedCowBytes {
