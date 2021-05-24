@@ -5,7 +5,7 @@ use super::{
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, ObjectRef},
-    tree::{errors::*, MessageAction},
+    tree::{errors::*, KeyInfo, MessageAction},
 };
 use std::{
     borrow::Borrow,
@@ -26,7 +26,7 @@ enum MyBound<T> {
 
 /// The range iterator of a tree.
 pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
-    buffer: VecDeque<(CowBytes, SlicedCowBytes)>,
+    buffer: VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
     min_key: MyBound<Vec<u8>>,
     /// Always inclusive
     max_key: Option<Vec<u8>>,
@@ -46,8 +46,8 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(x) = self.buffer.pop_front() {
-                return Some(Ok(x));
+            if let Some((key, (keyinfo, data))) = self.buffer.pop_front() {
+                return Some(Ok((key, data)));
             } else if self.finished {
                 return None;
             } else if let Err(e) = self.fill_buffer() {
@@ -160,7 +160,7 @@ where
     fn leaf_range_query(
         &self,
         key: &[u8],
-        data: &mut VecDeque<(CowBytes, SlicedCowBytes)>,
+        data: &mut VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
         prefetch: &mut Option<X::Prefetch>,
     ) -> Result<Option<CowBytes>, Error> {
         let result = {
@@ -218,11 +218,11 @@ where
         &self,
         left_pivot_key: &Option<CowBytes>,
         right_pivot_key: &Option<CowBytes>,
-        messages: BTreeMap<CowBytes, Vec<SlicedCowBytes>>,
+        messages: BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
         leaf_entries: J,
-        data: &mut VecDeque<(CowBytes, SlicedCowBytes)>,
+        data: &mut VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
     ) where
-        J: Iterator<Item = (&'a [u8], SlicedCowBytes)>,
+        J: Iterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))>,
     {
         // disregard any messages with keys outside of
         // left_pivot_key..right_pivot_key.
@@ -239,14 +239,28 @@ where
         // TODO
         let leaf_entries = leaf_entries.map(|(k, v)| (CowBytes::from(k), v));
 
-        for (key, msgs, mut value) in MergeByKeyIterator::new(msgs_iter, leaf_entries) {
+        for (key, msgs, value) in MergeByKeyIterator::new(msgs_iter, leaf_entries) {
+            let (mut keyinfo, mut value) = match value {
+                Some((keyinfo, value)) => (Some(keyinfo), Some(value)),
+                None => (None, None),
+            };
+
             if let Some(msgs) = msgs {
-                for msg in msgs.into_iter().rev() {
+                for (new_keyinfo, msg) in msgs.into_iter().rev() {
+                    if let Some(previous_keyinfo) = keyinfo {
+                        keyinfo = Some(previous_keyinfo.merge_with_upper(new_keyinfo));
+                    } else {
+                        keyinfo = Some(new_keyinfo)
+                    }
+
                     self.msg_action().apply(&key, &msg, &mut value);
                 }
             }
             if let Some(value) = value {
-                data.push_back((key, value));
+                // Unwrap is safe here, keyinfo can only be initially None if value
+                // is also None. And on every occasion where value can become Some,
+                // keyinfo has already been set to Some.
+                data.push_back((key, (keyinfo.unwrap(), value)));
             }
         }
     }
