@@ -372,10 +372,12 @@ mod tests {
                     // TODO multiple?
                     let offset = g.gen_range(0, 10);
                     let data: Vec<_> = Arbitrary::arbitrary(g);
-                    DefaultMessageActionMsg(DefaultMessageAction::build_upsert_msg(&[Upsert {
-                        offset,
-                        data: &data,
-                    }]))
+                    DefaultMessageActionMsg(DefaultMessageAction::build_upsert_msg(&[
+                        Upsert::Bytes {
+                            offset_bytes: offset,
+                            data: &data,
+                        },
+                    ]))
                 }
                 MsgType::OverwriteNone => {
                     DefaultMessageActionMsg(DefaultMessageAction::delete_msg())
