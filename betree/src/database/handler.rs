@@ -3,7 +3,7 @@ use super::{
     ObjectRef, TreeInner,
 };
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE, SEGMENT_SIZE_BYTES},
+    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
     data_management::{self, HandlerDml},
@@ -12,7 +12,7 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use byteorder::{BigEndian, ByteOrder};
 use owning_ref::OwningRef;
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
@@ -34,15 +34,19 @@ pub fn update_allocation_bitmap_msg(
     DefaultMessageAction::upsert_bits_msg(segment_offset, size.0, action.as_bool())
 }
 
+/// The database handler, holding management data for interactions
+/// between the database and data management layers.
 pub struct Handler {
-    pub root_tree_inner: AtomicOption<Arc<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
-    pub root_tree_snapshot: RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
-    pub current_generation: SeqLock<Generation>,
-    pub free_space: HashMap<(u8, u16), AtomicU64>,
-    pub delayed_messages: Mutex<Vec<(Box<[u8]>, SlicedCowBytes)>>,
-    pub last_snapshot_generation: RwLock<HashMap<DatasetId, Generation>>,
-    pub allocations: AtomicU64,
-    pub old_root_allocation: SeqLock<Option<(DiskOffset, Block<u32>)>>,
+    pub(crate) root_tree_inner:
+        AtomicOption<Arc<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
+    pub(crate) root_tree_snapshot:
+        RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
+    pub(crate) current_generation: SeqLock<Generation>,
+    pub(crate) free_space: HashMap<(u8, u16), AtomicU64>,
+    pub(crate) delayed_messages: Mutex<Vec<(Box<[u8]>, SlicedCowBytes)>>,
+    pub(crate) last_snapshot_generation: RwLock<HashMap<DatasetId, Generation>>,
+    pub(crate) allocations: AtomicU64,
+    pub(crate) old_root_allocation: SeqLock<Option<(DiskOffset, Block<u32>)>>,
 }
 
 impl Handler {

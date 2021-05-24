@@ -6,6 +6,7 @@ error_chain! {
         TreeError(crate::tree::Error);
         SerializationError(::bincode::Error);
         ConfigurationError(crate::storage_pool::configuration::Error);
+        Io(std::io::Error);
     }
     errors {
         InvalidSuperblock

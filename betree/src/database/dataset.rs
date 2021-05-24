@@ -32,20 +32,27 @@ impl<Config: DatabaseBuilder> Database<Config> {
         Ok(DatasetId::unpack(&data))
     }
 
-    pub fn open_dataset(
-        &mut self,
-        name: &[u8],
-        storage_preference: StoragePreference,
-    ) -> Result<Dataset<Config>> {
-        self.open_custom_dataset::<DefaultMessageAction>(name, storage_preference)
+    /// A convenience instantiation of [Database::open_custom_dataset] with [DefaultMessageAction].
+    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
+        self.open_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
+    /// A convenience instantiation of [Database::create_custom_dataset] with [DefaultMessageAction].
     pub fn create_dataset(
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        self.create_custom_dataset::<DefaultMessageAction>(name, storage_preference)
+        self.create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
+    }
+
+    /// A convenience instantiation of [Database::open_or_create_custom_dataset] with [DefaultMessageAction].
+    pub fn open_or_create_dataset(
+        &mut self,
+        name: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<Dataset<Config>> {
+        self.open_or_create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
     /// Opens a data set identified by the given name.
@@ -133,7 +140,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     /// Opens a dataset, creating a new one if none exists by the given name.
-    pub fn open_or_create_dataset<M: MessageAction + Default + 'static>(
+    pub fn open_or_create_custom_dataset<M: MessageAction + Default + 'static>(
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
