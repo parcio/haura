@@ -127,7 +127,7 @@ pub trait AddSize: Sized {
 }
 
 /// Interface to cache statistics.
-pub trait Stats: Display + Debug {
+pub trait Stats: Display + Debug + serde::Serialize {
     /// Returns the capacity of the cache in bytes.
     fn capacity(&self) -> usize;
     /// Returns the size of the cache in bytes.

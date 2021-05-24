@@ -55,7 +55,7 @@ impl<V> Deref for PinnedEntry<V> {
 unsafe impl<V> StableDeref for PinnedEntry<V> {}
 
 /// Cache statistics
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct CacheStats {
     capacity: usize,
     size: usize,
