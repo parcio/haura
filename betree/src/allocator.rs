@@ -4,7 +4,6 @@
 use crate::{cow_bytes::CowBytes, storage_pool::DiskOffset, vdev::Block};
 use bitvec::prelude::*;
 use byteorder::{BigEndian, ByteOrder};
-use std::{convert::TryInto, mem, u32};
 
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
