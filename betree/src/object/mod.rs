@@ -75,6 +75,7 @@ const OBJECT_ID_COUNTER_KEY: &[u8] = b"\0oid";
 /// fixed but unreliable size.
 pub struct ObjectId(u64);
 impl ObjectId {
+    #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
     pub fn as_u64(&self) -> u64 {
         self.0
@@ -103,8 +104,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
         storage_preference: StoragePreference,
     ) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
-            self.open_or_create_dataset(b"data", storage_preference)?,
-            self.open_or_create_dataset(b"meta", storage_preference)?,
+            self.open_or_create_custom_dataset(b"data", storage_preference)?,
+            self.open_or_create_custom_dataset(b"meta", storage_preference)?,
         )
     }
 
@@ -124,8 +125,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
         meta_name.extend_from_slice(b"meta");
 
         ObjectStore::with_datasets(
-            self.open_or_create_dataset(&data_name, storage_preference)?,
-            self.open_or_create_dataset(&meta_name, storage_preference)?,
+            self.open_or_create_custom_dataset(&data_name, storage_preference)?,
+            self.open_or_create_custom_dataset(&meta_name, storage_preference)?,
         )
     }
 }
@@ -199,6 +200,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         ))
     }
 
+    /// Open an existing object by key, return `None` if it doesn't exist.
+    /// As the object metadata needs to be queried anyway, it is also returned.
     pub fn open_object(
         &'os self,
         key: &[u8],
@@ -223,6 +226,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         }))
     }
 
+    /// Try to open an object, but create it if it didn't exist.
     pub fn open_or_create_object(
         &'os self,
         key: &[u8],
@@ -235,6 +239,11 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         }
     }
 
+    /// Unsafely construct an [ObjectHandle] from an [ObjectStore] and [Object] descriptor.
+    /// This is an escape mechanism means for when storing [ObjectHandle]s become too costly
+    /// or difficult, and doesn't protect from using mismatched [ObjectStore]s and [Object]s.
+    /// Operations on an [ObjectHandle] created for an [Object] that doesn't exist in the
+    /// [ObjectStore] it exists in, will result in undefined behaviour.
     pub fn handle_from_object(&'os self, object: Object) -> ObjectHandle<'os, Config> {
         ObjectHandle {
             store: self,
@@ -242,7 +251,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         }
     }
 
-    pub fn delete_object(&'os self, handle: &ObjectHandle<Config>) -> Result<()> {
+    /// Delete an existing object.
+    pub(crate) fn delete_object(&'os self, handle: &ObjectHandle<Config>) -> Result<()> {
         // FIXME: bad error handling, object can end up partially deleted
         // Delete metadata before data, otherwise object could be concurrently reopened,
         // rewritten, and deleted with a live handle.
@@ -260,11 +270,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         Ok(())
     }
 
-    pub fn close_object(&'os self, object: &ObjectHandle<Config>) -> Result<()> {
-        Ok(())
-    }
-
-    // TODO: return actual objects instead of objectinfos
+    /// Iterate objects whose keys are contained in the given range.
     pub fn list_objects<R, K>(
         &'os self,
         range: R,
@@ -315,6 +321,10 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     }
 }
 
+/// All the information necessary to quickly describe an object.
+///
+/// Strictly, either the key or id can unique identify an object, but
+/// the lookups/scans can be avoided by storing both of them together.
 #[derive(Debug, Clone)]
 pub struct Object {
     /// The key for which this object was opened.
@@ -328,13 +338,16 @@ pub struct Object {
 #[must_use]
 pub struct ObjectHandle<'os, Config: DatabaseBuilder> {
     store: &'os ObjectStore<Config>,
+    /// The [Object] addressed by this handle
     pub object: Object,
 }
 
 impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
-    /// Close this object, writing out its metadata
+    /// Close this object. This function doesn't do anything for now,
+    /// but might in the future.
     pub fn close(self) -> Result<()> {
-        self.store.close_object(&self)
+        // no-op for now
+        Ok(())
     }
 
     /// Delete this object
@@ -397,8 +410,10 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// and set the modification time to the current system time when the write was started.
     pub fn write_at(&self, mut buf: &[u8], offset: u64) -> result::Result<u64, (u64, Error)> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
-        let mut meta_change = MetaMessage::default();
-        meta_change.mtime = Some(SystemTime::now());
+        let mut meta_change = MetaMessage {
+            mtime: Some(SystemTime::now()),
+            ..MetaMessage::default()
+        };
 
         let mut total_written = 0;
         for chunk in chunk_range.split_at_chunk_bounds() {

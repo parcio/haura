@@ -91,6 +91,7 @@ impl MetaMessage {
         if let Some(mtime) = self.mtime {
             let us_since_epoch = mtime
                 .duration_since(UNIX_EPOCH)
+                .map_err(|_| ())
                 .expect("mtime is earlier than epoch")
                 .as_micros()
                 .try_into()
@@ -206,7 +207,7 @@ impl MessageAction for MetaMessageAction {
                     size: or_max(upper.size, lower.size),
                     mtime: or_max(upper.mtime, lower.mtime),
                 };
-                CowBytes::from(new.pack()).into()
+                new.pack().into()
             }
         }
     }
