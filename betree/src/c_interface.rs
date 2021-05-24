@@ -15,6 +15,7 @@ use crate::{
     database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
     object::{ObjectHandle, ObjectStore},
     storage_pool::{StoragePoolConfiguration, TierConfiguration},
+    tree::DefaultMessageAction,
     StoragePreference,
 };
 use error_chain::ChainedError;
@@ -334,7 +335,8 @@ pub unsafe extern "C" fn betree_open_ds(
 ) -> *mut ds_t {
     let db = &mut (*db).0;
     let name = from_raw_parts(name as *const u8, len as usize);
-    db.open_dataset(name, storage_pref.0).handle_result(err)
+    db.open_custom_dataset::<DefaultMessageAction>(name, storage_pref.0)
+        .handle_result(err)
 }
 
 /// Create a new data set with the given name.
@@ -353,7 +355,8 @@ pub unsafe extern "C" fn betree_create_ds(
 ) -> c_int {
     let db = &mut (*db).0;
     let name = from_raw_parts(name as *const u8, len as usize);
-    db.create_dataset(name, storage_pref.0).handle_result(err)
+    db.create_custom_dataset::<DefaultMessageAction>(name, storage_pref.0)
+        .handle_result(err)
 }
 
 /// Close a data set.
