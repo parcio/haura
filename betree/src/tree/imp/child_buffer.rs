@@ -1,7 +1,9 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::HasStoragePreference,
     size::{Size, StaticSize},
-    tree::MessageAction,
+    tree::{KeyInfo, MessageAction},
+    AtomicStoragePreference, StoragePreference,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -15,10 +17,36 @@ use std::{
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
 pub(super) struct ChildBuffer<N: 'static> {
+    pub(super) storage_preference: AtomicStoragePreference,
     buffer_entries_size: usize,
-    buffer: BTreeMap<CowBytes, SlicedCowBytes>,
+    buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
     #[serde(with = "ser_np")]
     pub(super) node_pointer: RwLock<N>,
+}
+
+impl Size for (KeyInfo, SlicedCowBytes) {
+    fn size(&self) -> usize {
+        let (keyinfo, data) = self;
+        keyinfo.size() + data.size()
+    }
+}
+
+impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
+    fn current_preference(&self) -> Option<StoragePreference> {
+        self.storage_preference.as_option()
+    }
+
+    fn recalculate(&self) -> StoragePreference {
+        // pref can't be lower than that of child nodes
+        let mut pref = self.node_pointer.read().correct_preference();
+
+        for (_k, (keyinfo, _v)) in &self.buffer {
+            pref.upgrade(keyinfo.storage_preference)
+        }
+
+        self.storage_preference.set(pref);
+        pref
+    }
 }
 
 mod ser_np {
@@ -62,7 +90,7 @@ impl<N: StaticSize> ChildBuffer<N> {
 
 impl<N> ChildBuffer<N> {
     pub fn static_size() -> usize {
-        16
+        17
     }
 
     pub fn buffer_size(&self) -> usize {
@@ -74,20 +102,20 @@ impl<N> ChildBuffer<N> {
         !self.buffer.contains_key(key)
     }
 
-    pub fn get(&self, key: &[u8]) -> Option<&SlicedCowBytes> {
+    pub fn get(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         self.buffer.get(key)
     }
 
     /// Returns an iterator over all messages.
     pub fn get_all_messages<'a>(
         &'a self,
-    ) -> impl Iterator<Item = (&'a CowBytes, &'a SlicedCowBytes)> + 'a {
+    ) -> impl Iterator<Item = (&'a CowBytes, &'a (KeyInfo, SlicedCowBytes))> + 'a {
         self.buffer.iter().map(|(key, msg)| (key, msg))
     }
 
     /// Takes the message buffer out this `ChildBuffer`,
     /// leaving an empty one in its place.
-    pub fn take(&mut self) -> (BTreeMap<CowBytes, SlicedCowBytes>, usize) {
+    pub fn take(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, usize) {
         (
             replace(&mut self.buffer, BTreeMap::new()),
             replace(&mut self.buffer_entries_size, 0),
@@ -106,16 +134,22 @@ impl<N> ChildBuffer<N> {
     pub fn split_at(&mut self, pivot: &CowBytes, node_pointer: N) -> Self {
         let (buffer, buffer_entries_size) = self.split_off(pivot);
         ChildBuffer {
+            storage_preference: AtomicStoragePreference::UNKNOWN,
             buffer,
             buffer_entries_size,
             node_pointer: RwLock::new(node_pointer),
         }
     }
-    fn split_off(&mut self, pivot: &CowBytes) -> (BTreeMap<CowBytes, SlicedCowBytes>, usize) {
+
+    fn split_off(
+        &mut self,
+        pivot: &CowBytes,
+    ) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, usize) {
         // `split_off` puts the split-key into the right buffer.
         let mut next_key = pivot.to_vec();
         next_key.push(0);
         let right_buffer = self.buffer.split_off(&next_key[..]);
+        self.storage_preference.invalidate();
 
         let right_entry_size = right_buffer
             .iter()
@@ -133,27 +167,37 @@ impl<N> ChildBuffer<N> {
     }
 
     /// Inserts a message to this buffer for the given `key`.
-    pub fn insert<Q, M>(&mut self, key: Q, msg: SlicedCowBytes, msg_action: M) -> isize
+    pub fn insert<Q, M>(
+        &mut self,
+        key: Q,
+        keyinfo: KeyInfo,
+        msg: SlicedCowBytes,
+        msg_action: M,
+    ) -> isize
     where
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
         let key = key.into();
         let key_size = key.size();
+
+        self.storage_preference.upgrade(keyinfo.storage_preference);
+
         // TODO
         match self.buffer.entry(key.clone()) {
             Entry::Vacant(e) => {
-                let size_delta = key_size + msg.size();
-                e.insert(msg);
+                let size_delta = key_size + msg.size() + keyinfo.size();
+                e.insert((keyinfo, msg));
                 self.buffer_entries_size += size_delta;
                 size_delta as isize
             }
             Entry::Occupied(mut e) => {
                 let lower = e.get_mut().clone();
-                let lower_size = lower.size();
-                let merged_msg = msg_action.merge(&key, msg, lower);
+                let (_, lower_msg) = lower;
+                let lower_size = lower_msg.size();
+                let merged_msg = msg_action.merge(&key, msg, lower_msg);
                 let merged_msg_size = merged_msg.size();
-                *e.get_mut() = merged_msg;
+                (*e.get_mut()).1 = merged_msg;
                 self.buffer_entries_size -= lower_size;
                 self.buffer_entries_size += merged_msg_size;
                 merged_msg_size as isize - lower_size as isize
@@ -164,6 +208,7 @@ impl<N> ChildBuffer<N> {
     /// Constructs a new, empty buffer.
     pub fn new(node_pointer: N) -> Self {
         ChildBuffer {
+            storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
             buffer: BTreeMap::new(),
             buffer_entries_size: 0,
             node_pointer: RwLock::new(node_pointer),
@@ -188,6 +233,7 @@ impl<N> ChildBuffer<N> {
             self.buffer.remove(&key);
         }
         self.buffer_entries_size -= size_delta;
+        self.storage_preference.invalidate();
         size_delta
     }
 }
@@ -203,6 +249,7 @@ mod tests {
     impl<N: Clone> Clone for ChildBuffer<N> {
         fn clone(&self) -> Self {
             ChildBuffer {
+                storage_preference: self.storage_preference.clone(),
                 buffer_entries_size: self.buffer_entries_size,
                 buffer: self.buffer.clone(),
                 node_pointer: RwLock::new(self.node_pointer.read().clone()),
@@ -221,15 +268,19 @@ mod tests {
     impl<N: Arbitrary> Arbitrary for ChildBuffer<N> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let entries_cnt = g.gen_range(0, 20);
-            let buffer: BTreeMap<CowBytes, SlicedCowBytes> = (0..entries_cnt)
+            let buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> = (0..entries_cnt)
                 .map(|_| {
                     (
                         CowBytes::arbitrary(g),
-                        DefaultMessageActionMsg::arbitrary(g).0,
+                        (
+                            KeyInfo::arbitrary(g),
+                            DefaultMessageActionMsg::arbitrary(g).0,
+                        ),
                     )
                 })
                 .collect();
             ChildBuffer {
+                storage_preference: AtomicStoragePreference::UNKNOWN,
                 buffer_entries_size: buffer
                     .iter()
                     .map(|(key, value)| key.size() + value.size())

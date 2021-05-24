@@ -1,36 +1,72 @@
 use super::child_buffer::ChildBuffer;
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::HasStoragePreference,
     size::{Size, SizeMut, StaticSize},
-    tree::MessageAction,
+    tree::{KeyInfo, MessageAction},
+    AtomicStoragePreference, StoragePreference,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, collections::BTreeMap, fmt, mem::replace};
+use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct InternalNode<T> {
+    pub(super) storage_preference: AtomicStoragePreference,
     level: u32,
     entries_size: usize,
     pivot: Vec<CowBytes>,
     children: Vec<T>,
 }
 
+// @tilpner:
+// Previously, this literal was magically spread across the code below, and I've (apparently
+// correctly) guessed it to be the fixed size of an empty InternalNode<_> when encoded with bincode.
+// I've added a test below to verify this and to ensure any bincode-sided change is noticed.
+// This is still wrong because:
+//
+// * usize is platform-dependent, 28 is not. Size will be impl'd incorrectly on 32b platforms
+//   * not just the top-level usize, Vec contains further address-sized fields, though bincode
+//     might special-case Vec encoding so that this doesn't matter
+// * the bincode format may not have changed in a while, but that's not a guarantee
+//
+// I'm not going to fix them, because the proper fix would be to take bincode out of everything,
+// and that's a lot of implementation and testing effort. You should though, if you find the time.
+const BINCODE_FIXED_SIZE: usize = 29;
+
 impl<T> Size for InternalNode<T> {
     fn size(&self) -> usize {
-        28 + self.entries_size
+        BINCODE_FIXED_SIZE + self.entries_size
     }
 }
 
 impl<N: StaticSize> InternalNode<ChildBuffer<N>> {
     pub(super) fn actual_size(&self) -> usize {
-        28 + self.pivot.iter().map(Size::size).sum::<usize>()
+        BINCODE_FIXED_SIZE
+            + self.pivot.iter().map(Size::size).sum::<usize>()
             + self
                 .children
                 .iter()
                 .map(|child| child.actual_size())
                 .sum::<usize>()
+    }
+}
+
+impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
+    fn current_preference(&self) -> Option<StoragePreference> {
+        self.storage_preference.as_option()
+    }
+
+    fn recalculate(&self) -> StoragePreference {
+        let mut pref = StoragePreference::NONE;
+
+        for child in &self.children {
+            pref.upgrade(child.correct_preference())
+        }
+
+        self.storage_preference.set(pref);
+        pref
     }
 }
 
@@ -40,6 +76,7 @@ impl<T> InternalNode<T> {
         T: Size,
     {
         InternalNode {
+            storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
             level,
             entries_size: left_child.size() + right_child.size() + pivot_key.size(),
             pivot: vec![pivot_key],
@@ -74,7 +111,7 @@ impl<T> InternalNode<T> {
 }
 
 impl<N> InternalNode<ChildBuffer<N>> {
-    pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<SlicedCowBytes>) {
+    pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>) {
         // TODO Merge range messages into msg stream
         let child = &self.children[self.idx(key)];
 
@@ -87,7 +124,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
         key: &[u8],
         left_pivot_key: &mut Option<CowBytes>,
         right_pivot_key: &mut Option<CowBytes>,
-        all_msgs: &mut BTreeMap<CowBytes, Vec<SlicedCowBytes>>,
+        all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
     ) -> &RwLock<N> {
         // TODO Merge range messages into msg stream
         let idx = self.idx(key);
@@ -113,13 +150,22 @@ impl<N> InternalNode<ChildBuffer<N>> {
         self.children.get(idx).map(|child| &child.node_pointer)
     }
 
-    pub fn insert<Q, M>(&mut self, key: Q, msg: SlicedCowBytes, msg_action: M) -> isize
+    pub fn insert<Q, M>(
+        &mut self,
+        key: Q,
+        keyinfo: KeyInfo,
+        msg: SlicedCowBytes,
+        msg_action: M,
+    ) -> isize
     where
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
+        self.storage_preference.upgrade(keyinfo.storage_preference);
+
         let idx = self.idx(key.borrow());
-        let added_size = self.children[idx].insert(key, msg, msg_action);
+        let added_size = self.children[idx].insert(key, keyinfo, msg, msg_action);
+
         if added_size > 0 {
             self.entries_size += added_size as usize;
         } else {
@@ -130,28 +176,19 @@ impl<N> InternalNode<ChildBuffer<N>> {
 
     pub fn insert_msg_buffer<I, M>(&mut self, iter: I, msg_action: M) -> isize
     where
-        I: IntoIterator<Item = (CowBytes, SlicedCowBytes)>,
+        I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
     {
         let mut added_size = 0;
-        let mut iter = iter.into_iter();
+        let mut buf_storage_pref = StoragePreference::NONE;
 
-        let mut current = match iter.next() {
-            Some(x) => x,
-            None => return 0,
-        };
-        let mut idx = self.idx(&current.0);
-        loop {
-            added_size += self.children[idx].insert(current.0, current.1, &msg_action);
-            current = match iter.next() {
-                Some(x) => x,
-                None => break,
-            };
-            let new_idx = self.idx(&current.0);
-            if idx != new_idx {
-                idx = new_idx;
-            }
+        for (k, (keyinfo, v)) in iter.into_iter() {
+            let idx = self.idx(&k);
+            buf_storage_pref.upgrade(keyinfo.storage_preference);
+            added_size += self.children[idx].insert(k, keyinfo, v, &msg_action);
         }
+
+        self.storage_preference.upgrade(buf_storage_pref);
         if added_size > 0 {
             self.entries_size += added_size as usize;
         } else {
@@ -161,6 +198,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
     }
 
     pub fn drain_children<'a>(&'a mut self) -> impl Iterator<Item = N> + 'a {
+        self.storage_preference.invalidate();
         self.children
             .drain(..)
             .map(|child| child.node_pointer.into_inner())
@@ -212,6 +250,7 @@ impl<N: StaticSize> InternalNode<ChildBuffer<N>> {
             self.entries_size -= child.range_delete(start, end);
         }
         let size_delta = size_before - self.entries_size;
+        self.storage_preference.invalidate();
 
         (
             size_delta,
@@ -234,7 +273,10 @@ impl<T: Size> InternalNode<T> {
         let size_delta = entries_size + pivot_key.size();
         self.entries_size -= size_delta;
 
+        // Neither side is sure about its current storage preference after a split
+        self.storage_preference.invalidate();
         let right_sibling = InternalNode {
+            storage_preference: AtomicStoragePreference::UNKNOWN,
             level: self.level,
             entries_size,
             pivot,
@@ -249,6 +291,9 @@ impl<T: Size> InternalNode<T> {
         self.pivot.push(old_pivot_key);
         self.pivot.append(&mut right_sibling.pivot);
         self.children.append(&mut right_sibling.children);
+
+        self.storage_preference
+            .upgrade_atomic(&right_sibling.storage_preference);
         size_delta as isize
     }
 }
@@ -265,6 +310,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
             None
         }
     }
+
     pub fn try_flush(
         &mut self,
         min_flush_size: usize,
@@ -310,6 +356,10 @@ impl<'a, N: StaticSize> TakeChildBuffer<'a, ChildBuffer<N>> {
         pivot_key: CowBytes,
         select_right: bool,
     ) -> isize {
+        // split_at invalidates both involved children (old and new), but as the new child
+        // is added to self, the overall entries don't change, so this node doesn't need to be
+        // invalidated
+
         let sibling = self.node.children[self.child_idx].split_at(&pivot_key, sibling_np);
         let size_delta = sibling.size() + pivot_key.size();
         self.node.children.insert(self.child_idx + 1, sibling);
@@ -368,6 +418,9 @@ impl<'a, N: Size> PrepareMergeChild<'a, ChildBuffer<N>> {
 
         let left_sibling = &mut self.node.children[self.pivot_key_idx];
         left_sibling.append(&mut right_sibling);
+        left_sibling
+            .storage_preference
+            .upgrade_atomic(&right_sibling.storage_preference);
 
         (
             pivot_key,
@@ -382,6 +435,7 @@ impl<'a, N: Size> PrepareMergeChild<'a, ChildBuffer<N>> {
         let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
         (&mut left[0], &mut right[0])
     }
+
     pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize {
         {
             // Move messages around
@@ -401,7 +455,7 @@ impl<'a, N: Size> TakeChildBuffer<'a, ChildBuffer<N>> {
     pub fn node_pointer_mut(&mut self) -> &mut RwLock<N> {
         &mut self.node.children[self.child_idx].node_pointer
     }
-    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, SlicedCowBytes>, isize) {
+    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) {
         let (buffer, size_delta) = self.node.children[self.child_idx].take();
         self.node.entries_size -= size_delta;
         (buffer, -(size_delta as isize))
@@ -417,9 +471,26 @@ mod tests {
     use rand::Rng;
     use serde::Serialize;
 
+    // Keys are not allowed to be empty. This is usually caught at the tree layer, but these are
+    // bypassing that check. There's probably a good way to do this, but we can also just throw
+    // away the empty keys until we find one that isn't empty.
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct Key(CowBytes);
+    impl Arbitrary for Key {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            loop {
+                let c = CowBytes::arbitrary(g);
+                if !c.is_empty() {
+                    return Key(c);
+                }
+            }
+        }
+    }
+
     impl<T: Clone> Clone for InternalNode<T> {
         fn clone(&self) -> Self {
             InternalNode {
+                storage_preference: self.storage_preference.clone(),
                 level: self.level,
                 entries_size: self.entries_size,
                 pivot: self.pivot.clone(),
@@ -448,6 +519,7 @@ mod tests {
             }
 
             InternalNode {
+                storage_preference: AtomicStoragePreference::UNKNOWN,
                 pivot,
                 children,
                 entries_size,
@@ -457,7 +529,11 @@ mod tests {
     }
 
     fn check_size<T: Serialize>(node: &mut InternalNode<T>) {
-        assert_eq!(node.size() as u64, serialized_size(node).unwrap());
+        assert_eq!(
+            node.size() as u64,
+            serialized_size(node).unwrap(),
+            "predicted size does not match serialized size"
+        );
     }
 
     #[quickcheck]
@@ -466,7 +542,8 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_idx(node: InternalNode<()>, key: CowBytes) {
+    fn check_idx(node: InternalNode<()>, key: Key) {
+        let key = key.0;
         let idx = node.idx(&key);
 
         if let Some(upper_key) = node.pivot.get(idx) {
@@ -479,13 +556,14 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_size_insert(
+    fn check_size_insert_single(
         mut node: InternalNode<ChildBuffer<()>>,
-        key: CowBytes,
+        key: Key,
+        keyinfo: KeyInfo,
         msg: DefaultMessageActionMsg,
     ) {
         let size_before = node.size() as isize;
-        let added_size = node.insert(key, msg.0, DefaultMessageAction);
+        let added_size = node.insert(key.0, keyinfo, msg.0, DefaultMessageAction);
         assert_eq!(size_before + added_size, node.size() as isize);
 
         check_size(&mut node);
@@ -494,14 +572,20 @@ mod tests {
     #[quickcheck]
     fn check_size_insert_msg_buffer(
         mut node: InternalNode<ChildBuffer<()>>,
-        buffer: BTreeMap<CowBytes, DefaultMessageActionMsg>,
+        buffer: BTreeMap<Key, (KeyInfo, DefaultMessageActionMsg)>,
     ) {
         let size_before = node.size() as isize;
         let added_size = node.insert_msg_buffer(
-            buffer.into_iter().map(|(key, msg)| (key, msg.0)),
+            buffer
+                .into_iter()
+                .map(|(Key(key), (keyinfo, msg))| (key, (keyinfo, msg.0))),
             DefaultMessageAction,
         );
-        assert_eq!(size_before + added_size, node.size() as isize);
+        assert_eq!(
+            size_before + added_size,
+            node.size() as isize,
+            "size delta mismatch"
+        );
 
         check_size(&mut node);
     }
@@ -509,18 +593,21 @@ mod tests {
     #[quickcheck]
     fn check_insert_msg_buffer(
         mut node: InternalNode<ChildBuffer<()>>,
-        buffer: BTreeMap<CowBytes, DefaultMessageActionMsg>,
+        buffer: BTreeMap<Key, (KeyInfo, DefaultMessageActionMsg)>,
     ) {
         let mut node_twin = node.clone();
         let added_size = node.insert_msg_buffer(
-            buffer.iter().map(|(key, msg)| (key.clone(), msg.0.clone())),
+            buffer
+                .iter()
+                .map(|(Key(key), (keyinfo, msg))| (key.clone(), (keyinfo.clone(), msg.0.clone()))),
             DefaultMessageAction,
         );
 
         let mut added_size_twin = 0;
-        for (key, msg) in buffer {
+        for (Key(key), (keyinfo, msg)) in buffer {
             let idx = node_twin.idx(&key);
-            added_size_twin += node_twin.children[idx].insert(key, msg.0, DefaultMessageAction);
+            added_size_twin +=
+                node_twin.children[idx].insert(key, keyinfo, msg.0, DefaultMessageAction);
         }
         if added_size_twin > 0 {
             node_twin.entries_size += added_size_twin as usize;
@@ -529,8 +616,10 @@ mod tests {
         }
 
         assert_eq!(node, node_twin);
+        assert_eq!(added_size, added_size_twin);
     }
 
+    #[quickcheck]
     fn check_size_split(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
         if node.fanout() < 2 {
             return TestResult::discard();
@@ -563,6 +652,23 @@ mod tests {
         assert_eq!(node, twin);
 
         TestResult::passed()
+    }
+
+    #[test]
+    fn check_constant() {
+        let node: InternalNode<ChildBuffer<()>> = InternalNode {
+            storage_preference: AtomicStoragePreference::UNKNOWN,
+            entries_size: 0,
+            level: 1,
+            children: vec![],
+            pivot: vec![],
+        };
+
+        assert_eq!(
+            serialized_size(&node).unwrap(),
+            BINCODE_FIXED_SIZE as u64,
+            "magic constants are wrong"
+        );
     }
 
     // TODO tests
