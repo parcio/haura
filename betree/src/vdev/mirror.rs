@@ -1,11 +1,8 @@
 use super::{
-    errors::*, util::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev,
-    VdevLeafRead, VdevLeafWrite, VdevRead, VdevWrite,
+    errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
+    VdevLeafWrite, VdevRead, VdevWrite,
 };
-use crate::{
-    buffer::{Buf, MutBuf},
-    checksum::Checksum,
-};
+use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use futures::{
     prelude::*,

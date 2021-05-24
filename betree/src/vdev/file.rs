@@ -1,11 +1,8 @@
 use super::{
-    errors::*, util::alloc_uninitialized, AtomicStatistics, Block, Result, ScrubResult, Statistics,
-    Vdev, VdevLeafRead, VdevLeafWrite, VdevRead,
+    errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
+    VdevLeafWrite, VdevRead,
 };
-use crate::{
-    buffer::{Buf, MutBuf},
-    checksum::Checksum,
-};
+use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
 use std::{
@@ -52,13 +49,7 @@ impl File {
 fn get_block_device_size(file: &fs::File) -> io::Result<Block<u64>> {
     const BLKGETSIZE64: c_ulong = 2148012658;
     let mut size: u64 = 0;
-    let result = unsafe {
-        ioctl(
-            file.as_raw_fd(),
-            BLKGETSIZE64,
-            &mut size,
-        )
-    };
+    let result = unsafe { ioctl(file.as_raw_fd(), BLKGETSIZE64, &mut size) };
 
     if result == 0 {
         Ok(Block::from_bytes(size))

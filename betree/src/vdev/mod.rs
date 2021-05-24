@@ -206,7 +206,7 @@ mod block;
 pub use self::block::Block;
 
 mod errors;
-pub type Result<T> = std::result::Result<T, errors::VdevError>;
+pub(crate) type Result<T> = std::result::Result<T, errors::VdevError>;
 pub use errors::VdevError as Error;
 
 mod file;
@@ -222,13 +222,13 @@ mod mem;
 pub use self::mem::Memory;
 
 #[enum_dispatch(Vdev, VdevRead, VdevLeafWrite, VdevLeafRead)]
-pub enum Leaf {
+pub(crate) enum Leaf {
     File,
     Memory,
 }
 
 #[enum_dispatch(Vdev, VdevWrite, VdevRead)]
-pub enum Dev {
+pub(crate) enum Dev {
     Leaf(Leaf),
     Mirror(Mirror<Leaf>),
     Parity1(Parity1<Leaf>),

@@ -49,16 +49,18 @@ impl Uint for usize {
 }
 
 impl<T: Uint> Block<T> {
-    /// Creates a new `Block` instance.
+    /// Creates a new [Block] instance.
     ///
     /// # Panics
     ///
-    /// Panics in debug mode if `bytes` is not a multiple of `BLOCK_SIZE`.
+    /// Panics in debug mode if `bytes` is not a multiple of [BLOCK_SIZE].
     pub fn from_bytes(bytes: T) -> Self {
         debug_assert!(bytes % T::BLOCK_SIZE == T::ZERO);
         Block(bytes / T::BLOCK_SIZE)
     }
 
+    /// In contrast to [Block::from_bytes], this function accepts sizes which
+    /// are not multiples of [BLOCK_SIZE], rounding up to full multiples.
     pub fn round_up_from_bytes(bytes: T) -> Self {
         let full_blocks = bytes / T::BLOCK_SIZE;
         if bytes % T::BLOCK_SIZE == T::ZERO {
