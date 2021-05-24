@@ -8,10 +8,12 @@ use crate::{
 };
 use bincode::{deserialize, serialize_into};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::io::{self, Seek, Write};
+use std::io::{self, Seek};
 
 static MAGIC: &[u8] = b"HEAFSv3\0\n";
 
+/// A superblock contains the location of the root tree,
+/// and is read during database initialisation.
 #[derive(Serialize, Deserialize)]
 pub struct Superblock<P> {
     magic: [u8; 9],
@@ -25,6 +27,11 @@ fn checksum(b: &[u8]) -> XxHash {
 }
 
 impl<P: DeserializeOwned> Superblock<P> {
+    /// Interpret a byte slice as a database superblock.
+    /// Errors if the supposed superblock doesn't begin with
+    /// a specific version byte sequence (currently `b"HEAFSv3\0\n", but
+    /// this sequence is explicitly not part of the stability guarantees),
+    /// or the contained checksum doesn't match the actual checksum of the superblock.
     pub fn unpack(b: &[u8]) -> Result<P> {
         let checksum_size = XxHash::size();
         let correct_checksum = checksum(&b[..b.len() - checksum_size]);
@@ -41,6 +48,8 @@ impl<P: DeserializeOwned> Superblock<P> {
 }
 
 impl Superblock<super::ObjectPointer> {
+    /// Try to find a superblock among the first two blocks
+    /// of each top-level vdev, returning the newest one if multiple are found.
     pub fn fetch_superblocks<S: StoragePoolLayer>(
         pool: &S,
     ) -> Result<Option<super::ObjectPointer>> {
@@ -53,6 +62,7 @@ impl Superblock<super::ObjectPointer> {
             .max_by_key(|ptr| ptr.generation()))
     }
 
+    /// Write a superblock to each top-level vdev.
     pub fn write_superblock<S: StoragePoolLayer>(
         pool: &S,
         ptr: &super::ObjectPointer,
@@ -67,6 +77,7 @@ impl Superblock<super::ObjectPointer> {
         Ok(())
     }
 
+    /// Overwrite all superblock locations with zeroes.
     pub fn clear_superblock<S: StoragePoolLayer>(pool: &S) -> Result<()> {
         let empty_data = Buf::zeroed(Block(1));
         pool.write_raw(empty_data.clone(), Block(0))?;
@@ -76,7 +87,7 @@ impl Superblock<super::ObjectPointer> {
 }
 
 impl<P: Serialize> Superblock<P> {
-    pub fn pack(p: &P) -> Result<Buf> {
+    fn pack(p: &P) -> Result<Buf> {
         let mut data = BufWrite::with_capacity(Block(1));
         {
             let mut this = Superblock {
