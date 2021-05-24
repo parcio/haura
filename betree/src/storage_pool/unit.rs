@@ -1,12 +1,12 @@
 use super::{
     errors::Result as StoragePoolResult, DiskOffset, StoragePoolConfiguration, StoragePoolLayer,
-    TierConfiguration,
+    NUM_STORAGE_CLASSES,
 };
 use crate::{
     bounded_future_queue::BoundedFutureQueue,
     buffer::Buf,
     checksum::Checksum,
-    vdev::{Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
+    vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
 };
 use futures::{
     executor::{block_on, ThreadPool},
@@ -14,7 +14,7 @@ use futures::{
     stream::FuturesUnordered,
     task::SpawnExt,
 };
-use std::{convert::TryInto, io, marker::PhantomData, pin::Pin, sync::Arc};
+use std::{convert::TryInto, marker::PhantomData, pin::Pin, sync::Arc};
 
 /// Actual implementation of the `StoragePoolLayer`.
 #[derive(Clone)]
@@ -27,11 +27,10 @@ pub(super) type WriteBackQueue = BoundedFutureQueue<
     Pin<Box<dyn Future<Output = Result<(), VdevError>> + Send + Sync + 'static>>,
 >;
 
-const MAX_STORAGE_CLASSES: usize = 4;
 type StorageTier = Box<[Dev]>;
 
 struct Inner<C: Checksum> {
-    tiers: [StorageTier; MAX_STORAGE_CLASSES],
+    tiers: [StorageTier; NUM_STORAGE_CLASSES],
     _check: PhantomData<Box<C>>,
     write_back_queue: WriteBackQueue,
     pool: ThreadPool,
@@ -46,18 +45,19 @@ impl<C: Checksum> Inner<C> {
 impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
     type Checksum = C;
     type Configuration = StoragePoolConfiguration;
+    type Metrics = StoragePoolMetrics;
 
     fn new(configuration: &Self::Configuration) -> StoragePoolResult<Self> {
-        let tiers: [StorageTier; MAX_STORAGE_CLASSES] = {
+        let tiers: [StorageTier; NUM_STORAGE_CLASSES] = {
             let mut vec: Vec<StorageTier> = configuration
                 .tiers
                 .iter()
                 .map(|tier_cfg| tier_cfg.build().map(Vec::into_boxed_slice))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            assert!(vec.len() <= MAX_STORAGE_CLASSES, "too many storage classes");
-            vec.resize_with(MAX_STORAGE_CLASSES, || Box::new([]));
-            let boxed: Box<[StorageTier; MAX_STORAGE_CLASSES]> =
+            assert!(vec.len() <= NUM_STORAGE_CLASSES, "too many storage classes");
+            vec.resize_with(NUM_STORAGE_CLASSES, || Box::new([]));
+            let boxed: Box<[StorageTier; NUM_STORAGE_CLASSES]> =
                 vec.into_boxed_slice().try_into().map_err(|_| ()).unwrap();
             *boxed
         };
@@ -188,7 +188,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
     }
 
     fn storage_class_count(&self) -> u8 {
-        MAX_STORAGE_CLASSES as u8
+        NUM_STORAGE_CLASSES as u8
     }
 
     fn flush(&self) -> Result<(), VdevError> {
@@ -200,4 +200,26 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         }
         Ok(())
     }
+
+    fn metrics(&self) -> Self::Metrics {
+        let mut tiers = [None, None, None, None];
+
+        for (tier, out) in self.inner.tiers.iter().zip(tiers.iter_mut()) {
+            *out = Some(StorageTierMetrics {
+                vdevs: tier.iter().map(Vdev::stats).collect(),
+            });
+        }
+
+        StoragePoolMetrics { tiers }
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct StoragePoolMetrics {
+    tiers: [Option<StorageTierMetrics>; NUM_STORAGE_CLASSES],
+}
+
+#[derive(serde::Serialize)]
+pub struct StorageTierMetrics {
+    vdevs: Vec<vdev::Statistics>,
 }

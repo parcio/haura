@@ -48,11 +48,13 @@ pub enum Vdev {
     Leaf(LeafVdev),
     /// This vdev is a mirror vdev.
     Mirror {
-        mirror: Vec<LeafVdev>
+        /// Constituent vdevs of this mirror
+        mirror: Vec<LeafVdev>,
     },
     /// Parity1 aka RAID5.
     Parity1 {
-        parity1: Vec<LeafVdev>
+        /// Constituent vdevs of this parity1 aggregation
+        parity1: Vec<LeafVdev>,
     },
 }
 
@@ -80,7 +82,7 @@ impl TierConfiguration {
     }
 
     /// Opens file and devices and constructs a `Vec<Vdev>`.
-    pub fn build(&self) -> io::Result<Vec<Dev>> {
+    pub(crate) fn build(&self) -> io::Result<Vec<Dev>> {
         self.top_level_vdevs
             .iter()
             .enumerate()
@@ -135,7 +137,9 @@ impl TierConfiguration {
             let (keyword, leaves) = match *vdev {
                 Vdev::Leaf(ref leaf) => ("", ref_slice(leaf)),
                 Vdev::Mirror { mirror: ref leaves } => ("mirror ", &leaves[..]),
-                Vdev::Parity1 { parity1: ref leaves } => ("parity1 ", &leaves[..]),
+                Vdev::Parity1 {
+                    parity1: ref leaves,
+                } => ("parity1 ", &leaves[..]),
             };
             s.push_str(keyword);
             for leaf in leaves {
