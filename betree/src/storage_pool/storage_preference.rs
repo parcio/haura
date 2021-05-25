@@ -149,7 +149,7 @@ impl Clone for AtomicStoragePreference {
 
 impl PartialEq for AtomicStoragePreference {
     fn eq(&self, rhs: &AtomicStoragePreference) -> bool {
-        self.as_option() == rhs.as_option()
+        self.0.load(Ordering::SeqCst) == rhs.0.load(Ordering::SeqCst)
     }
 }
 
