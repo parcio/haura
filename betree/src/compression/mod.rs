@@ -7,24 +7,11 @@ use crate::{
     size::{Size, StaticSize},
     vdev::Block,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{
-    fmt::Debug,
-    io::{self, Write},
-    mem,
-};
-
-use enum_dispatch::enum_dispatch;
+use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, io::Write, mem};
 
 mod errors;
 pub use errors::*;
-
-/*#[enum_dispatch(CompressionConfiguration)]
-pub enum CompressionType {
-    None,
-    // Lz4,
-    Zstd
-}*/
 
 const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
 

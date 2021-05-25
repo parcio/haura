@@ -5,7 +5,6 @@ use super::{
 use crate::{
     buffer::{Buf, BufWrite},
     size::StaticSize,
-    vdev::Block,
 };
 use serde::{Deserialize, Serialize};
 use std::{

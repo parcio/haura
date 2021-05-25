@@ -1,8 +1,11 @@
-use super::Compression;
+use super::{ CompressionConfiguration, CompressionState, DecompressionState, DecompressionTag, DEFAULT_BUFFER_SIZE, Result };
 use crate::size::StaticSize;
-use lz4::{BlockMode, BlockSize, ContentChecksum, Decoder, Encoder, EncoderBuilder};
+use crate::buffer::{Buf, BufWrite};
+
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
+
+// use lz4_sys::{ Lz4
 
 /// LZ4 compression. (<https://github.com/lz4/lz4>)
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -14,40 +17,47 @@ pub struct Lz4 {
     pub level: u8,
 }
 
+pub struct Lz4Compression {
+    config: Lz4,
+    encoder: Encoder<BufWrite>,
+}
+
+pub struct Lz4Decompression;
+
 impl StaticSize for Lz4 {
     fn size() -> usize {
         1
     }
 }
 
-impl Compression for Lz4 {
-    type Compress = Compress;
-
-    fn decompress(&self, buffer: Box<[u8]>) -> io::Result<Box<[u8]>> {
-        let mut output = vec![0; buffer.len()];
-        Decoder::new(&buffer[..])?.read_to_end(&mut output)?;
-        Ok(output.into_boxed_slice())
-    }
-
-    fn compress(&self) -> Self::Compress {
+impl CompressionConfiguration for Lz4 {
+    fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
         let encoder = EncoderBuilder::new()
             .level(u32::from(self.level))
             .checksum(ContentChecksum::NoChecksum)
             .block_size(BlockSize::Max4MB)
             .block_mode(BlockMode::Linked)
-            .build(Vec::new())
-            .unwrap();
-        Compress { encoder }
+            .build(BufWrite::with_capacity(DEFAULT_BUFFER_SIZE))?;
+
+        Ok(Box::new(Lz4Compression { config: self.clone(), encoder }))
+    }
+
+    fn decompression_tag(&self) -> DecompressionTag { DecompressionTag::Lz4 }
+}
+
+impl Lz4 {
+    pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
+        Ok(Box::new(Lz4Decompression))
     }
 }
 
-pub struct Compress {
-    encoder: Encoder<Vec<u8>>,
-}
-
-impl io::Write for Compress {
+impl io::Write for Lz4Compression {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.encoder.write(buf)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.encoder.write_all(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -55,10 +65,18 @@ impl io::Write for Compress {
     }
 }
 
-impl super::Compress for Compress {
-    fn finish(self) -> Box<[u8]> {
+impl CompressionState for Lz4Compression {
+    fn finish(&mut self) -> Buf {
         let (v, result) = self.encoder.finish();
         result.unwrap();
-        v.into_boxed_slice()
+        v.into_buf()
+    }
+}
+
+impl DecompressionState for Lz4Decompression {
+    fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
+        let mut output = Vec::with_capacity(DEFAULT_BUFFER_SIZE.to_bytes() as usize);
+        Decoder::new(&data[..])?.read_to_end(&mut output)?;
+        Ok(output.into_boxed_slice())
     }
 }
