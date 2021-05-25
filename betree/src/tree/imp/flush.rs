@@ -27,8 +27,6 @@ where
         mut node: X::CacheValueRefMut,
         mut parent: Option<Ref<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>>,
     ) -> Result<(), Error> {
-        //        let mut parent: Option<Ref<_, _>> = None;
-        let storage_preference = node.current_preference().unwrap_or(StoragePreference::NONE);
         loop {
             if !node.is_too_large() {
                 return Ok(());
@@ -86,8 +84,7 @@ where
             let (buffer, size_delta) = child_buffer.take_buffer();
             info!("Flushed {}", -size_delta);
             child_buffer.add_size(size_delta);
-            let size_delta_child =
-                child.insert_msg_buffer(buffer, self.msg_action(), storage_preference);
+            let size_delta_child = child.insert_msg_buffer(buffer, self.msg_action());
             child.add_size(size_delta_child);
 
             if child.is_too_small_leaf() {

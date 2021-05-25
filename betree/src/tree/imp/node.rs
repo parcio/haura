@@ -347,18 +347,12 @@ impl<N> Node<N> {
         }
     }
 
-    pub(super) fn insert_msg_buffer<I, M>(
-        &mut self,
-        msg_buffer: I,
-        msg_action: M,
-        storage_preference: StoragePreference,
-    ) -> isize
+    pub(super) fn insert_msg_buffer<I, M>(&mut self, msg_buffer: I, msg_action: M) -> isize
     where
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
     {
         self.ensure_unpacked();
-        let keyinfo = KeyInfo { storage_preference };
         match self.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
