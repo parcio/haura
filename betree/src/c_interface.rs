@@ -714,11 +714,16 @@ pub unsafe extern "C" fn betree_print_error(err: *mut err_t) {
 #[no_mangle]
 pub unsafe extern "C" fn betree_create_object_store(
     db: *mut db_t,
+    name: *const c_char,
+    name_len: c_uint,
     storage_pref: storage_pref_t,
     err: *mut *mut err_t,
 ) -> *mut obj_store_t {
     let db = &mut (*db).0;
-    db.open_object_store(storage_pref.0).handle_result(err)
+    let name = from_raw_parts(name as *const u8, name_len as usize);
+
+    db.open_named_object_store(name, storage_pref.0)
+        .handle_result(err)
 }
 
 /// Open an existing object.
@@ -731,7 +736,7 @@ pub unsafe extern "C" fn betree_object_open<'os>(
     err: *mut *mut err_t,
 ) -> *mut obj_t<'os> {
     let os = &mut (*os).0;
-    os.open_object(
+    os.open_object_with_pref(
         from_raw_parts(key as *const u8, key_len as usize),
         storage_pref.0,
     )
@@ -749,7 +754,7 @@ pub unsafe extern "C" fn betree_object_create<'os>(
     err: *mut *mut err_t,
 ) -> *mut obj_t<'os> {
     let os = &mut (*os).0;
-    os.create_object(
+    os.create_object_with_pref(
         from_raw_parts(key as *const u8, key_len as usize),
         storage_pref.0,
     )
@@ -767,7 +772,7 @@ pub unsafe extern "C" fn betree_object_open_or_create<'os>(
     err: *mut *mut err_t,
 ) -> *mut obj_t<'os> {
     let os = &mut (*os).0;
-    os.open_or_create_object(
+    os.open_or_create_object_with_pref(
         from_raw_parts(key as *const u8, key_len as usize),
         storage_pref.0,
     )

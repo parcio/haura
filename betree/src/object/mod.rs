@@ -95,17 +95,16 @@ pub struct ObjectStore<Config: DatabaseBuilder> {
     data: Dataset<Config>,
     metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: AtomicU64,
+    default_storage_preference: StoragePreference,
 }
 
 impl<Config: DatabaseBuilder> Database<Config> {
     /// Create an object store backed by a single database.
-    pub fn open_object_store(
-        &mut self,
-        storage_preference: StoragePreference,
-    ) -> Result<ObjectStore<Config>> {
+    pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
-            self.open_or_create_custom_dataset(b"data", storage_preference)?,
-            self.open_or_create_custom_dataset(b"meta", storage_preference)?,
+            self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?,
+            self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?,
+            StoragePreference::NONE,
         )
     }
 
@@ -127,6 +126,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
         ObjectStore::with_datasets(
             self.open_or_create_custom_dataset(&data_name, storage_preference)?,
             self.open_or_create_custom_dataset(&meta_name, storage_preference)?,
+            storage_preference,
         )
     }
 }
@@ -137,6 +137,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     pub fn with_datasets(
         data: Dataset<Config>,
         metadata: Dataset<Config, MetaMessageAction>,
+        default_storage_preference: StoragePreference,
     ) -> Result<ObjectStore<Config>> {
         Ok(ObjectStore {
             object_id_counter: {
@@ -152,11 +153,12 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             },
             data,
             metadata,
+            default_storage_preference,
         })
     }
 
     /// Create a new object handle.
-    pub fn create_object(
+    pub fn create_object_with_pref(
         &'os self,
         key: &[u8],
         storage_preference: StoragePreference,
@@ -200,9 +202,14 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         ))
     }
 
+    /// Create a new object handle.
+    pub fn create_object(&'os self, key: &[u8]) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+        self.create_object_with_pref(key, self.default_storage_preference)
+    }
+
     /// Open an existing object by key, return `None` if it doesn't exist.
     /// As the object metadata needs to be queried anyway, it is also returned.
-    pub fn open_object(
+    pub fn open_object_with_pref(
         &'os self,
         key: &[u8],
         storage_preference: StoragePreference,
@@ -226,17 +233,34 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         }))
     }
 
+    /// Open an existing object by key, return `None` if it doesn't exist.
+    /// As the object metadata needs to be queried anyway, it is also returned.
+    pub fn open_object(
+        &'os self,
+        key: &[u8],
+    ) -> Result<Option<(ObjectHandle<'os, Config>, ObjectInfo)>> {
+        self.open_object_with_pref(key, self.default_storage_preference)
+    }
+
     /// Try to open an object, but create it if it didn't exist.
-    pub fn open_or_create_object(
+    pub fn open_or_create_object_with_pref(
         &'os self,
         key: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
-        if let Some(obj) = self.open_object(key, storage_preference)? {
+        if let Some(obj) = self.open_object_with_pref(key, storage_preference)? {
             Ok(obj)
         } else {
-            self.create_object(key, storage_preference)
+            self.create_object_with_pref(key, storage_preference)
         }
+    }
+
+    /// Try to open an object, but create it if it didn't exist.
+    pub fn open_or_create_object(
+        &'os self,
+        key: &[u8],
+    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+        self.open_or_create_object_with_pref(key, self.default_storage_preference)
     }
 
     /// Unsafely construct an [ObjectHandle] from an [ObjectStore] and [Object] descriptor.
@@ -318,6 +342,18 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     ) -> Result<()> {
         self.metadata
             .insert_msg_with_pref(key, info.pack().into(), storage_preference)
+    }
+
+    #[allow(missing_docs)]
+    #[cfg(feature = "internal-api")]
+    pub fn data_tree(&self) -> &Dataset<Config> {
+        &self.data
+    }
+
+    #[allow(missing_docs)]
+    #[cfg(feature = "internal-api")]
+    pub fn meta_tree(&self) -> &Dataset<Config, meta::MetaMessageAction> {
+        &self.metadata
     }
 }
 
