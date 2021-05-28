@@ -26,7 +26,7 @@ use std::{
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct ModifiedObjectId(u64);
+pub struct ModifiedObjectId(u64, StoragePreference);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ObjectKey<G> {
@@ -83,9 +83,7 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
     fn correct_preference(&self) -> StoragePreference {
         match self {
             ObjectRef::Unmodified(p) => p.correct_preference(),
-            ObjectRef::Modified(_) | ObjectRef::InWriteback(_) => {
-                unreachable!("Can't query storage preference for modified objects")
-            }
+            ObjectRef::Modified(mid) | ObjectRef::InWriteback(mid) => mid.1,
         }
     }
 }
@@ -280,7 +278,7 @@ where
         info: H::Info,
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRefMut>, Error> {
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
-        let mid = ModifiedObjectId(mid);
+        let mid = ModifiedObjectId(mid, or.correct_preference());
         let entry = {
             let mut cache = self.cache.write();
             let was_present = cache.force_change_key(&or.as_key(), ObjectKey::Modified(mid));
@@ -774,7 +772,10 @@ where
     }
 
     fn insert(&self, mut object: Self::Object, info: H::Info) -> Self::ObjectRef {
-        let mid = ModifiedObjectId(self.next_modified_node_id.fetch_add(1, Ordering::Relaxed));
+        let mid = ModifiedObjectId(
+            self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
+            object.correct_preference(),
+        );
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
         let size = object.size();
@@ -787,7 +788,10 @@ where
         mut object: Self::Object,
         info: Self::Info,
     ) -> (Self::CacheValueRefMut, Self::ObjectRef) {
-        let mid = ModifiedObjectId(self.next_modified_node_id.fetch_add(1, Ordering::Relaxed));
+        let mid = ModifiedObjectId(
+            self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
+            object.correct_preference(),
+        );
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
         let size = object.size();
