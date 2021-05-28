@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 /// to ensure that the vague ordering properties hold for the given deployment.
 ///
 /// This type is not an `Option<u8>`, because it saves one byte per value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct StoragePreference(u8);
 impl StoragePreference {
