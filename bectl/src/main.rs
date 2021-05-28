@@ -291,7 +291,7 @@ fn bectl_main() -> Result<(), Error> {
                 let mut stdout_lock = stdout.lock();
 
                 let (obj, _info) = os
-                    .open_object(name.as_bytes(), storage_preference.0)?
+                    .open_object_with_pref(name.as_bytes(), storage_preference.0)?
                     .unwrap();
                 for (_key, value) in obj.read_all_chunks().unwrap().filter_map(Result::ok) {
                     stdout_lock.write_all(&value)?;
@@ -304,7 +304,7 @@ fn bectl_main() -> Result<(), Error> {
                 let mut db = open_db(cfg)?;
                 let os = db.open_named_object_store(namespace.as_bytes(), storage_preference.0)?;
                 let (obj, _info) =
-                    os.open_or_create_object(name.as_bytes(), storage_preference.0)?;
+                    os.open_or_create_object_with_pref(name.as_bytes(), storage_preference.0)?;
 
                 let stdin = io::stdin();
                 let mut stdin_lock = stdin.lock();
@@ -332,7 +332,7 @@ fn bectl_main() -> Result<(), Error> {
                 let mut db = open_db(cfg)?;
                 let os = db.open_named_object_store(namespace.as_bytes(), storage_preference.0)?;
 
-                if let Some((obj, _info)) = os.open_object(name.as_bytes(), storage_preference.0)? {
+                if let Some((obj, _info)) = os.open_object_with_pref(name.as_bytes(), storage_preference.0)? {
                     obj.delete()?;
                 }
 
