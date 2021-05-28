@@ -70,13 +70,13 @@ mod ser_np {
     }
 }
 
-impl<N: StaticSize> Size for ChildBuffer<N> {
+impl<N: StaticSize + HasStoragePreference> Size for ChildBuffer<N> {
     fn size(&self) -> usize {
         Self::static_size() + self.buffer_entries_size + N::size()
     }
 }
 
-impl<N: StaticSize> ChildBuffer<N> {
+impl<N: StaticSize + HasStoragePreference> ChildBuffer<N> {
     pub fn actual_size(&self) -> usize {
         Self::static_size()
             + N::size()
@@ -88,7 +88,7 @@ impl<N: StaticSize> ChildBuffer<N> {
     }
 }
 
-impl<N> ChildBuffer<N> {
+impl<N: HasStoragePreference> ChildBuffer<N> {
     pub fn static_size() -> usize {
         17
     }
@@ -208,11 +208,19 @@ impl<N> ChildBuffer<N> {
     /// Constructs a new, empty buffer.
     pub fn new(node_pointer: N) -> Self {
         ChildBuffer {
-            storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
+            storage_preference: AtomicStoragePreference::known(node_pointer.correct_preference()),
             buffer: BTreeMap::new(),
             buffer_entries_size: 0,
             node_pointer: RwLock::new(node_pointer),
         }
+    }
+
+    #[cfg(feature = "internal-api")]
+    pub fn buffer_info(&self) -> impl serde::Serialize {
+        #[derive(serde::Serialize)]
+        struct BufferInfo {}
+
+        BufferInfo {}
     }
 }
 

@@ -1,0 +1,133 @@
+---
+source: tests/src/lib.rs
+expression: "self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\")"
+
+---
+{
+  "type": "internal",
+  "level": 1,
+  "storage": 0,
+  "children": [
+    {
+      "from": null,
+      "to": "0000 0000 0000 0000 0000 0017",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0017",
+      "to": "0000 0000 0000 0000 0000 002F",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 002F",
+      "to": "0000 0000 0000 0000 0000 0047",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0047",
+      "to": "0000 0000 0000 0000 0000 005F",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 005F",
+      "to": "0000 0000 0000 0000 0000 0077",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0077",
+      "to": "0000 0000 0000 0000 0000 008F",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 008F",
+      "to": "0000 0000 0000 0000 0000 00A7",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 00A7",
+      "to": "0000 0000 0000 0000 0000 00BF",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 00BF",
+      "to": "0000 0000 0000 0000 0000 00D7",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 00D7",
+      "to": "0000 0000 0000 0000 0000 00EF",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 00EF",
+      "to": null,
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 11
+      }
+    }
+  ]
+}

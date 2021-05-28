@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HasStoragePreference, Object, ObjectRef},
+    data_management::{HandlerDml, HasStoragePreference, Object, ObjectRef},
     size::{Size, SizeMut, StaticSize},
     storage_pool::DiskOffset,
     tree::MessageAction,
@@ -38,7 +38,7 @@ pub(super) enum Inner<N: 'static> {
 impl<R: HasStoragePreference> HasStoragePreference for Node<R> {
     fn current_preference(&self) -> Option<StoragePreference> {
         match self.0 {
-            PackedLeaf(ref map) => None,
+            PackedLeaf(_) => None,
             Leaf(ref leaf) => leaf.current_preference(),
             Internal(ref internal) => internal.current_preference(),
         }
@@ -46,7 +46,7 @@ impl<R: HasStoragePreference> HasStoragePreference for Node<R> {
 
     fn recalculate(&self) -> StoragePreference {
         match self.0 {
-            PackedLeaf(ref map) => {
+            PackedLeaf(_) => {
                 unreachable!("packed leaves are never written back, have no preference")
             }
             Leaf(ref leaf) => leaf.recalculate(),
@@ -121,7 +121,7 @@ impl<N> Size for Node<N> {
     }
 }
 
-impl<N: StaticSize> Node<N> {
+impl<N: StaticSize + HasStoragePreference> Node<N> {
     pub(super) fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
@@ -139,7 +139,7 @@ impl<N: StaticSize> Node<N> {
     }
 }
 
-impl<N: StaticSize> Node<N> {
+impl<N: StaticSize + HasStoragePreference> Node<N> {
     pub(super) fn actual_size(&self) -> usize {
         match self.0 {
             PackedLeaf(ref map) => map.size(),
@@ -148,7 +148,7 @@ impl<N: StaticSize> Node<N> {
         }
     }
 }
-impl<N> Node<N> {
+impl<N: HasStoragePreference> Node<N> {
     pub(super) fn kind(&self) -> &str {
         match self.0 {
             PackedLeaf(_) => "packed leaf",
@@ -233,7 +233,7 @@ impl<N> Node<N> {
     }
 }
 
-impl<N: StaticSize> Node<N> {
+impl<N: StaticSize + HasStoragePreference> Node<N> {
     pub(super) fn split_root_mut<F>(&mut self, allocate_obj: F) -> isize
     where
         F: Fn(Self) -> N,
@@ -278,7 +278,7 @@ pub(super) enum GetRangeResult<'a, T, N: 'a> {
     },
 }
 
-impl<N> Node<N> {
+impl<N: HasStoragePreference> Node<N> {
     pub(super) fn get(
         &self,
         key: &[u8],
@@ -326,7 +326,7 @@ impl<N> Node<N> {
     }
 }
 
-impl<N> Node<N> {
+impl<N: HasStoragePreference> Node<N> {
     pub(super) fn insert<K, M>(
         &mut self,
         key: K,
@@ -363,7 +363,7 @@ impl<N> Node<N> {
     }
 }
 
-impl<N> Node<N> {
+impl<N: HasStoragePreference> Node<N> {
     pub(super) fn child_pointer_iter<'a>(
         &'a mut self,
     ) -> Option<impl Iterator<Item = &'a mut N> + 'a> {
@@ -385,7 +385,7 @@ impl<N> Node<N> {
     }
 }
 
-impl<N: StaticSize> Node<N> {
+impl<N: StaticSize + HasStoragePreference> Node<N> {
     pub(super) fn split(&mut self) -> (Self, CowBytes, isize) {
         self.ensure_unpacked();
         match self.0 {
@@ -448,6 +448,119 @@ impl<N: StaticSize> Node<N> {
                 let mut dead = Vec::new();
                 let (size_delta, l, r) = internal.range_delete(start, end, &mut dead);
                 (-(size_delta as isize), Some((l, r, dead)))
+            }
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct ChildInfo {
+    from: Option<ByteString>,
+    to: Option<ByteString>,
+    storage: StoragePreference,
+    child: NodeInfo,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum NodeInfo {
+    Internal {
+        level: u32,
+        storage: StoragePreference,
+        children: Vec<ChildInfo>,
+    },
+    Leaf {
+        level: u32,
+        storage: StoragePreference,
+        entry_count: usize,
+        // range: Vec<ByteString>
+    },
+    Packed {
+        entry_count: u32,
+        range: Vec<ByteString>,
+    },
+}
+
+pub struct ByteString(SlicedCowBytes);
+
+impl serde::Serialize for ByteString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        static CHARS: &[u8] = b"0123456789ABCDEF";
+        let mut s = String::with_capacity(self.0.len() * 2 + self.0.len() / 4);
+        for chunk in self.0.chunks(2) {
+            for b in chunk {
+                let (upper, lower) = (b >> 4, b & 0x0F);
+                s.push(CHARS[upper as usize] as char);
+                s.push(CHARS[lower as usize] as char);
+            }
+            s.push(' ');
+        }
+
+        serializer.serialize_str(s.trim_end())
+    }
+}
+
+impl<N: HasStoragePreference> Node<N> {
+    pub(crate) fn node_info<D>(&self, dml: &D) -> NodeInfo
+    where
+        D: HandlerDml<Object = Node<N>, ObjectRef = N>,
+        N: ObjectRef<ObjectPointer = D::ObjectPointer>,
+    {
+        match &self.0 {
+            Inner::Internal(int) => NodeInfo::Internal {
+                storage: self.correct_preference(),
+                level: self.level(),
+                children: {
+                    int.iter_with_bounds()
+                        .map(|(maybe_left, child_buf, maybe_right)| {
+                            let mut np = child_buf.node_pointer.write();
+                            let storage_preference = np.correct_preference();
+                            let child = dml.get(&mut np).unwrap();
+
+                            fn to_bytestring(cow_bytes: &CowBytes) -> ByteString {
+                                ByteString(SlicedCowBytes::from(cow_bytes.clone()))
+                            }
+
+                            ChildInfo {
+                                from: maybe_left.map(to_bytestring),
+                                to: maybe_right.map(to_bytestring),
+                                storage: storage_preference,
+                                child: child.node_info(dml),
+                            }
+                        })
+                        .collect()
+                },
+            },
+            Inner::Leaf(leaf) => NodeInfo::Leaf {
+                storage: self.correct_preference(),
+                level: self.level(),
+                entry_count: leaf.entries().len(),
+            },
+            Inner::PackedLeaf(packed) => {
+                let len = packed.entry_count();
+                NodeInfo::Packed {
+                    entry_count: len,
+                    range: if len == 0 {
+                        Vec::new()
+                    } else {
+                        [
+                            packed.get_full_by_index(0),
+                            packed.get_full_by_index(len - 1),
+                        ]
+                        .into_iter()
+                        .filter_map(|opt| {
+                            if let Some((key, _)) = opt {
+                                Some(ByteString(key.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                    },
+                }
             }
         }
     }

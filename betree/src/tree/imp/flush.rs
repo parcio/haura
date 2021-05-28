@@ -6,7 +6,6 @@ use crate::{
     data_management::{HandlerDml, HasStoragePreference, ObjectRef},
     size::Size,
     tree::{errors::*, MessageAction},
-    StoragePreference,
 };
 use stable_deref_trait::StableDeref;
 use std::{

@@ -16,7 +16,7 @@ pub(super) struct InternalNode<T> {
     pub(super) storage_preference: AtomicStoragePreference,
     level: u32,
     entries_size: usize,
-    pivot: Vec<CowBytes>,
+    pub(super) pivot: Vec<CowBytes>,
     children: Vec<T>,
 }
 
@@ -41,7 +41,7 @@ impl<T> Size for InternalNode<T> {
     }
 }
 
-impl<N: StaticSize> InternalNode<ChildBuffer<N>> {
+impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
     pub(super) fn actual_size(&self) -> usize {
         BINCODE_FIXED_SIZE
             + self.pivot.iter().map(Size::size).sum::<usize>()
@@ -70,13 +70,16 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     }
 }
 
-impl<T> InternalNode<T> {
+impl<T: HasStoragePreference> InternalNode<T> {
     pub fn new(left_child: T, right_child: T, pivot_key: CowBytes, level: u32) -> Self
     where
         T: Size,
     {
         InternalNode {
-            storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
+            storage_preference: AtomicStoragePreference::known(StoragePreference::choose_faster(
+                left_child.correct_preference(),
+                right_child.correct_preference(),
+            )),
             level,
             entries_size: left_child.size() + right_child.size() + pivot_key.size(),
             pivot: vec![pivot_key],
@@ -105,12 +108,32 @@ impl<T> InternalNode<T> {
         }
     }
 
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + 'a {
+        self.children.iter()
+    }
+
     pub fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &'a mut T> + 'a {
         self.children.iter_mut()
     }
+
+    pub fn iter_with_bounds<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (Option<&'a CowBytes>, &'a T, Option<&'a CowBytes>)> + 'a {
+        self.children.iter().enumerate().map(move |(idx, child)| {
+            let maybe_left = if idx == 0 {
+                None
+            } else {
+                self.pivot.get(idx - 1)
+            };
+
+            let maybe_right = self.pivot.get(idx);
+
+            (maybe_left, child, maybe_right)
+        })
+    }
 }
 
-impl<N> InternalNode<ChildBuffer<N>> {
+impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>> {
     pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>) {
         // TODO Merge range messages into msg stream
         let child = &self.children[self.idx(key)];
@@ -205,7 +228,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<N: StaticSize> InternalNode<ChildBuffer<N>> {
+impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
     pub fn range_delete(
         &mut self,
         start: &[u8],
@@ -260,7 +283,7 @@ impl<N: StaticSize> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<T: Size> InternalNode<T> {
+impl<T: Size + HasStoragePreference> InternalNode<T> {
     pub fn split(&mut self) -> (Self, CowBytes, isize) {
         let split_off_idx = self.fanout() / 2;
         let pivot = self.pivot.split_off(split_off_idx);
@@ -298,7 +321,7 @@ impl<T: Size> InternalNode<T> {
     }
 }
 
-impl<N> InternalNode<ChildBuffer<N>> {
+impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>> {
     pub fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
         let child_idx = self.idx(key);
         if self.children[child_idx].is_empty(key) {
@@ -349,7 +372,7 @@ pub(super) struct TakeChildBuffer<'a, T: 'a> {
     child_idx: usize,
 }
 
-impl<'a, N: StaticSize> TakeChildBuffer<'a, ChildBuffer<N>> {
+impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
     pub(super) fn split_child(
         &mut self,
         sibling_np: N,
@@ -408,7 +431,7 @@ impl<'a, N> PrepareMergeChild<'a, ChildBuffer<N>> {
         self.pivot_key_idx != self.other_child_idx
     }
 }
-impl<'a, N: Size> PrepareMergeChild<'a, ChildBuffer<N>> {
+impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
     pub(super) fn merge_children(self) -> (CowBytes, N, isize) {
         let mut right_sibling = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.pivot.remove(self.pivot_key_idx);
@@ -430,7 +453,7 @@ impl<'a, N: Size> PrepareMergeChild<'a, ChildBuffer<N>> {
     }
 }
 
-impl<'a, N: Size> PrepareMergeChild<'a, ChildBuffer<N>> {
+impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
     fn get_children(&mut self) -> (&mut ChildBuffer<N>, &mut ChildBuffer<N>) {
         let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
         (&mut left[0], &mut right[0])
@@ -451,7 +474,7 @@ impl<'a, N: Size> PrepareMergeChild<'a, ChildBuffer<N>> {
     }
 }
 
-impl<'a, N: Size> TakeChildBuffer<'a, ChildBuffer<N>> {
+impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
     pub fn node_pointer_mut(&mut self) -> &mut RwLock<N> {
         &mut self.node.children[self.child_idx].node_pointer
     }

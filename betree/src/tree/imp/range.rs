@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, ObjectRef},
+    data_management::{Dml, HasStoragePreference, ObjectRef},
     tree::{errors::*, KeyInfo, MessageAction},
 };
 use std::{
@@ -38,7 +38,7 @@ pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> 
 impl<X, R, M, I> Iterator for RangeIterator<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
@@ -61,7 +61,7 @@ where
 impl<X, R, M, I> RangeIterator<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
@@ -153,7 +153,7 @@ where
 impl<X, R, M, I> Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {

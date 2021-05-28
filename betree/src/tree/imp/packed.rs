@@ -153,6 +153,20 @@ impl PackedMap {
         }
     }
 
+    pub fn get_by_index(&self, idx: u32) -> Option<(KeyInfo, SlicedCowBytes)> {
+        Some((self.key_info(idx), self.get_slice_cow(self.val_pos(idx))))
+    }
+
+    pub fn get_full_by_index(
+        &self,
+        idx: u32,
+    ) -> Option<(SlicedCowBytes, (KeyInfo, SlicedCowBytes))> {
+        Some((
+            self.get_slice_cow(self.key_pos(idx)),
+            (self.key_info(idx), self.get_slice_cow(self.val_pos(idx))),
+        ))
+    }
+
     pub fn get(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
         let result = self.binary_search(key);
         let idx = match result {
@@ -160,7 +174,7 @@ impl PackedMap {
             Ok(idx) => idx,
         };
 
-        Some((self.key_info(idx), self.get_slice_cow(self.val_pos(idx))))
+        self.get_by_index(idx)
     }
 
     pub fn get_all<'a>(
@@ -227,6 +241,10 @@ impl PackedMap {
 
     pub(super) fn inner(&self) -> &CowBytes {
         &self.data
+    }
+
+    pub(super) fn entry_count(&self) -> u32 {
+        self.entry_count
     }
 }
 
