@@ -103,6 +103,7 @@ enum KvMode {
         name: String,
         value: Option<String>,
     },
+    TreeDump
 }
 
 #[derive(StructOpt)]
@@ -220,7 +221,10 @@ fn bectl_main() -> Result<(), Error> {
         } => match mode {
             KvMode::List { with_value } => {
                 let mut db = open_db(cfg)?;
-                let ds = db.open_dataset(dataset.as_bytes(), storage_preference.0)?;
+                let ds = db.open_custom_dataset::<DefaultMessageAction>(
+                    dataset.as_bytes(),
+                    storage_preference.0,
+                )?;
                 let range = ds.range::<_, CowBytes>(..).unwrap();
                 for (k, v) in range.filter_map(Result::ok) {
                     if with_value {
@@ -233,7 +237,7 @@ fn bectl_main() -> Result<(), Error> {
 
             KvMode::Get { name } => {
                 let mut db = open_db(cfg)?;
-                let ds = db.open_or_create_dataset::<DefaultMessageAction>(
+                let ds = db.open_or_create_custom_dataset::<DefaultMessageAction>(
                     dataset.as_bytes(),
                     storage_preference.0,
                 )?;
@@ -247,6 +251,16 @@ fn bectl_main() -> Result<(), Error> {
                 let value = value.expect("No value given");
                 ds.insert(name.as_bytes(), value.as_bytes())?;
                 db.sync()?;
+            }
+
+            KvMode::TreeDump => {
+                let mut db = open_db(cfg)?;
+                let ds = db.open_or_create_dataset(dataset.as_bytes(), storage_preference.0)?;
+
+                let stdout = io::stdout();
+                let mut stdout_lock = stdout.lock();
+
+                let _ = serde_json::to_writer_pretty(&mut stdout_lock, &ds.tree_dump()?);
             }
         },
 

@@ -9,6 +9,8 @@ betree_storage_stack = { path = "../betree", features = [ "internal-api" ] }
 structopt = "0.3"
 chrono = "0.4"
 
+serde_json = "1.0"
+
 jemallocator = { version = "0.3", features = [ "background_threads" ] }
 
 figment = { version = "0.10", features = [ "json" ] }
