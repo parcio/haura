@@ -12,7 +12,7 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TierConfiguration {
-    top_level_vdevs: Vec<Vdev>,
+    pub top_level_vdevs: Vec<Vdev>,
 }
 
 /// Configuration for the storage pool unit.
