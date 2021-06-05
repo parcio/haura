@@ -34,6 +34,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    thread,
 };
 
 mod dataset;
@@ -41,6 +42,7 @@ mod errors;
 mod handler;
 mod snapshot;
 mod superblock;
+mod sync_timer;
 
 #[cfg(feature = "figment_config")]
 mod figment;
@@ -56,6 +58,7 @@ pub use self::{
 const ROOT_DATASET_ID: DatasetId = DatasetId(0);
 const ROOT_TREE_STORAGE_PREFERENCE: StoragePreference = StoragePreference::FASTEST;
 const DEFAULT_CACHE_SIZE: usize = 256 * 1024 * 1024;
+const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 
 type Checksum = XxHash;
 
@@ -84,7 +87,7 @@ pub(crate) type DatasetTree<Dmu> = RootTree<Dmu>;
 /// Components of lower layers (Spu, Dmu) can be replaced, but the [handler::Handler] structure
 /// belongs to the database layer, and is necessary for the database to function.
 // TODO: Is this multi-step process unnecessarily rigid? Would fewer functions defeat the purpose?
-pub trait DatabaseBuilder
+pub trait DatabaseBuilder: Send + Sync + 'static
 where
     Self::Spu: StoragePoolLayer,
     Self::Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>
@@ -116,6 +119,8 @@ where
     /// or retrieve a previously written root tree.
     fn select_root_tree(&self, dmu: Arc<Self::Dmu>)
         -> Result<(RootTree<Self::Dmu>, ObjectPointer)>;
+
+    fn sync_mode(&self) -> SyncMode;
 }
 
 /// This enum controls whether to search for an existing database to reuse,
@@ -128,6 +133,14 @@ pub enum AccessMode {
     AlwaysCreateNew,
     /// Use an existing database if found, create a new one otherwise.
     OpenOrCreate,
+}
+
+/// Determines when sync is called
+pub enum SyncMode {
+    /// No automatic sync, only on user call
+    Explicit,
+    /// Every `interval_ms` milliseconds, sync is called
+    Periodic { interval_ms: u64 },
 }
 
 /// A bundle type of component configuration types, used during [Database::build]
@@ -155,6 +168,9 @@ pub struct DatabaseConfiguration {
     /// Whether to check for and open an existing database, or overwrite it
     pub access_mode: AccessMode,
 
+    /// When set, try to sync all datasets every `sync_interval_ms` milliseconds
+    pub sync_interval_ms: Option<u64>,
+
     /// If and how to log database metrics
     pub metrics: Option<MetricsConfiguration>,
 }
@@ -168,6 +184,7 @@ impl Default for DatabaseConfiguration {
             compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
             access_mode: AccessMode::OpenIfExists,
+            sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
         }
     }
@@ -282,17 +299,22 @@ impl DatabaseBuilder for DatabaseConfiguration {
             Ok((tree, root_ptr))
         }
     }
+
+    fn sync_mode(&self) -> SyncMode {
+        if let Some(interval_ms) = self.sync_interval_ms {
+            SyncMode::Periodic { interval_ms }
+        } else {
+            SyncMode::Explicit
+        }
+    }
 }
 
-type ErasedTree = dyn ErasedTreeSync<
-        Pointer = ObjectPointer,
-        ObjectRef = ObjectRef,
-    > + Send
-    + Sync;
+type ErasedTree = dyn ErasedTreeSync<Pointer = ObjectPointer, ObjectRef = ObjectRef> + Send + Sync;
 
 /// The database type.
 pub struct Database<Config: DatabaseBuilder> {
     root_tree: RootTree<Config::Dmu>,
+    builder: Config,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
 }
 
@@ -343,10 +365,32 @@ impl<Config: DatabaseBuilder> Database<Config> {
             DefaultMessageAction,
         ));
 
-        Ok(Database {
+        let db = Database {
             root_tree: tree,
+            builder,
             open_datasets: Default::default(),
-        })
+        };
+
+        Ok(db)
+    }
+
+    /// If this [Database] was created with a [SyncMode::Periodic], this function
+    /// will wrap self in an `Arc<RwLock<_>>` and start a thread to periodically
+    /// call `self.sync()`.
+    ///
+    /// This is a separate step from [Database::build] because some usecases don't require
+    /// periodic syncing.
+    pub fn with_sync(self) -> Arc<RwLock<Self>> {
+        if let SyncMode::Periodic { interval_ms } = self.builder.sync_mode() {
+            let db = Arc::new(RwLock::new(self));
+            thread::spawn({
+                let db = db.clone();
+                move || sync_timer::sync_timer(interval_ms, db)
+            });
+            db
+        } else {
+            Arc::new(RwLock::new(self))
+        }
     }
 
     fn sync_ds(&self, ds_id: DatasetId, ds_tree: &ErasedTree) -> Result<()> {
