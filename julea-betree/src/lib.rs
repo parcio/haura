@@ -22,7 +22,6 @@ use betree_storage_stack::{
 };
 
 mod jtrace;
-mod sync_timer;
 
 error_chain::error_chain! {
     foreign_links {
@@ -40,14 +39,6 @@ type Database = database::Database<DatabaseConfiguration>;
 type ObjectStore = object::ObjectStore<DatabaseConfiguration>;
 type ObjectStoreRef<'b> = dashmap::mapref::one::Ref<'b, CString, Pin<Box<ObjectStore>>>;
 type ObjectHandle<'os> = object::ObjectHandle<'os, DatabaseConfiguration>;
-
-const DEFAULT_SYNC_TIMEOUT_MS: u64 = 5000;
-
-#[derive(serde::Deserialize, serde::Serialize)]
-struct Configuration {
-    database: DatabaseConfiguration,
-    sync_timeout_ms: Option<u64>,
-}
 
 struct Backend {
     database: Arc<RwLock<Database>>,
@@ -101,16 +92,10 @@ unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointe
     let backend = || -> Result<_> {
         let path = CStr::from_ptr(path).to_str()?;
         let file = File::open(&path)?;
-        let config: Configuration = serde_json::from_reader(&file)?;
+        let config: DatabaseConfiguration = serde_json::from_reader(&file)?;
 
-        let db = Database::build(config.database)?;
-        let db = Arc::new(RwLock::new(db));
-
-        thread::spawn({
-            let timeout_ms = config.sync_timeout_ms.unwrap_or(DEFAULT_SYNC_TIMEOUT_MS);
-            let db = db.clone();
-            move || sync_timer::sync_timer(timeout_ms, db.clone())
-        });
+        let db = Database::build(config)?
+            .with_sync();
 
         Ok(Backend {
             database: db,
