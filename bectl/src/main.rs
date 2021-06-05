@@ -34,16 +34,19 @@ struct Opt {
 
 #[derive(StructOpt)]
 enum Mode {
+    /// Display the currently active database configuration
     Config {
         #[structopt(subcommand)]
         mode: ConfigMode,
     },
 
+    /// Act on the configured database
     Db {
         #[structopt(subcommand)]
         mode: DbMode,
     },
 
+    /// Key-value interface
     Kv {
         dataset: String,
         #[structopt(long, default_value = "")]
@@ -52,6 +55,7 @@ enum Mode {
         mode: KvMode,
     },
 
+    /// Object interface
     Obj {
         namespace: String,
         #[structopt(long, default_value = "")]
@@ -101,7 +105,7 @@ enum KvMode {
     },
     Put {
         name: String,
-        value: Option<String>,
+        value: String,
     },
     TreeDump
 }
@@ -248,7 +252,6 @@ fn bectl_main() -> Result<(), Error> {
             KvMode::Put { name, value } => {
                 let mut db = open_db(cfg)?;
                 let ds = db.open_or_create_dataset(dataset.as_bytes(), storage_preference.0)?;
-                let value = value.expect("No value given");
                 ds.insert(name.as_bytes(), value.as_bytes())?;
                 db.sync()?;
             }
