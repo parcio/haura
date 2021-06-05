@@ -174,7 +174,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     /// Iterates over all data sets in the database.
     pub fn iter_datasets(&self) -> Result<impl Iterator<Item = Result<SlicedCowBytes>>> {
         let low = &ds_data_key(DatasetId::default()) as &[_];
-        let high = &[2u8] as &[_];
+        let high = &[3u8] as &[_];
         Ok(self.root_tree.range(low..high)?.map(move |result| {
             let (b, _) = result?;
             let len = b.len() as u32;
