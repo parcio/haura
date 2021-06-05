@@ -145,8 +145,10 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
                     |slice: SlicedCowBytes| -> Option<[u8; 8]> { (&slice[..]).try_into().ok() },
                 );
                 if let Some(bytes) = last_key {
-                    AtomicU64::new(u64::from_le_bytes(bytes))
+                    // the last used id was stored, so start with the next one
+                    AtomicU64::new(u64::from_le_bytes(bytes) + 1)
                 } else {
+                    log::info!("no saved oid counter, resetting to 0");
                     // no last id saved, start from 0
                     AtomicU64::new(0)
                 }
