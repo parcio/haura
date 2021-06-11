@@ -19,7 +19,7 @@ use std::{
 pub(super) struct ChildBuffer<N: 'static> {
     pub(super) storage_preference: AtomicStoragePreference,
     buffer_entries_size: usize,
-    buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
+    pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
     #[serde(with = "ser_np")]
     pub(super) node_pointer: RwLock<N>,
 }
@@ -125,6 +125,7 @@ impl<N: HasStoragePreference> ChildBuffer<N> {
     pub fn append(&mut self, other: &mut Self) {
         self.buffer.append(&mut other.buffer);
         self.buffer_entries_size += other.buffer_entries_size;
+        self.storage_preference.upgrade_atomic(&other.storage_preference);
         other.buffer_entries_size = 0;
     }
 
@@ -213,14 +214,6 @@ impl<N: HasStoragePreference> ChildBuffer<N> {
             buffer_entries_size: 0,
             node_pointer: RwLock::new(node_pointer),
         }
-    }
-
-    #[cfg(feature = "internal-api")]
-    pub fn buffer_info(&self) -> impl serde::Serialize {
-        #[derive(serde::Serialize)]
-        struct BufferInfo {}
-
-        BufferInfo {}
     }
 }
 
