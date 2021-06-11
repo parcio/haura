@@ -194,9 +194,22 @@ impl LeafNode {
                 self.entries_size += packed::ENTRY_LEN;
                 self.entries_size += key_size;
             }
-        } else if let Some((_old_info, old_data)) = self.entries.remove(key.borrow()) {
-            // The value was removed by msg. This would be a downgrade opportunity, but
-            // a full scan on every delete-insert is probably too expensive.
+        } else if let Some((old_info, old_data)) = self.entries.remove(key.borrow()) {
+            // The value was removed by msg, this may be a downgrade opportunity.
+            // The preference of the removed entry can't be stricter than the current node
+            // preference, by invariant. That leaves "less strict" and "as strict" as the
+            // node preference:
+            //
+            // - less strict:
+            //     If the preference of the removed entry is less strict than the current
+            //     node preference, there must be another entry which is preventing a downgrade.
+            // - as strict:
+            //     The removed entry _may_ have caused the original upgrade to this preference,
+            //     we'll have to trigger a scan to find out.
+            if self.storage_preference.as_option() == Some(old_info.storage_preference) {
+                self.storage_preference.invalidate();
+            }
+
             self.entries_size -= packed::ENTRY_LEN;
             self.entries_size -= key_size;
             self.entries_size -= old_data.len();
@@ -272,7 +285,7 @@ impl LeafNode {
         }
     }
 
-    pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> usize {
+    /*pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> usize {
         // https://github.com/rust-lang/rust/issues/42849
         let size_before = self.entries_size;
         let range = (
@@ -288,7 +301,7 @@ impl LeafNode {
             self.entries.remove(&key);
         }
         size_before - self.entries_size
-    }
+    }*/
 }
 
 #[cfg(test)]
