@@ -68,6 +68,9 @@ mod meta;
 use self::{chunk::*, meta::*};
 pub use meta::ObjectInfo;
 
+mod cursor;
+pub use cursor::ObjectCursor;
+
 const OBJECT_ID_COUNTER_KEY: &[u8] = b"\0oid";
 
 #[derive(Debug, Clone, Copy, Readable, Writable)]
@@ -115,8 +118,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
         storage_preference: StoragePreference,
     ) -> Result<ObjectStore<Config>> {
         assert!(!name.contains(&0));
-        let mut v = name.to_vec();
-        v.push(0);
+        let v = name.to_vec();
 
         let mut data_name = v.clone();
         data_name.extend_from_slice(b"data");
@@ -184,7 +186,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             mtime: SystemTime::now(),
         };
 
-        self.update_object_info(key, &MetaMessage::set_info(&info), storage_preference)?;
+        self.update_object_info(key, &MetaMessage::set_info(&info))?;
         self.data.insert_with_pref(
             OBJECT_ID_COUNTER_KEY,
             &oid.0.to_le_bytes(),
@@ -284,8 +286,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         // rewritten, and deleted with a live handle.
         self.update_object_info(
             &handle.object.key[..],
-            &MetaMessage::delete(),
-            StoragePreference::NONE,
+            &MetaMessage::delete()
         )?;
 
         self.data.range_delete(
@@ -339,11 +340,10 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     fn update_object_info(
         &'os self,
         key: &[u8],
-        info: &MetaMessage,
-        storage_preference: StoragePreference,
+        info: &MetaMessage
     ) -> Result<()> {
         self.metadata
-            .insert_msg_with_pref(key, info.pack().into(), storage_preference)
+            .insert_msg_with_pref(key, info.pack().into(), StoragePreference::NONE)
     }
 
     #[allow(missing_docs)]
@@ -446,7 +446,10 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// Write `buf.len()` bytes from `buf` to this objects data, starting at offset `offset`.
     /// This will update the objects size to the largest byte index that has been inserted,
     /// and set the modification time to the current system time when the write was started.
-    pub fn write_at(&self, mut buf: &[u8], offset: u64) -> result::Result<u64, (u64, Error)> {
+    ///
+    /// `storage_pref` is only used for the data chunks, not for any metadata updates.
+    pub fn write_at_with_pref(&self, mut buf: &[u8], offset: u64,
+                              storage_pref: StoragePreference) -> result::Result<u64, (u64, Error)> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
         let mut meta_change = MetaMessage {
             mtime: Some(SystemTime::now()),
@@ -464,13 +467,15 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
                     &key[..],
                     &buf[..len],
                     chunk.start.offset,
-                    self.object.storage_preference,
+                    storage_pref,
                 )
                 .map_err(|err| {
-                    self.store.update_object_info(
+                    // best-effort metadata update
+                    // this is called only when the original upsert errored,
+                    // there's not much we can do to handle an error during error handling
+                    let _ = self.store.update_object_info(
                         &self.object.key,
-                        &meta_change,
-                        self.object.storage_preference,
+                        &meta_change
                     );
                     (total_written, err)
                 })?;
@@ -486,11 +491,17 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         self.store
             .update_object_info(
                 &self.object.key,
-                &meta_change,
-                self.object.storage_preference,
+                &meta_change
             )
             .map(|()| total_written)
             .map_err(|err| (total_written, err))
+    }
+
+    /// Write `buf.len()` bytes from `buf` to this objects data, starting at offset `offset`.
+    /// This will update the objects size to the largest byte index that has been inserted,
+    /// and set the modification time to the current system time when the write was started.
+    pub fn write_at(&self, buf: &[u8], offset: u64) -> result::Result<u64, (u64, Error)> {
+        self.write_at_with_pref(buf, offset, self.object.storage_preference)
     }
 
     /// Fetches this objects metadata.
