@@ -13,7 +13,6 @@ use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct InternalNode<T> {
-    pub(super) storage_preference: AtomicStoragePreference,
     level: u32,
     entries_size: usize,
     pub(super) pivot: Vec<CowBytes>,
@@ -33,7 +32,7 @@ pub(super) struct InternalNode<T> {
 //
 // I'm not going to fix them, because the proper fix would be to take bincode out of everything,
 // and that's a lot of implementation and testing effort. You should though, if you find the time.
-const BINCODE_FIXED_SIZE: usize = 29;
+const BINCODE_FIXED_SIZE: usize = 28;
 
 impl<T> Size for InternalNode<T> {
     fn size(&self) -> usize {
@@ -55,7 +54,7 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
 
 impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     fn current_preference(&self) -> Option<StoragePreference> {
-        self.storage_preference.as_option()
+        Some(self.recalculate())
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -65,21 +64,20 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
             pref.upgrade(child.correct_preference())
         }
 
-        self.storage_preference.set(pref);
         pref
+    }
+
+    fn correct_preference(&self) -> StoragePreference {
+        self.recalculate()
     }
 }
 
-impl<T: HasStoragePreference> InternalNode<T> {
+impl<T> InternalNode<T> {
     pub fn new(left_child: T, right_child: T, pivot_key: CowBytes, level: u32) -> Self
     where
         T: Size,
     {
         InternalNode {
-            storage_preference: AtomicStoragePreference::known(StoragePreference::choose_faster(
-                left_child.correct_preference(),
-                right_child.correct_preference(),
-            )),
             level,
             entries_size: left_child.size() + right_child.size() + pivot_key.size(),
             pivot: vec![pivot_key],
@@ -133,7 +131,7 @@ impl<T: HasStoragePreference> InternalNode<T> {
     }
 }
 
-impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>> {
+impl<N> InternalNode<ChildBuffer<N>> {
     pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>) {
         // TODO Merge range messages into msg stream
         let child = &self.children[self.idx(key)];
@@ -184,8 +182,6 @@ impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>> {
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
-        self.storage_preference.upgrade(keyinfo.storage_preference);
-
         let idx = self.idx(key.borrow());
         let added_size = self.children[idx].insert(key, keyinfo, msg, msg_action);
 
@@ -211,7 +207,6 @@ impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>> {
             added_size += self.children[idx].insert(k, keyinfo, v, &msg_action);
         }
 
-        self.storage_preference.upgrade(buf_storage_pref);
         if added_size > 0 {
             self.entries_size += added_size as usize;
         } else {
@@ -221,7 +216,6 @@ impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>> {
     }
 
     pub fn drain_children<'a>(&'a mut self) -> impl Iterator<Item = N> + 'a {
-        self.storage_preference.invalidate();
         self.children
             .drain(..)
             .map(|child| child.node_pointer.into_inner())
@@ -273,7 +267,6 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
             self.entries_size -= child.range_delete(start, end);
         }
         let size_delta = size_before - self.entries_size;
-        self.storage_preference.invalidate();
 
         (
             size_delta,
@@ -283,7 +276,7 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<T: Size + HasStoragePreference> InternalNode<T> {
+impl<T: Size> InternalNode<T> {
     pub fn split(&mut self) -> (Self, CowBytes, isize) {
         let split_off_idx = self.fanout() / 2;
         let pivot = self.pivot.split_off(split_off_idx);
@@ -297,9 +290,7 @@ impl<T: Size + HasStoragePreference> InternalNode<T> {
         self.entries_size -= size_delta;
 
         // Neither side is sure about its current storage preference after a split
-        self.storage_preference.invalidate();
         let right_sibling = InternalNode {
-            storage_preference: AtomicStoragePreference::UNKNOWN,
             level: self.level,
             entries_size,
             pivot,
@@ -315,8 +306,6 @@ impl<T: Size + HasStoragePreference> InternalNode<T> {
         self.pivot.append(&mut right_sibling.pivot);
         self.children.append(&mut right_sibling.children);
 
-        self.storage_preference
-            .upgrade_atomic(&right_sibling.storage_preference);
         size_delta as isize
     }
 }
@@ -442,8 +431,8 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
         let left_sibling = &mut self.node.children[self.pivot_key_idx];
         left_sibling.append(&mut right_sibling);
         left_sibling
-            .storage_preference
-            .upgrade_atomic(&right_sibling.storage_preference);
+            .messages_preference
+            .upgrade_atomic(&right_sibling.messages_preference);
 
         (
             pivot_key,
@@ -513,7 +502,6 @@ mod tests {
     impl<T: Clone> Clone for InternalNode<T> {
         fn clone(&self) -> Self {
             InternalNode {
-                storage_preference: self.storage_preference.clone(),
                 level: self.level,
                 entries_size: self.entries_size,
                 pivot: self.pivot.clone(),
@@ -542,7 +530,6 @@ mod tests {
             }
 
             InternalNode {
-                storage_preference: AtomicStoragePreference::UNKNOWN,
                 pivot,
                 children,
                 entries_size,
@@ -680,7 +667,6 @@ mod tests {
     #[test]
     fn check_constant() {
         let node: InternalNode<ChildBuffer<()>> = InternalNode {
-            storage_preference: AtomicStoragePreference::UNKNOWN,
             entries_size: 0,
             level: 1,
             children: vec![],

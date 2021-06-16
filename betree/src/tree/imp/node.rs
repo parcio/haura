@@ -68,14 +68,10 @@ impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
         }
     }
 
-    fn unpack_at(offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error> {
+    fn unpack_at(_offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error> {
         if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
             match deserialize::<InternalNode<_>>(&data[4..]) {
-                Ok(internal) => {
-                    let storage_preference = StoragePreference::new(offset.storage_class());
-                    internal.storage_preference.set(storage_preference);
-                    Ok(Node(Internal(internal)))
-                }
+                Ok(internal) => Ok(Node(Internal(internal))),
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
         } else {
@@ -432,7 +428,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn range_delete(
+    /*pub(super) fn range_delete(
         &mut self,
         start: &[u8],
         end: Option<&[u8]>,
@@ -450,7 +446,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
                 (-(size_delta as isize), Some((l, r, dead)))
             }
         }
-    }
+    }*/
 }
 
 #[derive(serde::Serialize)]
@@ -473,7 +469,6 @@ pub enum NodeInfo {
         level: u32,
         storage: StoragePreference,
         entry_count: usize,
-        // range: Vec<ByteString>
     },
     Packed {
         entry_count: u32,
@@ -550,7 +545,7 @@ impl<N: HasStoragePreference> Node<N> {
                             packed.get_full_by_index(0),
                             packed.get_full_by_index(len - 1),
                         ]
-                        .into_iter()
+                        .iter()
                         .filter_map(|opt| {
                             if let Some((key, _)) = opt {
                                 Some(ByteString(key.clone()))

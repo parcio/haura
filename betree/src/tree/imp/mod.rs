@@ -256,7 +256,7 @@ where
         self.get_mut_node_mut(np_ref.get_mut())
     }
 
-    fn walk_tree(
+    /*fn walk_tree(
         &self,
         mut node: X::CacheValueRefMut,
         start: &[u8],
@@ -312,7 +312,7 @@ where
             }
         }
         Ok(())
-    }
+    }*/
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
