@@ -129,9 +129,14 @@ impl AtomicStoragePreference {
     pub fn upgrade_atomic(&self, other: &AtomicStoragePreference) {
         self.0
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |p| {
+                // only track changes if in a known state
                 if p != u8::MAX {
                     let mut sp = StoragePreference(p);
-                    sp.upgrade(StoragePreference(other.0.load(Ordering::SeqCst)));
+
+                    let other_p = other.0.load(Ordering::SeqCst);
+                    if other_p != u8::MAX {
+                        sp.upgrade(StoragePreference(other_p));
+                    }
                     Some(sp.0)
                 } else {
                     Some(p)
