@@ -31,7 +31,7 @@ fn split_range_at(
     range: &Range<Block<u32>>,
     mid: Block<u32>,
 ) -> (Range<Block<u32>>, Range<Block<u32>>) {
-    if mid <= range.end {
+    if mid < range.end {
         if mid >= range.start {
             // mid is in range
             (range.start..mid, mid..range.end)
