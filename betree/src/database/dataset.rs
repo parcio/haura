@@ -38,20 +38,12 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     /// A convenience instantiation of [Database::create_custom_dataset] with [DefaultMessageAction].
-    pub fn create_dataset(
-        &mut self,
-        name: &[u8],
-        storage_preference: StoragePreference,
-    ) -> Result<()> {
+    pub fn create_dataset(&mut self, name: &[u8]) -> Result<()> {
         self.create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
     /// A convenience instantiation of [Database::open_or_create_custom_dataset] with [DefaultMessageAction].
-    pub fn open_or_create_dataset(
-        &mut self,
-        name: &[u8],
-        storage_preference: StoragePreference,
-    ) -> Result<Dataset<Config>> {
+    pub fn open_or_create_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
         self.open_or_create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
@@ -210,6 +202,8 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         self.insert_msg_with_pref(key, msg, StoragePreference::NONE)
     }
 
+    /// Inserts a message for the given key, allowing to override storage preference
+    /// for this operation.
     pub fn insert_msg_with_pref<K: Borrow<[u8]> + Into<CowBytes>>(
         &self,
         key: K,
