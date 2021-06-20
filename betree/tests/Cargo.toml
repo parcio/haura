@@ -5,7 +5,7 @@ authors = ["tilpner <till@hoeppner.ws>"]
 edition = "2018"
 
 [dependencies]
-betree_storage_stack = { path = "../betree", features = [ "internal-api" ] }
+betree_storage_stack = { path = "..", features = [ "internal-api" ] }
 insta = "1.7"
 
 rand = "0.8"

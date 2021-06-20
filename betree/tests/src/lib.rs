@@ -6,6 +6,7 @@ use betree_storage_stack::{
     database::AccessMode,
     object::ObjectStore,
     storage_pool::{ TierConfiguration, Vdev, LeafVdev },
+    compression::CompressionConfiguration,
     StoragePreference
 };
 
@@ -23,6 +24,7 @@ fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
             }).collect(),
             ..Default::default()
         },
+        compression: CompressionConfiguration::None,
         access_mode: AccessMode::AlwaysCreateNew,
         ..Default::default()
     };
@@ -101,4 +103,15 @@ fn insert_single() {
     driver.checkpoint("deleted foo");
     driver.insert_random(b"bar", 8192, 3000);
     driver.checkpoint("inserted bar");
+}
+
+#[test]
+fn delete_single() {
+    let mut driver = TestDriver::setup("delete single", 1, 1024);
+
+    driver.checkpoint("empty tree");
+    driver.insert_random(b"something", 8192 * 8, 12000);
+    driver.checkpoint("inserted something");
+    driver.delete(b"something");
+    driver.checkpoint("deleted something");
 }
