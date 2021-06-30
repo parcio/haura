@@ -8,7 +8,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef},
     range_validation::is_inclusive_non_empty,
-    size::StaticSize,
+    size::{Size, StaticSize},
     tree::MessageAction,
     StoragePreference,
 };
@@ -322,7 +322,7 @@ where
             .expect("No start provided, and couldn't get root node");
 
         println!(
-            "{}: {}, fanout {:?}, size {}",
+            "{}: {}, fanout {:?}, size {:?}",
             node.level(),
             node.kind(),
             node.fanout(),
