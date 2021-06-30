@@ -161,6 +161,9 @@ pub struct DatabaseConfiguration {
     /// - `[[0, 1, 2, 3], [1, 2, 3], [2, 3], [3]]` will try to allocate as requested,
     ///     but allows falling back to higher classes if a class is full
     pub alloc_strategy: [Vec<u8>; NUM_STORAGE_CLASSES],
+    /// Default storage class, used when attempting to allocate a tree object without
+    /// a storage preference
+    pub default_storage_class: u8,
     /// Which compression type to use, and the type-specific compression parameters
     pub compression: CompressionConfiguration,
     /// Size of cache in TODO
@@ -181,6 +184,7 @@ impl Default for DatabaseConfiguration {
             storage: StoragePoolConfiguration::default(),
             // identity mapping
             alloc_strategy: [vec![0], vec![1], vec![2], vec![3]],
+            default_storage_class: 0,
             compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
             access_mode: AccessMode::OpenIfExists,
@@ -231,6 +235,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         Dmu::new(
             self.compression.to_builder(),
             XxHashBuilder,
+            self.default_storage_class,
             spu,
             strategy,
             ClockCache::new(self.cache_size),
