@@ -17,15 +17,15 @@ where
     pub(super) fn split_root_node(&self, mut root_node: X::CacheValueRefMut) {
         let before = root_node.size();
         info!(
-            "Splitting root. {}, {:?}, {}, {}",
+            "Splitting root. {}, {:?}, {}, {:?}",
             root_node.kind(),
             root_node.fanout(),
             root_node.size(),
             root_node.actual_size()
         );
         let size_delta = root_node.split_root_mut(|node| {
-            warn!(
-                "Root split child: {}, {:?}, {}, {}",
+            info!(
+                "Root split child: {}, {:?}, {}, {:?}",
                 node.kind(),
                 node.fanout(),
                 node.size(),
@@ -64,6 +64,7 @@ where
         };
 
         let size_delta = parent.split_child(sibling_np, pivot_key, select_right);
+
         Ok((node, size_delta))
     }
 }

@@ -46,7 +46,7 @@ impl DiskOffset {
 }
 
 impl StaticSize for DiskOffset {
-    fn size() -> usize {
+    fn static_size() -> usize {
         mem::size_of::<u64>()
     }
 }

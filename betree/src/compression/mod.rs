@@ -55,7 +55,7 @@ impl DecompressionTag {
 }
 
 impl StaticSize for DecompressionTag {
-    fn size() -> usize {
+    fn static_size() -> usize {
         mem::size_of::<DecompressionTag>()
     }
 }

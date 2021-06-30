@@ -86,7 +86,7 @@ impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
 
     fn debug_info(&self) -> String {
         format!(
-            "{}: {:?}, {}, {}",
+            "{}: {:?}, {}, {:?}",
             self.kind(),
             self.fanout(),
             self.size(),
@@ -107,12 +107,20 @@ impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
     }
 }
 
-impl<N> Size for Node<N> {
+impl<N: StaticSize> Size for Node<N> {
     fn size(&self) -> usize {
         match self.0 {
             PackedLeaf(ref map) => map.size(),
             Leaf(ref leaf) => leaf.size(),
             Internal(ref internal) => 4 + internal.size(),
+        }
+    }
+
+    fn actual_size(&self) -> Option<usize> {
+        match self.0 {
+            PackedLeaf(ref map) => map.actual_size(),
+            Leaf(ref leaf) => leaf.actual_size(),
+            Internal(ref internal) => internal.actual_size().map(|size| 4 + size),
         }
     }
 }
@@ -133,18 +141,17 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             }
         }
     }
-}
 
-impl<N: StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn actual_size(&self) -> usize {
+    pub(super) fn is_too_large(&self) -> bool {
         match self.0 {
-            PackedLeaf(ref map) => map.size(),
-            Leaf(ref leaf) => leaf.actual_size(),
-            Internal(ref internal) => internal.actual_size(),
+            PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
+            Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
+            Internal(ref internal) => internal.size() > MAX_INTERNAL_NODE_SIZE,
         }
     }
 }
-impl<N: HasStoragePreference> Node<N> {
+
+impl<N: HasStoragePreference + StaticSize> Node<N> {
     pub(super) fn kind(&self) -> &str {
         match self.0 {
             PackedLeaf(_) => "packed leaf",
@@ -192,14 +199,6 @@ impl<N: HasStoragePreference> Node<N> {
             PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
             Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
             Internal(_) => false,
-        }
-    }
-
-    pub(super) fn is_too_large(&self) -> bool {
-        match self.0 {
-            PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
-            Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
-            Internal(ref internal) => internal.size() > MAX_INTERNAL_NODE_SIZE,
         }
     }
 
@@ -322,7 +321,7 @@ impl<N: HasStoragePreference> Node<N> {
     }
 }
 
-impl<N: HasStoragePreference> Node<N> {
+impl<N: HasStoragePreference + StaticSize> Node<N> {
     pub(super) fn insert<K, M>(
         &mut self,
         key: K,
@@ -394,7 +393,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             Internal(ref mut internal) => {
                 assert!(
                     internal.fanout() >= 2 * MIN_FANOUT,
-                    "internal split failed due to low fanout: {}, size: {}, actual_size: {}",
+                    "internal split failed due to low fanout: {}, size: {}, actual_size: {:?}",
                     internal.fanout(),
                     internal.size(),
                     internal.actual_size()

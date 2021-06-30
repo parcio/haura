@@ -439,6 +439,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
                 .allocations
                 .load(Ordering::Acquire);
             info!("Sync: syncing root tree");
+
             let root_ptr = self.root_tree.sync()?;
             let allocations_after = self
                 .root_tree
@@ -602,7 +603,7 @@ impl DatasetId {
 }
 
 impl StaticSize for DatasetId {
-    fn size() -> usize {
+    fn static_size() -> usize {
         8
     }
 }
@@ -665,7 +666,7 @@ impl<P: DeserializeOwned> DatasetData<P> {
 pub struct Generation(u64);
 
 impl StaticSize for Generation {
-    fn size() -> usize {
+    fn static_size() -> usize {
         8
     }
 }

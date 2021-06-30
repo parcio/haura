@@ -5,7 +5,7 @@ use crate::{
     cache::{AddSize, Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
     compression::{CompressionBuilder, DecompressionTag},
-    size::{SizeMut, StaticSize},
+    size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
     StoragePreference,
@@ -89,8 +89,8 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
 }
 
 impl<P: StaticSize> StaticSize for ObjectRef<P> {
-    fn size() -> usize {
-        P::size()
+    fn static_size() -> usize {
+        P::static_size()
     }
 }
 
@@ -148,12 +148,12 @@ impl<D, I, G> HasStoragePreference for ObjectPointer<D, I, G> {
 }
 
 impl<D: StaticSize, I: StaticSize, G: StaticSize> StaticSize for ObjectPointer<D, I, G> {
-    fn size() -> usize {
-        <DecompressionTag as StaticSize>::size()
-            + D::size()
-            + I::size()
-            + G::size()
-            + <DiskOffset as StaticSize>::size()
+    fn static_size() -> usize {
+        <DecompressionTag as StaticSize>::static_size()
+            + D::static_size()
+            + I::static_size()
+            + G::static_size()
+            + <DiskOffset as StaticSize>::static_size()
             + 4
     }
 }

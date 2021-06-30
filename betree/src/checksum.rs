@@ -71,7 +71,7 @@ impl Error for ChecksumError {
 pub struct XxHash(u64);
 
 impl StaticSize for XxHash {
-    fn size() -> usize {
+    fn static_size() -> usize {
         8
     }
 }

@@ -252,6 +252,10 @@ impl Size for PackedMap {
     fn size(&self) -> usize {
         self.data.len()
     }
+
+    fn actual_size(&self) -> Option<usize> {
+        Some(self.size())
+    }
 }
 
 #[cfg(test)]

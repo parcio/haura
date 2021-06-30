@@ -2,8 +2,8 @@ use super::errors::*;
 use crate::{
     buffer::{Buf, BufWrite},
     checksum::{Builder, State, XxHash, XxHashBuilder},
-    size::StaticSize,
     storage_pool::StoragePoolLayer,
+    size::StaticSize,
     vdev::{Block, BLOCK_SIZE},
 };
 use bincode::{deserialize, serialize_into};
@@ -33,7 +33,7 @@ impl<P: DeserializeOwned> Superblock<P> {
     /// this sequence is explicitly not part of the stability guarantees),
     /// or the contained checksum doesn't match the actual checksum of the superblock.
     pub fn unpack(b: &[u8]) -> Result<P> {
-        let checksum_size = XxHash::size();
+        let checksum_size = XxHash::static_size();
         let correct_checksum = checksum(&b[..b.len() - checksum_size]);
         let actual_checksum = deserialize(&b[b.len() - checksum_size..])?;
         if correct_checksum != actual_checksum {
@@ -97,7 +97,7 @@ impl<P: Serialize> Superblock<P> {
             this.magic.copy_from_slice(MAGIC);
             serialize_into(&mut data, &this)?;
         }
-        let checksum_size = XxHash::size();
+        let checksum_size = XxHash::static_size();
         data.seek(io::SeekFrom::End(-i64::from(checksum_size as u32)));
         let checksum = checksum(&data.as_ref()[..BLOCK_SIZE - checksum_size]);
         serialize_into(&mut data, &checksum)?;

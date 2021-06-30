@@ -31,7 +31,7 @@ where
                 return Ok(());
             }
             info!(
-                "{}, {:?}, lvl: {}, size: {}, {}",
+                "{}, {:?}, lvl: {}, size: {}, actual: {:?}",
                 node.kind(),
                 node.fanout(),
                 node.level(),

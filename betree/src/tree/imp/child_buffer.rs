@@ -27,14 +27,18 @@ pub(super) struct ChildBuffer<N: 'static> {
 impl Size for (KeyInfo, SlicedCowBytes) {
     fn size(&self) -> usize {
         let (keyinfo, data) = self;
-        keyinfo.size() + data.size()
+        KeyInfo::static_size() + data.size()
     }
 }
 
 impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
     fn current_preference(&self) -> Option<StoragePreference> {
-        self.messages_preference.as_option()
-            .map(|msg_pref| StoragePreference::choose_faster(msg_pref, self.node_pointer.read().correct_preference()))
+        self.messages_preference.as_option().map(|msg_pref| {
+            StoragePreference::choose_faster(
+                msg_pref,
+                self.node_pointer.read().correct_preference(),
+            )
+        })
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -74,19 +78,19 @@ mod ser_np {
 
 impl<N: StaticSize> Size for ChildBuffer<N> {
     fn size(&self) -> usize {
-        Self::static_size() + self.buffer_entries_size + N::size()
+        Self::static_size() + self.buffer_entries_size + N::static_size()
     }
-}
 
-impl<N: StaticSize + HasStoragePreference> ChildBuffer<N> {
-    pub fn actual_size(&self) -> usize {
-        Self::static_size()
-            + N::size()
-            + self
-                .buffer
-                .iter()
-                .map(|(key, msgs)| key.size() + msgs.size())
-                .sum::<usize>()
+    fn actual_size(&self) -> Option<usize> {
+        Some(
+            Self::static_size()
+                + N::static_size()
+                + self
+                    .buffer
+                    .iter()
+                    .map(|(key, msg)| key.size() + msg.size())
+                    .sum::<usize>(),
+        )
     }
 }
 
@@ -303,6 +307,8 @@ mod tests {
             child_buffer.size(),
             serialized_size(&child_buffer).unwrap() as usize
         );
+
+        assert_eq!(Some(child_buffer.size()), child_buffer.actual_size());
     }
 
     #[quickcheck]

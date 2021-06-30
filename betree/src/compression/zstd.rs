@@ -35,7 +35,7 @@ struct ZstdDecompression {
 }
 
 impl StaticSize for Zstd {
-    fn size() -> usize {
+    fn static_size() -> usize {
         1
     }
 }
@@ -105,8 +105,6 @@ impl DecompressionState for ZstdDecompression {
     fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
         self.writer.write_all(data);
         self.writer.finish();
-
-        let out = self.writer.writer().clone();
 
         Ok(mem::replace(
             self.writer.writer_mut(),

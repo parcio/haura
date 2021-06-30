@@ -28,7 +28,7 @@ pub struct KeyInfo {
 }
 
 impl StaticSize for KeyInfo {
-    fn size() -> usize {
+    fn static_size() -> usize {
         mem::size_of::<StoragePreference>()
     }
 }

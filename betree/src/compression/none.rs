@@ -18,7 +18,7 @@ pub struct NoneCompression {
 pub struct NoneDecompression;
 
 impl StaticSize for None {
-    fn size() -> usize {
+    fn static_size() -> usize {
         0
     }
 }

@@ -6,11 +6,7 @@ use crate::{
     tree::{imp::packed, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
-use std::{
-    borrow::Borrow,
-    collections::{BTreeMap, Bound},
-    iter::FromIterator,
-};
+use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};
 
 /// A leaf node of the tree holds pairs of keys values which are plain data.
 #[derive(Debug, Clone)]
@@ -25,15 +21,16 @@ impl Size for LeafNode {
     fn size(&self) -> usize {
         packed::HEADER_FIXED_LEN + self.entries_size
     }
-}
-impl LeafNode {
-    pub(super) fn actual_size(&self) -> usize {
-        packed::HEADER_FIXED_LEN
-            + self
-                .entries
-                .iter()
-                .map(|(key, (_keyinfo, value))| packed::ENTRY_LEN + key.len() + value.len())
-                .sum::<usize>()
+
+    fn actual_size(&self) -> Option<usize> {
+        Some(
+            packed::HEADER_FIXED_LEN
+                + self
+                    .entries
+                    .iter()
+                    .map(|(key, (_keyinfo, value))| packed::ENTRY_LEN + key.len() + value.len())
+                    .sum::<usize>(),
+        )
     }
 }
 
@@ -373,7 +370,7 @@ mod tests {
 
     #[quickcheck]
     fn check_actual_size(leaf_node: LeafNode) {
-        assert_eq!(leaf_node.actual_size(), serialized_size(&leaf_node));
+        assert_eq!(leaf_node.actual_size(), Some(serialized_size(&leaf_node)));
     }
 
     #[quickcheck]
@@ -382,7 +379,7 @@ mod tests {
         let serialized = serialized_size(&leaf_node);
         if size != serialized {
             eprintln!(
-                "leaf {:?}, size {}, actual_size {}, serialized_size {}",
+                "leaf {:?}, size {}, actual_size {:?}, serialized_size {}",
                 leaf_node,
                 size,
                 leaf_node.actual_size(),

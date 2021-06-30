@@ -12,6 +12,18 @@ pub trait Size {
     /// Returns the size (number of bytes) that this object would have
     /// if serialized using [`bincode`](../../bincode/index.html).
     fn size(&self) -> usize;
+
+    fn actual_size(&self) -> Option<usize> {
+        None
+    }
+
+    fn checked_size(&self) -> Result<usize, (usize, usize)> {
+        match (self.size(), self.actual_size()) {
+            (predicted, Some(actual)) if predicted == actual => Ok(actual),
+            (predicted, Some(actual)) => Err((predicted, actual)),
+            (predicted, None) => Ok(predicted),
+        }
+    }
 }
 
 /// A trait which represents an serializable object
@@ -29,11 +41,11 @@ pub trait SizeMut {
 pub trait StaticSize {
     /// Returns the size (number of bytes) that an object would have
     /// if serialized using [`bincode`](../../bincode/index.html).
-    fn size() -> usize;
+    fn static_size() -> usize;
 }
 
 impl StaticSize for () {
-    fn size() -> usize {
+    fn static_size() -> usize {
         0
     }
 }
@@ -46,7 +58,7 @@ impl<T: Size> SizeMut for T {
 
 impl<T: StaticSize> Size for T {
     fn size(&self) -> usize {
-        T::size()
+        T::static_size()
     }
 }
 

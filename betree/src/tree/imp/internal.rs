@@ -4,7 +4,7 @@ use crate::{
     data_management::HasStoragePreference,
     size::{Size, SizeMut, StaticSize},
     tree::{KeyInfo, MessageAction},
-    AtomicStoragePreference, StoragePreference,
+    StoragePreference,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -34,21 +34,25 @@ pub(super) struct InternalNode<T> {
 // and that's a lot of implementation and testing effort. You should though, if you find the time.
 const BINCODE_FIXED_SIZE: usize = 28;
 
-impl<T> Size for InternalNode<T> {
+impl<T: Size> Size for InternalNode<T> {
     fn size(&self) -> usize {
         BINCODE_FIXED_SIZE + self.entries_size
     }
-}
 
-impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
-    pub(super) fn actual_size(&self) -> usize {
-        BINCODE_FIXED_SIZE
-            + self.pivot.iter().map(Size::size).sum::<usize>()
-            + self
-                .children
-                .iter()
-                .map(|child| child.actual_size())
-                .sum::<usize>()
+    fn actual_size(&self) -> Option<usize> {
+        Some(
+            BINCODE_FIXED_SIZE
+                + self.pivot.iter().map(Size::size).sum::<usize>()
+                + self
+                    .children
+                    .iter()
+                    .map(|child| {
+                        child
+                            .checked_size()
+                            .expect("Child doesn't impl actual_size")
+                    })
+                    .sum::<usize>(),
+        )
     }
 }
 
@@ -216,6 +220,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
     }
 
     pub fn drain_children<'a>(&'a mut self) -> impl Iterator<Item = N> + 'a {
+        self.entries_size = 0;
         self.children
             .drain(..)
             .map(|child| child.node_pointer.into_inner())
@@ -310,7 +315,10 @@ impl<T: Size> InternalNode<T> {
     }
 }
 
-impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>> {
+impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>>
+where
+    ChildBuffer<N>: Size,
+{
     pub fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
         let child_idx = self.idx(key);
         if self.children[child_idx].is_empty(key) {
@@ -384,7 +392,10 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N
     }
 }
 
-impl<'a, T> TakeChildBuffer<'a, T> {
+impl<'a, T> TakeChildBuffer<'a, T>
+where
+    InternalNode<T>: Size,
+{
     pub(super) fn size(&self) -> usize {
         Size::size(&*self.node)
     }
@@ -538,7 +549,7 @@ mod tests {
         }
     }
 
-    fn check_size<T: Serialize>(node: &mut InternalNode<T>) {
+    fn check_size<T: Serialize + Size>(node: &mut InternalNode<T>) {
         assert_eq!(
             node.size() as u64,
             serialized_size(node).unwrap(),
