@@ -19,8 +19,7 @@ pub struct SegmentAllocator {
 
 impl SegmentAllocator {
     /// Constructs a new `SegmentAllocator` given the segment allocation bitmap.
-    /// The `bitmap` must have a length of `SEGMENT_SIZE` and must contain only
-    /// `0u8` and `1u8`.
+    /// The `bitmap` must have a length of `SEGMENT_SIZE`.
     pub fn new(bitmap: [u8; SEGMENT_SIZE_BYTES]) -> Self {
         SegmentAllocator {
             data: BitArray::new(bitmap),
