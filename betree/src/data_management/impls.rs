@@ -202,6 +202,7 @@ where
     pub fn new(
         default_compression: Box<dyn CompressionBuilder>,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
+        default_storage_class: u8,
         pool: SPL,
         alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
@@ -220,7 +221,7 @@ where
         Dmu {
             // default_compression_state: default_compression.new_compression().expect("Can't create compression state"),
             default_compression,
-            default_storage_class: 0,
+            default_storage_class,
             default_checksum_builder,
             alloc_strategy,
             pool,
@@ -448,7 +449,17 @@ where
         mid: ModifiedObjectId,
         evict: bool,
     ) -> Result<<Self as DmlBase>::ObjectPointer, Error> {
-        let object_size = super::Size::size(&*object);
+        let object_size = {
+            #[cfg(debug_assertions)]
+            {
+                super::Size::checked_size(&*object).expect("Size calculation mismatch")
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                super::Size::size(&*object)
+            }
+        };
+
         if object_size > 4 * 1024 * 1024 {
             warn!("Writing back large object: {}", object.debug_info());
         }
