@@ -12,7 +12,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 /// Configuration bundle of the [crate::metrics] module.
@@ -38,7 +38,7 @@ where
 
     let file = fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
         .open(&cfg.output_path)?;
 
     thread::Builder::new()
@@ -60,8 +60,8 @@ where
     let mut output = io::BufWriter::new(output);
     let sleep_duration = Duration::from_millis(cfg.interval_ms as u64);
     loop {
-        thread::sleep(sleep_duration);
         log::info!("gathering metrics");
+        let now = Instant::now();
 
         let spu = dmu.spl();
 
@@ -84,5 +84,7 @@ where
         if let Err(e) = res() {
             log::error!("metrics: {}", e);
         }
+
+        thread::sleep(sleep_duration.saturating_sub(now.elapsed()));
     }
 }
