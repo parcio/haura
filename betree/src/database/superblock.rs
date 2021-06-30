@@ -2,8 +2,8 @@ use super::errors::*;
 use crate::{
     buffer::{Buf, BufWrite},
     checksum::{Builder, State, XxHash, XxHashBuilder},
-    storage_pool::StoragePoolLayer,
     size::StaticSize,
+    storage_pool::StoragePoolLayer,
     vdev::{Block, BLOCK_SIZE},
 };
 use bincode::{deserialize, serialize_into};

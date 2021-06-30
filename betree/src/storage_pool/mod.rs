@@ -8,7 +8,7 @@ use crate::{
     vdev::{Block, Error as VdevError, Result as VdevResult},
 };
 use futures::{executor::block_on, prelude::*, TryFuture};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use std::fmt;
 
 pub use configuration::{LeafVdev, Vdev};

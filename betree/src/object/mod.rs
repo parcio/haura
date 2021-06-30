@@ -284,10 +284,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         // FIXME: bad error handling, object can end up partially deleted
         // Delete metadata before data, otherwise object could be concurrently reopened,
         // rewritten, and deleted with a live handle.
-        self.update_object_info(
-            &handle.object.key[..],
-            &MetaMessage::delete()
-        )?;
+        self.update_object_info(&handle.object.key[..], &MetaMessage::delete())?;
 
         self.data.range_delete(
             &object_chunk_key(handle.object.id, 0)[..]
@@ -337,11 +334,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         }
     }
 
-    fn update_object_info(
-        &'os self,
-        key: &[u8],
-        info: &MetaMessage
-    ) -> Result<()> {
+    fn update_object_info(&'os self, key: &[u8], info: &MetaMessage) -> Result<()> {
         self.metadata
             .insert_msg_with_pref(key, info.pack().into(), StoragePreference::NONE)
     }
@@ -457,8 +450,12 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// and set the modification time to the current system time when the write was started.
     ///
     /// `storage_pref` is only used for the data chunks, not for any metadata updates.
-    pub fn write_at_with_pref(&self, mut buf: &[u8], offset: u64,
-                              storage_pref: StoragePreference) -> result::Result<u64, (u64, Error)> {
+    pub fn write_at_with_pref(
+        &self,
+        mut buf: &[u8],
+        offset: u64,
+        storage_pref: StoragePreference,
+    ) -> result::Result<u64, (u64, Error)> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
         let mut meta_change = MetaMessage {
             mtime: Some(SystemTime::now()),
@@ -472,20 +469,14 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
 
             self.store
                 .data
-                .upsert_with_pref(
-                    &key[..],
-                    &buf[..len],
-                    chunk.start.offset,
-                    storage_pref,
-                )
+                .upsert_with_pref(&key[..], &buf[..len], chunk.start.offset, storage_pref)
                 .map_err(|err| {
                     // best-effort metadata update
                     // this is called only when the original upsert errored,
                     // there's not much we can do to handle an error during error handling
-                    let _ = self.store.update_object_info(
-                        &self.object.key,
-                        &meta_change
-                    );
+                    let _ = self
+                        .store
+                        .update_object_info(&self.object.key, &meta_change);
                     (total_written, err)
                 })?;
             buf = &buf[len..];
@@ -498,10 +489,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         }
 
         self.store
-            .update_object_info(
-                &self.object.key,
-                &meta_change
-            )
+            .update_object_info(&self.object.key, &meta_change)
             .map(|()| total_written)
             .map_err(|err| (total_written, err))
     }
