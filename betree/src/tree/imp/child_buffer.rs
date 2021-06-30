@@ -134,8 +134,8 @@ impl<N> ChildBuffer<N> {
     pub fn append(&mut self, other: &mut Self) {
         self.buffer.append(&mut other.buffer);
         self.buffer_entries_size += other.buffer_entries_size;
-        self.messages_preference.upgrade_atomic(&other.messages_preference);
-        other.buffer_entries_size = 0;
+        self.messages_preference
+            .upgrade_atomic(&other.messages_preference);
     }
 
     /// Splits this `ChildBuffer` at `pivot`
