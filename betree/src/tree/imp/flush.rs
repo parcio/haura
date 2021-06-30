@@ -83,6 +83,7 @@ where
             let (buffer, size_delta) = child_buffer.take_buffer();
             info!("Flushed {}", -size_delta);
             child_buffer.add_size(size_delta);
+            self.dml.verify_cache();
             let size_delta_child = child.insert_msg_buffer(buffer, self.msg_action());
             child.add_size(size_delta_child);
 

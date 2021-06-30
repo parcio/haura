@@ -7,6 +7,7 @@
 //! does.
 
 use super::{clock::Clock, AddSize, Cache, ChangeKeyError, RemoveError, Stats};
+use crate::size::{Size, SizeMut};
 use stable_deref_trait::StableDeref;
 use std::{
     collections::HashMap,
@@ -121,6 +122,7 @@ impl Stats for CacheStats {
     fn misses(&self) -> u64 {
         self.misses
     }
+
     fn insertions(&self) -> u64 {
         self.insertions
     }
@@ -144,7 +146,7 @@ impl<V> AddSize for PinnedEntry<V> {
     }
 }
 
-impl<K: Hash + Eq, V> ClockCache<K, V> {
+impl<K: Hash + Eq, V: SizeMut> ClockCache<K, V> {
     /// Returns a new cache instance with the given `capacity`.
     pub fn new(capacity: usize) -> Self {
         ClockCache {
@@ -161,7 +163,9 @@ impl<K: Hash + Eq, V> ClockCache<K, V> {
     }
 }
 
-impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for ClockCache<K, V> {
+impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 'static> Cache
+    for ClockCache<K, V>
+{
     type Key = K;
     type Value = V;
     type ValueRef = PinnedEntry<V>;
@@ -195,6 +199,7 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
     where
         F: FnOnce(&mut V) -> usize,
     {
+        self.verify();
         {
             let entry = self.map.get_mut(key).ok_or(RemoveError::NotPresent)?;
             Arc::get_mut(entry).ok_or(RemoveError::Pinned)?;
@@ -205,16 +210,19 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
         let size = f(&mut value);
         self.removals += 1;
         self.size.fetch_sub(size, Ordering::Relaxed);
+        self.verify();
         Ok(value)
     }
 
     fn force_remove(&mut self, key: &Self::Key, size: usize) -> bool {
+        self.verify();
         self.clock.retain(|entry| entry != key);
         if self.map.remove(key).is_none() {
             return false;
         }
         self.removals += 1;
         self.size.fetch_sub(size, Ordering::Relaxed);
+        self.verify();
         true
     }
 
@@ -222,6 +230,7 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
     where
         F: FnOnce(&K, &mut V, &dyn Fn(&K) -> bool) -> Result<K, E>,
     {
+        self.verify();
         let new_key = {
             let second_ref: &Self = unsafe { &*(self as *mut _) };
             let entry = self.map.get_mut(key).ok_or(ChangeKeyError::NotPresent)?;
@@ -233,10 +242,12 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
         if let Some(entry) = self.clock.iter_mut().find(|entry| *entry == key) {
             *entry = new_key;
         }
+        self.verify();
         Ok(())
     }
 
     fn force_change_key(&mut self, key: &Self::Key, new_key: Self::Key) -> bool {
+        self.verify();
         let entry = match self.map.remove(key) {
             None => return false,
             Some(entry) => entry,
@@ -245,6 +256,7 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
         if let Some(entry) = self.clock.iter_mut().find(|entry| *entry == key) {
             *entry = new_key;
         }
+        self.verify();
         true
     }
 
@@ -252,9 +264,11 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
     where
         F: FnMut(&K, &mut V, &dyn Fn(&K) -> bool) -> Option<usize>,
     {
+        self.verify();
+
         let len = self.clock.len();
         let mut cnt = 0;
-        loop {
+        let ret = loop {
             let eviction_successful = {
                 let key = match self.clock.peek_front().cloned() {
                     None => {
@@ -287,7 +301,15 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
             };
             if let Some(size) = eviction_successful {
                 let key = self.clock.pop_front().unwrap();
-                let entry = self.map.remove(&key).unwrap();
+                let mut entry = self.map.remove(&key).unwrap();
+
+                #[cfg(debug_assertions)]
+                {
+                    if let Some(entry) = Arc::get_mut(&mut entry) {
+                        assert_eq!(entry.value.size(), size);
+                    }
+                }
+
                 self.evictions += 1;
                 self.size.fetch_sub(size, Ordering::Relaxed);
                 let value = Arc::try_unwrap(entry).ok().unwrap().value;
@@ -300,10 +322,15 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
                 warn!("Clock eviction failed");
                 break None;
             }
-        }
+        };
+
+        self.verify();
+        ret
     }
 
-    fn insert(&mut self, key: K, value: V, size: usize) {
+    fn insert(&mut self, key: K, mut value: V, size: usize) {
+        debug_assert_eq!(value.size(), size);
+
         let old_value = self.map.insert(
             key.clone(),
             Arc::new(CacheEntry {
@@ -341,6 +368,37 @@ impl<K: Clone + Eq + Hash + Sync + Send, V: Sync + Send + 'static> Cache for Clo
     fn capacity(&self) -> usize {
         self.capacity
     }
+
+    // This is wildly unsafe, because it was hacked on top of a cache design which assumed interior
+    // mutability, but it's only a debugging feature to locate faulty size adjustments, and if you
+    // only run it without optimisations, the nasal demons might leave you alone.
+    #[cfg(feature = "cache-paranoia")]
+    fn verify(&mut self) {
+        {
+            let size = self
+                .map
+                .iter_mut()
+                .map(|(k, mut v): (_, &mut Arc<CacheEntry<_>>)| {
+                    let p: *mut CacheEntry<_> = Arc::as_ptr(&v) as *mut CacheEntry<_>;
+                    let v2: &mut CacheEntry<V> = unsafe { &mut *p };
+                    v2.value.size()
+                })
+                .sum::<usize>();
+
+            let actual = self.size.load(Ordering::Relaxed);
+            if size != actual {
+                log::error!(
+                    "invalid cache size! supposed({}) != actual({})",
+                    size,
+                    actual
+                );
+            }
+        }
+    }
+
+    #[cfg(not(feature = "cacha-paranoia"))]
+    #[inline(always)]
+    fn verify(&mut self) {}
 }
 
 #[cfg(test)]
@@ -350,7 +408,7 @@ mod tests {
 
     fn get_and_pin(b: &mut Bencher) {
         let mut c = ClockCache::new(5);
-        c.insert(5, 5, 1);
+        c.insert(5, (), 1);
         b.iter(|| {
             black_box(c.get(&5, true));
         });

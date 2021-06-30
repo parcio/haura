@@ -15,6 +15,7 @@ where
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
     pub(super) fn split_root_node(&self, mut root_node: X::CacheValueRefMut) {
+        self.dml.verify_cache();
         let before = root_node.size();
         info!(
             "Splitting root. {}, {:?}, {}, {:?}",
@@ -36,6 +37,7 @@ where
         info!("Root split done. {}, {}", root_node.size(), size_delta);
         assert!(before as isize + size_delta == root_node.size() as isize);
         root_node.finish(size_delta);
+        self.dml.verify_cache();
     }
 
     pub(super) fn split_node(
@@ -43,6 +45,8 @@ where
         mut node: X::CacheValueRefMut,
         parent: &mut TakeChildBuffer<ChildBuffer<R>>,
     ) -> Result<(X::CacheValueRefMut, isize), Error> {
+        self.dml.verify_cache();
+
         let before = node.size();
         let (sibling, pivot_key, size_delta) = node.split();
         let select_right = sibling.size() > node.size();

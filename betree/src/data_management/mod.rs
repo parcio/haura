@@ -162,6 +162,8 @@ pub trait HandlerDml: DmlBase {
 
     /// Turns an ObjectPointer into an ObjectReference.
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
+
+    fn verify_cache(&self);
 }
 
 /// Handler for a `Dml`.

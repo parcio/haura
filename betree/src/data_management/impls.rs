@@ -253,6 +253,7 @@ where
 impl<E, SPL, H> DmlBase for Dmu<E, SPL, H, H::Info, H::Generation>
 where
     E: Cache<Key = ObjectKey<H::Generation>>,
+    <E as Cache>::Value: SizeMut,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     H: HandlerTypes,
@@ -850,6 +851,10 @@ where
         }
         Ok(())
     }
+
+    fn verify_cache(&self) {
+        self.cache.write().verify();
+    }
 }
 
 impl<E, SPL, H, I, G> super::Dml for Dmu<E, SPL, H, I, G>
@@ -952,6 +957,7 @@ where
 impl<E, SPL, H, I, G> super::DmlWithHandler for Dmu<E, SPL, H, I, G>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    H::Object: Size,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
@@ -986,6 +992,7 @@ where
 impl<E, SPL, H, I, G> super::DmlWithCache for Dmu<E, SPL, H, I, G>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    H::Object: SizeMut,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,

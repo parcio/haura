@@ -64,6 +64,10 @@ where
         (**self).evict()
     }
 
+    fn verify_cache(&self) {
+        (**self).verify_cache()
+    }
+
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef {
         <T::Target as HandlerDml>::ref_from_ptr(r)
     }
