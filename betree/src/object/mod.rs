@@ -380,6 +380,15 @@ pub struct ObjectHandle<'os, Config: DatabaseBuilder> {
     pub object: Object,
 }
 
+impl<'os, Config: DatabaseBuilder> Clone for ObjectHandle<'os, Config> {
+    fn clone(&self) -> Self {
+        ObjectHandle {
+            store: self.store,
+            object: self.object.clone(),
+        }
+    }
+}
+
 impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// Close this object. This function doesn't do anything for now,
     /// but might in the future.
