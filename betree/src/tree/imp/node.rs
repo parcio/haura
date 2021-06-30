@@ -166,13 +166,18 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         }
     }
 
-    fn ensure_unpacked(&mut self) {
+    fn ensure_unpacked(&mut self) -> isize {
+        let before = self.size();
+
         let leaf = if let PackedLeaf(ref mut map) = self.0 {
             map.unpack_leaf()
         } else {
-            return;
+            return 0;
         };
+
         self.0 = Leaf(leaf);
+        let after = self.size();
+        after as isize - before as isize
     }
 
     fn take(&mut self) -> Self {
@@ -333,13 +338,14 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         K: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
-        self.ensure_unpacked();
+        let size_delta = self.ensure_unpacked();
         let keyinfo = KeyInfo { storage_preference };
-        match self.0 {
-            PackedLeaf(_) => unreachable!(),
-            Leaf(ref mut leaf) => leaf.insert(key, keyinfo, msg, msg_action),
-            Internal(ref mut internal) => internal.insert(key, keyinfo, msg, msg_action),
-        }
+        size_delta
+            + (match self.0 {
+                PackedLeaf(_) => unreachable!(),
+                Leaf(ref mut leaf) => leaf.insert(key, keyinfo, msg, msg_action),
+                Internal(ref mut internal) => internal.insert(key, keyinfo, msg, msg_action),
+            })
     }
 
     pub(super) fn insert_msg_buffer<I, M>(&mut self, msg_buffer: I, msg_action: M) -> isize
@@ -347,14 +353,15 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
     {
-        self.ensure_unpacked();
-        match self.0 {
-            PackedLeaf(_) => unreachable!(),
-            Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
-            Internal(ref mut internal) => {
-                internal.insert_msg_buffer(msg_buffer, msg_action) as isize
-            }
-        }
+        let size_delta = self.ensure_unpacked();
+        size_delta
+            + (match self.0 {
+                PackedLeaf(_) => unreachable!(),
+                Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
+                Internal(ref mut internal) => {
+                    internal.insert_msg_buffer(msg_buffer, msg_action) as isize
+                }
+            })
     }
 }
 
