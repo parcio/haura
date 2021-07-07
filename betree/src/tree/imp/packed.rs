@@ -28,7 +28,7 @@ pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 /// ```text
 /// Layout:
 ///     entry_count: u32,
-///     entries: [Entry; header.entry_count],
+///     entries: [Entry; entry_count],
 ///     # necessary to compute the length of the last value
 ///     data_end: Offset,
 ///     data: [u8]
