@@ -1,0 +1,11 @@
+---
+source: betree/tests/src/lib.rs
+expression: "self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\")"
+
+---
+{
+  "type": "leaf",
+  "level": 0,
+  "storage": 254,
+  "entry_count": 0
+}

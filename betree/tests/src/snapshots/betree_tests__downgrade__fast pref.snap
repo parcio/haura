@@ -1,0 +1,78 @@
+---
+source: betree/tests/src/lib.rs
+expression: "self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\")"
+
+---
+{
+  "type": "internal",
+  "level": 1,
+  "storage": 0,
+  "children": [
+    {
+      "from": null,
+      "to": "0000 0000 0000 0000 0000 0017",
+      "storage": 1,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 1,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0017",
+      "to": "0000 0000 0000 0000 0000 002F",
+      "storage": 1,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 1,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 002F",
+      "to": "0000 0000 0000 0000 0000 0047",
+      "storage": 1,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 1,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0047",
+      "to": "0000 0000 0000 0000 0000 005F",
+      "storage": 1,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 1,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 005F",
+      "to": "0000 0000 0000 0000 0000 0077",
+      "storage": 1,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 1,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0077",
+      "to": null,
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 13
+      }
+    }
+  ]
+}

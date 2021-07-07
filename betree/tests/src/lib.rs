@@ -59,16 +59,17 @@ impl TestDriver {
         assert_json_snapshot!(format!("{}/{}", self.name, name), self.object_store.data_tree().tree_dump().expect("Failed to create data tree dump"));
     }
 
-    fn insert_random(&mut self, object_name: &[u8], block_size: usize, times: u64) {
+    fn insert_random(&mut self, object_name: &[u8], pref: StoragePreference, block_size: usize, times: u64) {
         let (obj, _info) = self.object_store.open_or_create_object(object_name)
             .expect("Unable to create object");
         
         let mut buf = vec![0; block_size];
+        let pref = pref.or(StoragePreference::FASTEST);
 
         for i in 0..times {
             self.rng.try_fill(&mut buf[..])
                 .expect("Couldn't fill with random data");
-            obj.write_at(&buf, i * block_size as u64)
+            obj.write_at_with_pref(&buf, i * block_size as u64, pref)
                 .expect("Failed to write buf");
         }
     }
@@ -86,22 +87,22 @@ fn insert_single() {
     let mut driver = TestDriver::setup("insert single", 1, 256);
 
     driver.checkpoint("empty tree");
-    driver.insert_random(b"foo", 8192, 2000);
+    driver.insert_random(b"foo", StoragePreference::NONE, 8192, 2000);
     driver.checkpoint("inserted foo");
 
     for _ in 1..=3 {
-        driver.insert_random(b"foo", 8192, 2000);
+        driver.insert_random(b"foo", StoragePreference::NONE, 8192, 2000);
         // intentionally same key as above, to assert that tree structures is not changed by
         // object rewrites of the same size
         driver.checkpoint("inserted foo");
     }
 
-    driver.insert_random(b"foo", 8192, 4000);
+    driver.insert_random(b"foo", StoragePreference::NONE, 8192, 4000);
     driver.checkpoint("rewrote foo, but larger");
 
     driver.delete(b"foo");
     driver.checkpoint("deleted foo");
-    driver.insert_random(b"bar", 8192, 3000);
+    driver.insert_random(b"bar", StoragePreference::NONE, 8192, 3000);
     driver.checkpoint("inserted bar");
 }
 
@@ -110,8 +111,19 @@ fn delete_single() {
     let mut driver = TestDriver::setup("delete single", 1, 1024);
 
     driver.checkpoint("empty tree");
-    driver.insert_random(b"something", 8192 * 8, 12000);
+    driver.insert_random(b"something", StoragePreference::NONE, 8192 * 8, 2000);
     driver.checkpoint("inserted something");
     driver.delete(b"something");
     driver.checkpoint("deleted something");
+}
+
+#[test]
+fn downgrade() {
+    let mut driver = TestDriver::setup("downgrade", 2, 256);
+
+    driver.checkpoint("empty tree");
+    driver.insert_random(b"foo", StoragePreference::FASTEST, 8192, 2000);
+    driver.checkpoint("fastest pref");
+    driver.insert_random(b"foo", StoragePreference::FAST, 8192, 2100);
+    driver.checkpoint("fast pref");
 }
