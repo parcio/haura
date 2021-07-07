@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::{ cmp, sync::atomic::{AtomicU8, Ordering} };
 
 /// An allocation preference. If a [StoragePreference] other than [StoragePreference::NONE]
 /// is used for an operation, the allocator will try to allocate on that storage class,
@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 /// The exact properties of a storage layer depend on the database administrator, who is assumed
 /// to ensure that the vague ordering properties hold for the given deployment.
 ///
-/// This type is not an `Option<u8>`, because it saves one byte per value.
+/// This type is not an `Option<u8>`, because it saves one byte per value, and allows the
+/// implementation of convenience methods on itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct StoragePreference(u8);
@@ -74,6 +75,16 @@ impl StoragePreference {
 
     pub(crate) fn upgrade(&mut self, other: StoragePreference) {
         *self = StoragePreference::choose_faster(*self, other);
+    }
+}
+
+// Ordered by `strictness`, so 0 < 1 < 2 < 3 < None.
+// Implemented separately instead of derived, to comment
+// and error on some changes to struct items.
+impl PartialOrd for StoragePreference {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        // This works as long as NONE.0 is larger than 3
+        self.0.partial_cmp(&other.0)
     }
 }
 

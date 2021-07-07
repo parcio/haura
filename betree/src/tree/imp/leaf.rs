@@ -183,9 +183,14 @@ impl LeafNode {
             self.entries_size += data.len();
             self.storage_preference.upgrade(keyinfo.storage_preference);
 
-            if let Some((_old_info, old_data)) = self.entries.insert(key.into(), (keyinfo, data)) {
+            if let Some((old_info, old_data)) = self.entries.insert(key.into(), (keyinfo.clone(), data)) {
                 // There was a previous value in entries, which was now replaced
                 self.entries_size -= old_data.len();
+
+                // if previous entry was stricter than new entry, invalidate
+                if old_info.storage_preference < keyinfo.storage_preference {
+                    self.storage_preference.invalidate();
+                }
             } else {
                 // There was no previous value in entries
                 self.entries_size += packed::ENTRY_LEN;

@@ -136,9 +136,8 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
     pub(super) fn try_flush(&mut self) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => {
+            Internal(ref mut internal) =>
                 internal.try_flush(MIN_FLUSH_SIZE, MAX_INTERNAL_NODE_SIZE, MIN_FANOUT)
-            }
         }
     }
 
