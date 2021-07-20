@@ -1,0 +1,111 @@
+---
+source: betree/tests/src/lib.rs
+expression: "self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\")"
+
+---
+{
+  "type": "internal",
+  "level": 1,
+  "storage": 0,
+  "children": [
+    {
+      "from": null,
+      "to": "0000 0000 0000 0000 0000 0143",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0143",
+      "to": "0000 0000 0000 0000 0000 015B",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 015B",
+      "to": "0000 0000 0000 0000 0000 0173",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 0173",
+      "to": "0000 0000 0000 0000 0000 018B",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 018B",
+      "to": "0000 0000 0000 0000 0000 01A3",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 01A3",
+      "to": "0000 0000 0000 0000 0000 01BB",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 01BB",
+      "to": "0000 0000 0000 0000 0000 01D3",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 01D3",
+      "to": "0000 0000 0000 0000 0000 01EB",
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 24
+      }
+    },
+    {
+      "from": "0000 0000 0000 0000 0000 01EB",
+      "to": null,
+      "storage": 0,
+      "child": {
+        "type": "leaf",
+        "level": 0,
+        "storage": 0,
+        "entry_count": 9
+      }
+    }
+  ]
+}
