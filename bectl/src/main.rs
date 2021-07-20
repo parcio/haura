@@ -1,8 +1,7 @@
 use std::{
     fmt::{self, Display},
-    io::{self, Read, Write},
-    num, panic,
-    path::PathBuf,
+    io::{self, BufReader, BufWriter, Write},
+    num,
     str::FromStr,
 };
 
@@ -14,7 +13,6 @@ use betree_storage_stack::{
     StoragePreference,
 };
 use chrono::{DateTime, Utc};
-use error_chain::ChainedError;
 use figment::providers::Format;
 use log::info;
 use structopt::StructOpt;
@@ -107,7 +105,7 @@ enum KvMode {
         name: String,
         value: String,
     },
-    TreeDump
+    TreeDump,
 }
 
 #[derive(StructOpt)]
@@ -123,10 +121,6 @@ enum ObjMode {
     },
     Del {
         name: String,
-    },
-    #[cfg(feature = "fuse")]
-    Mount {
-        mountpoint: PathBuf,
     },
 }
 
@@ -209,10 +203,8 @@ fn bectl_main() -> Result<(), Error> {
                 let root = db.root_tree();
 
                 let range = root.range::<CowBytes, _>(..).unwrap();
-                for e in range {
-                    if let Ok((k, v)) = e {
-                        println!("{:?} -> {:?}", &*k, &*v);
-                    }
+                for (k, v) in range.flatten() {
+                    println!("{:?} -> {:?}", &*k, &*v);
                 }
             }
         },
@@ -251,14 +243,18 @@ fn bectl_main() -> Result<(), Error> {
 
             KvMode::Put { name, value } => {
                 let mut db = open_db(cfg)?;
-                let ds = db.open_or_create_dataset(dataset.as_bytes(), storage_preference.0)?;
+                let ds =
+                    db.open_or_create_custom_dataset(dataset.as_bytes(), storage_preference.0)?;
                 ds.insert(name.as_bytes(), value.as_bytes())?;
                 db.sync()?;
             }
 
             KvMode::TreeDump => {
                 let mut db = open_db(cfg)?;
-                let ds = db.open_or_create_dataset(dataset.as_bytes(), storage_preference.0)?;
+                let ds = db.open_or_create_custom_dataset::<DefaultMessageAction>(
+                    dataset.as_bytes(),
+                    storage_preference.0,
+                )?;
 
                 let stdout = io::stdout();
                 let mut stdout_lock = stdout.lock();
@@ -296,10 +292,9 @@ fn bectl_main() -> Result<(), Error> {
                 let (obj, _info) = os
                     .open_object_with_pref(name.as_bytes(), storage_preference.0)?
                     .unwrap();
-                for (_key, value) in obj.read_all_chunks().unwrap().filter_map(Result::ok) {
-                    stdout_lock.write_all(&value)?;
-                }
 
+                let mut cursor = BufReader::new(obj.cursor());
+                io::copy(&mut cursor, &mut stdout_lock)?;
                 stdout_lock.flush()?;
             }
 
@@ -312,21 +307,9 @@ fn bectl_main() -> Result<(), Error> {
                 let stdin = io::stdin();
                 let mut stdin_lock = stdin.lock();
 
-                let mut buf = vec![0; buf_size as usize];
-                let mut curr_pos = 0;
-
-                loop {
-                    match stdin_lock.read(&mut buf) {
-                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                        Err(e) => panic::panic_any(e), // FIXME: pass outside
-                        Ok(0) => break,
-                        Ok(n_read) => {
-                            obj.write_at(&buf[..n_read], curr_pos)
-                                .map_err(|(_, err)| err)?;
-                            curr_pos += n_read as u64;
-                        }
-                    }
-                }
+                let mut cursor = BufWriter::with_capacity(buf_size as usize, obj.cursor());
+                io::copy(&mut stdin_lock, &mut cursor)?;
+                cursor.flush()?;
 
                 db.sync()?;
             }
@@ -335,34 +318,13 @@ fn bectl_main() -> Result<(), Error> {
                 let mut db = open_db(cfg)?;
                 let os = db.open_named_object_store(namespace.as_bytes(), storage_preference.0)?;
 
-                if let Some((obj, _info)) = os.open_object_with_pref(name.as_bytes(), storage_preference.0)? {
+                if let Some((obj, _info)) =
+                    os.open_object_with_pref(name.as_bytes(), storage_preference.0)?
+                {
                     obj.delete()?;
                 }
 
                 db.sync()?;
-            }
-
-            #[cfg(feature = "fuse")]
-            ObjMode::Mount { mountpoint } => {
-                let mut db = open_db(cfg)?;
-                let os = db.open_named_object_store(namespace.as_bytes(), storage_preference.0)?;
-
-                let fs = betree_fuse::BetreeFs::new(os, storage_preference.0);
-                let mount_options = {
-                    use fuser::MountOption::*;
-                    [
-                        FSName(namespace),
-                        Subtype("betree".to_owned()),
-                        AutoUnmount,
-                        DefaultPermissions,
-                        NoDev,
-                        NoSuid,
-                        RW,
-                        NoExec,
-                        NoAtime,
-                    ]
-                };
-                fuser::mount2(fs, &mountpoint, &mount_options).expect("Couldn't mount filesystem");
             }
         },
     }
