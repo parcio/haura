@@ -2,11 +2,14 @@ use super::{
     errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead,
 };
-use crate::{buffer::Buf, checksum::Checksum};
+use crate::{
+    buffer::{Buf, BufWrite},
+    checksum::Checksum,
+};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::{
-    io,
+    io::{self, Write},
     ops::{Deref, DerefMut},
     sync::atomic::Ordering,
 };
@@ -54,11 +57,15 @@ impl Memory {
         .map_err(|_| VdevError::Write(self.id.clone()))
     }
 
-    fn slice_read(&self, size: Block<u32>, offset: Block<u64>) -> Result<Box<[u8]>> {
+    fn slice_read(&self, size: Block<u32>, offset: Block<u64>) -> Result<Buf> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
 
         match self.slice_blocks(size, offset) {
-            Ok(slice) => Ok(slice.to_owned().into_boxed_slice()),
+            Ok(slice) => {
+                let mut buf = BufWrite::with_capacity(size);
+                buf.write_all(&*slice)?;
+                Ok(buf.into_buf())
+            }
             Err(e) => {
                 self.stats
                     .failed_reads
@@ -77,7 +84,7 @@ impl VdevRead for Memory {
         offset: Block<u64>,
         checksum: C,
     ) -> Result<Buf> {
-        let buf = Buf::from(self.slice_read(size, offset)?);
+        let buf = self.slice_read(size, offset)?;
         match checksum
             .verify(&buf)
             .map_err(|_| VdevError::Read(self.id.clone()))
@@ -107,7 +114,7 @@ impl VdevRead for Memory {
     }
 
     async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
-        Ok(vec![Buf::from(self.slice_read(size, offset)?)])
+        Ok(vec![self.slice_read(size, offset)?])
     }
 }
 
