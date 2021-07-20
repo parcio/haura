@@ -93,6 +93,12 @@ fn object_chunk_key(ObjectId(object_id): ObjectId, chunk_id: u32) -> [u8; 8 + 4]
     b
 }
 
+fn decode_object_chunk_key(key: &[u8; 8 + 4]) -> (ObjectId, u32) {
+    let id = u64::from_be_bytes(key[..8].try_into().unwrap());
+    let offset = u32::from_be_bytes(key[8..].try_into().unwrap());
+    (ObjectId(id), offset)
+}
+
 /// An object store
 pub struct ObjectStore<Config: DatabaseBuilder> {
     data: Dataset<Config>,
@@ -314,7 +320,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
                         object: Object {
                             key: key.to_vec(),
                             id: info.object_id,
-                            storage_preference: StoragePreference::NONE, // FIXME: retrieve stored preference
+                            storage_preference: StoragePreference::NONE,
                         },
                     },
                     info,
@@ -398,10 +404,20 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// Read object data into `buf`, starting at offset `offset`, and returning the amount of
     /// actually read bytes.
     pub fn read_at(&self, mut buf: &mut [u8], offset: u64) -> result::Result<u64, (u64, Error)> {
-        let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
         let oid = self.object.id;
-
         let mut total_read = 0;
+
+        // Sparse object data below object size is zero-filled
+        let obj_size = self
+            .info()
+            .map_err(|err| (total_read, err))?
+            .map(|info| info.size)
+            .unwrap_or(0);
+
+        let remaining_data = obj_size.saturating_sub(offset);
+        let to_be_read = (buf.len() as u64).min(remaining_data);
+        let chunk_range = ChunkRange::from_byte_bounds(offset, to_be_read);
+
         for chunk in chunk_range.split_at_chunk_bounds() {
             let want_len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(oid, chunk.start.chunk_id);
@@ -412,36 +428,72 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
                 .get(&key[..])
                 .map_err(|err| (total_read, err))?;
             if let Some(data) = maybe_data {
-                let data = &data[chunk.start.offset as usize..];
-                let have_len = want_len.min(data.len());
-                buf[..have_len].copy_from_slice(&data[..have_len]);
+                if let Some(data) = data.get(chunk.start.offset as usize..) {
+                    // there was a value, and it has some data in the desired range
+                    let have_len = want_len.min(data.len());
+                    buf[..have_len].copy_from_slice(&data[..have_len]);
 
-                total_read += have_len as u64;
-                buf = &mut buf[have_len..];
+                    // if there was less data available than requested
+                    // (and because only data below obj_size is requested at all),
+                    // we need to zero-fill the rest of this chunk
+                    buf[have_len..want_len].fill(0);
+                } else {
+                    // there was a value, but it has no data in the desired range
+                    buf[..want_len].fill(0);
+                }
             } else {
-                break;
+                // there was no data for this key, but there could be additional keys
+                // separated by a gap, if this is a sparse object
+                buf[..want_len].fill(0);
             }
+
+            total_read += want_len as u64;
+            buf = &mut buf[want_len..];
         }
 
         Ok(total_read)
     }
 
-    /// Read this object in chunk-aligned blocks. The iterator will contain any existing chunks in
-    /// within `chunk_range`.
+    /// Read this object in chunk-aligned blocks. The iterator will contain any existing chunks
+    /// within `chunk_range`, and specify the address range of each returned chunk in bytes.
+    ///
+    /// For sparse objects, this will not include unallocated chunks,
+    /// and partially written chunks are not zero-filled.
     pub fn read_chunk_range(
         &self,
         chunk_range: Range<u32>,
-    ) -> Result<Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes)>>>> {
-        self.store.data.range(
+    ) -> Result<impl Iterator<Item = Result<(Range<u64>, SlicedCowBytes)>>> {
+        let iter = self.store.data.range(
             &object_chunk_key(self.object.id, chunk_range.start)[..]
                 ..&object_chunk_key(self.object.id, chunk_range.end),
-        )
+        )?;
+
+        let with_chunks = iter.map(|res| match res {
+            Ok((k, v)) => {
+                let k: &[u8; 8 + 4] = &k[..].try_into().expect("Invalid key length");
+                let (oid, chunk) = decode_object_chunk_key(k);
+                let chunk = ChunkOffset {
+                    chunk_id: chunk,
+                    offset: 0,
+                };
+                let byte_offset = chunk.as_bytes();
+                let range = byte_offset..byte_offset + k.len() as u64;
+                Ok((range, v))
+            }
+            Err(e) => Err(e),
+        });
+
+        Ok(with_chunks)
     }
 
-    /// Read all chunks of this object.
+    /// Read all allocated chunks of this object, along with the address range of
+    /// each returned chunk in bytes.
+    ///
+    /// For sparse objects, this will not include unallocated chunks,
+    /// and partially written chunks are not zero-filled.
     pub fn read_all_chunks(
         &self,
-    ) -> Result<Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes)>>>> {
+    ) -> Result<impl Iterator<Item = Result<(Range<u64>, SlicedCowBytes)>>> {
         self.read_chunk_range(0..CHUNK_MAX)
     }
 
@@ -463,6 +515,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         };
 
         let mut total_written = 0;
+
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(self.object.id, chunk.start.chunk_id);
@@ -501,7 +554,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         self.write_at_with_pref(buf, offset, self.object.storage_preference)
     }
 
-    /// Fetches this objects metadata.
+    /// Fetches this object's fixed metadata.
     /// Return this objects size in bytes. Size is defined as the largest offset of any byte in
     /// this objects data, and not the total count of bytes, as there could be sparsely allocated
     /// objects.
