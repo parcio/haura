@@ -304,7 +304,7 @@ mod tests {
 
     #[quickcheck]
     fn writes_without_failure(writes: Vec<(u8, u8)>, num_disks: u8) -> TestResult {
-        let vdev = try_ret!(build_mirror_vdev(Block(256), num_disks));
+        let vdev = try_ret!(build_mirror_vdev(Block(512), num_disks));
         test_writes_are_persistent(&writes, &vdev);
         TestResult::passed()
     }
@@ -321,7 +321,7 @@ mod tests {
         }
         let non_failing_disk_idx = non_failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(256), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
             .collect();
         for (idx, disk) in disks.iter().enumerate() {
             if idx != non_failing_disk_idx as usize {
@@ -345,7 +345,7 @@ mod tests {
         }
         let non_failing_disk_idx = non_failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(256), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
             .collect();
         for (idx, disk) in disks.iter().enumerate() {
             if idx != non_failing_disk_idx as usize {
@@ -369,7 +369,7 @@ mod tests {
         }
         let non_failing_disk_idx = non_failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(256), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
             .collect();
         for (idx, disk) in disks.iter().enumerate() {
             if idx != non_failing_disk_idx as usize {
@@ -412,7 +412,7 @@ mod tests {
         let read_non_failing_disk_idx = (read_non_failing_disk_idx % num_disks) as usize;
 
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(256), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
             .collect();
         let vdev = Mirror::new(disks.into_boxed_slice(), String::from("mirror"));
 
