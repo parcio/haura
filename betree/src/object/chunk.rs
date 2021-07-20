@@ -29,7 +29,7 @@ pub struct ChunkRange {
 impl ChunkRange {
     pub fn from_byte_bounds(offset: u64, len: u64) -> Self {
         const SIZE: u64 = CHUNK_SIZE as u64;
-        let end = offset + len;
+        let end = offset.saturating_add(len);
 
         ChunkRange {
             start: ChunkOffset {
@@ -55,35 +55,42 @@ impl ChunkRange {
     }
 
     pub fn split_at_chunk_bounds(&self) -> impl Iterator<Item = ChunkRange> {
-        let mut range = self.clone();
+        let mut range_start = Some(self.start.clone());
+        let end = self.end.clone();
 
         iter::from_fn(move || {
-            // is this range empty?
-            if range.start.chunk_id > range.end.chunk_id || range.start == range.end {
-                return None;
-            }
+            if let Some(start) = range_start {
+                // is this range empty?
+                if start.chunk_id > end.chunk_id || start == end {
+                    return None;
+                }
 
-            // no, it's not. return remainder of current chunk and remove it from this range
-            let last_chunk = range.start.chunk_id == range.end.chunk_id;
-            let curr_start = range.start;
-            range.start = ChunkOffset {
-                chunk_id: curr_start.chunk_id + 1,
-                offset: 0,
-            };
+                // no, it's not. return remainder of current chunk and remove it from this range
+                let last_chunk = start.chunk_id == end.chunk_id;
+                let curr_start = start;
 
-            let remainder = ChunkRange {
-                start: curr_start,
-                end: ChunkOffset {
-                    chunk_id: curr_start.chunk_id,
-                    offset: if last_chunk {
-                        range.end.offset
-                    } else {
-                        CHUNK_SIZE
+                // chunk_id increment could overflow, but we still need to return this remainder,
+                // even if it does
+                range_start = curr_start
+                    .chunk_id
+                    .checked_add(1)
+                    .map(|chunk_id| ChunkOffset {
+                        chunk_id,
+                        offset: 0,
+                    });
+
+                let remainder = ChunkRange {
+                    start: curr_start,
+                    end: ChunkOffset {
+                        chunk_id: curr_start.chunk_id,
+                        offset: if last_chunk { end.offset } else { CHUNK_SIZE },
                     },
-                },
-            };
+                };
 
-            Some(remainder)
+                Some(remainder)
+            } else {
+                None
+            }
         })
     }
 }
@@ -91,6 +98,13 @@ impl ChunkRange {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_chunk_empty() {
+        let chunk_range = ChunkRange::from_byte_bounds(42, 0);
+        assert_eq!(chunk_range.start, chunk_range.end);
+        assert_eq!(chunk_range.split_at_chunk_bounds().count(), 0);
+    }
 
     #[test]
     fn test_chunk_bounds() {
