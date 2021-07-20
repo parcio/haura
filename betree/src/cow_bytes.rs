@@ -204,6 +204,12 @@ impl CowBytes {
     pub fn slice(self, pos: u32, len: u32) -> SlicedCowBytes {
         SlicedCowBytes::from(self).subslice(pos, len)
     }
+
+    /// Returns a `SlicedCowBytes` which points to `self[pos..]`.
+    pub fn slice_from(self, pos: u32) -> SlicedCowBytes {
+        let len = self.len() as u32;
+        self.slice(pos, len)
+    }
 }
 
 impl<'a> Extend<&'a u8> for CowBytes {
@@ -299,14 +305,16 @@ impl Deref for SlicedCowBytes {
 #[cfg(test)]
 mod tests {
     use super::{Arc, CowBytes};
+    use crate::arbitrary::GenExt;
     use quickcheck::{Arbitrary, Gen};
-    use rand::Rng;
+    use rand::{Rng, RngCore};
 
     impl Arbitrary for CowBytes {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let len = g.gen_range(0, 128);
+        fn arbitrary(g: &mut Gen) -> Self {
+            let mut rng = g.rng();
+            let len = rng.gen_range(0..128);
             let mut bytes = vec![0; len];
-            g.fill_bytes(&mut bytes);
+            rng.fill_bytes(&mut bytes);
             CowBytes {
                 inner: Arc::new(bytes),
             }

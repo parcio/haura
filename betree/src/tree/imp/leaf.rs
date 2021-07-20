@@ -183,7 +183,9 @@ impl LeafNode {
             self.entries_size += data.len();
             self.storage_preference.upgrade(keyinfo.storage_preference);
 
-            if let Some((old_info, old_data)) = self.entries.insert(key.into(), (keyinfo.clone(), data)) {
+            if let Some((old_info, old_data)) =
+                self.entries.insert(key.into(), (keyinfo.clone(), data))
+            {
                 // There was a previous value in entries, which was now replaced
                 self.entries_size -= old_data.len();
 
@@ -310,6 +312,7 @@ impl LeafNode {
 mod tests {
     use super::{CowBytes, LeafNode, Size};
     use crate::{
+        arbitrary::GenExt,
         data_management::HasStoragePreference,
         tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
@@ -322,8 +325,8 @@ mod tests {
     use rand::Rng;
 
     impl Arbitrary for KeyInfo {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let sp = g.gen_range(0, 4);
+        fn arbitrary(g: &mut Gen) -> Self {
+            let sp = g.rng().gen_range(0..=3);
             KeyInfo {
                 storage_preference: StoragePreference::from_u8(sp),
             }
@@ -331,8 +334,8 @@ mod tests {
     }
 
     impl Arbitrary for LeafNode {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let len = g.gen_range(0, 20);
+        fn arbitrary(g: &mut Gen) -> Self {
+            let len = g.rng().gen_range(0..20);
             let entries: Vec<_> = (0..len)
                 .map(|_| {
                     (

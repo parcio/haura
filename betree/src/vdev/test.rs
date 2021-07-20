@@ -24,14 +24,13 @@ pub enum FailureMode {
 }
 
 impl Arbitrary for FailureMode {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        *[
+    fn arbitrary(g: &mut Gen) -> Self {
+        let choices = [
             FailureMode::NoFail,
             FailureMode::FailOperation,
             FailureMode::BadData,
-        ]
-        .choose(g)
-        .unwrap()
+        ];
+        *g.choose(&choices[..]).unwrap()
     }
 }
 
@@ -269,8 +268,9 @@ pub fn generate_data(idx: usize, offset: Block<u64>, size: Block<u32>) -> Buf {
 pub struct NonZeroU8(u8);
 
 impl Arbitrary for NonZeroU8 {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        NonZeroU8(g.gen_range(1, 255))
+    fn arbitrary(g: &mut Gen) -> Self {
+        use crate::arbitrary::GenExt;
+        NonZeroU8(g.rng().gen_range(1..=255))
     }
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {

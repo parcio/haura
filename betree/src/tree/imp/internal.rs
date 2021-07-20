@@ -488,7 +488,10 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg};
+    use crate::{
+        arbitrary::GenExt,
+        tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
+    };
     use bincode::serialized_size;
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
@@ -500,7 +503,7 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     struct Key(CowBytes);
     impl Arbitrary for Key {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        fn arbitrary(g: &mut Gen) -> Self {
             loop {
                 let c = CowBytes::arbitrary(g);
                 if !c.is_empty() {
@@ -522,8 +525,9 @@ mod tests {
     }
 
     impl<T: Arbitrary + Size> Arbitrary for InternalNode<T> {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let pivot_key_cnt = g.gen_range(1, 20);
+        fn arbitrary(g: &mut Gen) -> Self {
+            let mut rng = g.rng();
+            let pivot_key_cnt = rng.gen_range(1..20);
             let mut entries_size = 0;
 
             let mut pivot = Vec::with_capacity(pivot_key_cnt);

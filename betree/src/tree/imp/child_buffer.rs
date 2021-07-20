@@ -251,7 +251,7 @@ impl<N> ChildBuffer<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::default_message_action::DefaultMessageActionMsg;
+    use crate::{arbitrary::GenExt, tree::default_message_action::DefaultMessageActionMsg};
     use bincode::serialized_size;
     use quickcheck::{Arbitrary, Gen};
     use rand::Rng;
@@ -276,8 +276,9 @@ mod tests {
     }
 
     impl<N: Arbitrary> Arbitrary for ChildBuffer<N> {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let entries_cnt = g.gen_range(0, 20);
+        fn arbitrary(g: &mut Gen) -> Self {
+            let mut rng = g.rng();
+            let entries_cnt = rng.gen_range(0..20);
             let buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> = (0..entries_cnt)
                 .map(|_| {
                     (

@@ -357,7 +357,7 @@ pub use self::tests::DefaultMessageActionMsg;
 #[cfg(test)]
 mod tests {
     use super::{DefaultMessageAction, MsgType, Upsert};
-    use crate::cow_bytes::SlicedCowBytes;
+    use crate::{arbitrary::GenExt, cow_bytes::SlicedCowBytes};
     use quickcheck::{Arbitrary, Gen};
     use rand::Rng;
 
@@ -365,12 +365,13 @@ mod tests {
     pub struct DefaultMessageActionMsg(pub SlicedCowBytes);
 
     impl Arbitrary for DefaultMessageActionMsg {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let b = MsgType::from(g.gen_range(0, 3));
+        fn arbitrary(g: &mut Gen) -> Self {
+            let mut rng = g.rng();
+            let b = MsgType::from(rng.gen_range(0..3));
             match b {
                 MsgType::Upsert => {
                     // TODO multiple?
-                    let offset = g.gen_range(0, 10);
+                    let offset = rng.gen_range(0..10);
                     let data: Vec<_> = Arbitrary::arbitrary(g);
                     DefaultMessageActionMsg(DefaultMessageAction::build_upsert_msg(&[
                         Upsert::Bytes {

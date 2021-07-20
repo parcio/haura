@@ -51,6 +51,9 @@ pub mod object;
 #[cfg(feature = "init_env_logger")]
 pub mod env_logger;
 
+#[cfg(test)]
+mod arbitrary;
+
 pub use self::{
     database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
     storage_pool::{AtomicStoragePreference, StoragePoolConfiguration, StoragePreference},
