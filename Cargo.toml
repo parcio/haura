@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "betree",
-    "tests",
+    "betree/tests",
+    "betree/perf",
     "bectl",
     "julea-sys",
     "julea-betree",
