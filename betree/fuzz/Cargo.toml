@@ -12,8 +12,8 @@ members = ["."]
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = { version = "0.3", features = ["arbitrary-derive"] }
-arbitrary = { version = "0.4", features = ["derive"] }
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+arbitrary = { version = "1", features = ["derive"] }
 
 [dependencies.betree_storage_stack]
 path = ".."
