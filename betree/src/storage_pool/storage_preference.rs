@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::{ cmp, sync::atomic::{AtomicU8, Ordering} };
+use std::{
+    cmp,
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 /// An allocation preference. If a [StoragePreference] other than [StoragePreference::NONE]
 /// is used for an operation, the allocator will try to allocate on that storage class,

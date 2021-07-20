@@ -60,12 +60,22 @@ pub enum Vdev {
 
 /// Represents a leaf vdev.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
+#[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum LeafVdev {
     /// Backed by a file or disk.
     File(PathBuf),
+    /// Customisable file vdev.
+    FileWithOpts {
+        /// Path to file or block device
+        path: PathBuf,
+        /// Whether to use direct IO for this file. Defaults to true.
+        direct: Option<bool>,
+    },
     /// Backed by a memory buffer.
-    Memory(usize),
+    Memory {
+        /// Size of memory vdev in bytes.
+        mem: usize,
+    },
 }
 
 error_chain! {
@@ -145,7 +155,10 @@ impl TierConfiguration {
             for leaf in leaves {
                 match leaf {
                     LeafVdev::File(path) => write!(s, "{} ", path.display()).unwrap(),
-                    LeafVdev::Memory(size) => write!(s, "memory({}) ", size).unwrap(),
+                    LeafVdev::FileWithOpts { path, direct } => {
+                        write!(s, "{} (direct: {:?}) ", path.display(), direct).unwrap()
+                    }
+                    LeafVdev::Memory { mem } => write!(s, "memory({}) ", mem).unwrap(),
                 }
             }
         }
@@ -199,12 +212,20 @@ impl LeafVdev {
         use std::os::unix::fs::OpenOptionsExt;
 
         match *self {
-            LeafVdev::File(ref path) => {
-                let file = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .custom_flags(libc::O_DIRECT)
-                    .open(&path)?;
+            LeafVdev::File(_) | LeafVdev::FileWithOpts { .. } => {
+                let (path, direct) = match self {
+                    LeafVdev::File(path) => (path, true),
+                    LeafVdev::FileWithOpts { path, direct } => (path, direct.unwrap_or(true)),
+                    LeafVdev::Memory { .. } => unreachable!(),
+                };
+
+                let mut file = OpenOptions::new();
+                file.read(true).write(true);
+                if direct {
+                    file.custom_flags(libc::O_DIRECT);
+                }
+                let file = file.open(&path)?;
+
                 if unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) }
                     != 0
                 {
@@ -216,9 +237,9 @@ impl LeafVdev {
                     path.to_string_lossy().into_owned(),
                 )?))
             }
-            LeafVdev::Memory(size) => Ok(Leaf::Memory(vdev::Memory::new(
-                size,
-                format!("memory-{}", size),
+            LeafVdev::Memory { mem } => Ok(Leaf::Memory(vdev::Memory::new(
+                mem,
+                format!("memory-{}", mem),
             )?)),
         }
     }
@@ -267,8 +288,18 @@ impl LeafVdev {
             LeafVdev::File(path) => {
                 writeln!(f, "{:indent$}{}", "", path.display(), indent = indent)
             }
-            LeafVdev::Memory(size) => {
-                writeln!(f, "{:indent$}memory({})", "", size, indent = indent)
+            LeafVdev::FileWithOpts { path, direct } => {
+                writeln!(
+                    f,
+                    "{:indent$}{} (direct: {:?})",
+                    "",
+                    path.display(),
+                    direct,
+                    indent = indent
+                )
+            }
+            LeafVdev::Memory { mem } => {
+                writeln!(f, "{:indent$}memory({})", "", mem, indent = indent)
             }
         }
     }
