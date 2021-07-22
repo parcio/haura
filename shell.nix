@@ -1,33 +1,41 @@
-with (import <nixpkgs> {}).unstable;
+with import <nixpkgs> {};
 
 let
-  inherit (nur.repos.mozilla) rustChannelOf;
-
-  rustStable = rustChannelOf {
-    channel = "stable";
-    date = "2021-02-11";
+  rustOverlay = fetchFromGitHub {
+    owner = "oxalica";
+    repo = "rust-overlay";
+    rev = "8d79f4f49aef96b35de8229c9a059a2bdab2b1ec";
+    sha256 = "067gwa19qzxds50lj2s2gk5ww8grv76hzybabf00r6nz1zc3wyxb";
   };
 
-  rustNightly = rustChannelOf {
-    channel = "nightly";
-    date = "2021-02-17";
-  };
+  rustPkgs = let self = pkgs // (import rustOverlay self pkgs); in self;
 
-  rust = rustNightly.rust.override {
-  #rust = rustStable.rust.override {
-    extensions = [ "rust-src" "llvm-tools-preview" ];
+  extensions = [ "rust-src" "llvm-tools-preview" ];
+  rustStable = rustPkgs.rust-bin.nightly.latest.default.override {
+    inherit extensions;
   };
+  rustNightly = rustPkgs.rust-bin.selectLatestNightlyWith
+    (toolchain: toolchain.default.override { inherit extensions; });
+
+  rust = rustNightly;
 
   llvmPackages = llvmPackages_latest;
 in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
   RUST_BACKTRACE = "full";
-  RUSTFLAGS = "-C link-arg=-fuse-ld=lld -C target-cpu=native -C prefer-dynamic";
-  QUICKCHECK_TESTS = 1;
+  RUSTFLAGS = lib.concatStringsSep " " [
+    # "-C link-arg=-fuse-ld=lld"
+    # "-C prefer-dynamic"
+    "-C target-cpu=native"
+    # "-C target-feature=+avx"
+  ];
+  # pretend we have nightly to use cargo-fuzz
+  # RUSTC_BOOTSTRAP = "1";
+  QUICKCHECK_TESTS = 10;
 
   JULEA_PREFIX = "${toString ./.}/julea-install";
-  JULEA_TRACE = "echo";
-  G_DEBUG = "resident-modules";
-  G_SLICE = "debug-blocks";
+  # JULEA_TRACE = "echo";
+  # G_DEBUG = "resident-modules";
+  # G_SLICE = "debug-blocks";
 
   LIBCLANG_PATH="${llvmPackages.libclang.lib}/lib/libclang.so";
   JULEA_INCLUDE = "${toString ./.}/julea/include";
@@ -39,17 +47,24 @@ in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
   ];
 
   nativeBuildInputs = [
-    rustNightly.rustfmt-preview
+    # rustNightly.rustfmt-preview
     rust
 
     cargo-outdated
     cargo-bloat
     rust-bindgen
+    rust-cbindgen
 
     pkgconfig
 
+    perf-tools
+    flamegraph
     heaptrack
+    hotspot
     psrecord
+    coz
+
+    trace-cmd
 
     # julea
     meson
@@ -59,7 +74,7 @@ in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
     glib
   ] ++ (with llvmPackages; [
     libcxxClang
-    lldClang
+    bintools
     libclang.lib
   ]);
 
@@ -72,5 +87,7 @@ in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
   shellHook = ''
     export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:${toString ./.}/betree"
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:${JULEA_PREFIX}/lib"
+    TARGET_DIR="$(cargo metadata --no-deps --format-version 1 | ${jq}/bin/jq -r .target_directory)"
+    export PATH="$PATH:$TARGET_DIR/release"
   '';
 }
