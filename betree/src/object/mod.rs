@@ -392,12 +392,14 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
 pub struct Object {
     /// The key for which this object was opened.
     /// Required to interact with its metadata, which is indexed by the full object name.
-    pub key: Vec<u8>,
+    key: Vec<u8>,
     id: ObjectId,
     storage_preference: StoragePreference,
 }
 
 impl Object {
+    pub fn key(&self) -> &[u8] { &self.key }
+
     fn metadata_prefix_into(&self, v: &mut Vec<u8>) {
         v.extend_from_slice(&self.key[..]);
         v.push(0);
@@ -556,6 +558,8 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// and set the modification time to the current system time when the write was completed.
     ///
     /// `storage_pref` is only used for the data chunks, not for any metadata updates.
+    /// If an error is encounted while writing chunks, the operation is aborted and the amount
+    /// of bytes written is returned alongside the error.
     pub fn write_at_with_pref(
         &self,
         mut buf: &[u8],

@@ -153,7 +153,7 @@ unsafe extern "C" fn backend_open(
 
 unsafe extern "C" fn backend_delete(_backend_data: gpointer, backend_object: gpointer) -> gboolean {
     let handle = Box::from_raw(backend_object.cast::<ObjectHandle>());
-    let key = handle.object.key.clone();
+    let key = handle.object.key().to_vec();
 
     let (res, _) = jtrace::with_once(J_TRACE_FILE_DELETE, &key, || {
         let res = handle.delete();
@@ -170,7 +170,7 @@ unsafe extern "C" fn backend_delete(_backend_data: gpointer, backend_object: gpo
 
 unsafe extern "C" fn backend_close(_backend_data: gpointer, backend_object: gpointer) -> gboolean {
     let handle = Box::from_raw(backend_object.cast::<ObjectHandle>());
-    let key = handle.object.key.clone();
+    let key = handle.object.key().to_vec();
 
     let (res, _) = jtrace::with_once(J_TRACE_FILE_CLOSE, &key, || {
         let res = handle.close();
@@ -192,7 +192,7 @@ unsafe extern "C" fn backend_status(
     size: *mut guint64,
 ) -> gboolean {
     let handle = &*backend_object.cast::<ObjectHandle>();
-    let key = handle.object.key.as_ptr().cast::<i8>();
+    let key = handle.object.key().as_ptr().cast::<i8>();
 
     let (res, _): (Result<()>, _) = jtrace::with(J_TRACE_FILE_STATUS, key, || {
         let res = (|| {
@@ -224,7 +224,7 @@ unsafe extern "C" fn backend_sync(backend_data: gpointer, backend_object: gpoint
 
     let (res, _) = jtrace::with(
         J_TRACE_FILE_SYNC,
-        handle.object.key.as_ptr().cast::<i8>(),
+        handle.object.key().as_ptr().cast::<i8>(),
         || {
             let res = backend.database.write().sync();
             (res, (0, 0))
@@ -251,7 +251,7 @@ unsafe extern "C" fn backend_read(
 
     let (res, (n_read, _)) = jtrace::with(
         J_TRACE_FILE_READ,
-        handle.object.key.as_ptr().cast::<i8>(),
+        handle.object.key().as_ptr().cast::<i8>(),
         || {
             let res = handle.read_at(
                 slice::from_raw_parts_mut(buffer.cast::<u8>(), length as usize),
@@ -290,7 +290,7 @@ unsafe extern "C" fn backend_write(
 
     let (res, (n_written, _)) = jtrace::with(
         J_TRACE_FILE_WRITE,
-        handle.object.key.as_ptr().cast::<i8>(),
+        handle.object.key().as_ptr().cast::<i8>(),
         || {
             let res = handle.write_at(
                 slice::from_raw_parts(buffer.cast::<u8>(), length as usize),
@@ -372,7 +372,7 @@ unsafe extern "C" fn backend_iterate(
     let iter = &mut *backend_iterator.cast::<Iter>();
     if let Some((handle, _info)) = iter.iter.next() {
         iter.name.clear();
-        iter.name.extend_from_slice(&handle.object.key);
+        iter.name.extend_from_slice(handle.object.key());
         name.write(iter.name.as_ptr().cast::<i8>());
         TRUE
     } else {

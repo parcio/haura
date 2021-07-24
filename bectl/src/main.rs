@@ -293,7 +293,7 @@ fn bectl_main() -> Result<(), Error> {
                     let mtime = DateTime::<Utc>::from(info.mtime);
                     println!(
                         "{} ({} bytes, modified {})",
-                        PseudoAscii(&obj.object.key[..]),
+                        PseudoAscii(obj.object.key()),
                         info.size,
                         mtime.to_rfc3339()
                     );
