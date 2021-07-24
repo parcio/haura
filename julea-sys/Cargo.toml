@@ -5,4 +5,4 @@ authors = ["tilpner <till@hoeppner.ws>"]
 edition = "2018"
 
 [build-dependencies]
-bindgen = "0.57"
+bindgen = "0.58"

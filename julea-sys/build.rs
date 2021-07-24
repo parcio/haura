@@ -21,8 +21,8 @@ fn main() {
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .anon_fields_prefix("anon")
         .disable_nested_struct_naming()
-        .whitelist_type("JBackend")
-        .whitelist_function("j_trace.*")
+        .allowlist_type("JBackend")
+        .allowlist_function("j_trace.*")
         .rustified_non_exhaustive_enum("JTrace.*")
         .constified_enum_module("JBackend.*")
         // Finish the builder and generate the bindings.
