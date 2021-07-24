@@ -125,7 +125,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
         storage_preference: StoragePreference,
     ) -> Result<ObjectStore<Config>> {
         assert!(!name.contains(&0));
-        let v = name.to_vec();
+        let mut v = name.to_vec();
+        v.push(0);
 
         let mut data_name = v.clone();
         data_name.extend_from_slice(b"data");
