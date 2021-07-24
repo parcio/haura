@@ -783,7 +783,7 @@ where
         }
     }
 
-    fn insert(&self, mut object: Self::Object, info: H::Info) -> Self::ObjectRef {
+    fn insert(&self, object: Self::Object, info: H::Info) -> Self::ObjectRef {
         let mid = ModifiedObjectId(
             self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
             object.correct_preference(),
@@ -797,7 +797,7 @@ where
 
     fn insert_and_get_mut(
         &self,
-        mut object: Self::Object,
+        object: Self::Object,
         info: Self::Info,
     ) -> (Self::CacheValueRefMut, Self::ObjectRef) {
         let mid = ModifiedObjectId(

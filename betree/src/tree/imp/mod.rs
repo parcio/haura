@@ -8,7 +8,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef},
     range_validation::is_inclusive_non_empty,
-    size::{Size, StaticSize},
+    size::StaticSize,
     tree::MessageAction,
     StoragePreference,
 };

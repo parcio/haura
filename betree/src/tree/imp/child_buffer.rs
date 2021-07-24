@@ -26,7 +26,7 @@ pub(super) struct ChildBuffer<N: 'static> {
 
 impl Size for (KeyInfo, SlicedCowBytes) {
     fn size(&self) -> usize {
-        let (keyinfo, data) = self;
+        let (_keyinfo, data) = self;
         KeyInfo::static_size() + data.size()
     }
 }

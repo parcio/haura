@@ -7,7 +7,7 @@
 //! does.
 
 use super::{clock::Clock, AddSize, Cache, ChangeKeyError, RemoveError, Stats};
-use crate::size::{Size, SizeMut};
+use crate::size::SizeMut;
 use stable_deref_trait::StableDeref;
 use std::{
     collections::HashMap,

@@ -519,7 +519,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         let with_chunks = iter.map(|res| match res {
             Ok((k, v)) => {
                 let k: &[u8; 8 + 4] = &k[..].try_into().expect("Invalid key length");
-                let (oid, chunk) = decode_object_chunk_key(k);
+                let (_oid, chunk) = decode_object_chunk_key(k);
                 let chunk = ChunkOffset {
                     chunk_id: chunk,
                     offset: 0,

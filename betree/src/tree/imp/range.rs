@@ -46,7 +46,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some((key, (keyinfo, data))) = self.buffer.pop_front() {
+            if let Some((key, (_keyinfo, data))) = self.buffer.pop_front() {
                 return Some(Ok((key, data)));
             } else if self.finished {
                 return None;
