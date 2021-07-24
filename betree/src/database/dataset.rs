@@ -239,12 +239,6 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn debug_for_each(&self) {
-        self.tree.debug_for_each(None);
-    }
-
-    #[allow(missing_docs)]
-    #[cfg(feature = "internal-api")]
     pub fn tree_dump(&self) -> Result<impl serde::Serialize> {
         Ok(self.tree.tree_dump()?)
     }
