@@ -4,13 +4,13 @@ use super::{
 };
 use crate::{
     buffer::Buf,
-    checksum::{Builder, Checksum, State, XxHash, XxHashBuilder},
+    checksum::{Builder, Checksum, State, XxHashBuilder},
 };
 use async_trait::async_trait;
 use futures::{executor::block_on, prelude::*};
 use parking_lot::Mutex;
 use quickcheck::{Arbitrary, Gen};
-use rand::{seq::SliceRandom, Rng, RngCore, SeedableRng};
+use rand::{Rng, RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use seqlock::SeqLock;
 use std::{collections::HashMap, sync::atomic::Ordering};
