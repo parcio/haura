@@ -12,6 +12,7 @@
 //!
 //! ```text
 //! [key] -> ObjectInfo, containing object id in data tree, and current object size in bytes
+//! [key][0][custom byte key] -> [custom byte value]
 //! ```
 //!
 //! ## Data tree
@@ -304,6 +305,11 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         // Delete metadata before data, otherwise object could be concurrently reopened,
         // rewritten, and deleted with a live handle.
         self.update_object_info(&handle.object.key[..], &MetaMessage::delete())?;
+        let (start, end) = handle.object.metadata_bounds();
+        let meta_delete = SlicedCowBytes::from(meta::delete_custom());
+        for (k, _v) in self.metadata.range(start..end)?.flatten() {
+            self.metadata.insert_msg(k, meta_delete.clone());
+        }
 
         self.data.range_delete(
             &object_chunk_key(handle.object.id, 0)[..]
@@ -325,6 +331,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         let raw_iter = self.metadata.range(range)?;
         let iter = raw_iter
             .flat_map(Result::ok) // FIXME
+            .filter(|(key, _value)| meta::is_fixed_key(key))
             .map(move |(key, value)| {
                 let info = ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &value).unwrap();
                 (
@@ -382,6 +389,34 @@ pub struct Object {
     pub key: Vec<u8>,
     id: ObjectId,
     storage_preference: StoragePreference,
+}
+
+impl Object {
+    fn metadata_prefix_into(&self, v: &mut Vec<u8>) {
+        v.extend_from_slice(&self.key[..]);
+        v.push(0);
+    }
+
+    fn metadata_bounds(&self) -> (Vec<u8>, Vec<u8>) {
+        let prefix_len = self.key.len() + 1;
+
+        // construct the key range of custom metadata: [key]0 .. [key]1
+        let mut start = Vec::with_capacity(prefix_len);
+        start.extend_from_slice(&self.key[..]);
+        start.push(0);
+        let mut end = start.clone();
+        end.pop();
+        end.push(1);
+
+        (start, end)
+    }
+
+    fn metadata_key(&self, name: &[u8]) -> Vec<u8> {
+        let mut v = Vec::with_capacity(self.key.len() + 1 + name.len());
+        self.metadata_prefix_into(&mut v);
+        v.extend_from_slice(name);
+        v
+    }
 }
 
 /// A handle to an object which may or may not exist in the [ObjectStore] it was created from.
@@ -512,7 +547,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
 
     /// Write `buf.len()` bytes from `buf` to this objects data, starting at offset `offset`.
     /// This will update the objects size to the largest byte index that has been inserted,
-    /// and set the modification time to the current system time when the write was started.
+    /// and set the modification time to the current system time when the write was completed.
     ///
     /// `storage_pref` is only used for the data chunks, not for any metadata updates.
     pub fn write_at_with_pref(
@@ -522,11 +557,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         storage_pref: StoragePreference,
     ) -> result::Result<u64, (u64, Error)> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
-        let mut meta_change = MetaMessage {
-            mtime: Some(SystemTime::now()),
-            ..MetaMessage::default()
-        };
-
+        let mut meta_change = MetaMessage::default();
         let mut total_written = 0;
 
         for chunk in chunk_range.split_at_chunk_bounds() {
@@ -540,6 +571,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
                     // best-effort metadata update
                     // this is called only when the original upsert errored,
                     // there's not much we can do to handle an error during error handling
+                    meta_change.mtime = Some(SystemTime::now());
                     let _ = self
                         .store
                         .update_object_info(&self.object.key, &meta_change);
@@ -554,6 +586,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
             meta_change.size = Some(chunk.end.as_bytes());
         }
 
+        meta_change.mtime = Some(SystemTime::now());
         self.store
             .update_object_info(&self.object.key, &meta_change)
             .map(|()| total_written)
@@ -575,5 +608,46 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// Ok(None) is only returned if the object was deleted concurrently.
     pub fn info(&self) -> Result<Option<ObjectInfo>> {
         self.store.read_object_info(&self.object.key)
+    }
+
+    pub fn get_metadata(&self, name: &[u8]) -> Result<Option<SlicedCowBytes>> {
+        assert!(!name.contains(&0));
+        let key = self.object.metadata_key(name);
+        self.store.metadata.get(key)
+    }
+
+    pub fn set_metadata(&self, name: &[u8], value: &[u8]) -> Result<()> {
+        assert!(!name.contains(&0));
+        let key = self.object.metadata_key(name);
+        let msg = meta::set_custom(value);
+        self.store
+            .metadata
+            .insert_msg(key, SlicedCowBytes::from(msg))
+    }
+
+    pub fn delete_metadata(&self, name: &[u8]) -> Result<()> {
+        assert!(!name.contains(&0));
+        let key = self.object.metadata_key(name);
+        let msg = meta::delete_custom();
+        self.store
+            .metadata
+            .insert_msg(key, SlicedCowBytes::from(msg))
+    }
+
+    /// Fetches this object's custom metadata.
+    pub fn iter_metadata(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Result<(SlicedCowBytes, SlicedCowBytes)>>>> {
+        let (start, end) = self.object.metadata_bounds();
+        let prefix_len = start.len();
+
+        let iter = self
+            .store
+            .metadata
+            .range(start..end)?
+            // strip key prefix, leave only metadata entry name
+            .map(move |res| res.map(|(k, v)| (k.slice_from(prefix_len as u32), v)));
+
+        Ok(Box::new(iter))
     }
 }

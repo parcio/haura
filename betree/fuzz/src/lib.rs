@@ -93,7 +93,10 @@ pub fn run_kv_ops(ops: &[KvOp]) {
 pub enum ObjOp {
     Write(ValidKey, Vec<u8>, u64),
     Read(ValidKey, u32, u64),
-    Delete(ValidKey)
+    Delete(ValidKey),
+    MetaGet(ValidKey, ValidKey),
+    MetaSet(ValidKey, ValidKey, Vec<u8>),
+    MetaDel(ValidKey, ValidKey)
 }
 
 pub fn run_obj_ops(ops: &[ObjOp]) {
@@ -117,7 +120,23 @@ pub fn run_obj_ops(ops: &[ObjOp]) {
                 if let Ok(Some(obj)) = os.open_object(key) {
                     let _ = obj.delete();
                 }
-            }
+            },
+            MetaGet(ValidKey(obj_key), ValidKey(meta_key)) => {
+                if let Ok(Some(obj)) = os.open_object(obj_key) {
+                    let _ = obj.get_metadata(meta_key);
+                }
+            },
+            MetaSet(ValidKey(obj_key), ValidKey(meta_key), value) => {
+                if let Ok(Some(obj)) = os.open_object(obj_key) {
+                    let _ = obj.set_metadata(meta_key, value);
+                }
+            },
+            MetaDel(ValidKey(obj_key), ValidKey(meta_key)) => {
+                if let Ok(Some(obj)) = os.open_object(obj_key) {
+                    let _ = obj.delete_metadata(meta_key);
+                }
+            },
+
         }
     }
 }

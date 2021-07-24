@@ -110,7 +110,10 @@ enum KvMode {
 
 #[derive(StructOpt)]
 enum ObjMode {
-    List,
+    List {
+        #[structopt(short = "c", long)]
+        with_custom: bool,
+    },
     Get {
         name: String,
     },
@@ -122,6 +125,19 @@ enum ObjMode {
     Del {
         name: String,
     },
+    Meta {
+        obj_name: String,
+        #[structopt(subcommand)]
+        mode: ObjMetaMode,
+    },
+}
+
+#[derive(StructOpt)]
+enum ObjMetaMode {
+    Get { meta_name: String },
+    Set { meta_name: String, value: String },
+    Del { meta_name: String },
+    List,
 }
 
 error_chain::error_chain! {
@@ -269,7 +285,7 @@ fn bectl_main() -> Result<(), Error> {
             storage_preference,
             ..
         } => match mode {
-            ObjMode::List => {
+            ObjMode::List { with_custom } => {
                 let mut db = open_db(cfg)?;
                 let os = db.open_named_object_store(namespace.as_bytes(), storage_preference.0)?;
 
@@ -281,6 +297,12 @@ fn bectl_main() -> Result<(), Error> {
                         info.size,
                         mtime.to_rfc3339()
                     );
+
+                    if with_custom {
+                        for (k, v) in obj.iter_metadata()?.flatten() {
+                            println!("  {} -> {}", PseudoAscii(&k[..]), PseudoAscii(&v[..]))
+                        }
+                    }
                 }
             }
             ObjMode::Get { name } => {
@@ -322,6 +344,35 @@ fn bectl_main() -> Result<(), Error> {
                     os.open_object_with_pref(name.as_bytes(), storage_preference.0)?
                 {
                     obj.delete()?;
+                }
+
+                db.sync()?;
+            }
+
+            ObjMode::Meta { obj_name, mode } => {
+                let mut db = open_db(cfg)?;
+                let os = db.open_named_object_store(namespace.as_bytes(), storage_preference.0)?;
+                if let Some((obj, _info)) =
+                    os.open_object_with_pref(obj_name.as_bytes(), storage_preference.0)?
+                {
+                    match mode {
+                        ObjMetaMode::Get { meta_name } => {
+                            if let Some(value) = obj.get_metadata(meta_name.as_bytes())? {
+                                println!("{}", PseudoAscii(&value[..]));
+                            }
+                        }
+                        ObjMetaMode::Set { meta_name, value } => {
+                            obj.set_metadata(meta_name.as_bytes(), value.as_bytes())?;
+                        }
+                        ObjMetaMode::Del { meta_name } => {
+                            obj.delete_metadata(meta_name.as_bytes())?;
+                        }
+                        ObjMetaMode::List => {
+                            for (k, v) in obj.iter_metadata()?.flatten() {
+                                println!("{} -> {}", PseudoAscii(&k[..]), PseudoAscii(&v[..]))
+                            }
+                        }
+                    }
                 }
 
                 db.sync()?;

@@ -124,91 +124,150 @@ impl MetaMessage {
     }
 }
 
+/// MetaMessageAction consists of two different message types, split by the key for which the
+/// message is intended:
+///
+/// - a fixed metadata entry consists simply of the object name
+/// - a custom metadata is the concatenation of the object name, a zero byte, and the custom key
+///
+/// A fixed metadata entry has a fixed size, and contains the three metadata values an object will always
+/// have. The storage stack will only manage fixed metadata by itself, and leave custom metadata
+/// to the user.
+///
+/// Fixed entries have special merge semantics, which are necessary to allow metadata updates as a
+/// result of write operations without a read-modify-write cycle:
+///
+/// - the object id is replaced by the upper message if both messages have an id
+/// - size and mtime are merged with max if both messages have the respective field,
+///   to avoid "resetting" back to an earlier value with concurrent writes.
+///
+/// A custom entry is user-specified per-object key-value metadata. As they are stored inline with
+/// fixed metadata, the total size should be kept low to maintain fast object metadata iteration speeds.
+/// As a result of this, upserts are not supported for custom metadata, only allowing replacement
+/// or deletion.
+///
+/// Fixed metadata messages have no Rust structure, their encoding is:
+/// - [0], as a deletion message
+/// - [1]<user-provided value>, as a replacement message
 #[derive(Debug, Default)]
 pub struct MetaMessageAction;
 
+const FIXED_DELETE: u8 = 0;
+const FIXED_REPLACE: u8 = 1;
+
+pub(super) fn is_fixed_key(key: &[u8]) -> bool {
+    !key.contains(&0)
+}
+
+pub(super) fn delete_custom() -> CowBytes {
+    [FIXED_DELETE][..].into()
+}
+
+pub(super) fn set_custom(value: &[u8]) -> CowBytes {
+    let mut v = Vec::with_capacity(1 + value.len());
+    v.push(FIXED_REPLACE);
+    v.extend_from_slice(value);
+    v.into()
+}
+
 impl MessageAction for MetaMessageAction {
-    fn apply(&self, _key: &[u8], msg: &SlicedCowBytes, data: &mut Option<SlicedCowBytes>) {
-        let msg = MetaMessage::unpack(msg).expect("Unable to unpack message for application");
+    fn apply(&self, key: &[u8], msg: &SlicedCowBytes, data: &mut Option<SlicedCowBytes>) {
+        if is_fixed_key(key) {
+            let msg = MetaMessage::unpack(msg).expect("Unable to unpack message for application");
 
-        match msg {
-            MetaMessage {
-                object_id: Some(object_id),
-                size: Some(size),
-                mtime: Some(mtime),
-            } => {
-                // message overwrites entirely, don't bother unpacking existing data
-                let info = ObjectInfo {
-                    object_id,
-                    size,
-                    mtime,
-                };
-                *data = Some(CowBytes::from(info.write_to_vec_with_ctx(ENDIAN).unwrap()).into());
-            }
-            MetaMessage {
-                object_id: None,
-                size: None,
-                mtime: None,
-            } => {
-                // message deletes entirely
-                *data = None;
-            }
-            MetaMessage {
-                object_id,
-                size,
-                mtime,
-            } => {
-                if let Some(d) = data {
-                    let mut info = ObjectInfo::read_from_buffer_with_ctx(ENDIAN, &d).unwrap();
-
-                    if let Some(object_id) = object_id {
-                        info.object_id = object_id;
-                    }
-                    if let Some(size) = size {
-                        info.size = size;
-                    }
-                    if let Some(mtime) = mtime {
-                        info.mtime = mtime;
-                    }
-
+            match msg {
+                MetaMessage {
+                    object_id: Some(object_id),
+                    size: Some(size),
+                    mtime: Some(mtime),
+                } => {
+                    // message overwrites entirely, don't bother unpacking existing data
+                    let info = ObjectInfo {
+                        object_id,
+                        size,
+                        mtime,
+                    };
                     *data =
                         Some(CowBytes::from(info.write_to_vec_with_ctx(ENDIAN).unwrap()).into());
                 }
+                MetaMessage {
+                    object_id: None,
+                    size: None,
+                    mtime: None,
+                } => {
+                    // message deletes entirely
+                    *data = None;
+                }
+                MetaMessage {
+                    object_id,
+                    size,
+                    mtime,
+                } => {
+                    if let Some(d) = data {
+                        let mut info = ObjectInfo::read_from_buffer_with_ctx(ENDIAN, &d).unwrap();
+
+                        if let Some(object_id) = object_id {
+                            info.object_id = object_id;
+                        }
+                        if let Some(size) = size {
+                            info.size = size;
+                        }
+                        if let Some(mtime) = mtime {
+                            info.mtime = mtime;
+                        }
+
+                        *data = Some(
+                            CowBytes::from(info.write_to_vec_with_ctx(ENDIAN).unwrap()).into(),
+                        );
+                    }
+                }
+            }
+        } else {
+            // this is a custom metadata entry
+            match msg[0] {
+                FIXED_DELETE => *data = None,
+                FIXED_REPLACE => *data = Some(msg.clone().slice_from(1)),
+                _ => unreachable!(),
             }
         }
     }
 
     fn merge(
         &self,
-        _key: &[u8],
+        key: &[u8],
         upper_msg: SlicedCowBytes,
         lower_msg: SlicedCowBytes,
     ) -> SlicedCowBytes {
-        let upper = MetaMessage::unpack(&upper_msg).unwrap();
+        if is_fixed_key(key) {
+            let upper = MetaMessage::unpack(&upper_msg).unwrap();
 
-        fn or_max<T: Ord>(a: Option<T>, b: Option<T>) -> Option<T> {
-            match (a, b) {
-                (None, None) => None,
-                (Some(x), None) | (None, Some(x)) => Some(x),
-                (Some(a), Some(b)) => Some(a.max(b)),
+            fn or_max<T: Ord>(a: Option<T>, b: Option<T>) -> Option<T> {
+                match (a, b) {
+                    (None, None) => None,
+                    (Some(x), None) | (None, Some(x)) => Some(x),
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                }
             }
-        }
 
-        match upper.to_content_flags() {
-            // upper sets everything, lower has no influence
-            CONTENT_FLAG_ALL => upper_msg,
-            // upper sets nothing, does not alter lower
-            CONTENT_FLAG_NONE => lower_msg,
-            // combine upper and lower, upper has priority for object_id
-            _ => {
-                let lower = MetaMessage::unpack(&lower_msg).unwrap();
-                let new = MetaMessage {
-                    object_id: upper.object_id.or(lower.object_id),
-                    size: or_max(upper.size, lower.size),
-                    mtime: or_max(upper.mtime, lower.mtime),
-                };
-                new.pack().into()
+            match upper.to_content_flags() {
+                // upper sets everything, lower has no influence
+                CONTENT_FLAG_ALL => upper_msg,
+                // upper sets nothing, does not alter lower
+                CONTENT_FLAG_NONE => lower_msg,
+                // combine upper and lower, upper has priority for object_id
+                _ => {
+                    let lower = MetaMessage::unpack(&lower_msg).unwrap();
+                    let new = MetaMessage {
+                        object_id: upper.object_id.or(lower.object_id),
+                        size: or_max(upper.size, lower.size),
+                        mtime: or_max(upper.mtime, lower.mtime),
+                    };
+                    new.pack().into()
+                }
             }
+        } else {
+            // this is a custom metadata entry, and the upper message always wins
+            upper_msg
         }
     }
 }
