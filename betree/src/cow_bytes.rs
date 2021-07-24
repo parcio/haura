@@ -208,7 +208,7 @@ impl CowBytes {
     /// Returns a `SlicedCowBytes` which points to `self[pos..]`.
     pub fn slice_from(self, pos: u32) -> SlicedCowBytes {
         let len = self.len() as u32;
-        self.slice(pos, len)
+        self.slice(pos, len - pos)
     }
 }
 
