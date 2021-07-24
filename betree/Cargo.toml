@@ -32,7 +32,6 @@ seqlock = { path = "seqlock/" }
 twox-hash = { version = "1.6", features = [ "serde", "serialize" ] }
 stable_deref_trait = "1.1"
 itertools = "0.10"
-ref_slice = "1.1"
 env_logger = { version = "0.9", optional = true }
 core_affinity = "0.5"
 async-trait = "0.1"

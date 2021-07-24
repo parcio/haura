@@ -2,10 +2,10 @@
 use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
 use libc;
-use ref_slice::ref_slice;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
+    slice,
 };
 
 /// Configuration of a single storage class.
@@ -145,7 +145,7 @@ impl TierConfiguration {
         let mut s = String::new();
         for vdev in &self.top_level_vdevs {
             let (keyword, leaves) = match *vdev {
-                Vdev::Leaf(ref leaf) => ("", ref_slice(leaf)),
+                Vdev::Leaf(ref leaf) => ("", slice::from_ref(leaf)),
                 Vdev::Mirror { mirror: ref leaves } => ("mirror ", &leaves[..]),
                 Vdev::Parity1 {
                     parity1: ref leaves,
