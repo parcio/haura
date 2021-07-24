@@ -139,6 +139,11 @@ impl<Config: DatabaseBuilder> Database<Config> {
             storage_preference,
         )
     }
+
+    pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
+        self.close_dataset(store.metadata);
+        self.close_dataset(store.data);
+    }
 }
 
 impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
