@@ -7,7 +7,6 @@ use std::{
     pin::Pin,
     ptr, result, slice,
     sync::Arc,
-    thread,
     time::UNIX_EPOCH,
 };
 
@@ -121,9 +120,7 @@ unsafe extern "C" fn backend_create(
     let key = CStr::from_ptr(path);
 
     let (obj, _) = jtrace::with(J_TRACE_FILE_CREATE, path, || {
-        let obj = ns
-            .create_object(key.to_bytes())
-            .map(|(handle, _info)| handle);
+        let obj = ns.create_object(key.to_bytes());
         (obj, (0, 0))
     });
 
@@ -147,7 +144,7 @@ unsafe extern "C" fn backend_open(
 
     let result = match obj {
         Ok(None) => return FALSE,
-        Ok(Some((handle, _info))) => Ok(handle),
+        Ok(Some(handle)) => Ok(handle),
         Err(err) => Err(err),
     };
 

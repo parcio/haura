@@ -74,7 +74,7 @@ impl TestDriver {
         times: u64,
         offset: u64,
     ) {
-        let (obj, _info) = self
+        let obj = self
             .object_store
             .open_or_create_object(object_name)
             .expect("Unable to create object");
@@ -102,13 +102,13 @@ impl TestDriver {
     }
 
     fn delete(&self, object_name: &[u8]) {
-        if let Ok(Some((obj, _info))) = self.object_store.open_object(object_name) {
+        if let Ok(Some(obj)) = self.object_store.open_object(object_name) {
             obj.delete().expect("Failed to delete object");
         }
     }
 
     fn read_for_length(&self, object_name: &[u8]) -> u64 {
-        let (obj, _info) = self
+        let obj = self
             .object_store
             .open_or_create_object(object_name)
             .expect("Unable to create object");

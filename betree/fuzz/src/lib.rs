@@ -104,17 +104,17 @@ pub fn run_obj_ops(ops: &[ObjOp]) {
         use crate::ObjOp::*;
         match op {
             Write(ValidKey(key), data, offset) => {
-                let (obj, _info) = os.open_or_create_object(key).unwrap();
+                let obj = os.open_or_create_object(key).unwrap();
                 let _ = obj.write_at(data, *offset);
             },
             Read(ValidKey(key), len, offset) => {
                 let len = (*len).min(64 * 1024 * 1024);
                 let mut buf = vec![0; len as usize];
-                let (obj, _info) = os.open_or_create_object(key).unwrap();
+                let obj = os.open_or_create_object(key).unwrap();
                 let _ = obj.read_at(&mut buf, *offset);
             }
             Delete(ValidKey(key)) => {
-                if let Ok(Some((obj, _info))) = os.open_object(key) {
+                if let Ok(Some(obj)) = os.open_object(key) {
                     let _ = obj.delete();
                 }
             }

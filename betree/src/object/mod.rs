@@ -213,8 +213,9 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     }
 
     /// Create a new object handle.
-    pub fn create_object(&'os self, key: &[u8]) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+    pub fn create_object(&'os self, key: &[u8]) -> Result<ObjectHandle<'os, Config>> {
         self.create_object_with_pref(key, self.default_storage_preference)
+            .map(|(handle, _info)| handle)
     }
 
     /// Open an existing object by key, return `None` if it doesn't exist.
@@ -245,11 +246,17 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
 
     /// Open an existing object by key, return `None` if it doesn't exist.
     /// As the object metadata needs to be queried anyway, it is also returned.
-    pub fn open_object(
+    pub fn open_object_with_info(
         &'os self,
         key: &[u8],
     ) -> Result<Option<(ObjectHandle<'os, Config>, ObjectInfo)>> {
         self.open_object_with_pref(key, self.default_storage_preference)
+    }
+
+    /// Open an existing object by key, return `None` if it doesn't exist.
+    pub fn open_object(&'os self, key: &[u8]) -> Result<Option<ObjectHandle<'os, Config>>> {
+        self.open_object_with_info(key)
+            .map(|option| option.map(|(handle, _info)| handle))
     }
 
     /// Try to open an object, but create it if it didn't exist.
@@ -266,11 +273,17 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     }
 
     /// Try to open an object, but create it if it didn't exist.
-    pub fn open_or_create_object(
+    pub fn open_or_create_object_with_info(
         &'os self,
         key: &[u8],
     ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
         self.open_or_create_object_with_pref(key, self.default_storage_preference)
+    }
+
+    /// Try to open an object, but create it if it didn't exist.
+    pub fn open_or_create_object(&'os self, key: &[u8]) -> Result<ObjectHandle<'os, Config>> {
+        self.open_or_create_object_with_info(key)
+            .map(|(handle, _info)| handle)
     }
 
     /// Unsafely construct an [ObjectHandle] from an [ObjectStore] and [Object] descriptor.
