@@ -59,7 +59,7 @@ use std::{
     borrow::Borrow,
     convert::TryInto,
     ops::{Range, RangeBounds},
-    result,
+    result, mem,
     sync::atomic::{AtomicU64, Ordering},
     time::SystemTime,
 };
@@ -405,6 +405,14 @@ impl Object {
         v.push(0);
     }
 
+    fn metadata_end(&self) -> Vec<u8> {
+        let prefix_len = self.key.len() + 1;
+        let mut v = Vec::with_capacity(prefix_len);
+        v.extend_from_slice(&self.key[..]);
+        v.push(1);
+        v
+    }
+
     fn metadata_bounds(&self) -> (Vec<u8>, Vec<u8>) {
         let prefix_len = self.key.len() + 1;
 
@@ -455,6 +463,36 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// Delete this object
     pub fn delete(self) -> Result<()> {
         self.store.delete_object(&self)
+    }
+
+    pub fn rename(&mut self, new_key: &[u8]) -> Result<()> {
+        assert!(!new_key.contains(&0));
+
+        let old_key = mem::replace(&mut self.object.key, new_key.to_vec());
+        let custom_delete = SlicedCowBytes::from(meta::delete_custom());
+
+        let mut nk = Vec::with_capacity(new_key.len());
+
+        for (k, v) in self.store.metadata.range(old_key..self.object.metadata_end())?.flatten() {
+            if meta::is_fixed_key(&k) {
+                self.store.metadata.insert_msg(k, MetaMessage::delete().pack().into())?;
+                self.store.metadata.insert_msg(new_key, v)?;
+            } else {
+                nk.clear();
+                nk.extend_from_slice(new_key);
+                nk.push(0);
+                // unwrap-safe, k must contain 0 as is_fixed_key was false
+                let meta_name_start =
+                    k.iter().position(|&b| b == 0)
+                    .unwrap() + 1;
+                nk.extend_from_slice(&k[meta_name_start..]);
+
+                self.store.metadata.insert_msg(k, custom_delete.clone())?;
+                self.store.metadata.insert_msg(&nk[..], meta::set_custom(&v).into())?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Read object data into `buf`, starting at offset `offset`, and returning the amount of

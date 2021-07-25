@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "betree_storage_stack"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bincode",
@@ -118,7 +118,6 @@ dependencies = [
  "lz4-sys",
  "owning_ref",
  "parking_lot",
- "ref_slice",
  "seqlock",
  "serde",
  "serde_json",
@@ -720,12 +719,6 @@ checksum = "5ab49abadf3f9e1c4bc499e8845e152ad87d2ad2d30371841171169e9d75feee"
 dependencies = [
  "bitflags",
 ]
-
-[[package]]
-name = "ref_slice"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4ed1d73fb92eba9b841ba2aef69533a060ccc0d3ec71c90aeda5996d4afb7a9"
 
 [[package]]
 name = "regex"

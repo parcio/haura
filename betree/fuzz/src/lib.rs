@@ -94,6 +94,7 @@ pub enum ObjOp {
     Write(ValidKey, Vec<u8>, u64),
     Read(ValidKey, u32, u64),
     Delete(ValidKey),
+    Rename(ValidKey, ValidKey),
     MetaGet(ValidKey, ValidKey),
     MetaSet(ValidKey, ValidKey, Vec<u8>),
     MetaDel(ValidKey, ValidKey)
@@ -119,6 +120,11 @@ pub fn run_obj_ops(ops: &[ObjOp]) {
             Delete(ValidKey(key)) => {
                 if let Ok(Some(obj)) = os.open_object(key) {
                     let _ = obj.delete();
+                }
+            },
+            Rename(ValidKey(key), ValidKey(new_key)) => {
+                if let Ok(Some(mut obj)) = os.open_object(key) {
+                    let _ = obj.rename(new_key);
                 }
             },
             MetaGet(ValidKey(obj_key), ValidKey(meta_key)) => {
