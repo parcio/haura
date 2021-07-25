@@ -1,474 +1,485 @@
 ---
 source: betree/tests/src/lib.rs
-expression: "self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\")"
+expression: "json!({\n          \"shape/data\" :\n          self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\"),\n          \"keys/data\" : self.object_store.data_tree().range :: < _, & [u8] >\n          (..).expect(\"Failed to query data keys\").map(| res |\n                                                       res.map(| (k, _v) |\n                                                               k)).collect ::\n          < Result < Vec < _ >, _ >> ().expect(\"Failed to gather data keys\"),\n          \"keys/meta\" : self.object_store.meta_tree().range :: < _, & [u8] >\n          (..).expect(\"Failed to query meta keys\").map(| res |\n                                                       res.map(| (k, _v) |\n                                                               k)).collect ::\n          < Result < Vec < _ >, _ >> ().expect(\"Failed to gather meta keys\")\n      })"
 
 ---
 {
-  "type": "internal",
-  "level": 1,
-  "storage": 0,
-  "children": [
-    {
-      "from": null,
-      "to": "0000 0000 0000 0000 0000 0017",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+  "keys/data": [
+    [
+      0,
+      111,
+      105,
+      100
+    ]
+  ],
+  "keys/meta": [],
+  "shape/data": {
+    "children": [
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": null,
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0017",
-      "to": "0000 0000 0000 0000 0000 002F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0017"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0017",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 002F",
-      "to": "0000 0000 0000 0000 0000 0047",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 002F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 002F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0047",
-      "to": "0000 0000 0000 0000 0000 005F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0047"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0047",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 005F",
-      "to": "0000 0000 0000 0000 0000 0077",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 005F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 005F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0077",
-      "to": "0000 0000 0000 0000 0000 008F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0077"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0077",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 008F",
-      "to": "0000 0000 0000 0000 0000 00A7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 008F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 008F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 00A7",
-      "to": "0000 0000 0000 0000 0000 00BF",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 00A7"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 00A7",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 00BF",
-      "to": "0000 0000 0000 0000 0000 00D7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 00BF"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 00BF",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 00D7",
-      "to": "0000 0000 0000 0000 0000 00EF",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 00D7"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 00D7",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 00EF",
-      "to": "0000 0000 0000 0000 0000 0107",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 00EF"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 00EF",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0107",
-      "to": "0000 0000 0000 0000 0000 011F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0107"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0107",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 011F",
-      "to": "0000 0000 0000 0000 0000 0137",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 011F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 011F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0137",
-      "to": "0000 0000 0000 0000 0000 014F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0137"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0137",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 014F",
-      "to": "0000 0000 0000 0000 0000 0167",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 014F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 014F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0167",
-      "to": "0000 0000 0000 0000 0000 017F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0167"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0167",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 017F",
-      "to": "0000 0000 0000 0000 0000 0197",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 017F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 017F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0197",
-      "to": "0000 0000 0000 0000 0000 01AF",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0197"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0197",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 01AF",
-      "to": "0000 0000 0000 0000 0000 01C7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 01AF"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 01AF",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 01C7",
-      "to": "0000 0000 0000 0000 0000 01DF",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 01C7"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 01C7",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 01DF",
-      "to": "0000 0000 0000 0000 0000 01F7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 01DF"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 01DF",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 01F7",
-      "to": "0000 0000 0000 0000 0000 020F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 01F7"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 01F7",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 020F",
-      "to": "0000 0000 0000 0000 0000 0227",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 020F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 020F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0227",
-      "to": "0000 0000 0000 0000 0000 023F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0227"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0227",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 023F",
-      "to": "0000 0000 0000 0000 0000 0257",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 023F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 023F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0257",
-      "to": "0000 0000 0000 0000 0000 026F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0257"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0257",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 026F",
-      "to": "0000 0000 0000 0000 0000 0287",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 026F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 026F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0287",
-      "to": "0000 0000 0000 0000 0000 029F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0287"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0287",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 029F",
-      "to": "0000 0000 0000 0000 0000 02B7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 029F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 029F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 02B7",
-      "to": "0000 0000 0000 0000 0000 02CF",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 02B7"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 02B7",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 02CF",
-      "to": "0000 0000 0000 0000 0000 02E7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 02CF"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 02CF",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 02E7",
-      "to": "0000 0000 0000 0000 0000 02FF",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 02E7"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 02E7",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 02FF",
-      "to": "0000 0000 0000 0000 0000 0317",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 02FF"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 02FF",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0317",
-      "to": "0000 0000 0000 0000 0000 032F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0317"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0317",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 032F",
-      "to": "0000 0000 0000 0000 0000 0347",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 032F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 032F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0347",
-      "to": "0000 0000 0000 0000 0000 035F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0347"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0347",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 035F",
-      "to": "0000 0000 0000 0000 0000 0377",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 035F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 035F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 0377",
-      "to": "0000 0000 0000 0000 0000 038F",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 0377"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 0377",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 038F",
-      "to": "0000 0000 0000 0000 0000 03A7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 038F"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 038F",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 03A7",
-      "to": "0000 0000 0000 0000 0000 03BF",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 03A7"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 03A7",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 03BF",
-      "to": "0000 0000 0000 0000 0000 03D7",
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 03BF"
+      },
+      {
+        "child": {
+          "entry_count": 24,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 03BF",
         "storage": 0,
-        "entry_count": 24
-      }
-    },
-    {
-      "from": "0000 0000 0000 0000 0000 03D7",
-      "to": null,
-      "storage": 0,
-      "child": {
-        "type": "leaf",
-        "level": 0,
+        "to": "0000 0000 0000 0000 0000 03D7"
+      },
+      {
+        "child": {
+          "entry_count": 17,
+          "level": 0,
+          "storage": 0,
+          "type": "leaf"
+        },
+        "from": "0000 0000 0000 0000 0000 03D7",
         "storage": 0,
-        "entry_count": 17
+        "to": null
       }
-    }
-  ]
+    ],
+    "level": 1,
+    "storage": 0,
+    "type": "internal"
+  }
 }

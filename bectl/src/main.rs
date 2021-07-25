@@ -125,6 +125,10 @@ enum ObjMode {
     Del {
         name: String,
     },
+    Mv {
+        name: String,
+        new_name: String
+    },
     Meta {
         obj_name: String,
         #[structopt(subcommand)]
@@ -344,6 +348,19 @@ fn bectl_main() -> Result<(), Error> {
                     os.open_object_with_pref(name.as_bytes(), storage_preference.0)?
                 {
                     obj.delete()?;
+                }
+
+                db.sync()?;
+            }
+
+            ObjMode::Mv { name, new_name } => {
+                let mut db = open_db(cfg)?;
+                let os = db.open_named_object_store(namespace.as_bytes(), storage_preference.0)?;
+
+                if let Some((mut obj, _info)) =
+                    os.open_object_with_pref(name.as_bytes(), storage_preference.0)?
+                {
+                    obj.rename(new_name.as_bytes())?;
                 }
 
                 db.sync()?;

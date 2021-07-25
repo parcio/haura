@@ -3,7 +3,7 @@
 use betree_storage_stack::{
     compression::CompressionConfiguration,
     database::AccessMode,
-    object::ObjectStore,
+    object::{ ObjectStore, ObjectHandle },
     storage_pool::{LeafVdev, TierConfiguration, Vdev},
     Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference,
 };
@@ -14,6 +14,7 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 use insta::assert_json_snapshot;
+use serde_json::json;
 
 fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
     let tier_size = mb_per_tier as usize * 1024 * 1024;
@@ -55,15 +56,44 @@ impl TestDriver {
         }
     }
 
+    // TODO: It would be nice if this could generate diffs to previous state,
+    // and assert those. Diffs are easier to review and perhaps closer to what
+    // we want to test.
     fn checkpoint(&mut self, name: &str) {
         self.database.sync().expect("Failed to sync database");
+
         assert_json_snapshot!(
             format!("{}/{}", self.name, name),
-            self.object_store
-                .data_tree()
-                .tree_dump()
-                .expect("Failed to create data tree dump")
+            json!({
+                "shape/data": 
+                    self.object_store
+                        .data_tree()
+                        .tree_dump()
+                        .expect("Failed to create data tree dump"),
+                "keys/data":
+                    self.object_store
+                        .data_tree()
+                        .range::<_, &[u8]>(..)
+                        .expect("Failed to query data keys")
+                        .map(|res| res.map(|(k, _v)| k))
+                        .collect::<Result<Vec<_>, _>>()
+                        .expect("Failed to gather data keys"),
+                "keys/meta":
+                    self.object_store
+                        .meta_tree()
+                        .range::<_, &[u8]>(..)
+                        .expect("Failed to query meta keys")
+                        .map(|res| res.map(|(k, _v)| k))
+                        .collect::<Result<Vec<_>, _>>()
+                        .expect("Failed to gather meta keys")
+            })
         );
+    }
+
+    fn open(&self, obj_name: &[u8]) -> ObjectHandle<DatabaseConfiguration> {
+        self.object_store
+            .open_or_create_object(obj_name)
+            .expect("Unable to open object")
     }
 
     fn insert_random_at(
@@ -187,4 +217,39 @@ fn sparse() {
     driver.checkpoint("sparse write 2");
 
     assert_eq!(driver.read_for_length(b"foo"), (800 + 300) * chunk_size);
+}
+
+#[test]
+fn rename() {
+    let mut driver = TestDriver::setup("rename", 1, 512);
+    
+    driver.checkpoint("empty tree");
+    driver.insert_random(
+        b"foo",
+        StoragePreference::FASTEST,
+        128 * 1024,
+        20
+    );
+    driver.checkpoint("inserted foo");
+
+    {
+        let obj = driver.open(b"foo");
+        obj.set_metadata(b"quux", b"bar").unwrap();
+        obj.set_metadata(b"some other key", b"some other value").unwrap();
+    }
+    driver.checkpoint("inserted metadata");
+
+    {
+        let mut obj = driver.open(b"foo");
+        obj.rename(b"not foo").unwrap();
+    }
+    driver.checkpoint("renamed foo to not foo");
+
+    {
+        let obj = driver.open(b"not foo");
+        obj.delete_metadata(b"quux").unwrap();
+        obj.set_metadata(b"new quux", b"bar").unwrap();
+        obj.write_at(&[42], 128 * 1024 * 19283).unwrap();
+    }
+    driver.checkpoint("changed (meta)data after renaming");
 }
