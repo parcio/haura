@@ -468,6 +468,7 @@ pub struct ChildInfo {
 pub enum NodeInfo {
     Internal {
         level: u32,
+        size: usize,
         storage: StoragePreference,
         children: Vec<ChildInfo>,
     },
@@ -482,7 +483,7 @@ pub enum NodeInfo {
     },
 }
 
-pub struct ByteString(SlicedCowBytes);
+pub struct ByteString(Vec<u8>);
 
 impl serde::Serialize for ByteString {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -514,22 +515,27 @@ impl<N: HasStoragePreference> Node<N> {
             Inner::Internal(int) => NodeInfo::Internal {
                 storage: self.correct_preference(),
                 level: self.level(),
+                size: self.size(),
                 children: {
                     int.iter_with_bounds()
                         .map(|(maybe_left, child_buf, maybe_right)| {
-                            let mut np = child_buf.node_pointer.write();
-                            let storage_preference = np.correct_preference();
-                            let child = dml.get(&mut np).unwrap();
+                            let (child, storage_preference) = {
+                                let mut np = child_buf.node_pointer.write();
+                                let storage_preference = np.correct_preference();
+                                let child = dml.get(&mut np).unwrap();
+                                (child, storage_preference)
+                            };
 
-                            fn to_bytestring(cow_bytes: &CowBytes) -> ByteString {
-                                ByteString(SlicedCowBytes::from(cow_bytes.clone()))
-                            }
+                            let node_info = child.node_info(dml);
+                            drop(child);
+
+                            dml.evict().unwrap();
 
                             ChildInfo {
-                                from: maybe_left.map(to_bytestring),
-                                to: maybe_right.map(to_bytestring),
+                                from: maybe_left.map(|cow| ByteString(cow.to_vec())),
+                                to: maybe_right.map(|cow| ByteString(cow.to_vec())),
                                 storage: storage_preference,
-                                child: child.node_info(dml),
+                                child: node_info,
                             }
                         })
                         .collect()
@@ -554,7 +560,7 @@ impl<N: HasStoragePreference> Node<N> {
                         .iter()
                         .filter_map(|opt| {
                             if let Some((key, _)) = opt {
-                                Some(ByteString(key.clone()))
+                                Some(ByteString(key.to_vec()))
                             } else {
                                 None
                             }
