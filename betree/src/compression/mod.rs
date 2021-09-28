@@ -87,6 +87,3 @@ pub use self::none::None;
 
 mod zstd;
 pub use self::zstd::Zstd;
-
-//mod state_cache;
-//pub(crate) use self::state_cache::CompressionStateCache;
