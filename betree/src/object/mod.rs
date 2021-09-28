@@ -58,8 +58,9 @@ use speedy::{Readable, Writable};
 use std::{
     borrow::Borrow,
     convert::TryInto,
+    mem,
     ops::{Range, RangeBounds},
-    result, mem,
+    result,
     sync::atomic::{AtomicU64, Ordering},
     time::SystemTime,
 };
@@ -407,7 +408,9 @@ pub struct Object {
 }
 
 impl Object {
-    pub fn key(&self) -> &[u8] { &self.key }
+    pub fn key(&self) -> &[u8] {
+        &self.key
+    }
 
     fn metadata_prefix_into(&self, v: &mut Vec<u8>) {
         v.extend_from_slice(&self.key[..]);
@@ -482,22 +485,29 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
 
         let mut nk = Vec::with_capacity(new_key.len());
 
-        for (k, v) in self.store.metadata.range(old_key..self.object.metadata_end())?.flatten() {
+        for (k, v) in self
+            .store
+            .metadata
+            .range(old_key..self.object.metadata_end())?
+            .flatten()
+        {
             if meta::is_fixed_key(&k) {
-                self.store.metadata.insert_msg(k, MetaMessage::delete().pack().into())?;
+                self.store
+                    .metadata
+                    .insert_msg(k, MetaMessage::delete().pack().into())?;
                 self.store.metadata.insert_msg(new_key, v)?;
             } else {
                 nk.clear();
                 nk.extend_from_slice(new_key);
                 nk.push(0);
                 // unwrap-safe, k must contain 0 as is_fixed_key was false
-                let meta_name_start =
-                    k.iter().position(|&b| b == 0)
-                    .unwrap() + 1;
+                let meta_name_start = k.iter().position(|&b| b == 0).unwrap() + 1;
                 nk.extend_from_slice(&k[meta_name_start..]);
 
                 self.store.metadata.insert_msg(k, custom_delete.clone())?;
-                self.store.metadata.insert_msg(&nk[..], meta::set_custom(&v).into())?;
+                self.store
+                    .metadata
+                    .insert_msg(&nk[..], meta::set_custom(&v).into())?;
             }
         }
 

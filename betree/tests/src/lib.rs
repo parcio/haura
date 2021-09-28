@@ -3,7 +3,7 @@
 use betree_storage_stack::{
     compression::CompressionConfiguration,
     database::AccessMode,
-    object::{ ObjectStore, ObjectHandle },
+    object::{ObjectHandle, ObjectStore},
     storage_pool::{LeafVdev, TierConfiguration, Vdev},
     Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference,
 };
@@ -65,7 +65,7 @@ impl TestDriver {
         assert_json_snapshot!(
             format!("{}/{}", self.name, name),
             json!({
-                "shape/data": 
+                "shape/data":
                     self.object_store
                         .data_tree()
                         .tree_dump()
@@ -222,20 +222,16 @@ fn sparse() {
 #[test]
 fn rename() {
     let mut driver = TestDriver::setup("rename", 1, 512);
-    
+
     driver.checkpoint("empty tree");
-    driver.insert_random(
-        b"foo",
-        StoragePreference::FASTEST,
-        128 * 1024,
-        20
-    );
+    driver.insert_random(b"foo", StoragePreference::FASTEST, 128 * 1024, 20);
     driver.checkpoint("inserted foo");
 
     {
         let obj = driver.open(b"foo");
         obj.set_metadata(b"quux", b"bar").unwrap();
-        obj.set_metadata(b"some other key", b"some other value").unwrap();
+        obj.set_metadata(b"some other key", b"some other value")
+            .unwrap();
     }
     driver.checkpoint("inserted metadata");
 

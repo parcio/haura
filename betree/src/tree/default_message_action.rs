@@ -168,6 +168,7 @@ fn append_upsert(v: &mut Vec<u8>, upsert: &Upsert) {
         &Upsert::Bytes { offset_bytes, data } => {
             v.write_u32::<LittleEndian>(offset_bytes).unwrap();
             v.write_u32::<LittleEndian>(data.len() as u32).unwrap();
+
             v.extend_from_slice(data);
         }
         &Upsert::Bits {
