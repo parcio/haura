@@ -11,7 +11,7 @@
 //! ### Keys
 //!
 //! ```text
-//! [key] -> ObjectInfo, containing object id in data tree, and current object size in bytes
+//! [key] -> ObjectInfo, containing object id in data tree, mtime, and current object size in bytes
 //! [key][0][custom byte key] -> [custom byte value]
 //! ```
 //!
@@ -326,6 +326,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     }
 
     /// Iterate objects whose keys are contained in the given range.
+    ///
+    /// The iterated handles are created with [StoragePreference::NONE].
     pub fn list_objects<R, K>(
         &'os self,
         range: R,
@@ -336,7 +338,14 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     {
         let raw_iter = self.metadata.range(range)?;
         let iter = raw_iter
-            .flat_map(Result::ok) // FIXME
+            .flat_map(|res| match res {
+                Ok(v) => Some(v),
+                // FIXME: report this in a way that the caller can react to
+                Err(e) => {
+                    eprintln!("discarding object due to error: {}", e);
+                    None
+                }
+            })
             .filter(|(key, _value)| meta::is_fixed_key(key))
             .map(move |(key, value)| {
                 let info = ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &value).unwrap();
