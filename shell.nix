@@ -30,7 +30,7 @@ in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
   ];
   # pretend we have nightly to use cargo-fuzz
   # RUSTC_BOOTSTRAP = "1";
-  QUICKCHECK_TESTS = 10;
+  QUICKCHECK_TESTS = 1000;
 
   JULEA_PREFIX = "${toString ./.}/julea-install";
   # JULEA_TRACE = "echo";
@@ -62,7 +62,6 @@ in (mkShell.override { inherit (llvmPackages) stdenv; }) rec {
     heaptrack
     hotspot
     psrecord
-    coz
 
     trace-cmd
 
