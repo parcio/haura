@@ -468,7 +468,6 @@ pub struct ChildInfo {
 pub enum NodeInfo {
     Internal {
         level: u32,
-        size: usize,
         storage: StoragePreference,
         children: Vec<ChildInfo>,
     },
@@ -515,7 +514,6 @@ impl<N: HasStoragePreference> Node<N> {
             Inner::Internal(int) => NodeInfo::Internal {
                 storage: self.correct_preference(),
                 level: self.level(),
-                size: self.size(),
                 children: {
                     int.iter_with_bounds()
                         .map(|(maybe_left, child_buf, maybe_right)| {
