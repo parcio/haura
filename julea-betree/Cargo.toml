@@ -1,7 +1,7 @@
 [package]
 name = "julea-betree"
 version = "0.1.0"
-authors = ["tilpner <till@hoeppner.ws>"]
+authors = ["tilpner <betree@tilpner.com>"]
 edition = "2018"
 
 [lib]
