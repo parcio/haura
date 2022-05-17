@@ -32,6 +32,9 @@ pub(super) struct InternalNode<T> {
 //
 // I'm not going to fix them, because the proper fix would be to take bincode out of everything,
 // and that's a lot of implementation and testing effort. You should though, if you find the time.
+// @jwuensche:
+// Added TODO to better find this in the future.
+// Will definitely need to adjust this at some point, though this is not now.
 const BINCODE_FIXED_SIZE: usize = 28;
 
 impl<T: Size> Size for InternalNode<T> {
