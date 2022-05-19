@@ -179,7 +179,9 @@ impl<Config: DatabaseBuilder> Database<Config> {
         &mut self,
         ds: Dataset<Config, Message>,
     ) -> Result<()> {
+        log::trace!("close_dataset: Enter");
         self.sync_ds(ds.id, &ds.tree)?;
+        log::trace!("synced dataset");
         self.open_datasets.remove(&ds.id);
         self.root_tree
             .dmu()

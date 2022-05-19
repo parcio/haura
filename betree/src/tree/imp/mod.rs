@@ -448,9 +448,12 @@ where
 
     fn sync(&self) -> Result<Self::Pointer, Error> {
         // TODO
+        // @jwuensche: Yeah I figured.
+        trace!("sync: Enter");
         let obj_ptr = self
             .dml
             .write_back(|| self.inner.borrow().root_node.write())?;
+        trace!("sync: Finished write_back");
         Ok(obj_ptr)
     }
 }

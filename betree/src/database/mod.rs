@@ -413,7 +413,9 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     fn sync_ds(&self, ds_id: DatasetId, ds_tree: &ErasedTree) -> Result<()> {
+        trace!("sync_ds: Enter");
         let ptr = ds_tree.erased_sync()?;
+        trace!("sync_ds: erased_sync");
         let msg = DatasetData::update_ptr(ptr)?;
         let key = &ds_data_key(ds_id) as &[_];
         self.root_tree.insert(key, msg, StoragePreference::NONE)?;

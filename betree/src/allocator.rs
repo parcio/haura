@@ -79,6 +79,7 @@ impl SegmentAllocator {
 
     /// Deallocates the allocated block.
     pub fn deallocate(&mut self, offset: u32, size: u32) {
+        log::debug!("Marked a block range {{ offset: {}, size: {} }} for deallocation", offset, size);
         self.mark(offset, size, Action::Deallocate);
     }
 

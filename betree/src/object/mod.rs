@@ -143,7 +143,9 @@ impl<Config: DatabaseBuilder> Database<Config> {
 
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
         self.close_dataset(store.metadata);
+        trace!("Metadata closed.");
         self.close_dataset(store.data);
+        trace!("Data closed.");
     }
 }
 
@@ -626,6 +628,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
         let mut meta_change = MetaMessage::default();
         let mut total_written = 0;
+        log::trace!("Entered object::write_at_with_pref");
 
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;

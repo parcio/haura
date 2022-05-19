@@ -185,6 +185,9 @@ impl data_management::Handler<ObjectRef> for Handler {
         Block(0)
     }
 
+    /// Marks blocks from removed objects to be removed if they are no longer needed.
+    /// Checks for the existence of snapshots which included this data, if snapshots are found continue to hold this key as "dead" key.
+    // copy on write is a bit of an unlucky name
     fn copy_on_write(
         &self,
         offset: DiskOffset,
@@ -201,6 +204,7 @@ impl data_management::Handler<ObjectRef> for Handler {
         {
             // Deallocate
             let key = &segment_id_to_key(SegmentId::get(offset)) as &[_];
+            log::debug!("Marked a block range {{ offset: {:?}, size: {:?} }} for deallocation", offset, size);
             let msg = update_allocation_bitmap_msg(offset, size, Action::Deallocate);
             self.delayed_messages.lock().push((key.into(), msg));
         } else {

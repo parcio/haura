@@ -459,6 +459,7 @@ where
                 super::Size::size(&*object)
             }
         };
+        log::trace!("Entering write back of {:?}", &mid);
 
         if object_size > 4 * 1024 * 1024 {
             warn!("Writing back large object: {}", object.debug_info());
@@ -490,6 +491,7 @@ where
         let size = Block(((size as usize + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
+        trace!("Returned from allocate");
         assert_eq!(size.to_bytes() as usize, compressed_data.len());
         /*if size.to_bytes() as usize != compressed_data.len() {
             let mut v = compressed_data.into_vec();
@@ -504,6 +506,7 @@ where
         };
 
         self.pool.begin_write(compressed_data, offset)?;
+        trace!("Written to pool");
 
         let obj_ptr = ObjectPointer {
             offset,
@@ -549,6 +552,7 @@ where
             );
         }
 
+        trace!("handle_write_back: Leaving");
         Ok(obj_ptr)
     }
 
@@ -557,6 +561,8 @@ where
         if size >= Block(2048) {
             warn!("Very large allocation requested: {:?}", size);
         }
+
+        log::trace!("Enter allocate: {{ storage_preference: {}, size: {:?} }}", storage_preference, size);
 
         let strategy = self.alloc_strategy[storage_preference as usize];
 
@@ -623,6 +629,7 @@ where
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
                 .chain_err(|| ErrorKind::HandlerError)?;
 
+            info!("Return from allocate fn");
             return Ok(disk_offset);
         }
 
@@ -658,12 +665,16 @@ where
         mid: ModifiedObjectId,
         dep_mids: &mut Vec<ModifiedObjectId>,
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRef>, ()> {
+        trace!("prepare_write_back: Enter");
         loop {
+            trace!("prepare_write_back: Trying to acquire cache write lock");
             let mut cache = self.cache.write();
+            trace!("prepare_write_back: Acquired");
             if cache.contains_key(&ObjectKey::InWriteback(mid)) {
                 // TODO wait
                 drop(cache);
                 yield_now();
+                trace!("prepare_wait_back: Cache contained key, waiting..");
                 continue;
             }
             let result =
@@ -883,23 +894,33 @@ where
         F: FnMut() -> FO,
         FO: DerefMut<Target = Self::ObjectRef>,
     {
+        trace!("write_back: Enter");
         let (object, mid) = loop {
+            trace!("write_back: Trying to acquire lock");
             let mut or = acquire_or_lock();
+            trace!("write_back: Acquired lock");
             let mid = match *or {
                 ObjectRef::Unmodified(ref p) => return Ok(p.clone()),
                 ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid,
             };
             let mut mids = Vec::new();
 
+            trace!("write_back: Preparing write back");
             match self.prepare_write_back(mid, &mut mids) {
-                Ok(None) => self.fix_or(&mut or),
+                Ok(None) => {
+                    trace!("write_back: Was Ok(None)");
+                    self.fix_or(&mut or)
+                },
                 Ok(Some(object)) => break (object, mid),
                 Err(()) => {
+                    trace!("write_back: Was Err");
                     drop(or);
                     while let Some(&mid) = mids.last() {
+                        trace!("write_back: Trying to prepare write back");
                         match self.prepare_write_back(mid, &mut mids) {
                             Ok(None) => {}
                             Ok(Some(object)) => {
+                                trace!("write_back: Was Ok Some");
                                 self.handle_write_back(object, mid, false)?;
                             }
                             Err(()) => continue,
@@ -909,6 +930,7 @@ where
                 }
             }
         };
+        trace!("write_back: Leave");
         self.handle_write_back(object, mid, false)
     }
 
