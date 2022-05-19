@@ -42,6 +42,10 @@ impl KeyInfo {
             ),
         }
     }
+
+    pub(crate) fn storage_preference(&self) -> &StoragePreference {
+        &self.storage_preference
+    }
 }
 
 pub(super) const MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
@@ -328,6 +332,38 @@ where
     //    pub fn is_modified(&mut self) -> bool {
     //        self.inner.borrow_mut().root_node.is_modified()
     //    }
+
+    pub(crate) fn get_with_info<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<(KeyInfo, SlicedCowBytes)>, Error> {
+        let key = key.borrow();
+        let mut msgs = Vec::new();
+        let mut node = self.get_root_node()?;
+        let data = loop {
+            let next_node = match node.get(key, &mut msgs) {
+                GetResult::NextNode(np) => self.get_node(np)?,
+                GetResult::Data(data) => break data,
+            };
+            node = next_node;
+        };
+
+        match data {
+            None => Ok(None),
+            Some((info, data)) => {
+                let mut tmp = Some(data);
+                for (_keyinfo, msg) in msgs.into_iter().rev() {
+                    self.msg_action().apply(key, &msg, &mut tmp);
+                }
+
+                // This may never be false.
+                let data = tmp.unwrap();
+
+                drop(node);
+                if self.evict {
+                    self.dml.evict()?;
+                }
+                Ok(Some((info, data)))
+            }
+        }
+    }
 }
 
 // impl<X, R, M> Tree<X, M, Arc<Inner<X::ObjectRef, X::Info, M>>>
@@ -350,26 +386,13 @@ where
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
     fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error> {
-        let key = key.borrow();
-        let mut msgs = Vec::new();
-        let mut node = self.get_root_node()?;
-        let mut data = loop {
-            let next_node = match node.get(key, &mut msgs) {
-                GetResult::NextNode(np) => self.get_node(np)?,
-                GetResult::Data(data) => break data.map(|(_info, data)| data),
-            };
-            node = next_node;
-        };
-
-        for (_keyinfo, msg) in msgs.into_iter().rev() {
-            self.msg_action().apply(key, &msg, &mut data);
-        }
-
-        drop(node);
-        if self.evict {
-            self.dml.evict()?;
-        }
-        Ok(data)
+        self.get_with_info(key).map(|res| {
+            match res {
+                None => None,
+                // Throw away info..
+                Some((_info, data)) => Some(data),
+            }
+        })
     }
 
     fn insert<K>(

@@ -336,4 +336,37 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
 
         res
     }
+
+    /// Given a key and storage preference notify for this entry to be moved to a new storage level.
+    /// If the key is already located on this layer no operation is performed and success is returned.
+    pub fn migrate<K: Borrow<[u8]>+ Into<CowBytes>>(&self, key: K, pref: StoragePreference) -> Result<()> {
+        let entry = self.tree.get_with_info(key.borrow())?;
+        match entry {
+            None => Err(Error::from_kind(ErrorKind::InDestruction)),
+            Some((info, dat)) => {
+                if *info.storage_preference() == pref {
+                    // Save unnecessary moves between identical storage layers
+                    return Ok(())
+                }
+                self.delete(key.borrow())?;
+                self.insert_with_pref(key,&dat,pref)
+            }
+        }
+    }
+
+    /// Migrate a complete range of keys to another storage preference.
+    /// If an entry is already located on this layer no operation is performed and success is returned.
+    pub fn migrate_range<R, K>(&self, range: R, pref: StoragePreference) -> Result<()>
+    where
+        K: Borrow<[u8]> + Into<CowBytes>,
+        R: RangeBounds<K>,
+    {
+        for entry in self.tree.range(range)? {
+            if let Ok((k, _v)) = entry {
+                // abort on errors, they will likely be that one layer is full
+                self.migrate(k, pref)?;
+            }
+        }
+        Ok(())
+    }
 }

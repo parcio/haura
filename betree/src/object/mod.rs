@@ -720,4 +720,14 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
 
         Ok(Box::new(iter))
     }
+
+    /// Migrate the whole object to a specified storage preference.
+    pub fn migrate(&self, pref: StoragePreference) -> Result<()> {
+        unimplemented!()
+    }
+
+    /// Migrate a range of chunks to a new storage preference
+    pub fn migrate_range(&self, length: u64, offset: u64, pref: StoragePreference) -> Result<()> {
+        unimplemented!()
+    }
 }
