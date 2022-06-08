@@ -1,0 +1,14 @@
+---
+source: betree/tests/src/lib.rs
+expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\"),\n        \"keys/data\" : self.object_store.data_tree().range :: < _, & [u8] >\n        (..).expect(\"Failed to query data keys\").map(| res |\n        res.map(| (k, _v) | k)).collect :: < Result < Vec < _ >, _ >>\n        ().expect(\"Failed to gather data keys\"), \"keys/meta\" :\n        self.object_store.meta_tree().range :: < _, & [u8] >\n        (..).expect(\"Failed to query meta keys\").map(| res |\n        res.map(| (k, _v) | k)).collect :: < Result < Vec < _ >, _ >>\n        ().expect(\"Failed to gather meta keys\")\n    })"
+---
+{
+  "keys/data": [],
+  "keys/meta": [],
+  "shape/data": {
+    "entry_count": 0,
+    "level": 0,
+    "storage": 254,
+    "type": "leaf"
+  }
+}
