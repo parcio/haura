@@ -35,6 +35,27 @@ fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
     Database::build(cfg).expect("Database initialisation failed")
 }
 
+// List of sizes for each tier is attached
+// It is assumed len(that mb_per_tier) = tiers
+fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database<DatabaseConfiguration> {
+    let cfg = DatabaseConfiguration {
+        storage: StoragePoolConfiguration {
+            tiers: (0..tiers)
+                .map(|idx| TierConfiguration {
+                    top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory { mem: mb_per_tier[idx] as usize * TO_MEBIBYTE })],
+                })
+                .collect(),
+            ..Default::default()
+        },
+        compression: CompressionConfiguration::None,
+        access_mode: AccessMode::AlwaysCreateNew,
+        alloc_strategy: [vec![0], vec![1], vec![2], vec![3]],
+        ..Default::default()
+    };
+
+    Database::build(cfg).expect("Database initialisation failed")
+}
+
 struct TestDriver {
     name: String,
     database: Database<DatabaseConfiguration>,
@@ -369,7 +390,7 @@ fn write_delete_sequence(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
                     println!("Delete object");
                     let key = inserted.choose(&mut rng).expect("Could not choose an element").clone();
                     let foo = os.open_object(&key.to_le_bytes()).expect("Key is not contained").expect("No content beyond object");
-                    os.delete_object(foo).unwrap();
+                    foo.delete().expect("Could not delete");
                     inserted.retain(|e| *e != key);
                 }
             },
@@ -407,7 +428,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
     db.sync().expect("Could not sync database");
     {
         let obj = os.open_or_create_object(b"test2").expect("Could not create object");
-        os.delete_object(obj).expect("Could not delete entry");
+        obj.delete().expect("Could not delete");
     }
     db.sync().expect("Could not sync database");
     {
@@ -470,4 +491,86 @@ fn write_sequence_random_fill(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
     let obj = os.open_or_create_object(b"finaldrop").expect("oh no! could not open object!");
     obj.write_at(&buf, 0).expect("hello");
     db.sync().expect("Could not sync database");
+}
+
+#[rstest]
+#[case::a(32)]
+#[case::b(128)]
+#[case::c(512)]
+#[case::d(2048)]
+fn migrate_up(#[case] tier_size_mb: u32) {
+    let mut db = test_db(2, tier_size_mb);
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
+    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).expect("Could not write to newly created object");
+    db.sync().expect("Could not sync database");
+    obj.migrate(StoragePreference::FAST).unwrap();
+}
+
+#[rstest]
+#[case::a(32)]
+#[case::b(128)]
+#[case::c(512)]
+#[case::d(2048)]
+fn migrate_down(#[case] tier_size_mb: u32) {
+    let mut db = test_db(2, tier_size_mb);
+    let os = db.open_named_object_store(b"test", StoragePreference::FAST).expect("Oh no! Could not open object store");
+    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).expect("Could not write to newly created object");
+    db.sync().expect("Could not sync database");
+    obj.migrate(StoragePreference::FASTEST).unwrap();
+}
+
+#[rstest]
+#[case::a(32, 8)]
+#[case::b(128, 32)]
+#[case::c(512, 128)]
+#[case::d(2048, 512)]
+// The most commmon case for this should be moving upwards to faster storage.
+// Therefore this is teted here, the other direction should however behave exactly the same.
+fn migrate_invalid_size(#[case] tier_size_mb: u32, #[case] buffer_size: u32) {
+    let mut db = test_db_uneven(2, &[buffer_size, tier_size_mb]);
+    let os = db.open_named_object_store(b"test", StoragePreference::FAST).expect("Oh no! Could not open object store");
+    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let buf = vec![42; (tier_size_mb as f32 * 0.65) as usize * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).expect("Could not write to newly created object");
+    db.sync().expect("Could not sync database");
+    // The slowest tier is not defined in this default configuration
+    obj.migrate(StoragePreference::FASTEST);
+    db.sync().expect_err("Too large data synced");
+}
+
+#[rstest]
+#[case::a(32)]
+#[case::b(128)]
+#[case::c(512)]
+#[case::d(2048)]
+fn migrate_invalid_tier(#[case] tier_size_mb: u32) {
+    let mut db = test_db(2, tier_size_mb);
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
+    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let buf = vec![42; (tier_size_mb as f32 * 0.6) as usize * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).expect("Could not write to newly created object");
+    db.sync().expect("Could not sync database");
+    // The slowest tier is not defined in this default configuration
+    obj.migrate(StoragePreference::SLOWEST).expect_err("Accepted invalid tier");
+}
+
+#[rstest]
+#[case::a(32)]
+#[case::b(128)]
+#[case::c(512)]
+#[case::d(2048)]
+// @jwuensche: This case should not raise any errors and should just allow silent dropping of the operation.
+fn migrate_nochange(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
+    let mut db = test_db(2, tier_size_mb);
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
+    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let mut buf = vec![42u8; (tier_size_mb as f32 * 0.8) as usize * TO_MEBIBYTE];
+    rng.try_fill(buf.as_mut_slice()).expect("Could not fill buffer");
+    obj.write_at(&buf, 0).expect("Could not write to newly created object");
+    db.sync().expect("Could not sync database");
+    obj.migrate(StoragePreference::FASTEST).unwrap();
 }
