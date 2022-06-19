@@ -179,6 +179,7 @@ impl<D, I, G: Copy> ObjectPointer<D, I, G> {
 /// The Data Management Unit.
 pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'static> {
     default_compression: Box<dyn CompressionBuilder>,
+    // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
     default_checksum_builder: <SPL::Checksum as Checksum>::Builder,

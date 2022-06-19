@@ -87,6 +87,11 @@ pub trait HasStoragePreference {
             None => self.recalculate(),
         }
     }
+
+    // /// Distribute a desired storage prefrence to all child nodes.
+    // /// Cached prefrence are advised to be updated.
+    // /// The size of the moved keys should not exceed the limit of the desired storage tier.
+    // fn flood_storage_preference(&self, pref: StoragePreference);
 }
 
 /// An object managed by a `Dml`.

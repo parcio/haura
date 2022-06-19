@@ -104,6 +104,7 @@ impl StoragePoolLayer for InMemory {
 
     /// Returns the effective free size for a specific `Vdev`.
     fn effective_free_size(&self, disk_id: u16, free_size: Block<u64>) -> Block<u64> {
+        // NOTE: Is this correct?
         if disk_id == 0 {
             self.size_in_blocks(0)
         } else {

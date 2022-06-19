@@ -70,16 +70,19 @@ where
     }
 
     fn drain_any_future(&self) -> Option<Result<(), F::Error>> {
+        trace!("Trying to drain futures from queue");
         let maybe_entry = self
             .futures
             .write()
             .get_index(0)
             .map(|(k, v)| (k.clone(), v.clone()));
 
+
         if let Some((k, v)) = maybe_entry {
             let ret = block_on(v);
 
             self.futures.write().shift_remove(&k);
+            trace!("Removing future from queue");
 
             Some(ret)
         } else {
@@ -116,7 +119,9 @@ where
 
     /// Flushes the queue.
     pub fn flush(&self) -> Result<(), F::Error> {
+        trace!("Entering write back queue flush");
         let _lock = self.flush_lock.lock();
+        trace!("Acquired flush lock");
 
         self.drain_while_above_limit(0)
     }
