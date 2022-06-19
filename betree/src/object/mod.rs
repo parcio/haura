@@ -723,11 +723,17 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
 
     /// Migrate the whole object to a specified storage preference.
     pub fn migrate(&self, pref: StoragePreference) -> Result<()> {
-        unimplemented!()
+        self.migrate_range(u64::MAX, 0, pref)
     }
 
     /// Migrate a range of chunks to a new storage preference
     pub fn migrate_range(&self, length: u64, offset: u64, pref: StoragePreference) -> Result<()> {
-        unimplemented!()
+        let chunk_range = ChunkRange::from_byte_bounds(offset, length);
+
+        self.store.data.migrate_range(
+            &object_chunk_key(self.object.id, chunk_range.start.chunk_id)[..]
+                ..&object_chunk_key(self.object.id, chunk_range.end.chunk_id),
+            pref
+        )
     }
 }
