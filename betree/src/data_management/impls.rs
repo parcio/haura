@@ -188,6 +188,10 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'st
     written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum, I, G>>>,
     modified_info: Mutex<HashMap<ModifiedObjectId, I>>,
     handler: H,
+    // NOTE: The semantic structure of this looks as this
+    // Storage Pool Layers:
+    //      Layer Disks:
+    //          Tuple of SegmentIDs and their according Allocators
     allocation_data: Box<[Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>]>,
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
@@ -572,6 +576,8 @@ where
                 continue;
             }
 
+            // TODO: Consider the known free size and continue on success
+
             let start_disk_id = (self.next_disk_id.fetch_add(1, Ordering::Relaxed)
                 % u64::from(disks_in_class)) as u16;
             let disk_id = (start_disk_id..disks_in_class)
@@ -580,7 +586,7 @@ where
                     self.pool.effective_free_size(
                         class,
                         disk_id,
-                        self.handler.get_free_space(disk_id),
+                        self.handler.get_free_space(class, disk_id).expect("We can be sure that this disk id exists."),
                     )
                 })
                 .unwrap();
@@ -629,7 +635,6 @@ where
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
                 .chain_err(|| ErrorKind::HandlerError)?;
 
-            info!("Return from allocate fn");
             return Ok(disk_offset);
         }
 

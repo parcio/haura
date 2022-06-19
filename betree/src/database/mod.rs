@@ -23,6 +23,7 @@ use crate::{
 };
 use bincode::{deserialize, serialize_into};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -212,13 +213,32 @@ impl DatabaseBuilder for DatabaseConfiguration {
     }
 
     fn new_handler(&self, spu: &Self::Spu) -> handler::Handler {
+        // TODO: Update the free sizes of each used vdev here.
+        // How do we recover this from the storage?
+        // FIXME: Ensure this is recovered properly from storage
         Handler {
             root_tree_inner: AtomicOption::new(),
             root_tree_snapshot: RwLock::new(None),
             current_generation: SeqLock::new(Generation(1)),
             free_space: HashMap::from_iter((0..spu.storage_class_count()).flat_map(|class| {
-                (0..spu.disk_count(class)).map(move |disk_id| ((class, disk_id), AtomicU64::new(0)))
+                (0..spu.disk_count(class)).map(move |disk_id| ((class, disk_id), AtomicU64::new(
+                    spu.effective_free_size(
+                        class,
+                        disk_id,
+                        spu.size_in_blocks(class, disk_id)
+                    ).as_u64()
+                )))
             })),
+            // FIXME: This can be done much nicer
+            free_space_tier: (0..spu.storage_class_count()).map(|class| {
+                AtomicU64::new((0..spu.disk_count(class)).fold(0, |acc, disk_id| {
+                    acc + spu.effective_free_size(
+                        class,
+                        disk_id,
+                        spu.size_in_blocks(class, disk_id)
+                    ).as_u64()
+                }))
+            }).collect_vec(),
             delayed_messages: Mutex::new(Vec::new()),
             last_snapshot_generation: RwLock::new(HashMap::new()),
             allocations: AtomicU64::new(0),

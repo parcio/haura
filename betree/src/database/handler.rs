@@ -19,7 +19,7 @@ use seqlock::SeqLock;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering, AtomicBool},
         Arc,
     },
 };
@@ -42,12 +42,21 @@ pub struct Handler {
     pub(crate) root_tree_snapshot:
         RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
+    // Free Space counted as blocks
     pub(crate) free_space: HashMap<(u8, u16), AtomicU64>,
+    pub(crate) free_space_tier: Vec<AtomicU64>,
     pub(crate) delayed_messages: Mutex<Vec<(Box<[u8]>, SlicedCowBytes)>>,
     pub(crate) last_snapshot_generation: RwLock<HashMap<DatasetId, Generation>>,
     pub(crate) allocations: AtomicU64,
     pub(crate) old_root_allocation: SeqLock<Option<(DiskOffset, Block<u32>)>>,
 }
+
+// NOTE: Maybe use somehting like this in the future, for now we update another list on the side here
+// pub struct FreeSpace {
+//     pub(crate) disk: HashMap<(u8, u16), AtomicU64>,
+//     pub(crate) class: Vec<AtomicU64>,
+//     pub(crate) invalidated: AtomicBool,
+// }
 
 impl Handler {
     fn current_root_tree<'a, X>(
@@ -130,6 +139,17 @@ impl data_management::Handler<ObjectRef> for Handler {
         self.allocations.fetch_add(1, Ordering::Release);
         let key = segment_id_to_key(SegmentId::get(offset));
         let msg = update_allocation_bitmap_msg(offset, size, action);
+        // NOTE: We perform double the amount of atomics here than necessary, but we do this for now to avoid reiteration
+        match action.clone() {
+            Action::Deallocate => {
+                self.free_space.get(&(offset.storage_class(), offset.disk_id())).expect("Could not find disk id in storage class").fetch_add(size.as_u64(), Ordering::Relaxed);
+                self.free_space_tier[offset.storage_class() as usize].fetch_add(size.as_u64(), Ordering::Relaxed);
+            },
+            Action::Allocate => {
+                self.free_space.get(&(offset.storage_class(), offset.disk_id())).expect("Could not find disk id in storage class").fetch_sub(size.as_u64(), Ordering::Relaxed);
+                self.free_space_tier[offset.storage_class() as usize].fetch_sub(size.as_u64(), Ordering::Relaxed);
+            },
+        };
         self.current_root_tree(dmu)
             .insert(&key[..], msg, StoragePreference::NONE)?;
         Ok(())
@@ -180,9 +200,8 @@ impl data_management::Handler<ObjectRef> for Handler {
         Ok(allocator)
     }
 
-    fn get_free_space(&self, _disk_id: u16) -> Block<u64> {
-        // TODO account free space per vdev
-        Block(0)
+    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<Block<u64>> {
+        self.free_space.get(&(class, disk_id)).map(|elem| Block(elem.load(Ordering::Relaxed)))
     }
 
     /// Marks blocks from removed objects to be removed if they are no longer needed.
@@ -206,6 +225,9 @@ impl data_management::Handler<ObjectRef> for Handler {
             let key = &segment_id_to_key(SegmentId::get(offset)) as &[_];
             log::debug!("Marked a block range {{ offset: {:?}, size: {:?} }} for deallocation", offset, size);
             let msg = update_allocation_bitmap_msg(offset, size, Action::Deallocate);
+            // NOTE: Update free size on both positions
+            self.free_space.get(&(offset.storage_class(), offset.disk_id())).expect("Could not fetch disk id from storage class").fetch_add(size.as_u64(), Ordering::Relaxed);
+            self.free_space_tier[offset.storage_class() as usize].fetch_add(size.as_u64(), Ordering::Relaxed);
             self.delayed_messages.lock().push((key.into(), msg));
         } else {
             // Add to dead list

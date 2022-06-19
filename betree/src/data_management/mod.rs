@@ -5,7 +5,7 @@ use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
     size::{Size, StaticSize},
-    storage_pool::DiskOffset,
+    storage_pool::{DiskOffset, StoragePoolLayer},
     vdev::Block,
     StoragePreference,
 };
@@ -209,8 +209,7 @@ pub trait Handler<R: ObjectRef>: HandlerTypes {
         R::ObjectPointer: Serialize + DeserializeOwned;
 
     /// Returns the amount of free space (in blocks) for a given top-level vdev.
-    fn get_free_space(&self, disk_id: u16) -> Block<u64>;
-
+    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<Block<u64>>;
     /// Will be called when an object has been made mutable.
     /// May be used to mark the data blocks for delayed deallocation.
     fn copy_on_write(
