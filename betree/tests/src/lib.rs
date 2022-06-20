@@ -498,7 +498,7 @@ fn write_sequence_random_fill(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
 #[case::b(128)]
 #[case::c(512)]
 #[case::d(2048)]
-fn migrate_up(#[case] tier_size_mb: u32) {
+fn migrate_down(#[case] tier_size_mb: u32) {
     let mut db = test_db(2, tier_size_mb);
     let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
     let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
@@ -513,7 +513,7 @@ fn migrate_up(#[case] tier_size_mb: u32) {
 #[case::b(128)]
 #[case::c(512)]
 #[case::d(2048)]
-fn migrate_down(#[case] tier_size_mb: u32) {
+fn migrate_up(#[case] tier_size_mb: u32) {
     let mut db = test_db(2, tier_size_mb);
     let os = db.open_named_object_store(b"test", StoragePreference::FAST).expect("Oh no! Could not open object store");
     let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
