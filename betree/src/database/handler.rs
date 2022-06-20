@@ -204,6 +204,10 @@ impl data_management::Handler<ObjectRef> for Handler {
         self.free_space.get(&(class, disk_id)).map(|elem| Block(elem.load(Ordering::Relaxed)))
     }
 
+    fn get_free_space_tier(&self, class: u8) -> Option<Block<u64>> {
+        self.free_space_tier.get(class as usize).map(|elem| Block(elem.load(Ordering::Relaxed)))
+    }
+
     /// Marks blocks from removed objects to be removed if they are no longer needed.
     /// Checks for the existence of snapshots which included this data, if snapshots are found continue to hold this key as "dead" key.
     // copy on write is a bit of an unlucky name
