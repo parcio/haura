@@ -560,11 +560,11 @@ fn migrate_invalid_size(#[case] tier_size_mb: u32, #[case] buffer_size: u32) {
     let mut db = test_db_uneven(2, &[buffer_size, tier_size_mb]);
     let os = db.open_named_object_store(b"test", StoragePreference::FAST).expect("Oh no! Could not open object store");
     let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
-    let buf = vec![42; (tier_size_mb as f32 * 0.65) as usize * TO_MEBIBYTE];
+    let buf = vec![42; (tier_size_mb as f32 * 0.9) as usize * TO_MEBIBYTE];
     obj.write_at(&buf, 0).expect("Could not write to newly created object");
     db.sync().expect("Could not sync database");
     // The slowest tier is not defined in this default configuration
-    obj.migrate(StoragePreference::FASTEST);
+    obj.migrate(StoragePreference::FASTEST);//.expect_err("Should not succeed");
     db.sync().expect_err("Too large data synced");
 }
 
