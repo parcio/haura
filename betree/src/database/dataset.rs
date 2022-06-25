@@ -288,6 +288,9 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
             offset as usize + data.len() <= tree::MAX_MESSAGE_SIZE,
             ErrorKind::MessageTooLarge
         );
+        // TODO: In case of overfilling the underlying storage we should notify in _any_ case that the writing is not successfull, for this
+        // we need to know wether the space to write out has been expanded. For this we need further information which we ideally do not want
+        // to read out from the disk here.
         self.insert_msg_with_pref(
             key,
             DefaultMessageAction::upsert_msg(offset, data),

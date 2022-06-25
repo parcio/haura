@@ -316,10 +316,12 @@ where
         match *or {
             ObjectRef::Unmodified(_) => unreachable!(),
             ObjectRef::Modified(mid) => {
+                debug!("{mid:?} moved to InWriteback");
                 *or = ObjectRef::InWriteback(mid);
             }
             ObjectRef::InWriteback(mid) => {
                 // The object must have been written back recently.
+                debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(&mid).unwrap();
                 *or = ObjectRef::Unmodified(ptr);
             }
@@ -489,20 +491,21 @@ where
             state.finish()
         };
 
-        let info = self.modified_info.lock().remove(&mid).unwrap();
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();
+        debug!("Compressed object size is {size} bytes");
         let size = Block(((size as usize + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
-        trace!("Returned from allocate");
         assert_eq!(size.to_bytes() as usize, compressed_data.len());
         /*if size.to_bytes() as usize != compressed_data.len() {
             let mut v = compressed_data.into_vec();
             v.resize(size.to_bytes() as usize, 0);
             compressed_data = v.into_boxed_slice();
         }*/
+
+        let info = self.modified_info.lock().remove(&mid).unwrap();
 
         let checksum = {
             let mut state = self.default_checksum_builder.build();
@@ -673,14 +676,14 @@ where
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRef>, ()> {
         trace!("prepare_write_back: Enter");
         loop {
-            trace!("prepare_write_back: Trying to acquire cache write lock");
+            // trace!("prepare_write_back: Trying to acquire cache write lock");
             let mut cache = self.cache.write();
-            trace!("prepare_write_back: Acquired");
+            // trace!("prepare_write_back: Acquired");
             if cache.contains_key(&ObjectKey::InWriteback(mid)) {
                 // TODO wait
                 drop(cache);
                 yield_now();
-                trace!("prepare_wait_back: Cache contained key, waiting..");
+                // trace!("prepare_write_back: Cache contained key, waiting..");
                 continue;
             }
             let result =
@@ -911,6 +914,13 @@ where
             };
             let mut mids = Vec::new();
 
+            // debug!("MID: {mid:?}");
+            // match *or {
+            //     ObjectRef::Unmodified(_) => debug!("State was Unmodified"),
+            //     ObjectRef::InWriteback(_) => debug!("State was InWriteback"),
+            //     ObjectRef::Modified(_) => debug!("State was Modified"),
+            // }
+
             trace!("write_back: Preparing write back");
             match self.prepare_write_back(mid, &mut mids) {
                 Ok(None) => {
@@ -927,7 +937,13 @@ where
                             Ok(None) => {}
                             Ok(Some(object)) => {
                                 trace!("write_back: Was Ok Some");
-                                self.handle_write_back(object, mid, false)?;
+                                self.handle_write_back(object, mid, false).map_err(|err| {
+                                    let mut cache = self.cache.write();
+                                    cache.change_key::<(), _>(&ObjectKey::InWriteback(mid), |obj, val, _| {
+                                        Ok(ObjectKey::Modified(mid))
+                                    }).unwrap();
+                                    err
+                                })?;
                             }
                             Err(()) => continue,
                         };

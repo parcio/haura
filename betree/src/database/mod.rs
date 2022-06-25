@@ -6,7 +6,7 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml,
+        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml, Handler as DmuHandler,
     },
     metrics::{metrics_init, MetricsConfiguration},
     size::StaticSize,
