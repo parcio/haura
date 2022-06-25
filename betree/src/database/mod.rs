@@ -511,11 +511,26 @@ impl<Config: DatabaseBuilder> Database<Config> {
         Ok(())
     }
 
+    pub fn free_space_tier(&self) -> Vec<StorageInfo> {
+        (0..self.root_tree.dmu().spl().storage_class_count()).map(|class| {
+            StorageInfo {
+                free: self.root_tree.dmu().handler().get_free_space_tier(class).expect("Could not find expected class"),
+                total: Block(0u64),
+            }
+        }).collect()
+    }
+
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
     pub fn root_tree(&self) -> &RootTree<Config::Dmu> {
         &self.root_tree
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageInfo {
+    pub free: Block<u64>,
+    pub total: Block<u64>,
 }
 
 fn ss_key(ds_id: DatasetId, name: &[u8]) -> Vec<u8> {

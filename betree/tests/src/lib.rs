@@ -574,3 +574,25 @@ fn migrate_nochange(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
     db.sync().expect("Could not sync database");
     obj.migrate(StoragePreference::FASTEST).unwrap();
 }
+
+#[rstest]
+fn space_accounting_smoke() {
+    // env_logger::init();
+    let mut db = test_db(2, 64);
+    let before = db.free_space_tier();
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
+    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let buf = vec![42u8; 2 * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).expect("Could not write to newly created object");
+    db.sync().expect("Could not sync database");
+    let after = db.free_space_tier();
+
+    // Size - superblocks blocks
+    let expected_free_size_before = (64 * TO_MEBIBYTE as u64) / 4096 - 2;
+    //let expected_free_size_after = expected_free_size_before - (32 * TO_MEBIBYTE as u64 / 4096);
+    println!("{:?}", before);
+    println!("{:?}", after);
+    assert_eq!(before[0].free.as_u64(), expected_free_size_before);
+    assert_ne!(before[0].free, after[0].free);
+    // assert_eq!(after[0].free.as_u64(), expected_free_size_after);
+}

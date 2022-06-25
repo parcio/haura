@@ -472,6 +472,12 @@ where
             warn!("Writing back large object: {}", object.debug_info());
         }
 
+        // NOTE: Test the discrepancy between the actual size packed and the packed compressed length.
+        // let mut buff: Vec<u8> = Vec::new();
+        // object.pack(&mut buff);
+        // debug!("Normal packed size is {} bytes", buff.len());
+        debug!("Estimated object size is {object_size} bytes");
+        debug!("Using compression {:?}", &self.default_compression);
         let generation = self.handler.current_generation();
         let storage_preference = object.correct_preference();
         let storage_class = storage_preference
@@ -514,7 +520,6 @@ where
         };
 
         self.pool.begin_write(compressed_data, offset)?;
-        trace!("Written to pool");
 
         let obj_ptr = ObjectPointer {
             offset,
@@ -542,6 +547,7 @@ where
                 )
             };
             if was_present {
+                debug!("Inserted {mid:?} into written_back");
                 self.written_back.lock().insert(mid, obj_ptr.clone());
             }
         }
@@ -581,6 +587,11 @@ where
             }
 
             // TODO: Consider the known free size and continue on success
+
+            if self.handler.get_free_space_tier(class).expect("Has to exist").as_u64() < size.as_u64() {
+                warn!("Storage tier {class} does not have enough space remaining. {} blocks of {}", self.handler.get_free_space_tier(class).unwrap().as_u64(), size.as_u64());
+                continue;
+            }
 
             let start_disk_id = (self.next_disk_id.fetch_add(1, Ordering::Relaxed)
                 % u64::from(disks_in_class)) as u16;
@@ -624,6 +635,8 @@ where
                     );
                     if next_segment_id == first_seen_segment_id {
                         // Can't allocate in this class, try next
+                        warn!("Allocation failed not enough space");
+                        debug!("Free space is {:?} blocks", self.handler.get_free_space_tier(class));
                         continue 'class;
                     }
                     *allocator = self
@@ -635,6 +648,7 @@ where
             };
 
             info!("Allocated {:?} at {:?}", size, disk_offset);
+            debug!("Remaining space is {:?} blocks", self.handler.get_free_space_tier(class));
             self.handler
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
                 .chain_err(|| ErrorKind::HandlerError)?;
@@ -642,6 +656,7 @@ where
             return Ok(disk_offset);
         }
 
+        warn!("No available layer can provide enough free storage {:?}", size);
         bail!(ErrorKind::OutOfSpaceError)
     }
 
