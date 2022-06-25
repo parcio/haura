@@ -208,7 +208,7 @@ fn bectl_main() -> Result<(), Error> {
                 let dmu = root.dmu();
                 let handler = dmu.handler();
 
-                let space = handler.get_free_space(0);
+                let space = handler.get_free_space(0,0);
                 println!("{:?}", space);
             }
 
