@@ -21,7 +21,7 @@ use std::{
 };
 
 const MIN_GROWTH_SIZE: Block<u32> = Block(1);
-const GROWTH_FACTOR: f32 = 1.5;
+const GROWTH_FACTOR: f32 = 1.1;
 
 fn is_aligned(buf: &[u8]) -> bool {
     buf.as_ptr() as usize % BLOCK_SIZE == 0 && buf.len() % BLOCK_SIZE == 0
