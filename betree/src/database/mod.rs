@@ -6,7 +6,8 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithSpl, Dmu, HandlerDml, Handler as DmuHandler,
+        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithSpl, Dmu, Handler as DmuHandler,
+        HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
     size::StaticSize,
@@ -31,11 +32,12 @@ use std::{
     collections::HashMap,
     iter::FromIterator,
     mem::replace,
+    path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    thread, path::Path,
+    thread,
 };
 
 mod dataset;
@@ -197,9 +199,15 @@ impl Default for DatabaseConfiguration {
 
 impl DatabaseConfiguration {
     /// Serialize the configuration to a given path in the json format.
-    pub fn write_to_json<P: AsRef<Path>>(&self,path: P) -> Result<()> {
-        let file = std::fs::OpenOptions::new().write(true).truncate(true).create(true).open(path)?;
-        serde_json::to_writer_pretty(file, &self).map_err(|e| crate::database::errors::Error::with_chain(e, ErrorKind::SerializeFailed))?;
+    pub fn write_to_json<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(path)?;
+        serde_json::to_writer_pretty(file, &self).map_err(|e| {
+            crate::database::errors::Error::with_chain(e, ErrorKind::SerializeFailed)
+        })?;
         Ok(())
     }
 }
@@ -221,24 +229,30 @@ impl DatabaseBuilder for DatabaseConfiguration {
             root_tree_snapshot: RwLock::new(None),
             current_generation: SeqLock::new(Generation(1)),
             free_space: HashMap::from_iter((0..spu.storage_class_count()).flat_map(|class| {
-                (0..spu.disk_count(class)).map(move |disk_id| ((class, disk_id), AtomicU64::new(
-                    spu.effective_free_size(
-                        class,
-                        disk_id,
-                        spu.size_in_blocks(class, disk_id)
-                    ).as_u64()
-                )))
+                (0..spu.disk_count(class)).map(move |disk_id| {
+                    (
+                        (class, disk_id),
+                        AtomicU64::new(
+                            spu.effective_free_size(
+                                class,
+                                disk_id,
+                                spu.size_in_blocks(class, disk_id),
+                            )
+                            .as_u64(),
+                        ),
+                    )
+                })
             })),
             // FIXME: This can be done much nicer
-            free_space_tier: (0..spu.storage_class_count()).map(|class| {
-                AtomicU64::new((0..spu.disk_count(class)).fold(0, |acc, disk_id| {
-                    acc + spu.effective_free_size(
-                        class,
-                        disk_id,
-                        spu.size_in_blocks(class, disk_id)
-                    ).as_u64()
-                }))
-            }).collect_vec(),
+            free_space_tier: (0..spu.storage_class_count())
+                .map(|class| {
+                    AtomicU64::new((0..spu.disk_count(class)).fold(0, |acc, disk_id| {
+                        acc + spu
+                            .effective_free_size(class, disk_id, spu.size_in_blocks(class, disk_id))
+                            .as_u64()
+                    }))
+                })
+                .collect_vec(),
             delayed_messages: Mutex::new(Vec::new()),
             last_snapshot_generation: RwLock::new(HashMap::new()),
             allocations: AtomicU64::new(0),
@@ -512,12 +526,17 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     pub fn free_space_tier(&self) -> Vec<StorageInfo> {
-        (0..self.root_tree.dmu().spl().storage_class_count()).map(|class| {
-            StorageInfo {
-                free: self.root_tree.dmu().handler().get_free_space_tier(class).expect("Could not find expected class"),
+        (0..self.root_tree.dmu().spl().storage_class_count())
+            .map(|class| StorageInfo {
+                free: self
+                    .root_tree
+                    .dmu()
+                    .handler()
+                    .get_free_space_tier(class)
+                    .expect("Could not find expected class"),
                 total: Block(0u64),
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     #[allow(missing_docs)]

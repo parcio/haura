@@ -19,7 +19,7 @@ use seqlock::SeqLock;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering, AtomicBool},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -142,13 +142,21 @@ impl data_management::Handler<ObjectRef> for Handler {
         // NOTE: We perform double the amount of atomics here than necessary, but we do this for now to avoid reiteration
         match action.clone() {
             Action::Deallocate => {
-                self.free_space.get(&(offset.storage_class(), offset.disk_id())).expect("Could not find disk id in storage class").fetch_add(size.as_u64(), Ordering::Relaxed);
-                self.free_space_tier[offset.storage_class() as usize].fetch_add(size.as_u64(), Ordering::Relaxed);
-            },
+                self.free_space
+                    .get(&(offset.storage_class(), offset.disk_id()))
+                    .expect("Could not find disk id in storage class")
+                    .fetch_add(size.as_u64(), Ordering::Relaxed);
+                self.free_space_tier[offset.storage_class() as usize]
+                    .fetch_add(size.as_u64(), Ordering::Relaxed);
+            }
             Action::Allocate => {
-                self.free_space.get(&(offset.storage_class(), offset.disk_id())).expect("Could not find disk id in storage class").fetch_sub(size.as_u64(), Ordering::Relaxed);
-                self.free_space_tier[offset.storage_class() as usize].fetch_sub(size.as_u64(), Ordering::Relaxed);
-            },
+                self.free_space
+                    .get(&(offset.storage_class(), offset.disk_id()))
+                    .expect("Could not find disk id in storage class")
+                    .fetch_sub(size.as_u64(), Ordering::Relaxed);
+                self.free_space_tier[offset.storage_class() as usize]
+                    .fetch_sub(size.as_u64(), Ordering::Relaxed);
+            }
         };
         self.current_root_tree(dmu)
             .insert(&key[..], msg, StoragePreference::NONE)?;
@@ -201,11 +209,15 @@ impl data_management::Handler<ObjectRef> for Handler {
     }
 
     fn get_free_space(&self, class: u8, disk_id: u16) -> Option<Block<u64>> {
-        self.free_space.get(&(class, disk_id)).map(|elem| Block(elem.load(Ordering::Relaxed)))
+        self.free_space
+            .get(&(class, disk_id))
+            .map(|elem| Block(elem.load(Ordering::Relaxed)))
     }
 
     fn get_free_space_tier(&self, class: u8) -> Option<Block<u64>> {
-        self.free_space_tier.get(class as usize).map(|elem| Block(elem.load(Ordering::Relaxed)))
+        self.free_space_tier
+            .get(class as usize)
+            .map(|elem| Block(elem.load(Ordering::Relaxed)))
     }
 
     /// Marks blocks from removed objects to be removed if they are no longer needed.
@@ -227,11 +239,19 @@ impl data_management::Handler<ObjectRef> for Handler {
         {
             // Deallocate
             let key = &segment_id_to_key(SegmentId::get(offset)) as &[_];
-            log::debug!("Marked a block range {{ offset: {:?}, size: {:?} }} for deallocation", offset, size);
+            log::debug!(
+                "Marked a block range {{ offset: {:?}, size: {:?} }} for deallocation",
+                offset,
+                size
+            );
             let msg = update_allocation_bitmap_msg(offset, size, Action::Deallocate);
             // NOTE: Update free size on both positions
-            self.free_space.get(&(offset.storage_class(), offset.disk_id())).expect("Could not fetch disk id from storage class").fetch_add(size.as_u64(), Ordering::Relaxed);
-            self.free_space_tier[offset.storage_class() as usize].fetch_add(size.as_u64(), Ordering::Relaxed);
+            self.free_space
+                .get(&(offset.storage_class(), offset.disk_id()))
+                .expect("Could not fetch disk id from storage class")
+                .fetch_add(size.as_u64(), Ordering::Relaxed);
+            self.free_space_tier[offset.storage_class() as usize]
+                .fetch_add(size.as_u64(), Ordering::Relaxed);
             self.delayed_messages.lock().push((key.into(), msg));
         } else {
             // Add to dead list

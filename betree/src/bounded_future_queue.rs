@@ -77,7 +77,6 @@ where
             .get_index(0)
             .map(|(k, v)| (k.clone(), v.clone()));
 
-
         if let Some((k, v)) = maybe_entry {
             let ret = block_on(v);
 

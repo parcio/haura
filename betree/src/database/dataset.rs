@@ -342,17 +342,21 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
 
     /// Given a key and storage preference notify for this entry to be moved to a new storage level.
     /// If the key is already located on this layer no operation is performed and success is returned.
-    pub fn migrate<K: Borrow<[u8]>+ Into<CowBytes>>(&self, key: K, pref: StoragePreference) -> Result<()> {
+    pub fn migrate<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        pref: StoragePreference,
+    ) -> Result<()> {
         let entry = self.tree.get_with_info(key.borrow())?;
         match entry {
             None => Err(Error::from_kind(ErrorKind::InDestruction)),
             Some((info, dat)) => {
                 if *info.storage_preference() == pref {
                     // Save unnecessary moves between identical storage layers
-                    return Ok(())
+                    return Ok(());
                 }
                 self.delete(key.borrow())?;
-                self.insert_with_pref(key,&dat,pref)
+                self.insert_with_pref(key, &dat, pref)
             }
         }
     }

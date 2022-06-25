@@ -333,7 +333,10 @@ where
     //        self.inner.borrow_mut().root_node.is_modified()
     //    }
 
-    pub(crate) fn get_with_info<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<(KeyInfo, SlicedCowBytes)>, Error> {
+    pub(crate) fn get_with_info<K: Borrow<[u8]>>(
+        &self,
+        key: K,
+    ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, Error> {
         let key = key.borrow();
         let mut msgs = Vec::new();
         let mut node = self.get_root_node()?;

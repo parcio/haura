@@ -733,7 +733,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         self.store.data.migrate_range(
             &object_chunk_key(self.object.id, chunk_range.start.chunk_id)[..]
                 ..&object_chunk_key(self.object.id, chunk_range.end.chunk_id),
-            pref
+            pref,
         )
     }
 }

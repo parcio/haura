@@ -497,7 +497,6 @@ where
             state.finish()
         };
 
-
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();
         debug!("Compressed object size is {size} bytes");
@@ -576,7 +575,11 @@ where
             warn!("Very large allocation requested: {:?}", size);
         }
 
-        log::trace!("Enter allocate: {{ storage_preference: {}, size: {:?} }}", storage_preference, size);
+        log::trace!(
+            "Enter allocate: {{ storage_preference: {}, size: {:?} }}",
+            storage_preference,
+            size
+        );
 
         let strategy = self.alloc_strategy[storage_preference as usize];
 
@@ -588,8 +591,18 @@ where
 
             // TODO: Consider the known free size and continue on success
 
-            if self.handler.get_free_space_tier(class).expect("Has to exist").as_u64() < size.as_u64() {
-                warn!("Storage tier {class} does not have enough space remaining. {} blocks of {}", self.handler.get_free_space_tier(class).unwrap().as_u64(), size.as_u64());
+            if self
+                .handler
+                .get_free_space_tier(class)
+                .expect("Has to exist")
+                .as_u64()
+                < size.as_u64()
+            {
+                warn!(
+                    "Storage tier {class} does not have enough space remaining. {} blocks of {}",
+                    self.handler.get_free_space_tier(class).unwrap().as_u64(),
+                    size.as_u64()
+                );
                 continue;
             }
 
@@ -601,7 +614,9 @@ where
                     self.pool.effective_free_size(
                         class,
                         disk_id,
-                        self.handler.get_free_space(class, disk_id).expect("We can be sure that this disk id exists."),
+                        self.handler
+                            .get_free_space(class, disk_id)
+                            .expect("We can be sure that this disk id exists."),
                     )
                 })
                 .unwrap();
@@ -636,7 +651,10 @@ where
                     if next_segment_id == first_seen_segment_id {
                         // Can't allocate in this class, try next
                         warn!("Allocation failed not enough space");
-                        debug!("Free space is {:?} blocks", self.handler.get_free_space_tier(class));
+                        debug!(
+                            "Free space is {:?} blocks",
+                            self.handler.get_free_space_tier(class)
+                        );
                         continue 'class;
                     }
                     *allocator = self
@@ -648,7 +666,10 @@ where
             };
 
             info!("Allocated {:?} at {:?}", size, disk_offset);
-            debug!("Remaining space is {:?} blocks", self.handler.get_free_space_tier(class));
+            debug!(
+                "Remaining space is {:?} blocks",
+                self.handler.get_free_space_tier(class)
+            );
             self.handler
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
                 .chain_err(|| ErrorKind::HandlerError)?;
@@ -656,7 +677,10 @@ where
             return Ok(disk_offset);
         }
 
-        warn!("No available layer can provide enough free storage {:?}", size);
+        warn!(
+            "No available layer can provide enough free storage {:?}",
+            size
+        );
         bail!(ErrorKind::OutOfSpaceError)
     }
 
@@ -941,7 +965,7 @@ where
                 Ok(None) => {
                     trace!("write_back: Was Ok(None)");
                     self.fix_or(&mut or)
-                },
+                }
                 Ok(Some(object)) => break (object, mid),
                 Err(()) => {
                     trace!("write_back: Was Err");
@@ -954,9 +978,12 @@ where
                                 trace!("write_back: Was Ok Some");
                                 self.handle_write_back(object, mid, false).map_err(|err| {
                                     let mut cache = self.cache.write();
-                                    cache.change_key::<(), _>(&ObjectKey::InWriteback(mid), |obj, val, _| {
-                                        Ok(ObjectKey::Modified(mid))
-                                    }).unwrap();
+                                    cache
+                                        .change_key::<(), _>(
+                                            &ObjectKey::InWriteback(mid),
+                                            |obj, val, _| Ok(ObjectKey::Modified(mid)),
+                                        )
+                                        .unwrap();
                                     err
                                 })?;
                             }
