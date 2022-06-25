@@ -276,7 +276,7 @@ const TO_MEBIBYTE: usize = 1024 * 1024;
 // @jwuensche:
 // This test seems to trigger particulary unregular behavior and may be failing depending on various factors
 // We repeat this test here to trigger this potential behavior
-fn write_flaky(tier_size_mb: u32, write_size_mb: usize, test: &str) {
+fn write_flaky(tier_size_mb: u32, write_size_mb: usize) {
     for _ in 0..3 {
         let mut db = test_db(1, tier_size_mb);
         let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
@@ -304,7 +304,7 @@ use rstest::{rstest, fixture};
 fn write_block(#[case] tier_size_mb: u32) {
     let mut write_size = 1;
     while write_size < tier_size_mb {
-        write_flaky(tier_size_mb, write_size as usize, format!("write_{}mb_{}mb", tier_size_mb, write_size).as_str());
+        write_flaky(tier_size_mb, write_size as usize);
         write_size *= 2;
     }
     // @jwuensche: This is too errorprone at the moment will add a different test for this as it muddies the results from this one
@@ -326,7 +326,7 @@ fn write_block(#[case] tier_size_mb: u32) {
 fn write_full(#[case] tier_size_mb: u32, #[case] par_space: f32) {
     // @jwuensche: This test can lead to busy locks, the timeout prevents the tests from completely locking up
     // If 60 seconds are overstepped it is highly unlikely that the test will ever finish
-    write_flaky(tier_size_mb, (tier_size_mb as f32 * par_space) as usize, "write_almost_full")
+    write_flaky(tier_size_mb, (tier_size_mb as f32 * par_space) as usize)
 }
 
 #[rstest]
