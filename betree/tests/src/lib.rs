@@ -321,14 +321,40 @@ fn write_block(#[case] tier_size_mb: u32) {
 #[case::g(1024, 0.7)]
 #[case::h(1024, 0.8)]
 #[case::i(1024, 0.9)]
-#[case::j(1024, 0.93)]
-#[case::k(1024, 0.95)]
-#[case::l(1024, 0.97)]
+#[case::j(1024, 0.91)]
 #[timeout(std::time::Duration::from_secs(60))]
 fn write_full(#[case] tier_size_mb: u32, #[case] par_space: f32) {
     // @jwuensche: This test can lead to busy locks, the timeout prevents the tests from completely locking up
     // If 60 seconds are overstepped it is highly unlikely that the test will ever finish
     write_flaky(tier_size_mb, (tier_size_mb as f32 * par_space) as usize, "write_almost_full")
+}
+
+#[rstest]
+// Fullness if buffer growth atleast x1.1
+#[case::a(1024, 0.93)]
+#[case::b(1024, 0.95)]
+#[case::c(1024, 0.97)]
+#[case::d(1024, 0.99)]
+// Over-over fill
+#[case::e(1024, 1.1)]
+#[case::f(1024, 1.2)]
+#[case::g(1024, 1.5)]
+#[timeout(std::time::Duration::from_secs(60))]
+fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
+    // env_logger::init();
+    let mut db = test_db(1, tier_size_mb);
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
+    let buf = vec![42_u8; (tier_size_mb as f32 * par_space) as usize * TO_MEBIBYTE];
+    {
+        let obj = os.open_or_create_object(b"hewo").expect("Oh no! Could not open object!");
+        obj.write_at(&buf, 0).expect(format!("Writing of {} MiB into {} MiB storage failed (Growth Factor 1.1)", tier_size_mb as f32 * par_space * 1.1, tier_size_mb).as_str());
+    }
+    db.close_object_store(os);
+    // NOTE: Test multiple times if the error persist as it should in this case
+    db.sync().expect_err(format!("Sync succeeded ({}MB of {}MB)", tier_size_mb as f32 * par_space * 1.1, tier_size_mb).as_str());
+    db.sync().expect_err(format!("Sync succeeded ({}MB of {}MB)", tier_size_mb as f32 * par_space * 1.1, tier_size_mb).as_str());
+    db.sync().expect_err(format!("Sync succeeded ({}MB of {}MB)", tier_size_mb as f32 * par_space * 1.1, tier_size_mb).as_str());
+    // NOTE: If the sync errors are not corrected this will deadlock here on the final drop. Test with timeout.
 }
 
 #[fixture]
