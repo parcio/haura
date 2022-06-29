@@ -310,6 +310,30 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         self.upsert_with_pref(key, data, offset, StoragePreference::NONE)
     }
 
+    /// Given a key and storage preference notify for this entry to be moved to a new storage level.
+    /// If the key is already located on this layer no operation is performed and success is returned.
+    ///
+    /// As the migration is for a singular there is no guarantee that when selectiong migrate for a key
+    /// that the value is actually moved to the specified storage tier.
+    /// Internally: The most high required tier will be chosen for one leaf node.
+    pub fn migrate<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        pref: StoragePreference,
+    ) -> Result<()> {
+        use crate::data_management::DmlWithSpl;
+        use crate::storage_pool::StoragePoolLayer;
+        if self.tree.dmu().spl().disk_count(pref.as_u8()) == 0 {
+            bail!(ErrorKind::DoesNotExist)
+        }
+        // TODO: What happens on none existent keys? They should not be inserted in this case. Check!
+        self.insert_msg_with_pref(
+            key,
+            DefaultMessageAction::noop_msg(),
+            pref,
+        )
+    }
+
     /// Deletes the key-value pair if existing.
     pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
         self.insert_msg_with_pref(
@@ -338,27 +362,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         }
 
         res
-    }
-
-    /// Given a key and storage preference notify for this entry to be moved to a new storage level.
-    /// If the key is already located on this layer no operation is performed and success is returned.
-    pub fn migrate<K: Borrow<[u8]> + Into<CowBytes>>(
-        &self,
-        key: K,
-        pref: StoragePreference,
-    ) -> Result<()> {
-        let entry = self.tree.get_with_info(key.borrow())?;
-        match entry {
-            None => Err(Error::from_kind(ErrorKind::InDestruction)),
-            Some((info, dat)) => {
-                if *info.storage_preference() == pref {
-                    // Save unnecessary moves between identical storage layers
-                    return Ok(());
-                }
-                self.delete(key.borrow())?;
-                self.insert_with_pref(key, &dat, pref)
-            }
-        }
     }
 
     /// Migrate a complete range of keys to another storage preference.

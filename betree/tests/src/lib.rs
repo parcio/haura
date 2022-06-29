@@ -521,17 +521,19 @@ fn write_sequence_random_fill(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
 
 #[rstest]
 #[case::a(32)]
-#[case::b(128)]
-#[case::c(512)]
-#[case::d(2048)]
-fn migrate_down(#[case] tier_size_mb: u32) {
+fn dataset_migrate_down(#[case] tier_size_mb: u32) {
     let mut db = test_db(2, tier_size_mb);
-    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
-    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
-    let buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
-    obj.write_at(&buf, 0).expect("Could not write to newly created object");
-    db.sync().expect("Could not sync database");
-    obj.migrate(StoragePreference::FAST).unwrap();
+    let ds = db.open_or_create_dataset(b"miniprod").unwrap();
+    let buf = std::borrow::Cow::from(b"Ich bin nur froh im Grossraumbuero".to_vec());
+    let key = b"test".to_vec();
+    ds.insert_with_pref(key.clone(), &buf, StoragePreference::FASTEST).unwrap();
+    db.sync().unwrap();
+    let space = db.free_space_tier();
+    assert!(space[0].free < space[1].free);
+    ds.migrate(key, StoragePreference::FAST).unwrap();
+    db.sync().unwrap();
+    let space = db.free_space_tier();
+    assert!(space[0].free > space[1].free);
 }
 
 #[rstest]
@@ -539,14 +541,57 @@ fn migrate_down(#[case] tier_size_mb: u32) {
 #[case::b(128)]
 #[case::c(512)]
 #[case::d(2048)]
-fn migrate_up(#[case] tier_size_mb: u32) {
+fn object_migrate_down(#[case] tier_size_mb: u32) {
+    // env_logger::init();
     let mut db = test_db(2, tier_size_mb);
-    let os = db.open_named_object_store(b"test", StoragePreference::FAST).expect("Oh no! Could not open object store");
-    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
-    let buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
-    obj.write_at(&buf, 0).expect("Could not write to newly created object");
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).unwrap();
+    let mut obj = os.open_or_create_object(b"foobar").unwrap();
+    let mut buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).unwrap();
     db.sync().expect("Could not sync database");
+    dbg!(db.free_space_tier());
+    obj.migrate(StoragePreference::FAST).unwrap();
+    // log::debug!("DONE WITH MIGRATION");
+    obj.write_at_with_pref(&buf, 0, StoragePreference::FAST);
+    // log::debug!("DONE WITH WRITING");
+    db.sync().expect("Could not sync database");
+    dbg!(db.free_space_tier());
+}
+
+#[rstest]
+#[case::a(32)]
+fn dataset_migrate_up(#[case] tier_size_mb: u32) {
+    let mut db = test_db(2, tier_size_mb);
+    let ds = db.open_or_create_dataset(b"miniprod").unwrap();
+    let buf = std::borrow::Cow::from(b"Ich arbeite gern fuer meinen Konzern".to_vec());
+    let key = b"test".to_vec();
+    ds.insert_with_pref(key.clone(), &buf, StoragePreference::FAST).unwrap();
+    db.sync().unwrap();
+    let space = db.free_space_tier();
+    assert!(space[0].free > space[1].free);
+    ds.migrate(key, StoragePreference::FASTEST).unwrap();
+    db.sync().unwrap();
+    let space = db.free_space_tier();
+    assert!(space[0].free < space[1].free);
+}
+
+#[rstest]
+#[case::a(32)]
+#[case::b(128)]
+#[case::c(512)]
+#[case::d(2048)]
+fn object_migrate_up(#[case] tier_size_mb: u32) {
+    // env_logger::init();
+    let mut db = test_db(2, tier_size_mb);
+    let os = db.open_named_object_store(b"test", StoragePreference::FAST).unwrap();
+    let mut obj = os.open_or_create_object(b"foobar").unwrap();
+    let buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).unwrap();
+    db.sync().unwrap();
+    dbg!(db.free_space_tier());
     obj.migrate(StoragePreference::FASTEST).unwrap();
+    db.sync().unwrap();
+    dbg!(db.free_space_tier());
 }
 
 #[rstest]
@@ -556,15 +601,16 @@ fn migrate_up(#[case] tier_size_mb: u32) {
 #[case::d(2048, 512)]
 // The most commmon case for this should be moving upwards to faster storage.
 // Therefore this is teted here, the other direction should however behave exactly the same.
-fn migrate_invalid_size(#[case] tier_size_mb: u32, #[case] buffer_size: u32) {
+fn object_migrate_invalid_size(#[case] tier_size_mb: u32, #[case] buffer_size: u32) {
     let mut db = test_db_uneven(2, &[buffer_size, tier_size_mb]);
-    let os = db.open_named_object_store(b"test", StoragePreference::FAST).expect("Oh no! Could not open object store");
-    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let os = db.open_named_object_store(b"test", StoragePreference::FAST).unwrap();
+    let mut obj = os.open_or_create_object(b"foobar").unwrap();
     let buf = vec![42; (tier_size_mb as f32 * 0.9) as usize * TO_MEBIBYTE];
-    obj.write_at(&buf, 0).expect("Could not write to newly created object");
-    db.sync().expect("Could not sync database");
-    // The slowest tier is not defined in this default configuration
-    obj.migrate(StoragePreference::FASTEST);//.expect_err("Should not succeed");
+    obj.write_at(&buf, 0).unwrap();
+    db.sync().unwrap();
+    obj.migrate(StoragePreference::FASTEST).unwrap();
+    // NOTE: If this fails on sync, or worse the sync succeeds we run into errors later which is undebuggable in this case
+    // for the user.
     db.sync().expect_err("Too large data synced");
 }
 
@@ -573,13 +619,13 @@ fn migrate_invalid_size(#[case] tier_size_mb: u32, #[case] buffer_size: u32) {
 #[case::b(128)]
 #[case::c(512)]
 #[case::d(2048)]
-fn migrate_invalid_tier(#[case] tier_size_mb: u32) {
+fn object_migrate_invalid_tier(#[case] tier_size_mb: u32) {
     let mut db = test_db(2, tier_size_mb);
-    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
-    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).unwrap();
+    let mut obj = os.open_or_create_object(b"foobar").unwrap();
     let buf = vec![42; (tier_size_mb as f32 * 0.6) as usize * TO_MEBIBYTE];
-    obj.write_at(&buf, 0).expect("Could not write to newly created object");
-    db.sync().expect("Could not sync database");
+    obj.write_at(&buf, 0).unwrap();
+    db.sync().unwrap();
     // The slowest tier is not defined in this default configuration
     obj.migrate(StoragePreference::SLOWEST).expect_err("Accepted invalid tier");
 }
@@ -590,15 +636,15 @@ fn migrate_invalid_tier(#[case] tier_size_mb: u32) {
 #[case::c(512)]
 #[case::d(2048)]
 // @jwuensche: This case should not raise any errors and should just allow silent dropping of the operation.
-fn migrate_nochange(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
+fn object_migrate_nochange(#[case] tier_size_mb: u32) {
     let mut db = test_db(2, tier_size_mb);
-    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
-    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
-    let mut buf = vec![42u8; (tier_size_mb as f32 * 0.8) as usize * TO_MEBIBYTE];
-    rng.try_fill(buf.as_mut_slice()).expect("Could not fill buffer");
-    obj.write_at(&buf, 0).expect("Could not write to newly created object");
-    db.sync().expect("Could not sync database");
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).unwrap();
+    let mut obj = os.open_or_create_object(b"foobar").unwrap();
+    let buf = vec![42u8; (tier_size_mb as f32 * 0.8) as usize * TO_MEBIBYTE];
+    obj.write_at(&buf, 0).unwrap();
+    db.sync().unwrap();
     obj.migrate(StoragePreference::FASTEST).unwrap();
+    db.sync().unwrap();
 }
 
 #[rstest]
@@ -606,18 +652,16 @@ fn space_accounting_smoke() {
     // env_logger::init();
     let mut db = test_db(2, 64);
     let before = db.free_space_tier();
-    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).expect("Oh no! Could not open object store");
-    let obj = os.open_or_create_object(b"foobar").expect("oh no! could not open object!");
+    let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).unwrap();
+    let obj = os.open_or_create_object(b"foobar").unwrap();
     let buf = vec![42u8; 2 * TO_MEBIBYTE];
-    obj.write_at(&buf, 0).expect("Could not write to newly created object");
-    db.sync().expect("Could not sync database");
+    obj.write_at(&buf, 0).unwrap();
+    db.sync().unwrap();
     let after = db.free_space_tier();
 
     // Size - superblocks blocks
     let expected_free_size_before = (64 * TO_MEBIBYTE as u64) / 4096 - 2;
     //let expected_free_size_after = expected_free_size_before - (32 * TO_MEBIBYTE as u64 / 4096);
-    println!("{:?}", before);
-    println!("{:?}", after);
     assert_eq!(before[0].free.as_u64(), expected_free_size_before);
     assert_ne!(before[0].free, after[0].free);
     // assert_eq!(after[0].free.as_u64(), expected_free_size_after);

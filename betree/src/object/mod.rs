@@ -721,8 +721,17 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         Ok(Box::new(iter))
     }
 
-    /// Migrate the whole object to a specified storage preference.
-    pub fn migrate(&self, pref: StoragePreference) -> Result<()> {
+    /// Migrate the whole object to a specified storage preference and write all future accesses to the same storage
+    /// tier.
+    pub fn migrate(&mut self, pref: StoragePreference) -> Result<()> {
+        // Future writes should adhere to the same preference
+        self.object.storage_preference = pref;
+        self.migrate_once(pref)
+    }
+
+    /// Migrate the whole object to a specified storage preference. This includes all present chunks, future chunks may
+    /// be written to different storage tiers specified in the [Object].
+    pub fn migrate_once(&self, pref: StoragePreference) -> Result<()> {
         self.migrate_range(u64::MAX, 0, pref)
     }
 
