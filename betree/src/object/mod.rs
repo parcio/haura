@@ -49,8 +49,8 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, Error, Result},
-    Database, Dataset, StoragePreference,
+    database::{DatabaseBuilder, Error, Result, ErrorKind},
+    Database, Dataset, StoragePreference, vdev::{BLOCK_SIZE, Block},
 };
 
 use speedy::{Readable, Writable};
@@ -725,13 +725,24 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// tier.
     pub fn migrate(&mut self, pref: StoragePreference) -> Result<()> {
         // Future writes should adhere to the same preference
+        self.migrate_once(pref)?;
         self.object.storage_preference = pref;
-        self.migrate_once(pref)
+        Ok(())
     }
 
     /// Migrate the whole object to a specified storage preference. This includes all present chunks, future chunks may
     /// be written to different storage tiers specified in the [Object].
     pub fn migrate_once(&self, pref: StoragePreference) -> Result<()> {
+        // Has to exist with handle
+        let info = self.info().expect("An object key which should exist was not present");
+        if let Some(info) = info {
+            // will be atleast this large
+            let blocks = Block::round_up_from_bytes(info.size);
+            let tier_info = self.store.data.free_space_tier(pref)?;
+            if blocks > tier_info.free {
+                bail!(ErrorKind::MigrationWouldExceedStorage);
+            }
+        }
         self.migrate_range(u64::MAX, 0, pref)
     }
 

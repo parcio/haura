@@ -1,13 +1,13 @@
 use super::{
     ds_data_key, errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree,
-    Generation, MessageTree,
+    Generation, MessageTree, StorageInfo,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::DmlWithHandler,
+    data_management::{DmlWithHandler, Handler},
     database::DatabaseBuilder,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
-    StoragePreference,
+    StoragePreference, vdev::Block,
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
@@ -336,6 +336,18 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
             DefaultMessageAction::delete_msg(),
             StoragePreference::NONE,
         )
+    }
+
+    pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
+        if let Some(blocks) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
+            Ok(StorageInfo {
+                free: blocks,
+                total: Block(0),
+            })
+        } else {
+            bail!(ErrorKind::DoesNotExist)
+        }
+
     }
 
     /// Removes all key-value pairs in the given key range.

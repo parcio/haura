@@ -16,5 +16,6 @@ error_chain! {
         InDestruction
         MessageTooLarge
         SerializeFailed
+        MigrationWouldExceedStorage
     }
 }

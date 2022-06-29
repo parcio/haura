@@ -608,10 +608,10 @@ fn object_migrate_invalid_size(#[case] tier_size_mb: u32, #[case] buffer_size: u
     let buf = vec![42; (tier_size_mb as f32 * 0.9) as usize * TO_MEBIBYTE];
     obj.write_at(&buf, 0).unwrap();
     db.sync().unwrap();
-    obj.migrate(StoragePreference::FASTEST).unwrap();
+    obj.migrate(StoragePreference::FASTEST).expect_err("The specified tier cannot store, but no error has been thrown.");
     // NOTE: If this fails on sync, or worse the sync succeeds we run into errors later which is undebuggable in this case
     // for the user.
-    db.sync().expect_err("Too large data synced");
+    db.sync().unwrap();
 }
 
 #[rstest]
@@ -640,7 +640,7 @@ fn object_migrate_nochange(#[case] tier_size_mb: u32) {
     let mut db = test_db(2, tier_size_mb);
     let os = db.open_named_object_store(b"test", StoragePreference::FASTEST).unwrap();
     let mut obj = os.open_or_create_object(b"foobar").unwrap();
-    let buf = vec![42u8; (tier_size_mb as f32 * 0.8) as usize * TO_MEBIBYTE];
+    let buf = vec![42u8; (tier_size_mb as f32 * 0.4) as usize * TO_MEBIBYTE];
     obj.write_at(&buf, 0).unwrap();
     db.sync().unwrap();
     obj.migrate(StoragePreference::FASTEST).unwrap();
