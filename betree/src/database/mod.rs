@@ -525,6 +525,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
         Ok(())
     }
 
+    /// Storage tier information for all available tiers. These are in order as in `storage_prefernce.as_u8()`
     pub fn free_space_tier(&self) -> Vec<StorageInfo> {
         (0..self.root_tree.dmu().spl().storage_class_count())
             .map(|class| StorageInfo {
@@ -547,8 +548,11 @@ impl<Config: DatabaseBuilder> Database<Config> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Space information representation for a singular storage tier.
 pub struct StorageInfo {
+    /// Remaining free storage in blocks.
     pub free: Block<u64>,
+    /// Total storage in blocks.
     pub total: Block<u64>,
 }
 
