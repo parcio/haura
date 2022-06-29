@@ -321,17 +321,12 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         key: K,
         pref: StoragePreference,
     ) -> Result<()> {
-        use crate::data_management::DmlWithSpl;
-        use crate::storage_pool::StoragePoolLayer;
+        use crate::{data_management::DmlWithSpl, storage_pool::StoragePoolLayer};
         if self.tree.dmu().spl().disk_count(pref.as_u8()) == 0 {
             bail!(ErrorKind::DoesNotExist)
         }
         // TODO: What happens on none existent keys? They should not be inserted in this case. Check!
-        self.insert_msg_with_pref(
-            key,
-            DefaultMessageAction::noop_msg(),
-            pref,
-        )
+        self.insert_msg_with_pref(key, DefaultMessageAction::noop_msg(), pref)
     }
 
     /// Deletes the key-value pair if existing.

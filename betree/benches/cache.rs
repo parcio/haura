@@ -1,4 +1,10 @@
-use betree_storage_stack::{cache::{Cache, ClockCache}, database::{DatasetId, Generation}, storage_pool::DiskOffset, compression::DecompressionTag, vdev::Block};
+use betree_storage_stack::{
+    cache::{Cache, ClockCache},
+    compression::DecompressionTag,
+    database::{DatasetId, Generation},
+    storage_pool::DiskOffset,
+    vdev::Block,
+};
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 
 fn get_and_pin(b: &mut Bencher) {
