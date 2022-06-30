@@ -347,7 +347,7 @@ fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
     let buf = vec![42_u8; (tier_size_mb as f32 * par_space) as usize * TO_MEBIBYTE];
     {
         let obj = os.open_or_create_object(b"hewo").expect("Oh no! Could not open object!");
-        obj.write_at(&buf, 0).expect(format!("Writing of {} MiB into {} MiB storage failed (Growth Factor 1.1)", tier_size_mb as f32 * par_space * 1.1, tier_size_mb).as_str());
+        obj.write_at(&buf, 0).expect_err(format!("Writing of {} MiB into {} MiB storage succeeded (Growth Factor 1.1)", tier_size_mb as f32 * par_space * 1.1, tier_size_mb).as_str());
     }
     db.close_object_store(os);
     // NOTE: Test multiple times if the error persist as it should in this case
