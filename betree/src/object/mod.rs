@@ -50,7 +50,7 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{DatabaseBuilder, Error, Result, ErrorKind},
-    Database, Dataset, StoragePreference, vdev::{BLOCK_SIZE, Block},
+    Database, Dataset, StoragePreference, vdev::Block,
 };
 
 use speedy::{Readable, Writable};

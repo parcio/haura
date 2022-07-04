@@ -5,7 +5,7 @@ use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
     size::{Size, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer},
+    storage_pool::DiskOffset,
     vdev::Block,
     StoragePreference,
 };
