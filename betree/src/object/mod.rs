@@ -746,6 +746,48 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         self.migrate_range(u64::MAX, 0, pref)
     }
 
+    /// Migrate the whole object to the next faster storage tier.
+    /// The object will continue to use this tier for future writes.
+    /// Returns error if no higher tier is available or no storage tier is specified.
+    pub fn migrate_up(&mut self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lift() {
+            self.migrate(pref)
+        } else {
+            bail!(ErrorKind::MigrationUpNotPossible)
+        }
+    }
+
+    /// Migrate the whole object to the next faster storage tier.
+    /// Returns error if no higher tier is available or no storage tier is specified.
+    pub fn migrate_up_once(&mut self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lift() {
+            self.migrate_once(pref)
+        } else {
+            bail!(ErrorKind::MigrationUpNotPossible)
+        }
+    }
+
+    /// Migrate the whole object to the next slower storage tier.
+    /// The object will continue to use this tier for future writes.
+    /// Returns error if no lower tier is available or no storage tier is specified.
+    pub fn migrate_down(&mut self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lower() {
+            self.migrate(pref)
+        } else {
+            bail!(ErrorKind::MigrationUpNotPossible)
+        }
+    }
+
+    /// Migrate the whole object to the next slower storage tier.
+    /// Returns error if no lower tier is available or no storage tier is specified.
+    pub fn migrate_down_once(&self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lower() {
+            self.migrate_once(pref)
+        } else {
+            bail!(ErrorKind::MigrationUpNotPossible)
+        }
+    }
+
     /// Migrate a range of chunks to a new storage preference
     pub fn migrate_range(&self, length: u64, offset: u64, pref: StoragePreference) -> Result<()> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, length);

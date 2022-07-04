@@ -17,5 +17,7 @@ error_chain! {
         MessageTooLarge
         SerializeFailed
         MigrationWouldExceedStorage
+        MigrationUpNotPossible
+        MigrationDownNotPossible
     }
 }
