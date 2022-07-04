@@ -98,7 +98,7 @@ impl<P: Serialize> Superblock<P> {
             serialize_into(&mut data, &this)?;
         }
         let checksum_size = XxHash::static_size();
-        data.seek(io::SeekFrom::End(-i64::from(checksum_size as u32)));
+        data.seek(io::SeekFrom::End(-i64::from(checksum_size as u32)))?;
         let checksum = checksum(&data.as_ref()[..BLOCK_SIZE - checksum_size]);
         serialize_into(&mut data, &checksum)?;
         Ok(data.into_buf())

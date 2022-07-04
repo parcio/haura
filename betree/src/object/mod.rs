@@ -142,9 +142,9 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
-        self.close_dataset(store.metadata);
+        let _ = self.close_dataset(store.metadata);
         trace!("Metadata closed.");
-        self.close_dataset(store.data);
+        let _ = self.close_dataset(store.data);
         trace!("Data closed.");
     }
 }
@@ -317,7 +317,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         let (start, end) = handle.object.metadata_bounds();
         let meta_delete = SlicedCowBytes::from(meta::delete_custom());
         for (k, _v) in self.metadata.range(start..end)?.flatten() {
-            self.metadata.insert_msg(k, meta_delete.clone());
+            let _ = self.metadata.insert_msg(k, meta_delete.clone());
         }
 
         self.data.range_delete(

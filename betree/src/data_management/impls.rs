@@ -981,7 +981,8 @@ where
                                     cache
                                         .change_key::<(), _>(
                                             &ObjectKey::InWriteback(mid),
-                                            |obj, val, _| Ok(ObjectKey::Modified(mid)),
+                                            // Has to have been in the modified state before
+                                            |_, _, _| Ok(ObjectKey::Modified(mid)),
                                         )
                                         .unwrap();
                                     err
