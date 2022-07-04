@@ -15,5 +15,6 @@ error_chain! {
         InUse
         InDestruction
         MessageTooLarge
+        SerializeFailed
     }
 }

@@ -34,7 +34,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    thread,
+    thread, path::Path,
 };
 
 mod dataset;
@@ -191,6 +191,15 @@ impl Default for DatabaseConfiguration {
             sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
         }
+    }
+}
+
+impl DatabaseConfiguration {
+    /// Serialize the configuration to a given path in the json format.
+    pub fn write_to_json<P: AsRef<Path>>(&self,path: P) -> Result<()> {
+        let file = std::fs::OpenOptions::new().write(true).truncate(true).create(true).open(path)?;
+        serde_json::to_writer_pretty(file, &self).map_err(|e| crate::database::errors::Error::with_chain(e, ErrorKind::SerializeFailed))?;
+        Ok(())
     }
 }
 
@@ -351,6 +360,11 @@ impl Database<DatabaseConfiguration> {
             access_mode: AccessMode::OpenOrCreate,
             ..Default::default()
         })
+    }
+
+    /// Write the current configuration to the specified path in the json format.
+    pub fn write_config_json<P: AsRef<Path>>(&self, p: P) -> Result<()> {
+        self.builder.write_to_json(p)
     }
 }
 
