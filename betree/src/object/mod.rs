@@ -49,8 +49,9 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, Error, Result, ErrorKind},
-    Database, Dataset, StoragePreference, vdev::Block,
+    database::{DatabaseBuilder, Error, ErrorKind, Result},
+    vdev::Block,
+    Database, Dataset, StoragePreference,
 };
 
 use speedy::{Readable, Writable};
@@ -734,7 +735,9 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// be written to different storage tiers specified in the [Object].
     pub fn migrate_once(&self, pref: StoragePreference) -> Result<()> {
         // Has to exist with handle
-        let info = self.info().expect("An object key which should exist was not present");
+        let info = self
+            .info()
+            .expect("An object key which should exist was not present");
         if let Some(info) = info {
             // will be atleast this large
             let blocks = Block::round_up_from_bytes(info.size);

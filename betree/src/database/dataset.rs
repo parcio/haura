@@ -7,7 +7,8 @@ use crate::{
     data_management::{DmlWithHandler, Handler},
     database::DatabaseBuilder,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
-    StoragePreference, vdev::Block,
+    vdev::Block,
+    StoragePreference,
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
@@ -347,7 +348,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         } else {
             bail!(ErrorKind::DoesNotExist)
         }
-
     }
 
     /// Removes all key-value pairs in the given key range.
