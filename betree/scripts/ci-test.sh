@@ -1,7 +1,7 @@
 #! /bin/env bash
 
 # num_thread=$(echo "$(cat /proc/meminfo | head -n 1 | xargs | cut -d ' ' -f 2) / 1024 / 1024 / 2" | bc)
-failed=$(cargo test -- --test-threads 1 -Z unstable-options --format json \
+failed=$(cargo test -- -Z unstable-options --format json \
     | grep name \
     | grep failed \
     | jq '"Test: " + .name + "\n-----LOG-----\n" + .stdout + "---END LOG---\n" ' \
