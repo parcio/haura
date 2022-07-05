@@ -24,6 +24,7 @@ jobs:
       uses: Swatinem/rust-cache@v1
       with:
         sharedKey: "betree"
+        target-dir: "../.target"
     - name: Build
       run: |
         cd betree
@@ -40,6 +41,7 @@ jobs:
       uses: Swatinem/rust-cache@v1
       with:
         sharedKey: "betree"
+        target-dir: "../.target"
     - name: Run integration tests
       run: |
         cd betree/tests
@@ -56,6 +58,7 @@ jobs:
       uses: Swatinem/rust-cache@v1
       with:
         sharedKey: "betree"
+        target-dir: "../.target"
     - name: Run internal tests
       run: |
         cd betree
