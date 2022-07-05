@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  betree:
+  betree-build:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -27,10 +27,30 @@ jobs:
       uses: Swatinem/rust-cache@ce325b60658c1b38465c06cc965b79baf32c1e72
     - name: Build
       run: |
-        cd betree/tests
+        cd betree
         cargo build
-    - name: Run tests
+  betree-integration:
+    needs: [betree-build]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Run integration tests
       run: |
         cd betree/tests
+        ./scripts/ci-test.sh
+  betree-internal:
+    needs: [betree-build]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Run internal tests
+      run: |
+        cd betree
         ./scripts/ci-test.sh
 
