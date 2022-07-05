@@ -12,4 +12,9 @@ for tst in "${failed[@]}"
 do
     printf '%b' "$(echo "$tst" | sed -e 's/\"//g')"
 done
-exit "$(echo "$failed" | wc -l)"
+if [ -z "$failed" ]
+then
+        exit 0
+else
+        exit 1
+fi
