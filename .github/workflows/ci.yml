@@ -21,7 +21,9 @@ jobs:
         profile: minimal
         override: true
     - name: Dependency Cache
-      uses: Swatinem/rust-cache@ce325b60658c1b38465c06cc965b79baf32c1e72
+      uses: Swatinem/rust-cache@v1
+      with:
+        sharedKey: "betree"
     - name: Build
       run: |
         cd betree
@@ -35,7 +37,9 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Dependency Cache
-      uses: Swatinem/rust-cache@ce325b60658c1b38465c06cc965b79baf32c1e72
+      uses: Swatinem/rust-cache@v1
+      with:
+        sharedKey: "betree"
     - name: Run integration tests
       run: |
         cd betree/tests
@@ -49,7 +53,9 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Dependency Cache
-      uses: Swatinem/rust-cache@ce325b60658c1b38465c06cc965b79baf32c1e72
+      uses: Swatinem/rust-cache@v1
+      with:
+        sharedKey: "betree"
     - name: Run internal tests
       run: |
         cd betree
