@@ -21,10 +21,17 @@ jobs:
         profile: minimal
         override: true
     - name: Dependency Cache
-      uses: Swatinem/rust-cache@v1
+      uses: actions/cache@v3
       with:
-        sharedKey: "betree"
-        target-dir: "../target"
+        path: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ../target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
     - name: Build
       run: |
         cd betree
@@ -40,10 +47,17 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Dependency Cache
-      uses: Swatinem/rust-cache@v1
+      uses: actions/cache@v3
       with:
-        sharedKey: "betree"
-        target-dir: "../target"
+        path: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ../target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
     - name: Run integration tests
       run: |
         cd betree/tests
@@ -59,10 +73,17 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Dependency Cache
-      uses: Swatinem/rust-cache@v1
+      uses: actions/cache@v3
       with:
-        sharedKey: "betree"
-        target-dir: "../target"
+        path: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ../target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
     - name: Run internal tests
       run: |
         cd betree
