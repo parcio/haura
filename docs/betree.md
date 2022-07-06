@@ -8,20 +8,80 @@ $ cargo build
 
 ## Tests
 
+### Integration
+
 Navigate to `./tests/`
 
 ```sh
-$ cargo test -j 4
+$ cargo test -- --test-threads 4
 ```
 
 > It is advised to use a limited number of jobs for testing all scenarios as some use up to 2 GiB of main memory.
-> `your_main_memory / 2 = number_of_test_jobs`
+> `your_main_memory_in_gb / 2 = number_of_test_jobs`
 
-Some test cases observe erroneous behavior at the moment and timeout after 60 seconds.
+
+### Internal
+
+From the `betree` directory run
+
+```sh
+$ cargo test
+```
+
+> Some test cases observe erroneous behavior at the moment and timeout after 60 seconds.
 
 ## Overview
 
 ![An overview of the different layers defined in the betree architecture](./assets/concept.svg)
+
+### Database, Dataset and Object store
+
+At the top of the overview, see above, we can see the _user interface_ part
+of _Haura_. The `Database` provides the main introduction here for the rest of
+the modules to be used. From an active `Database` we can then initiate a
+`Dataset` or `Objectstore`. Also notable from the graphic, the `Database`
+creates the `AllocationHandler` which is subsequently used in the
+`DataManagement`. The `Database` also contains due to this also the storage
+configuration which is then initiated in the `StoragePool`. The implementation
+of the `Objectstore` is a wrapper around `Dataset` whereas the keys are chunk
+ids and the value is there chunk content.
+
+### Bε-tree
+
+The `Dataset` interacts mainly with the actual Bε-tree, which
+receives through its root node messages from the `Dataset`. By default these
+implement _insert_, _remove_ and _upsert_, although this can be exchanged if
+required. Solely the `MessageAction` trait is required to be implemented on the
+chosen type to allow for its use in the tree. An example for this can be seen in
+the `MetaMessage` of the `Objectstore`.
+Once passed, the tree propagates the message down the tree until it reaches a
+leaf node where the message will be applied. Though this, might not happen
+instantaneously and multiple buffers might be encountered which momentarily hold
+the message at internal nodes. This has been done to offer a write optimized
+behavior.
+
+### Data Management
+
+On-disk operations and storage allocation are handled by the Data Management
+layer. This layer also implements the copy-on-write semantics required for
+snapshots, done in delayed deallocation and accounting of a dead-list of blocks.
+
+### Storage Pool
+
+As the abstraction over specific hardware types and raid configurations the data
+management unit interacts for all IO operation with the storage pool layer.
+
+Notable here is the division of the layer into (of course) storage tiers, `Vdev`
+and `LeafVdevs`.  There are 4 storage tiers available
+(`FASTEST`,`FAST`,`SLOW`,`SLOWEST`) with each at maximum 1024 `Vdev`s.  Each
+`Vdev` can be one of four variants. First, a singular `LeafVdev`, this is the
+equivalent of a disk or any other file path backed interface, for example a
+truncated file or a disk `dev/...`. Second, a RAID-1 like mirrored
+configuration. Third, a RAID-5 like striping and parity based setup with
+multiple disks. Fourth and last, a main memory backed buffer, simply hold as a
+vector.
+
+## Implementation
 
 There are multiple modules with interweaving functionality
 in `betree`, we will quickly name and describe them here.
@@ -36,6 +96,12 @@ in `betree`, we will quickly name and describe them here.
 | object          | The object store wrapper around the dataset store                                                                  |
 | storage\_pool   | The storage pool layer which manages different vdevs                                                               |
 | tree            | The actual b-epsilon tree                                                                                          |
-| vdev            | Implement the use of different devices for storage (Block, File, Memorr) with different modes parity, raid, single |
+| vdev            | Implement the use of different devices for storage (Block, File, Memory) with different modes parity, raid, single |
 
 > Note that traits are heavily used to allow interaction between objects of different modules, traits implemented by one module might be located in multiple other modules.
+
+## Known bugs
+- On large write operations (easy to achieve with `Objectstore`) which overfill the storage can return unexpected errors, this has been reduced by the introduction of space accounting but some errors might still occur as not all checks have been implemented yet.
+- Not all tests finish successfully at the moment; both in internal and integration tests
+  - Integration: Overwriting existent data fails due to semantics of the tree and intermediate message buffering in internal nodes which may overstep the actual available storage size
+  - Internal: `parity1` tests fail, due for investigation
