@@ -15,11 +15,10 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        profile: minimal
-        override: true
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs/ | sh -s -- -y
+        source $HOME/.cargo/env
+        rustup toolchain install --profile minimal --force stable
     - name: Dependency Cache
       uses: actions/cache@v3
       with:
