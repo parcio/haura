@@ -66,6 +66,14 @@ On-disk operations and storage allocation are handled by the Data Management
 layer. This layer also implements the copy-on-write semantics required for
 snapshots, done in delayed deallocation and accounting of a dead-list of blocks.
 
+Most important here is the `Dml` traits (`Dml`, `DmlBase`, `DmlWithHandler`,
+`DmlWithCache`, `DmlWithSpl`) and the `Handler` trait. (`Cache` and `Spl` are
+part of different modules and layers).
+
+The `Handler` manages the actual bitmap handling for all allocations and
+deallocations and is also responsible for tracking the number of blocks
+distributed (Space Accounting).
+
 ### Storage Pool
 
 As the abstraction over specific hardware types and raid configurations the data
