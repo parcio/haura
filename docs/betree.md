@@ -48,6 +48,8 @@ ids and the value is there chunk content.
 
 ### Bε-tree
 
+![Example Representation of an Bε-tree showing relevant structures and their functions](./assets/tree_semantics.svg)
+
 The `Dataset` interacts mainly with the actual Bε-tree, which
 receives through its root node messages from the `Dataset`. By default these
 implement _insert_, _remove_ and _upsert_, although this can be exchanged if
@@ -56,9 +58,20 @@ chosen type to allow for its use in the tree. An example for this can be seen in
 the `MetaMessage` of the `Objectstore`.
 Once passed, the tree propagates the message down the tree until it reaches a
 leaf node where the message will be applied. Though this, might not happen
-instantaneously and multiple buffers might be encountered which momentarily hold
-the message at internal nodes. This has been done to offer a write optimized
-behavior.
+instantaneously and multiple buffers (`ChildBuffer`s) might be encountered which momentarily hold
+the message at internal nodes. This way we avoid additional deep traversals and
+might be able to flush multiple messages at once from one buffer node.
+
+Vital to understanding the handling and movement of nodes and their content
+within _Haura_ is the object state cycle, this is illustrated at the leaf nodes
+and in more detail in the following figure.
+
+![State Diagram of the object lifecycle](./assets/object_lifecycle.svg)
+
+Notable, is the additional state here labeled "On Disk", this is _strictly_
+speaking not a state in the implementation of `ObjectRef` as-is but a state one
+might differentiate two `ObjectRef`s by, as its simply denoting if the data has
+to be read or is already present in the `Cache`.
 
 ### Data Management
 
