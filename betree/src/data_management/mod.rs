@@ -87,6 +87,11 @@ pub trait HasStoragePreference {
             None => self.recalculate(),
         }
     }
+
+    // /// Distribute a desired storage prefrence to all child nodes.
+    // /// Cached prefrence are advised to be updated.
+    // /// The size of the moved keys should not exceed the limit of the desired storage tier.
+    // fn flood_storage_preference(&self, pref: StoragePreference);
 }
 
 /// An object managed by a `Dml`.
@@ -209,8 +214,9 @@ pub trait Handler<R: ObjectRef>: HandlerTypes {
         R::ObjectPointer: Serialize + DeserializeOwned;
 
     /// Returns the amount of free space (in blocks) for a given top-level vdev.
-    fn get_free_space(&self, disk_id: u16) -> Block<u64>;
-
+    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<Block<u64>>;
+    /// Returns the amount of free space (in blocks) over a whole storage tier.
+    fn get_free_space_tier(&self, class: u8) -> Option<Block<u64>>;
     /// Will be called when an object has been made mutable.
     /// May be used to mark the data blocks for delayed deallocation.
     fn copy_on_write(

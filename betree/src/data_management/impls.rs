@@ -179,6 +179,7 @@ impl<D, I, G: Copy> ObjectPointer<D, I, G> {
 /// The Data Management Unit.
 pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'static> {
     default_compression: Box<dyn CompressionBuilder>,
+    // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
     default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
@@ -188,6 +189,10 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'st
     written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum, I, G>>>,
     modified_info: Mutex<HashMap<ModifiedObjectId, I>>,
     handler: H,
+    // NOTE: The semantic structure of this looks as this
+    // Storage Pool Layers:
+    //      Layer Disks:
+    //          Tuple of SegmentIDs and their according Allocators
     allocation_data: Box<[Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>]>,
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
@@ -311,10 +316,12 @@ where
         match *or {
             ObjectRef::Unmodified(_) => unreachable!(),
             ObjectRef::Modified(mid) => {
+                debug!("{mid:?} moved to InWriteback");
                 *or = ObjectRef::InWriteback(mid);
             }
             ObjectRef::InWriteback(mid) => {
                 // The object must have been written back recently.
+                debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(&mid).unwrap();
                 *or = ObjectRef::Unmodified(ptr);
             }
@@ -459,11 +466,18 @@ where
                 super::Size::size(&*object)
             }
         };
+        log::trace!("Entering write back of {:?}", &mid);
 
         if object_size > 4 * 1024 * 1024 {
             warn!("Writing back large object: {}", object.debug_info());
         }
 
+        // NOTE: Test the discrepancy between the actual size packed and the packed compressed length.
+        // let mut buff: Vec<u8> = Vec::new();
+        // object.pack(&mut buff);
+        // debug!("Normal packed size is {} bytes", buff.len());
+        debug!("Estimated object size is {object_size} bytes");
+        debug!("Using compression {:?}", &self.default_compression);
         let generation = self.handler.current_generation();
         let storage_preference = object.correct_preference();
         let storage_class = storage_preference
@@ -483,10 +497,9 @@ where
             state.finish()
         };
 
-        let info = self.modified_info.lock().remove(&mid).unwrap();
-
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();
+        debug!("Compressed object size is {size} bytes");
         let size = Block(((size as usize + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
@@ -496,6 +509,8 @@ where
             v.resize(size.to_bytes() as usize, 0);
             compressed_data = v.into_boxed_slice();
         }*/
+
+        let info = self.modified_info.lock().remove(&mid).unwrap();
 
         let checksum = {
             let mut state = self.default_checksum_builder.build();
@@ -531,6 +546,7 @@ where
                 )
             };
             if was_present {
+                debug!("Inserted {mid:?} into written_back");
                 self.written_back.lock().insert(mid, obj_ptr.clone());
             }
         }
@@ -549,6 +565,7 @@ where
             );
         }
 
+        trace!("handle_write_back: Leaving");
         Ok(obj_ptr)
     }
 
@@ -558,11 +575,34 @@ where
             warn!("Very large allocation requested: {:?}", size);
         }
 
+        log::trace!(
+            "Enter allocate: {{ storage_preference: {}, size: {:?} }}",
+            storage_preference,
+            size
+        );
+
         let strategy = self.alloc_strategy[storage_preference as usize];
 
         'class: for &class in strategy.iter().flatten() {
             let disks_in_class = self.pool.disk_count(class);
             if disks_in_class == 0 {
+                continue;
+            }
+
+            // TODO: Consider the known free size and continue on success
+
+            if self
+                .handler
+                .get_free_space_tier(class)
+                .expect("Has to exist")
+                .as_u64()
+                < size.as_u64()
+            {
+                warn!(
+                    "Storage tier {class} does not have enough space remaining. {} blocks of {}",
+                    self.handler.get_free_space_tier(class).unwrap().as_u64(),
+                    size.as_u64()
+                );
                 continue;
             }
 
@@ -574,7 +614,9 @@ where
                     self.pool.effective_free_size(
                         class,
                         disk_id,
-                        self.handler.get_free_space(disk_id),
+                        self.handler
+                            .get_free_space(class, disk_id)
+                            .expect("We can be sure that this disk id exists."),
                     )
                 })
                 .unwrap();
@@ -608,6 +650,11 @@ where
                     );
                     if next_segment_id == first_seen_segment_id {
                         // Can't allocate in this class, try next
+                        warn!("Allocation failed not enough space");
+                        debug!(
+                            "Free space is {:?} blocks",
+                            self.handler.get_free_space_tier(class)
+                        );
                         continue 'class;
                     }
                     *allocator = self
@@ -619,6 +666,10 @@ where
             };
 
             info!("Allocated {:?} at {:?}", size, disk_offset);
+            debug!(
+                "Remaining space is {:?} blocks",
+                self.handler.get_free_space_tier(class)
+            );
             self.handler
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
                 .chain_err(|| ErrorKind::HandlerError)?;
@@ -626,6 +677,10 @@ where
             return Ok(disk_offset);
         }
 
+        warn!(
+            "No available layer can provide enough free storage {:?}",
+            size
+        );
         bail!(ErrorKind::OutOfSpaceError)
     }
 
@@ -658,12 +713,16 @@ where
         mid: ModifiedObjectId,
         dep_mids: &mut Vec<ModifiedObjectId>,
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRef>, ()> {
+        trace!("prepare_write_back: Enter");
         loop {
+            // trace!("prepare_write_back: Trying to acquire cache write lock");
             let mut cache = self.cache.write();
+            // trace!("prepare_write_back: Acquired");
             if cache.contains_key(&ObjectKey::InWriteback(mid)) {
                 // TODO wait
                 drop(cache);
                 yield_now();
+                // trace!("prepare_write_back: Cache contained key, waiting..");
                 continue;
             }
             let result =
@@ -883,24 +942,51 @@ where
         F: FnMut() -> FO,
         FO: DerefMut<Target = Self::ObjectRef>,
     {
+        trace!("write_back: Enter");
         let (object, mid) = loop {
+            trace!("write_back: Trying to acquire lock");
             let mut or = acquire_or_lock();
+            trace!("write_back: Acquired lock");
             let mid = match *or {
                 ObjectRef::Unmodified(ref p) => return Ok(p.clone()),
                 ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid,
             };
             let mut mids = Vec::new();
 
+            // debug!("MID: {mid:?}");
+            // match *or {
+            //     ObjectRef::Unmodified(_) => debug!("State was Unmodified"),
+            //     ObjectRef::InWriteback(_) => debug!("State was InWriteback"),
+            //     ObjectRef::Modified(_) => debug!("State was Modified"),
+            // }
+
+            trace!("write_back: Preparing write back");
             match self.prepare_write_back(mid, &mut mids) {
-                Ok(None) => self.fix_or(&mut or),
+                Ok(None) => {
+                    trace!("write_back: Was Ok(None)");
+                    self.fix_or(&mut or)
+                }
                 Ok(Some(object)) => break (object, mid),
                 Err(()) => {
+                    trace!("write_back: Was Err");
                     drop(or);
                     while let Some(&mid) = mids.last() {
+                        trace!("write_back: Trying to prepare write back");
                         match self.prepare_write_back(mid, &mut mids) {
                             Ok(None) => {}
                             Ok(Some(object)) => {
-                                self.handle_write_back(object, mid, false)?;
+                                trace!("write_back: Was Ok Some");
+                                self.handle_write_back(object, mid, false).map_err(|err| {
+                                    let mut cache = self.cache.write();
+                                    cache
+                                        .change_key::<(), _>(
+                                            &ObjectKey::InWriteback(mid),
+                                            // Has to have been in the modified state before
+                                            |_, _, _| Ok(ObjectKey::Modified(mid)),
+                                        )
+                                        .unwrap();
+                                    err
+                                })?;
                             }
                             Err(()) => continue,
                         };
@@ -909,6 +995,7 @@ where
                 }
             }
         };
+        trace!("write_back: Leave");
         self.handle_write_back(object, mid, false)
     }
 

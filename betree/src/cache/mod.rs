@@ -7,6 +7,7 @@ use std::{
 };
 
 /// Error type of `Cache::change_key`.
+#[derive(Debug)]
 pub enum ChangeKeyError<E> {
     /// The requested cache entry was not present in the cache.
     NotPresent,
@@ -23,6 +24,7 @@ impl<E> From<E> for ChangeKeyError<E> {
 }
 
 /// Error type of `Cache::remove`.
+#[derive(Debug)]
 pub enum RemoveError {
     /// The requested cache entry was not present in the cache.
     NotPresent,

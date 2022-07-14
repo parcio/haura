@@ -1,7 +1,7 @@
 [package]
 name = "betree_storage_stack"
-version = "0.2.0"
-authors = ["Felix Wiedemann <felix@kann.it>", "Till Hoeppner <betree@tilpner.com>"]
+version = "0.2.1-alpha"
+authors = ["Felix Wiedemann <felix@kann.it>", "Till Hoeppner <betree@tilpner.com>", "Johannes Wünsche <johannes@spacesnek.rocks>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
 

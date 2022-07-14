@@ -1,12 +1,13 @@
 use super::{
     ds_data_key, errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree,
-    Generation, MessageTree,
+    Generation, MessageTree, StorageInfo,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::DmlWithHandler,
+    data_management::{DmlWithHandler, Handler},
     database::DatabaseBuilder,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
+    vdev::Block,
     StoragePreference,
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
@@ -179,7 +180,9 @@ impl<Config: DatabaseBuilder> Database<Config> {
         &mut self,
         ds: Dataset<Config, Message>,
     ) -> Result<()> {
+        log::trace!("close_dataset: Enter");
         self.sync_ds(ds.id, &ds.tree)?;
+        log::trace!("synced dataset");
         self.open_datasets.remove(&ds.id);
         self.root_tree
             .dmu()
@@ -286,6 +289,9 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
             offset as usize + data.len() <= tree::MAX_MESSAGE_SIZE,
             ErrorKind::MessageTooLarge
         );
+        // TODO: In case of overfilling the underlying storage we should notify in _any_ case that the writing is not successfull, for this
+        // we need to know wether the space to write out has been expanded. For this we need further information which we ideally do not want
+        // to read out from the disk here.
         self.insert_msg_with_pref(
             key,
             DefaultMessageAction::upsert_msg(offset, data),
@@ -305,6 +311,25 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         self.upsert_with_pref(key, data, offset, StoragePreference::NONE)
     }
 
+    /// Given a key and storage preference notify for this entry to be moved to a new storage level.
+    /// If the key is already located on this layer no operation is performed and success is returned.
+    ///
+    /// As the migration is for a singular there is no guarantee that when selectiong migrate for a key
+    /// that the value is actually moved to the specified storage tier.
+    /// Internally: The most high required tier will be chosen for one leaf node.
+    pub fn migrate<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        pref: StoragePreference,
+    ) -> Result<()> {
+        use crate::{data_management::DmlWithSpl, storage_pool::StoragePoolLayer};
+        if self.tree.dmu().spl().disk_count(pref.as_u8()) == 0 {
+            bail!(ErrorKind::DoesNotExist)
+        }
+        // TODO: What happens on none existent keys? They should not be inserted in this case. Check!
+        self.insert_msg_with_pref(key, DefaultMessageAction::noop_msg(), pref)
+    }
+
     /// Deletes the key-value pair if existing.
     pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
         self.insert_msg_with_pref(
@@ -312,6 +337,17 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
             DefaultMessageAction::delete_msg(),
             StoragePreference::NONE,
         )
+    }
+
+    pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
+        if let Some(blocks) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
+            Ok(StorageInfo {
+                free: blocks,
+                total: Block(0),
+            })
+        } else {
+            bail!(ErrorKind::DoesNotExist)
+        }
     }
 
     /// Removes all key-value pairs in the given key range.
@@ -333,5 +369,21 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         }
 
         res
+    }
+
+    /// Migrate a complete range of keys to another storage preference.
+    /// If an entry is already located on this layer no operation is performed and success is returned.
+    pub fn migrate_range<R, K>(&self, range: R, pref: StoragePreference) -> Result<()>
+    where
+        K: Borrow<[u8]> + Into<CowBytes>,
+        R: RangeBounds<K>,
+    {
+        for entry in self.tree.range(range)? {
+            if let Ok((k, _v)) = entry {
+                // abort on errors, they will likely be that one layer is full
+                self.migrate(k, pref)?;
+            }
+        }
+        Ok(())
     }
 }

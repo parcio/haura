@@ -49,7 +49,8 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, Error, Result},
+    database::{DatabaseBuilder, Error, ErrorKind, Result},
+    vdev::Block,
     Database, Dataset, StoragePreference,
 };
 
@@ -142,8 +143,10 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
-        self.close_dataset(store.metadata);
-        self.close_dataset(store.data);
+        let _ = self.close_dataset(store.metadata);
+        trace!("Metadata closed.");
+        let _ = self.close_dataset(store.data);
+        trace!("Data closed.");
     }
 }
 
@@ -315,7 +318,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         let (start, end) = handle.object.metadata_bounds();
         let meta_delete = SlicedCowBytes::from(meta::delete_custom());
         for (k, _v) in self.metadata.range(start..end)?.flatten() {
-            self.metadata.insert_msg(k, meta_delete.clone());
+            let _ = self.metadata.insert_msg(k, meta_delete.clone());
         }
 
         self.data.range_delete(
@@ -626,6 +629,7 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, buf.len() as u64);
         let mut meta_change = MetaMessage::default();
         let mut total_written = 0;
+        log::trace!("Entered object::write_at_with_pref");
 
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;
@@ -716,5 +720,85 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
             .map(move |res| res.map(|(k, v)| (k.slice_from(prefix_len as u32), v)));
 
         Ok(Box::new(iter))
+    }
+
+    /// Migrate the whole object to a specified storage preference and write all future accesses to the same storage
+    /// tier.
+    pub fn migrate(&mut self, pref: StoragePreference) -> Result<()> {
+        // Future writes should adhere to the same preference
+        self.migrate_once(pref)?;
+        self.object.storage_preference = pref;
+        Ok(())
+    }
+
+    /// Migrate the whole object to a specified storage preference. This includes all present chunks, future chunks may
+    /// be written to different storage tiers specified in the [Object].
+    pub fn migrate_once(&self, pref: StoragePreference) -> Result<()> {
+        // Has to exist with handle
+        let info = self
+            .info()
+            .expect("An object key which should exist was not present");
+        if let Some(info) = info {
+            // will be atleast this large
+            let blocks = Block::round_up_from_bytes(info.size);
+            let tier_info = self.store.data.free_space_tier(pref)?;
+            if blocks > tier_info.free {
+                bail!(ErrorKind::MigrationWouldExceedStorage);
+            }
+        }
+        self.migrate_range(u64::MAX, 0, pref)
+    }
+
+    /// Migrate the whole object to the next faster storage tier.
+    /// The object will continue to use this tier for future writes.
+    /// Returns error if no higher tier is available or no storage tier is specified.
+    pub fn migrate_up(&mut self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lift() {
+            self.migrate(pref)
+        } else {
+            bail!(ErrorKind::MigrationNotPossible)
+        }
+    }
+
+    /// Migrate the whole object to the next faster storage tier.
+    /// Returns error if no higher tier is available or no storage tier is specified.
+    pub fn migrate_up_once(&mut self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lift() {
+            self.migrate_once(pref)
+        } else {
+            bail!(ErrorKind::MigrationNotPossible)
+        }
+    }
+
+    /// Migrate the whole object to the next slower storage tier.
+    /// The object will continue to use this tier for future writes.
+    /// Returns error if no lower tier is available or no storage tier is specified.
+    pub fn migrate_down(&mut self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lower() {
+            self.migrate(pref)
+        } else {
+            bail!(ErrorKind::MigrationNotPossible)
+        }
+    }
+
+    /// Migrate the whole object to the next slower storage tier.
+    /// Returns error if no lower tier is available or no storage tier is specified.
+    pub fn migrate_down_once(&self) -> Result<()> {
+        if let Some(pref) = self.object.storage_preference.lower() {
+            self.migrate_once(pref)
+        } else {
+            bail!(ErrorKind::MigrationNotPossible)
+        }
+    }
+
+    /// Migrate a range of chunks to a new storage preference
+    pub fn migrate_range(&self, length: u64, offset: u64, pref: StoragePreference) -> Result<()> {
+        let chunk_range = ChunkRange::from_byte_bounds(offset, length);
+
+        self.store.data.migrate_range(
+            &object_chunk_key(self.object.id, chunk_range.start.chunk_id)[..]
+                ..&object_chunk_key(self.object.id, chunk_range.end.chunk_id),
+            pref,
+        )
     }
 }

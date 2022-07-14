@@ -284,6 +284,11 @@ impl DefaultMessageAction {
         Self::build_upsert_msg(&[Upsert::Bytes { offset_bytes, data }])
     }
 
+    /// Return an empty message which will act as a carry for keyinfo updates.
+    pub fn noop_msg() -> SlicedCowBytes {
+        Self::build_upsert_msg(&[])
+    }
+
     /// Return a new message which will set the specified bit range to `value`.
     pub fn upsert_bits_msg(offset_bits: u32, amount_bits: u32, value: bool) -> SlicedCowBytes {
         Self::build_upsert_msg(&[Upsert::Bits {
@@ -302,7 +307,7 @@ impl MessageAction for DefaultMessageAction {
                 *data = new_data;
             }
             MsgType::Upsert => {
-                // There are no upserts if len <= 1
+                // There are no upserts if len < 1
                 if msg.len() >= 1 {
                     let upserts = iter_upserts(msg).expect("Message was not an upsert");
                     Self::apply_upserts(upserts, data);

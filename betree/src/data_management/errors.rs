@@ -16,5 +16,6 @@ error_chain! {
         HandlerError
         CannotWriteBackError
         OutOfSpaceError
+        CallbackError
     }
 }

@@ -79,6 +79,21 @@ impl StoragePreference {
     pub(crate) fn upgrade(&mut self, other: StoragePreference) {
         *self = StoragePreference::choose_faster(*self, other);
     }
+
+    pub(crate) fn lift(self) -> Option<StoragePreference> {
+        match self {
+            Self::NONE => None,
+            _ => Some(Self(self.0.saturating_sub(1))),
+        }
+    }
+
+    pub(crate) fn lower(self) -> Option<StoragePreference> {
+        match self {
+            Self::NONE => None,
+            Self::SLOWEST => Some(Self::SLOWEST),
+            _ => Some(Self(self.0.saturating_add(1))),
+        }
+    }
 }
 
 // Ordered by `strictness`, so 0 < 1 < 2 < 3 < None.

@@ -124,6 +124,10 @@ impl LeafNode {
         &self.entries
     }
 
+    pub(in crate::tree) fn entry_info(&mut self, key: &[u8]) -> Option<&mut KeyInfo> {
+        self.entries.get_mut(key).map(|e| &mut e.0)
+    }
+
     fn do_split_off(
         &mut self,
         right_sibling: &mut Self,

@@ -1,8 +1,8 @@
-use betree_storage_stack::allocator::{SegmentAllocator, SEGMENT_SIZE};
+use betree_storage_stack::allocator::{SegmentAllocator, SEGMENT_SIZE_BYTES};
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 
 fn allocate(b: &mut Bencher) {
-    let mut a = SegmentAllocator::new(vec![0; SEGMENT_SIZE].into_boxed_slice());
+    let mut a = SegmentAllocator::new([0; SEGMENT_SIZE_BYTES]);
     b.iter(|| {
         black_box(a.allocate(10));
     });

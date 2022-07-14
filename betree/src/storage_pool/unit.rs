@@ -124,6 +124,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
                 .await;
 
             // TODO: what about multiple writes to same offset?
+            // NOTE: This is currently covered in the tests and fails as expected
             inner.write_back_queue.mark_completed(&offset).await;
             res
         })?;
@@ -192,12 +193,15 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
     }
 
     fn flush(&self) -> Result<(), VdevError> {
+        trace!("Entering flush");
         self.inner.write_back_queue.flush()?;
+        trace!("Entering flush");
         for tier in self.inner.tiers.iter() {
             for vdev in tier.iter() {
                 vdev.flush()?;
             }
         }
+        trace!("Leaving flush");
         Ok(())
     }
 
