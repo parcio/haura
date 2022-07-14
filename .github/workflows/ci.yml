@@ -1,0 +1,90 @@
+name: ci-pr
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  betree-build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Install Rust
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs/ | sh -s -- -y
+        source $HOME/.cargo/env
+        rustup toolchain install --profile minimal --force stable
+    - name: Dependency Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ./target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+    - name: Build
+      run: |
+        cd betree
+        cargo build
+  betree-integration:
+    needs: [betree-build]
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Dependency Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ./target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+    - name: Run integration tests
+      run: |
+        cd betree/tests
+        ./scripts/ci-test.sh
+  betree-internal:
+    needs: [betree-build]
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Dependency Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          ./target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+    - name: Run internal tests
+      run: |
+        cd betree
+        ./scripts/ci-test.sh
+
