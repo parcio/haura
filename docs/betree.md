@@ -58,9 +58,10 @@ chosen type to allow for its use in the tree. An example for this can be seen in
 the `MetaMessage` of the `Objectstore`.
 Once passed, the tree propagates the message down the tree until it reaches a
 leaf node where the message will be applied. Though this, might not happen
-instantaneously and multiple buffers (`ChildBuffer`s) might be encountered which momentarily hold
-the message at internal nodes. This way we avoid additional deep traversals and
-might be able to flush multiple messages at once from one buffer node.
+instantaneously and multiple buffers (`ChildBuffer`s) might be encountered which
+momentarily hold the message at internal nodes. This way we avoid additional
+deep traversals and might be able to flush multiple messages at once from one
+buffer node.
 
 Vital to understanding the handling and movement of nodes and their content
 within _Haura_ is the object state cycle, this is illustrated at the leaf nodes
@@ -76,10 +77,16 @@ to be read or is already present in the `Cache`.
 
 ![Constructed trees in an example of 3 open datasets](./assets/trees.svg)
 
-Adjacent to the internals and construction of Bε-trees are the commonalities between existing trees in an open database.
-Mainly non-transparent to the user another tree is opened to store internal information concerning the created datasets (their `DatasetId`s and `ObjectPointer`s) and `Segment`s information.
-`Segment` are previously not mentioned here as they are considered in the Storage Pool Layer, but can be thought of as containers organizing the allocation bitmap for a range of blocks.
-Additionally to avoid conflicts with another, all trees share the same Data Management Unit to assure that no irregular state is reached in handling critical on-disk management such as allocation of blocks and updating of bitmaps.
+Adjacent to the internals and construction of Bε-trees are the commonalities
+between existing trees in an open database.  Mainly non-transparent to the user
+another tree is opened to store internal information concerning the created
+datasets (their `DatasetId`s and `ObjectPointer`s) and `Segment`s information.
+`Segment`s are previously not mentioned here as they are considered in the Data
+Management Layer, but can be thought of as containers organizing the allocation
+bitmap for a range of blocks.  Additionally to avoid conflicts with another, all
+trees share the same Data Management Unit to assure that no irregular state is
+reached in handling critical on-disk management such as allocation of blocks and
+updating of bitmaps.
 
 ### Data Management
 
@@ -95,11 +102,26 @@ The `Handler` manages the actual bitmap handling for all allocations and
 deallocations and is also responsible for tracking the number of blocks
 distributed (Space Accounting).
 
+To keep track of specific locations of allocated blocks, or free ranges of
+blocks rather, bitmaps are used.  Wrapped around `SegmentAllocator`s, these can
+be used to allocate block ranges at any position in a specific `SegmentId` or
+request specific allocations at given offsets.
+
+`SegementId`s refer to 1 GiB large ranges of blocks on a storage tier, though
+the Id is unique over all storage tiers.
+
+#### Copy on Write
+
+The Data Management Layer is also responsible to handle copy on write
+preservation.  This is handle by checking if any snapshots of the dataset
+contain the afflicted node (via `Generation`), if this is the case the
+`dead_list` contained in the root tree is updated, to contain the storage
+location of the old version of the node on the next sync.
+
 ### Storage Pool
 
 As the abstraction over specific hardware types and raid configurations the data
 management unit interacts for all IO operation with the storage pool layer.
-
 Notable here is the division of the layer into (of course) storage tiers, `Vdev`
 and `LeafVdevs`.  There are 4 storage tiers available
 (`FASTEST`,`FAST`,`SLOW`,`SLOWEST`) with each at maximum 1024 `Vdev`s.  Each
