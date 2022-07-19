@@ -73,6 +73,14 @@ speaking not a state in the implementation of `ObjectRef` as-is but a state one
 might differentiate two `ObjectRef`s by, as its simply denoting if the data has
 to be read or is already present in the `Cache`.
 
+
+![Constructed trees in an example of 3 open datasets](./assets/trees.svg)
+
+Adjacent to the internals and construction of Bε-trees are the commonalities between existing trees in an open database.
+Mainly non-transparent to the user another tree is opened to store internal information concerning the created datasets (their `DatasetId`s and `ObjectPointer`s) and `Segment`s information.
+`Segment` are previously not mentioned here as they are considered in the Storage Pool Layer, but can be thought of as containers organizing the allocation bitmap for a range of blocks.
+Additionally to avoid conflicts with another, all trees share the same Data Management Unit to assure that no irregular state is reached in handling critical on-disk management such as allocation of blocks and updating of bitmaps.
+
 ### Data Management
 
 On-disk operations and storage allocation are handled by the Data Management
