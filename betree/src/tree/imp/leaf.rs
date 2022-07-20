@@ -3,6 +3,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::Size,
+    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
     tree::{imp::packed, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
@@ -13,6 +14,8 @@ use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct LeafNode {
     storage_preference: AtomicStoragePreference,
+    /// A storage preference assigned by the
+    system_storage_preference: AtomicSystemStoragePreference,
     entries_size: usize,
     entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
 }
@@ -36,7 +39,10 @@ impl Size for LeafNode {
 
 impl HasStoragePreference for LeafNode {
     fn current_preference(&self) -> Option<StoragePreference> {
-        self.storage_preference.as_option()
+        match self.storage_preference.as_option() {
+            Some(pref) => Some(self.system_storage_preference.weak_bound(&pref)),
+            None => None,
+        }
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -95,6 +101,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for LeafNode {
 
         LeafNode {
             storage_preference: AtomicStoragePreference::known(storage_pref),
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             entries_size,
             entries,
         }
@@ -106,6 +113,7 @@ impl LeafNode {
     pub fn new() -> Self {
         LeafNode {
             storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             entries_size: 0,
             entries: BTreeMap::new(),
         }
@@ -247,6 +255,7 @@ impl LeafNode {
             // During a split, preference can't be inherited because the new subset of entries
             // might be a subset with a lower maximal preference.
             storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             entries_size: 0,
             entries: BTreeMap::new(),
         };
