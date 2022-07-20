@@ -4,6 +4,12 @@ use std::{
     sync::atomic::{AtomicU8, Ordering},
 };
 
+const NONE: u8 = u8::MAX - 1;
+const FASTEST: u8 = 0;
+const FAST: u8 = 1;
+const SLOW: u8 = 2;
+const SLOWEST: u8 = 3;
+
 /// An allocation preference. If a [StoragePreference] other than [StoragePreference::NONE]
 /// is used for an operation, the allocator will try to allocate on that storage class,
 /// but success is not guaranteed.
@@ -25,15 +31,15 @@ use std::{
 pub struct StoragePreference(u8);
 impl StoragePreference {
     /// No preference, any other preference overrides this.
-    pub const NONE: Self = Self(u8::MAX - 1);
+    pub const NONE: Self = Self(NONE);
     /// The fastest storage class (0).
-    pub const FASTEST: Self = Self(0);
+    pub const FASTEST: Self = Self(FASTEST);
     /// The second-fastest storage class (1).
-    pub const FAST: Self = Self(1);
+    pub const FAST: Self = Self(FAST);
     /// The third-fastest, or second-slowest, storage class (2).
-    pub const SLOW: Self = Self(2);
+    pub const SLOW: Self = Self(SLOW);
     /// The slowest storage class (3).
-    pub const SLOWEST: Self = Self(3);
+    pub const SLOWEST: Self = Self(SLOWEST);
 
     /// Construct a new [StoragePreference], for a given class.
     /// Panics if `class > 3`.
@@ -187,13 +193,150 @@ impl PartialEq for AtomicStoragePreference {
     }
 }
 
+/// An upper bound reflecting the optimized choice of storage determined by the
+/// automated migration policy, in contrast to the lower bound by
+/// [StoragePreference]. Acts as a neutral element when set to
+/// [AtomicSystemStoragePreference::NONE].
+#[derive(Debug)]
+pub(crate) struct AtomicSystemStoragePreference(AtomicU8);
+
+impl Clone for AtomicSystemStoragePreference {
+    fn clone(&self) -> Self {
+        Self(AtomicU8::new(self.0.load(Ordering::Relaxed)))
+    }
+}
+
+impl From<StoragePreference> for AtomicSystemStoragePreference {
+    fn from(prf: StoragePreference) -> Self {
+        Self(AtomicU8::new(prf.as_u8()))
+    }
+}
+
+impl Into<StoragePreference> for &AtomicSystemStoragePreference {
+    fn into(self) -> StoragePreference {
+        StoragePreference::from_u8(self.0.load(Ordering::Relaxed))
+    }
+}
+
+impl Into<AtomicStoragePreference> for &AtomicSystemStoragePreference {
+    fn into(self) -> AtomicStoragePreference {
+        AtomicStoragePreference::known(StoragePreference::from_u8(self.0.load(Ordering::Relaxed)))
+    }
+}
+
+impl AtomicSystemStoragePreference {
+    pub fn set(&self, pref: StoragePreference) {
+        self.0.store(pref.as_u8(), Ordering::Relaxed);
+    }
+}
+
+impl PartialEq for AtomicSystemStoragePreference {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.load(Ordering::SeqCst) == other.0.load(Ordering::SeqCst)
+    }
+}
+
+/// Trait describing a boundary to digest with [StoragePreference] or [AtomicStoragePreference]
+pub(crate) trait StoragePreferenceBound<Pref> {
+    /// Weak Bound expects the user given storage preference to be vital to performance, and respect the user choice in any case.
+    /// If [StoragePreference] was NONE, the bound value is chosen.
+    fn weak_bound(&self, prf: &Pref) -> Pref;
+    /// Strong Bound disregards the user choice and enforces the
+    fn strong_bound(&self, prf: &Pref) -> Pref;
+}
+
+impl StoragePreferenceBound<StoragePreference> for AtomicSystemStoragePreference {
+    fn weak_bound(&self, prf: &StoragePreference) -> StoragePreference {
+        match self.0.load(Ordering::Relaxed) {
+            NONE => *prf,
+            lvl @ 0..=3 => {
+                if lvl > prf.as_u8() {
+                    *prf
+                } else {
+                    StoragePreference::from_u8(lvl)
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn strong_bound(&self, _prf: &StoragePreference) -> StoragePreference {
+        self.into()
+    }
+}
+
+impl StoragePreferenceBound<AtomicStoragePreference> for AtomicSystemStoragePreference {
+    fn weak_bound(&self, prf: &AtomicStoragePreference) -> AtomicStoragePreference {
+        match prf.as_option() {
+            Some(pref) => AtomicStoragePreference::known(self.weak_bound(&pref)),
+            None => prf.clone(),
+        }
+    }
+
+    fn strong_bound(&self, _prf: &AtomicStoragePreference) -> AtomicStoragePreference {
+        self.into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{AtomicSystemStoragePreference, StoragePreference, StoragePreferenceBound};
+
     #[test]
     fn pref_choose_faster() {
         use super::StoragePreference as S;
         assert_eq!(S::choose_faster(S::SLOWEST, S::FASTEST), S::FASTEST);
         assert_eq!(S::choose_faster(S::FASTEST, S::NONE), S::FASTEST);
         assert_eq!(S::choose_faster(S::NONE, S::SLOWEST), S::SLOWEST);
+    }
+
+    #[test]
+    fn weak_bound() {
+        let bound = AtomicSystemStoragePreference::from(StoragePreference::SLOW);
+        assert_eq!(
+            bound.weak_bound(&StoragePreference::NONE),
+            StoragePreference::SLOW
+        );
+        assert_eq!(
+            bound.weak_bound(&StoragePreference::SLOWEST),
+            StoragePreference::SLOW
+        );
+        assert_eq!(
+            bound.weak_bound(&StoragePreference::SLOW),
+            StoragePreference::SLOW
+        );
+        assert_eq!(
+            bound.weak_bound(&StoragePreference::FAST),
+            StoragePreference::FAST
+        );
+        assert_eq!(
+            bound.weak_bound(&StoragePreference::FASTEST),
+            StoragePreference::FASTEST
+        );
+    }
+
+    #[test]
+    fn strong_bound() {
+        let bound = AtomicSystemStoragePreference::from(StoragePreference::SLOW);
+        assert_eq!(
+            bound.strong_bound(&StoragePreference::NONE),
+            StoragePreference::SLOW
+        );
+        assert_eq!(
+            bound.strong_bound(&StoragePreference::SLOWEST),
+            StoragePreference::SLOW
+        );
+        assert_eq!(
+            bound.strong_bound(&StoragePreference::SLOW),
+            StoragePreference::SLOW
+        );
+        assert_eq!(
+            bound.strong_bound(&StoragePreference::FAST),
+            StoragePreference::SLOW
+        );
+        assert_eq!(
+            bound.strong_bound(&StoragePreference::FASTEST),
+            StoragePreference::SLOW
+        );
     }
 }
