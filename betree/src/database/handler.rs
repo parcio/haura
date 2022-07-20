@@ -6,7 +6,7 @@ use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, HandlerDml},
+    data_management::{self, CopyOnWriteEvent, HandlerDml},
     storage_pool::DiskOffset,
     tree::{DefaultMessageAction, Tree, TreeBaseLayer},
     vdev::Block,
@@ -229,7 +229,7 @@ impl data_management::Handler<ObjectRef> for Handler {
         size: Block<u32>,
         generation: Generation,
         dataset_id: DatasetId,
-    ) {
+    ) -> CopyOnWriteEvent {
         if self
             .last_snapshot_generation
             .read()
@@ -253,6 +253,7 @@ impl data_management::Handler<ObjectRef> for Handler {
             self.free_space_tier[offset.storage_class() as usize]
                 .fetch_add(size.as_u64(), Ordering::Relaxed);
             self.delayed_messages.lock().push((key.into(), msg));
+            CopyOnWriteEvent::Preserved
         } else {
             // Add to dead list
             let key = &dead_list_key(dataset_id, self.current_generation.read(), offset) as &[_];
@@ -266,6 +267,7 @@ impl data_management::Handler<ObjectRef> for Handler {
 
             let msg = DefaultMessageAction::insert_msg(&data);
             self.delayed_messages.lock().push((key.into(), msg));
+            CopyOnWriteEvent::Removed
         }
     }
 }

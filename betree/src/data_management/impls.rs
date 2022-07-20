@@ -1,15 +1,21 @@
-use super::{errors::*, DmlBase, Handler, HandlerTypes, HasStoragePreference, Object, PodType};
+use super::{
+    errors::*, CopyOnWriteEvent, DmlBase, Handler, HandlerTypes, HasStoragePreference, Object,
+    PodType,
+};
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     buffer::Buf,
     cache::{AddSize, Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
     compression::{CompressionBuilder, DecompressionTag},
+    data_management::DmlWithReport,
+    migration::{ConstructReport, ProfileMsg},
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
     StoragePreference,
 };
+use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{
@@ -35,6 +41,9 @@ pub enum ObjectKey<G> {
     InWriteback(ModifiedObjectId),
 }
 
+// TODO: Perhaps extend this with previous storage location, to keep track of the history of nodes in the auto migration feature
+// for now
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ObjectRef<P> {
     Unmodified(P),
     Modified(ModifiedObjectId),
@@ -177,7 +186,8 @@ impl<D, I, G: Copy> ObjectPointer<D, I, G> {
 }
 
 /// The Data Management Unit.
-pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'static> {
+pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'static, MSG: 'static>
+{
     default_compression: Box<dyn CompressionBuilder>,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
@@ -196,9 +206,10 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'st
     allocation_data: Box<[Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>]>,
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
+    report_tx: Option<Sender<MSG>>,
 }
 
-impl<E, SPL, H> Dmu<E, SPL, H, H::Info, H::Generation>
+impl<E, SPL, H, MSG> Dmu<E, SPL, H, H::Info, H::Generation, MSG>
 where
     SPL: StoragePoolLayer,
     H: HandlerTypes,
@@ -237,6 +248,7 @@ where
             allocation_data,
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
+            report_tx: None,
         }
     }
 
@@ -256,7 +268,7 @@ where
     }
 }
 
-impl<E, SPL, H> DmlBase for Dmu<E, SPL, H, H::Info, H::Generation>
+impl<E, SPL, H, MSG> DmlBase for Dmu<E, SPL, H, H::Info, H::Generation, MSG>
 where
     E: Cache<Key = ObjectKey<H::Generation>>,
     <E as Cache>::Value: SizeMut,
@@ -269,7 +281,7 @@ where
     type Info = H::Info;
 }
 
-impl<E, SPL, H, I, G> Dmu<E, SPL, H, I, G>
+impl<E, SPL, H, I, G, MSG> Dmu<E, SPL, H, I, G, MSG>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
@@ -278,6 +290,7 @@ where
     H::Object: Object<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
     I: PodType,
     G: PodType,
+    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
 {
     fn steal(
         &self,
@@ -297,11 +310,7 @@ where
         };
         let obj = CacheValueRef::write(entry);
         if let ObjectRef::Unmodified(ptr) = replace(or, ObjectRef::Modified(mid)) {
-            let actual_size =
-                self.pool
-                    .actual_size(ptr.offset.storage_class(), ptr.offset.disk_id(), ptr.size);
-            self.handler
-                .copy_on_write(ptr.offset, actual_size, ptr.generation, ptr.info);
+            self.copy_on_write(ptr);
         }
         Ok(Some(obj))
     }
@@ -328,7 +337,30 @@ where
         }
     }
 
-    /// Fetches asynchronously an object from disk and inserts it into the
+    fn copy_on_write(&self, obj_ptr: ObjectPointer<SPL::Checksum, I, G>) {
+        let actual_size = self.pool.actual_size(
+            obj_ptr.offset.storage_class(),
+            obj_ptr.offset.disk_id(),
+            obj_ptr.size,
+        );
+        match (
+            self.handler.copy_on_write(
+                obj_ptr.offset,
+                actual_size,
+                obj_ptr.generation,
+                obj_ptr.info,
+            ),
+            &self.report_tx,
+        ) {
+            (CopyOnWriteEvent::Removed, Some(tx)) => {
+                tx.send(MSG::remove(ObjectRef::Unmodified(obj_ptr)))
+                    .expect("Channel dead");
+            }
+            _ => {}
+        }
+    }
+
+    /// Fetches synchronously an object from disk and inserts it into the
     /// cache.
     fn fetch(&self, op: &<Self as DmlBase>::ObjectPointer) -> Result<(), Error> {
         // FIXME: reuse decompression_state
@@ -552,19 +584,19 @@ where
         }
         if !was_present {
             // The object has been `stolen`.  Notify the handler.
-            let actual_size = self.pool.actual_size(
-                obj_ptr.offset.storage_class(),
-                obj_ptr.offset.disk_id(),
-                obj_ptr.size,
-            );
-            self.handler.copy_on_write(
-                obj_ptr.offset,
-                actual_size,
-                obj_ptr.generation,
-                obj_ptr.info,
-            );
+            self.copy_on_write(obj_ptr.clone());
         }
 
+        // TODO: Report write event
+        if let Some(report_tx) = &self.report_tx {
+            report_tx
+                .send(MSG::write(
+                    ObjectRef::Unmodified(obj_ptr.clone()),
+                    size,
+                    obj_ptr.offset.storage_class(),
+                ))
+                .expect("Channel dropped");
+        }
         trace!("handle_write_back: Leaving");
         Ok(obj_ptr)
     }
@@ -770,7 +802,7 @@ where
     }
 }
 
-impl<E, SPL, H, I, G> super::HandlerDml for Dmu<E, SPL, H, I, G>
+impl<E, SPL, H, I, G, MSG> super::HandlerDml for Dmu<E, SPL, H, I, G, MSG>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
@@ -779,6 +811,7 @@ where
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
+    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
 {
     type Object = H::Object;
     type CacheValueRef = CacheValueRef<E::ValueRef, RwLockReadGuard<'static, H::Object>>;
@@ -814,7 +847,18 @@ where
             }
             if let ObjectRef::Unmodified(ref ptr) = *or {
                 drop(cache);
+
                 self.fetch(ptr)?;
+                // TODO: Report fetch to policies
+                if let Some(report_tx) = &self.report_tx {
+                    report_tx
+                        .send(MSG::fetch(
+                            ObjectRef::Unmodified(ptr.clone()),
+                            ptr.size,
+                            ptr.offset.storage_class(),
+                        ))
+                        .expect("Channel dropped");
+                }
                 cache = self.cache.read();
             } else {
                 self.fix_or(or);
@@ -881,11 +925,7 @@ where
             Err(RemoveError::Pinned) => unimplemented!(),
         };
         if let ObjectRef::Unmodified(ref ptr) = or {
-            let actual_size =
-                self.pool
-                    .actual_size(ptr.offset.storage_class(), ptr.offset.disk_id(), ptr.size);
-            self.handler
-                .copy_on_write(ptr.offset, actual_size, ptr.generation, ptr.info);
+            self.copy_on_write(ptr.clone());
         }
     }
 
@@ -900,11 +940,7 @@ where
             };
         };
         if let ObjectRef::Unmodified(ref ptr) = or {
-            let actual_size =
-                self.pool
-                    .actual_size(ptr.offset.storage_class(), ptr.offset.disk_id(), ptr.size);
-            self.handler
-                .copy_on_write(ptr.offset, actual_size, ptr.generation, ptr.info);
+            self.copy_on_write(ptr.clone());
         }
         Ok(obj.into_inner())
     }
@@ -927,7 +963,7 @@ where
     }
 }
 
-impl<E, SPL, H, I, G> super::Dml for Dmu<E, SPL, H, I, G>
+impl<E, SPL, H, I, G, MSG> super::Dml for Dmu<E, SPL, H, I, G, MSG>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
@@ -936,6 +972,7 @@ where
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
+    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
 {
     fn write_back<F, FO>(&self, mut acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
     where
@@ -1052,7 +1089,7 @@ where
     }
 }
 
-impl<E, SPL, H, I, G> super::DmlWithHandler for Dmu<E, SPL, H, I, G>
+impl<E, SPL, H, I, G, MSG> super::DmlWithHandler for Dmu<E, SPL, H, I, G, MSG>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     H::Object: Size,
@@ -1070,7 +1107,7 @@ where
     }
 }
 
-impl<E, SPL, H, I, G> super::DmlWithSpl for Dmu<E, SPL, H, I, G>
+impl<E, SPL, H, I, G, MSG> super::DmlWithSpl for Dmu<E, SPL, H, I, G, MSG>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
@@ -1087,7 +1124,7 @@ where
     }
 }
 
-impl<E, SPL, H, I, G> super::DmlWithCache for Dmu<E, SPL, H, I, G>
+impl<E, SPL, H, I, G, MSG> super::DmlWithCache for Dmu<E, SPL, H, I, G, MSG>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
     H::Object: SizeMut,
@@ -1102,6 +1139,28 @@ where
 
     fn cache_stats(&self) -> Self::CacheStats {
         self.cache.read().stats()
+    }
+}
+
+impl<E, SPL, H, I, G, MSG> super::DmlWithReport<MSG> for Dmu<E, SPL, H, I, G, MSG>
+where
+    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    H::Object: SizeMut,
+    SPL: StoragePoolLayer,
+    SPL::Checksum: StaticSize,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H::Object: Object<<Self as DmlBase>::ObjectRef>,
+    I: PodType,
+    G: PodType,
+    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
+{
+    fn with_report(mut self, tx: Sender<MSG>) -> Self {
+        self.report_tx = Some(tx);
+        self
+    }
+
+    fn set_report(&mut self, tx: Sender<MSG>) {
+        self.report_tx = Some(tx);
     }
 }
 
