@@ -35,7 +35,7 @@ impl CompressionConfiguration {
 /// method. This differs from a CompressionConfiguration, in that it is not configurable, as
 /// all methods will decompress just fine without knowing at which compression level it was
 /// originally written, so there's no advantage in storing the compression level with each object.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum DecompressionTag {
     None,
