@@ -6,8 +6,8 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithSpl, Dmu, Handler as DmuHandler,
-        HandlerDml,
+        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl, Dmu,
+        Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
     migration::{MigrationPolicies, MigrationPolicy, ProfileMsg},
@@ -25,6 +25,7 @@ use crate::{
 };
 use bincode::{deserialize, serialize_into};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use crossbeam_channel::{Receiver, Sender};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
@@ -76,6 +77,7 @@ pub(crate) type RootDmu = Dmu<
     Handler,
     DatasetId,
     Generation,
+    ProfileMsg<ObjectRef>,
 >;
 
 pub(crate) type MessageTree<Dmu, Message> =
@@ -100,6 +102,7 @@ where
         + DmlWithHandler<Handler = handler::Handler>
         + DmlWithSpl<Spl = Self::Spu>
         + DmlWithCache
+        + DmlWithReport<ProfileMsg<ObjectRef>>
         + Send
         + Sync
         + 'static,
@@ -418,11 +421,24 @@ impl<Config: DatabaseBuilder> Database<Config> {
     /// Opens or creates a database given by the storage pool configuration and
     /// sets the given cache size.
     pub fn build(builder: Config) -> Result<Self> {
+        Self::build_internal(builder, None)
+    }
+
+    // Construct an instance of [Database] either using external threads or not.
+    // Deprecates [with_sync]
+    fn build_internal(
+        builder: Config,
+        report_tx: Option<Sender<ProfileMsg<ObjectRef>>>,
+    ) -> Result<Self> {
         builder.pre_build();
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);
-        let dmu = Arc::new(builder.new_dmu(spl, handler));
-        let (tree, root_ptr) = builder.select_root_tree(dmu)?;
+        let mut dmu = builder.new_dmu(spl, handler);
+        if let Some(tx) = report_tx {
+            dmu.set_report(tx);
+        }
+
+        let (tree, root_ptr) = builder.select_root_tree(Arc::new(dmu))?;
 
         *tree.dmu().handler().current_generation.lock_write() = root_ptr.generation().next();
         *tree.dmu().handler().root_tree_snapshot.write() = Some(TreeInner::new_ro(
@@ -439,23 +455,42 @@ impl<Config: DatabaseBuilder> Database<Config> {
         Ok(db)
     }
 
+    /// Opens or create a database given by the storage pool configuration, sets the given cache size and spawns threads to periodically perform
+    /// sync (if configured with [SyncMode::Periodic]) and auto migration (if configured with [MigrationPolicies]).
+    pub fn build_threaded(builder: Config) -> Result<Arc<RwLock<Self>>> {
+        let db = match builder.migration_policy() {
+            Some(pol) => {
+                let (report_tx, report_rx) = crossbeam_channel::unbounded();
+                let db = Arc::new(RwLock::new(Self::build_internal(builder, Some(report_tx))?));
+                let other = db.clone();
+                thread::spawn(move || {
+                    let policy = pol.construct(report_rx, other);
+                    loop {
+                        // TODO Add logic & timer
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                });
+                db
+            }
+            None => Arc::new(RwLock::new(Self::build_internal(builder, None)?)),
+        };
+        Ok(Self::with_sync(db))
+    }
+
     /// If this [Database] was created with a [SyncMode::Periodic], this function
     /// will wrap self in an `Arc<RwLock<_>>` and start a thread to periodically
     /// call `self.sync()`.
     ///
     /// This is a separate step from [Database::build] because some usecases don't require
     /// periodic syncing.
-    pub fn with_sync(self) -> Arc<RwLock<Self>> {
-        if let SyncMode::Periodic { interval_ms } = self.builder.sync_mode() {
-            let db = Arc::new(RwLock::new(self));
+    fn with_sync(this: Arc<RwLock<Self>>) -> Arc<RwLock<Self>> {
+        if let SyncMode::Periodic { interval_ms } = this.read().builder.sync_mode() {
             thread::spawn({
-                let db = db.clone();
+                let db = this.clone();
                 move || sync_timer::sync_timer(interval_ms, db)
             });
-            db
-        } else {
-            Arc::new(RwLock::new(self))
         }
+        this
     }
 
     fn sync_ds(&self, ds_id: DatasetId, ds_tree: &ErasedTree) -> Result<()> {

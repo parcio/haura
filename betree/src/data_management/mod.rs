@@ -4,6 +4,7 @@
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
+    migration::ProfileMsg,
     size::{Size, StaticSize},
     storage_pool::DiskOffset,
     vdev::Block,
@@ -18,6 +19,8 @@ use std::{
     io::{self, Write},
     ops::DerefMut,
 };
+
+use crossbeam_channel::Sender;
 
 /// Marker trait for plain old data types
 pub trait PodType:
@@ -171,6 +174,11 @@ pub trait HandlerDml: DmlBase {
     fn verify_cache(&self);
 }
 
+pub enum CopyOnWriteEvent {
+    Preserved,
+    Removed,
+}
+
 /// Handler for a `Dml`.
 pub trait Handler<R: ObjectRef>: HandlerTypes {
     /// The object type managed by this handler.
@@ -225,7 +233,7 @@ pub trait Handler<R: ObjectRef>: HandlerTypes {
         size: Block<u32>,
         generation: Self::Generation,
         info: Self::Info,
-    );
+    ) -> CopyOnWriteEvent;
 }
 
 /// The Data Mangement Layer
@@ -268,6 +276,15 @@ pub trait DmlWithCache {
     type CacheStats: serde::Serialize;
 
     fn cache_stats(&self) -> Self::CacheStats;
+}
+
+/// Extension of an DMU to signal that it supports a message based report format.
+/// Implemented via channels the DMU is allowed to send any number of messages to an consuming sink.
+/// It is advised to use `unbound` channels for this purpose.
+pub trait DmlWithReport<Msg> {
+    /// Attach a reporting channel to a DMU
+    fn with_report(self, tx: Sender<Msg>) -> Self;
+    fn set_report(&mut self, tx: Sender<Msg>);
 }
 
 mod delegation;
