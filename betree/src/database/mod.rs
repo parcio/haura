@@ -10,6 +10,7 @@ use crate::{
         HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
+    migration::{MigrationPolicies, MigrationPolicy, ProfileMsg},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -124,6 +125,8 @@ where
         -> Result<(RootTree<Self::Dmu>, ObjectPointer)>;
 
     fn sync_mode(&self) -> SyncMode;
+
+    fn migration_policy(&self) -> Option<MigrationPolicies>;
 }
 
 /// This enum controls whether to search for an existing database to reuse,
@@ -177,6 +180,10 @@ pub struct DatabaseConfiguration {
     /// When set, try to sync all datasets every `sync_interval_ms` milliseconds
     pub sync_interval_ms: Option<u64>,
 
+    /// Set the migration policy to be used.
+    /// TODO: This can be extended on by adding a MigrationConfig or similar to modify grace period, fetch interval, action thresholds..
+    pub migration_policy: Option<MigrationPolicies>,
+
     /// If and how to log database metrics
     pub metrics: Option<MetricsConfiguration>,
 }
@@ -193,6 +200,7 @@ impl Default for DatabaseConfiguration {
             access_mode: AccessMode::OpenIfExists,
             sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
+            migration_policy: None,
         }
     }
 }
@@ -354,6 +362,10 @@ impl DatabaseBuilder for DatabaseConfiguration {
         } else {
             SyncMode::Explicit
         }
+    }
+
+    fn migration_policy(&self) -> Option<MigrationPolicies> {
+        self.migration_policy
     }
 }
 

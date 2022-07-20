@@ -48,6 +48,8 @@ pub mod vdev;
 pub mod metrics;
 pub mod object;
 
+pub mod migration;
+
 #[cfg(feature = "init_env_logger")]
 pub mod env_logger;
 
