@@ -19,7 +19,7 @@ pub enum ProfileMsg<M: Clone> {
     Remove(M),
 
     // Initial message at the beginning of an session
-    Disover(M),
+    Discover(M),
 }
 
 pub trait ConstructReport<M: Clone> {

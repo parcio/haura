@@ -10,7 +10,7 @@ use crate::{
         Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{MigrationPolicies, MigrationPolicy, ProfileMsg},
+    migration::{MigrationPolicies, MigrationPolicy, ProfileMsg, MigrationConfig},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -68,7 +68,7 @@ const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 type Checksum = XxHash;
 
 type ObjectPointer = data_management::impls::ObjectPointer<Checksum, DatasetId, Generation>;
-type ObjectRef = data_management::impls::ObjectRef<ObjectPointer>;
+pub(crate) type ObjectRef = data_management::impls::ObjectRef<ObjectPointer>;
 type Object = Node<ObjectRef>;
 
 pub(crate) type RootDmu = Dmu<
@@ -376,7 +376,7 @@ type ErasedTree = dyn ErasedTreeSync<Pointer = ObjectPointer, ObjectRef = Object
 
 /// The database type.
 pub struct Database<Config: DatabaseBuilder> {
-    root_tree: RootTree<Config::Dmu>,
+    pub(crate) root_tree: RootTree<Config::Dmu>,
     builder: Config,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
 }
@@ -464,10 +464,12 @@ impl<Config: DatabaseBuilder> Database<Config> {
                 let db = Arc::new(RwLock::new(Self::build_internal(builder, Some(report_tx))?));
                 let other = db.clone();
                 thread::spawn(move || {
-                    let policy = pol.construct(report_rx, other);
+                    let mut policy = pol.construct(report_rx, other);
                     loop {
-                        // TODO Add logic & timer
-                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        if let Err(e) = policy.thread_loop() {
+                            error!("Automatic Migration Policy encountered {:?}", e);
+                            error!("Continuing and reinitializing policy to avoid errors, but functionality may be limited.");
+                        }
                     }
                 });
                 db
