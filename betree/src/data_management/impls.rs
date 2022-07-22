@@ -173,7 +173,7 @@ impl<D, I, G: Copy> From<ObjectPointer<D, I, G>> for ObjectRef<ObjectPointer<D, 
     }
 }
 
-impl<D, I, G: Copy> ObjectPointer<D, I, G> {
+impl<D, I: Copy, G: Copy> ObjectPointer<D, I, G> {
     pub fn offset(&self) -> DiskOffset {
         self.offset
     }
@@ -182,6 +182,9 @@ impl<D, I, G: Copy> ObjectPointer<D, I, G> {
     }
     pub fn generation(&self) -> G {
         self.generation
+    }
+    pub fn info(&self) -> I {
+        self.info
     }
 }
 

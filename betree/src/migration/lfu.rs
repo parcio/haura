@@ -6,48 +6,78 @@ use std::{
 };
 
 use crate::{
-    data_management::ObjectRef,
-    database::DatabaseBuilder,
+    data_management::{ObjectRef as ObjectRefTrait, HandlerDml},
+    database::{DatabaseBuilder, ObjectRef, DatasetId},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     Database,
 };
 
-use super::msg::ProfileMsg;
+use super::{
+    ProfileMsg,
+    MigrationConfig,
+};
 
 const FREQ_LEN: usize = 10;
 
 /// Implementation of Least Frequently Used
 
-pub struct Lfu<M: ObjectRef + Clone, C: DatabaseBuilder> {
-    leafs: [HashMap<DiskOffset, (f32, VecDeque<ProfileMsg<M>>)>; NUM_STORAGE_CLASSES],
-    rx: Receiver<ProfileMsg<M>>,
+pub struct Lfu<C: DatabaseBuilder> {
+    leafs: [HashMap<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
+    rx: Receiver<ProfileMsg<ObjectRef>>,
     db: Arc<RwLock<Database<C>>>,
+    config: MigrationConfig,
+}
+
+struct LeafInfo {
+    freq: f32,
+    msgs: VecDeque<ProfileMsg<ObjectRef>>,
+    mid: ObjectRef,
+    info: DatasetId,
+}
+
+impl LeafInfo {
+    fn mid_mut(&self) -> ObjectRef {
+        self.mid.clone()
+    }
 }
 
 impl<
-        D,
-        I,
-        G: Copy,
-        M: ObjectRef<ObjectPointer = crate::data_management::impls::ObjectPointer<D, I, G>> + Clone,
         C: DatabaseBuilder,
-    > super::MigrationPolicy<C> for Lfu<M, C>
+    > super::MigrationPolicy<C> for Lfu<C>
 {
-    type Message = ProfileMsg<M>;
+    type ObjectReference = ObjectRef;
+    type Message = ProfileMsg<Self::ObjectReference>;
 
-    fn build(rx: Receiver<ProfileMsg<M>>, db: Arc<RwLock<Database<C>>>) -> Self {
+    fn build(rx: Receiver<Self::Message>, db: Arc<RwLock<Database<C>>>, config: MigrationConfig) -> Self {
         Self {
             leafs: [(); NUM_STORAGE_CLASSES].map(|_| Default::default()),
             rx,
             db,
+            config,
         }
     }
 
     fn action(&self, storage_tier: u8) -> super::errors::Result<()> {
+        if let Some(selected) = self.leafs[storage_tier as usize].iter().find(|elem| {
+            // frequency comparison with some random constant for testing
+            elem.1.freq < 0.25
+        }) {
+            let mut handle = selected.1.mid_mut();
+            let guard = self.db.write();
+            let dmu = guard.root_tree.dmu();
+            let node = dmu.get_mut(&mut handle, selected.1.info).unwrap();
+            // TODO: Update system preference of selected nodes
+            todo!()
+        }
         todo!()
     }
 
     fn db(&self) -> &Arc<RwLock<Database<C>>> {
         &self.db
+    }
+
+    fn config(&self) -> &MigrationConfig {
+        &self.config
     }
 
     fn update(&mut self) -> super::errors::Result<()> {
@@ -60,18 +90,18 @@ impl<
                         .get_mut(&info.mid.get_unmodified().unwrap().offset())
                     {
                         // TODO: Move entry on moving object pointer
-                        entry.1.push_front(msg);
-                        entry.1.truncate(FREQ_LEN);
+                        entry.msgs.push_front(msg);
+                        entry.msgs.truncate(FREQ_LEN);
                         // Only classify as soon as enough entries are collected
                         if let (Some(first), Some(last)) =
-                            (entry.1.get(0), entry.1.get(FREQ_LEN - 1))
+                            (entry.msgs.get(0), entry.msgs.get(FREQ_LEN - 1))
                         {
                             match (first, last) {
                                 (ProfileMsg::Fetch(f), ProfileMsg::Fetch(l))
                                 | (ProfileMsg::Fetch(f), ProfileMsg::Write(l))
                                 | (ProfileMsg::Write(f), ProfileMsg::Fetch(l))
                                 | (ProfileMsg::Write(f), ProfileMsg::Write(l)) => {
-                                    entry.0 = FREQ_LEN as f32
+                                    entry.freq = FREQ_LEN as f32
                                         / (l.time
                                             .duration_since(f.time)
                                             .expect("Events not ordered"))
@@ -83,13 +113,23 @@ impl<
                     } else {
                         self.leafs[info.storage_tier as usize].insert(
                             info.mid.get_unmodified().unwrap().offset(),
-                            (0.0, vec![msg].into()),
-                        );
+                            LeafInfo {
+                                freq: 0.0,
+                                msgs: vec![msg].into(),
+                                info: info.mid.get_unmodified().unwrap().info(),
+                                mid: info.mid,
+                            });
                     }
                 }
                 ProfileMsg::Remove(mid) => {
                     let offset = mid.get_unmodified().unwrap().offset();
                     self.leafs[offset.storage_class() as usize].remove(&offset);
+                }
+                ProfileMsg::Discover(mid) => {
+                    let op = mid.get_unmodified().unwrap();
+                    let offset = op.offset();
+                    let info = op.info();
+                    self.leafs[offset.storage_class() as usize].insert(offset, LeafInfo { freq: 0.0, msgs: vec![].into(), mid, info });
                 }
                 // This policy ignores all other messages.
                 _ => {}
