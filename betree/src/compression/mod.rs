@@ -15,7 +15,7 @@ pub use errors::*;
 
 const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CompressionConfiguration {
     None,
     // Lz4,

@@ -98,7 +98,7 @@ impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
     where
         F: FnMut(&mut R) -> Result<(), E>,
     {
-        if let Some(iter) = self.child_pointer_iter() {
+        if let Some(iter) = self.child_pointer_iter_mut() {
             for np in iter {
                 f(np)?;
             }
@@ -366,7 +366,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 }
 
 impl<N: HasStoragePreference> Node<N> {
-    pub(super) fn child_pointer_iter<'a>(
+    pub(super) fn child_pointer_iter_mut<'a>(
         &'a mut self,
     ) -> Option<impl Iterator<Item = &'a mut N> + 'a> {
         match self.0 {
@@ -375,6 +375,19 @@ impl<N: HasStoragePreference> Node<N> {
                 internal
                     .iter_mut()
                     .map(|child| child.node_pointer.get_mut()),
+            ),
+        }
+    }
+
+    pub(super) fn child_pointer_iter<'a>(
+        &'a mut self,
+    ) -> Option<impl Iterator<Item = &'a mut RwLock<N>> + 'a> {
+        match self.0 {
+            Leaf(_) | PackedLeaf(_) => None,
+            Internal(ref mut internal) => Some(
+                internal
+                    .iter_mut()
+                    .map(|child| &mut child.node_pointer),
             ),
         }
     }

@@ -19,6 +19,7 @@ pub enum ProfileMsg<M: Clone> {
     Remove(M),
 
     // Initial message at the beginning of an session
+    // For effectiveness it is advised to discover all nodes in every dataset intially.
     Discover(M),
 }
 

@@ -1,5 +1,9 @@
 #! /bin/env bash
 
+set -e
+
+./prepare-test.sh
+
 # num_thread=$(echo "$(cat /proc/meminfo | head -n 1 | xargs | cut -d ' ' -f 2) / 1024 / 1024 / 2" | bc)
 failed=$(cargo test -- --test-threads 1 -Z unstable-options --format json \
     | grep name \
@@ -18,3 +22,5 @@ then
 else
         exit 1
 fi
+
+./cleanup-test.sh

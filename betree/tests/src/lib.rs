@@ -5,7 +5,7 @@ use betree_storage_stack::{
     database::AccessMode,
     object::{ObjectHandle, ObjectStore},
     storage_pool::{LeafVdev, TierConfiguration, Vdev},
-    Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference,
+    Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference, migration::MigrationPolicies,
 };
 
 use std::{io::{BufReader, Read}, env};
@@ -665,4 +665,35 @@ fn space_accounting_smoke() {
     assert_eq!(before[0].free.as_u64(), expected_free_size_before);
     assert_ne!(before[0].free, after[0].free);
     // assert_eq!(after[0].free.as_u64(), expected_free_size_after);
+}
+
+#[rstest]
+fn tree_iterator_smoke() {
+    let config = DatabaseConfiguration {
+        storage: StoragePoolConfiguration {
+            tiers: vec![
+                TierConfiguration {
+                    top_level_vdevs: vec![
+                        Vdev::Leaf(LeafVdev::File("test_disk_tier_fastest".into()))
+                    ],
+                },
+            ],
+            ..Default::default()
+        },
+        migration_policy: Some(MigrationPolicies::Lfu(Default::default())),
+        access_mode: AccessMode::OpenOrCreate,
+        ..Default::default()
+    };
+    { // First block opening and writing a miniscule amount of data
+        let shared_db = Database::build_threaded(config.clone()).unwrap();
+        let mut db = shared_db.write();
+        let ds = db.open_or_create_dataset(b"test").unwrap();
+        ds.insert("foobar".as_bytes(), &[1,2,3,4,5]).unwrap();
+    }
+    { // Second block trying to fetch information of previous state and reinit policies, using tree iterator
+        let shared_db = Database::build_threaded(config).unwrap();
+        let mut db = shared_db.write();
+        let ds = db.open_or_create_dataset(b"test").unwrap();
+    }
+
 }
