@@ -59,7 +59,7 @@ where
 {
     type ObjectPointer = ObjectPointer<D, I, G>;
     fn get_unmodified(&self) -> Option<&ObjectPointer<D, I, G>> {
-        if let ObjectRef::Unmodified(ref p) = *self {
+        if let ObjectRef::Unmodified(ref p) = self {
             Some(p)
         } else {
             None

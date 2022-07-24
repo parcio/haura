@@ -56,7 +56,7 @@ pub trait DmlBase: Sized {
     /// A reference to an object managed by this `Dmu`.
     type ObjectRef: ObjectRef<ObjectPointer = Self::ObjectPointer>;
     /// The pointer type to an on-disk object.
-    type ObjectPointer: Serialize + DeserializeOwned;
+    type ObjectPointer: Serialize + DeserializeOwned + Clone;
     /// The info type which is tagged to each object.
     type Info: PodType;
 }

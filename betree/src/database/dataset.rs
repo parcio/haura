@@ -386,4 +386,12 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         }
         Ok(())
     }
+
+    pub(super) fn report_node_pointers<M: Clone>(&self, tx: Sender<ProfileMsg<M>>) {
+        for node in self.tree.node_iter() {
+            tx.send(ProfileMsg::Discover(node)).unwrap();
+        }
+    }
 }
+use crossbeam_channel::Sender;
+use crate::migration::ProfileMsg;

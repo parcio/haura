@@ -153,7 +153,7 @@ pub enum SyncMode {
 }
 
 /// A bundle type of component configuration types, used during [Database::build]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields, default)]
 pub struct DatabaseConfiguration {
     /// Backing storage to be used
@@ -434,8 +434,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);
         let mut dmu = builder.new_dmu(spl, handler);
-        if let Some(tx) = report_tx {
-            dmu.set_report(tx);
+        if let Some(tx) = &report_tx {
+            dmu.set_report(tx.clone());
         }
 
         let (tree, root_ptr) = builder.select_root_tree(Arc::new(dmu))?;
@@ -446,11 +446,23 @@ impl<Config: DatabaseBuilder> Database<Config> {
             DefaultMessageAction,
         ));
 
-        let db = Database {
+        let mut db = Database {
             root_tree: tree,
             builder,
             open_datasets: Default::default(),
         };
+
+
+        let start = std::time::Instant::now();
+        // Report all objectpointers known to the migration policy, this might
+        // take some time
+        if let Some(tx) = report_tx {
+            for ds_id in db.iter_datasets()? {
+                let ds = db.open_dataset(&ds_id?);
+            }
+        }
+        let time_reporting = start.elapsed();
+        debug!("Reporting of nodes took {} ms", time_reporting.as_millis());
 
         Ok(db)
     }
