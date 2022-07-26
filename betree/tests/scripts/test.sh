@@ -1,8 +1,6 @@
 #!/bin/env bash
 
-set -e
-
-./prepare-test.sh
+./scripts/prepare-test.sh
 
 num_thread=$(echo "$(head -n 1 /proc/meminfo | xargs | cut -d ' ' -f 2) / 1024 / 1024 / 2" | bc)
 
@@ -13,4 +11,4 @@ fi
 
 cargo test -- --test-threads "$num_thread"
 
-./cleanup-test.sh
+./scripts/cleanup-test.sh
