@@ -453,16 +453,19 @@ impl<Config: DatabaseBuilder> Database<Config> {
         };
 
 
-        let start = std::time::Instant::now();
         // Report all objectpointers known to the migration policy, this might
         // take some time
         if let Some(tx) = report_tx {
+            let start = std::time::Instant::now();
             for ds_id in db.iter_datasets()? {
-                let ds = db.open_dataset(&ds_id?);
+                let id = &*ds_id?;
+                let ds = db.open_dataset_with_id::<DefaultMessageAction>(&id)?;
+                ds.report_node_pointers(tx.clone());
+                db.close_dataset(ds)?;
             }
+            let time_reporting = start.elapsed();
+            debug!("Reporting of nodes took {} ms", time_reporting.as_millis());
         }
-        let time_reporting = start.elapsed();
-        debug!("Reporting of nodes took {} ms", time_reporting.as_millis());
 
         Ok(db)
     }

@@ -380,14 +380,14 @@ impl<N: HasStoragePreference> Node<N> {
     }
 
     pub(super) fn child_pointer_iter<'a>(
-        &'a mut self,
-    ) -> Option<impl Iterator<Item = &'a mut RwLock<N>> + 'a> {
+        &'a self,
+    ) -> Option<impl Iterator<Item = &'a RwLock<N>> + 'a> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => Some(
+            Internal(ref internal) => Some(
                 internal
-                    .iter_mut()
-                    .map(|child| &mut child.node_pointer),
+                    .iter()
+                    .map(|child| &child.node_pointer),
             ),
         }
     }

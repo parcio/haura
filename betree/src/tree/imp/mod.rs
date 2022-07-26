@@ -491,8 +491,12 @@ where
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
+
+    /// An iterator returning all [ObjectPointer]s of a specified tree.
+    /// CAUTION: While build lazily the consumtion of this iterator implies hevay IO work on large trees as nodes up until the leaves (excluded) are read.
+    /// This can contain quite a substantial part of data but on the lesser side of the bulk of the data.
     pub fn node_iter<'a>(&'a self) -> TreeIterator<'a, X,R,M,I> {
-        TreeIterator { tree: self, depth: self.depth().unwrap(), node: vec![].into() }
+        TreeIterator { tree: self, depth: self.depth().unwrap(), node: vec![(None, Some(self.get_root_node().unwrap()))].into() }
     }
 }
 
@@ -505,7 +509,7 @@ where
 {
     tree: &'a Tree<X, M, I>,
     depth: u32,
-    node: VecDeque<(X::ObjectPointer, <X as HandlerDml>::CacheValueRefMut)>,
+    node: VecDeque<(Option<X::ObjectPointer>, Option<<X as HandlerDml>::CacheValueRef>)>,
 }
 
 impl<'a, X, R, M, I> Iterator for TreeIterator<'a, X, R, M, I>
@@ -518,17 +522,33 @@ where
     type Item = X::ObjectPointer;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((objptr,mut n)) =self.node.pop_front() {
-            if n.level() < self.depth - 1 {
-                for node_pointer in n.child_pointer_iter().unwrap() {
-                    let ptr = node_pointer.read().get_unmodified().unwrap().clone();
-                    let node = self.tree.get_mut_node(node_pointer).expect("DEBUGGING");
-                    self.node.push_back((ptr, node));
+        match self.node.pop_front() {
+            // valid object ptr & valid node
+            Some((objptr, Some(n))) => {
+                debug!("Level of node {}", n.level());
+                debug!("Total depth {}", self.depth);
+                if let Some(iter) = n.child_pointer_iter() {
+                    for node_pointer in iter {
+                        let ptr = node_pointer.read().get_unmodified().unwrap().clone();
+                        if n.level() >= self.depth - 1 {
+                            self.node.push_back((Some(ptr), None));
+                        } else {
+                            let node = self.tree.get_node(node_pointer).expect("DEBUGGING");
+                            self.node.push_back((Some(ptr), Some(node)));
+                        }
+                    }
                 }
-            }
-            return Some(objptr);
+                if let None = &objptr {
+                    return self.next();
+                }
+                objptr
+            },
+            // valid object ptr & invalid node (leaf)
+            Some((objptr, None)) => {
+                objptr
+            },
+            _ => None,
         }
-        None
     }
 }
 

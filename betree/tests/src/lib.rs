@@ -668,7 +668,8 @@ fn space_accounting_smoke() {
 }
 
 #[rstest]
-fn tree_iterator_smoke() {
+fn object_pointer_iterator_smoke() {
+    env_logger::init();
     let config = DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: vec![
@@ -680,20 +681,36 @@ fn tree_iterator_smoke() {
             ],
             ..Default::default()
         },
-        migration_policy: Some(MigrationPolicies::Lfu(Default::default())),
+        // migration_policy: Some(MigrationPolicies::Lfu(Default::default())),
         access_mode: AccessMode::OpenOrCreate,
         ..Default::default()
     };
-    { // First block opening and writing a miniscule amount of data
+    { // Opening and writing a miniscule amount of data
         let shared_db = Database::build_threaded(config.clone()).unwrap();
         let mut db = shared_db.write();
-        let ds = db.open_or_create_dataset(b"test").unwrap();
-        ds.insert("foobar".as_bytes(), &[1,2,3,4,5]).unwrap();
+        let ds = db.open_named_object_store(b"test", StoragePreference::NONE).unwrap();
+        let obj = ds.open_or_create_object(b"foobar").unwrap();
+        // at best the current impl takes 1.1 promille additional space for each leaf (3.2 MB size with 32 bytes metadata)
+        let buf = vec![42u8; 1024 * TO_MEBIBYTE];
+        dbg!(obj.write_at(&buf, 0).unwrap());
+        db.close_object_store(ds);
+        db.sync().unwrap();
     }
-    { // Second block trying to fetch information of previous state and reinit policies, using tree iterator
+    log::info!("Opening Again");
+    { // Trying to fetch information of previous state and reinit policies, using tree iterator
         let shared_db = Database::build_threaded(config).unwrap();
         let mut db = shared_db.write();
-        let ds = db.open_or_create_dataset(b"test").unwrap();
+        let ds = db.open_named_object_store(b"test", StoragePreference::NONE).unwrap();
+        let obj = ds.open_object(b"foobar").unwrap().unwrap();
+        let mut buf = vec![255u8; 1 * TO_MEBIBYTE];
+        dbg!(obj.read_at(&mut buf, 0).unwrap());
+        // for chunk in obj.read_all_chunks().unwrap() {
+        //     log::debug!("{:?}", chunk);
+        // }
+        let res = vec![42u8; 42 * TO_MEBIBYTE];
+        dbg!(res[0]);
+        dbg!(&buf);
+        assert_eq!(buf[0], res[0]);
     }
 
 }
