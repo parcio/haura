@@ -6,16 +6,13 @@ use std::{
 };
 
 use crate::{
-    data_management::{ObjectRef as ObjectRefTrait, HandlerDml},
-    database::{DatabaseBuilder, ObjectRef, DatasetId},
+    data_management::{HandlerDml, ObjectRef as ObjectRefTrait},
+    database::{DatabaseBuilder, DatasetId, ObjectRef},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     Database,
 };
 
-use super::{
-    ProfileMsg,
-    MigrationConfig,
-};
+use super::{MigrationConfig, ProfileMsg};
 
 const FREQ_LEN: usize = 10;
 
@@ -41,14 +38,15 @@ impl LeafInfo {
     }
 }
 
-impl<
-        C: DatabaseBuilder,
-    > super::MigrationPolicy<C> for Lfu<C>
-{
+impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
     type ObjectReference = ObjectRef;
     type Message = ProfileMsg<Self::ObjectReference>;
 
-    fn build(rx: Receiver<Self::Message>, db: Arc<RwLock<Database<C>>>, config: MigrationConfig) -> Self {
+    fn build(
+        rx: Receiver<Self::Message>,
+        db: Arc<RwLock<Database<C>>>,
+        config: MigrationConfig,
+    ) -> Self {
         Self {
             leafs: [(); NUM_STORAGE_CLASSES].map(|_| Default::default()),
             rx,
@@ -118,7 +116,8 @@ impl<
                                 msgs: vec![msg].into(),
                                 info: info.mid.get_unmodified().unwrap().info(),
                                 mid: info.mid,
-                            });
+                            },
+                        );
                     }
                 }
                 ProfileMsg::Remove(mid) => {
@@ -129,7 +128,15 @@ impl<
                     let op = mid.get_unmodified().unwrap();
                     let offset = op.offset();
                     let info = op.info();
-                    self.leafs[offset.storage_class() as usize].insert(offset, LeafInfo { freq: 0.0, msgs: vec![].into(), mid, info });
+                    self.leafs[offset.storage_class() as usize].insert(
+                        offset,
+                        LeafInfo {
+                            freq: 0.0,
+                            msgs: vec![].into(),
+                            mid,
+                            info,
+                        },
+                    );
                 }
                 // This policy ignores all other messages.
                 _ => {}

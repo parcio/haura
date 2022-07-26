@@ -10,7 +10,7 @@ use crate::{
         Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{MigrationPolicies, MigrationPolicy, ProfileMsg, MigrationConfig},
+    migration::{MigrationConfig, MigrationPolicies, MigrationPolicy, ProfileMsg},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -451,7 +451,6 @@ impl<Config: DatabaseBuilder> Database<Config> {
             builder,
             open_datasets: Default::default(),
         };
-
 
         // Report all objectpointers known to the migration policy, this might
         // take some time

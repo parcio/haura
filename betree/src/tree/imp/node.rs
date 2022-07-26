@@ -384,11 +384,7 @@ impl<N: HasStoragePreference> Node<N> {
     ) -> Option<impl Iterator<Item = &'a RwLock<N>> + 'a> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref internal) => Some(
-                internal
-                    .iter()
-                    .map(|child| &child.node_pointer),
-            ),
+            Internal(ref internal) => Some(internal.iter().map(|child| &child.node_pointer)),
         }
     }
 
