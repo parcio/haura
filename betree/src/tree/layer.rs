@@ -1,4 +1,4 @@
-use super::{MessageAction, imp::TreeIterator};
+use super::{imp::TreeIterator, MessageAction};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     StoragePreference,

@@ -10,7 +10,7 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
-use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc, process::id};
+use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, process::id, sync::Arc};
 
 /// The data set type.
 pub struct Dataset<Config, Message = DefaultMessageAction>
@@ -62,12 +62,19 @@ impl<Config: DatabaseBuilder> Database<Config> {
 
     /// Internal function to open a dataset based on it's internal id, saves knowing the actual name.
     /// THE NAME IS NOT KNOW IN THIS CASE AND THE NAME BOX EMPTY.
-    pub(super) fn open_dataset_with_id<M: MessageAction + Default + 'static>(&mut self, id: &[u8]) -> Result<Dataset<Config, M>> {
+    pub(super) fn open_dataset_with_id<M: MessageAction + Default + 'static>(
+        &mut self,
+        id: &[u8],
+    ) -> Result<Dataset<Config, M>> {
         let id = DatasetId::unpack(id);
         self.open_dataset_with_id_and_name(id, &[])
     }
 
-    fn open_dataset_with_id_and_name<M: MessageAction + Default + 'static>(&mut self, id: DatasetId, name: &[u8]) -> Result<Dataset<Config, M>> {
+    fn open_dataset_with_id_and_name<M: MessageAction + Default + 'static>(
+        &mut self,
+        id: DatasetId,
+        name: &[u8],
+    ) -> Result<Dataset<Config, M>> {
         let ds_data = fetch_ds_data(&self.root_tree, id)?;
         if self.open_datasets.contains_key(&id) {
             bail!(ErrorKind::InUse)
@@ -399,13 +406,12 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         Ok(())
     }
 
-
     pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg<ObjectRef>>) {
         for node in self.tree.node_iter() {
-            tx.send(ProfileMsg::Discover(ObjectRef::Unmodified(node))).expect("Message receiver has been dropped. Unrecoverable.");
+            tx.send(ProfileMsg::Discover(ObjectRef::Unmodified(node)))
+                .expect("Message receiver has been dropped. Unrecoverable.");
         }
     }
 }
+use crate::{database::ObjectRef, migration::ProfileMsg};
 use crossbeam_channel::Sender;
-use crate::migration::ProfileMsg;
-use crate::database::ObjectRef;

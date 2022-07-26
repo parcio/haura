@@ -6,7 +6,9 @@ use super::{
 use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef, impls::ObjectPointer},
+    data_management::{
+        impls::ObjectPointer, Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef,
+    },
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
     tree::MessageAction,
@@ -14,7 +16,13 @@ use crate::{
 };
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
-use std::{borrow::Borrow, marker::PhantomData, mem, ops::{RangeBounds, Deref}, collections::VecDeque};
+use std::{
+    borrow::Borrow,
+    collections::VecDeque,
+    marker::PhantomData,
+    mem,
+    ops::{Deref, RangeBounds},
+};
 
 #[derive(Debug)]
 enum FillUpResult {
@@ -481,7 +489,6 @@ where
         trace!("sync: Finished write_back");
         Ok(obj_ptr)
     }
-
 }
 
 impl<X, R, M, I> Tree<X, M, I>
@@ -491,12 +498,15 @@ where
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
-
     /// An iterator returning all [ObjectPointer]s of a specified tree.
     /// CAUTION: While build lazily the consumtion of this iterator implies hevay IO work on large trees as nodes up until the leaves (excluded) are read.
     /// This can contain quite a substantial part of data but on the lesser side of the bulk of the data.
-    pub fn node_iter<'a>(&'a self) -> TreeIterator<'a, X,R,M,I> {
-        TreeIterator { tree: self, depth: self.depth().unwrap(), node: vec![(None, Some(self.get_root_node().unwrap()))].into() }
+    pub fn node_iter<'a>(&'a self) -> TreeIterator<'a, X, R, M, I> {
+        TreeIterator {
+            tree: self,
+            depth: self.depth().unwrap(),
+            node: vec![(None, Some(self.get_root_node().unwrap()))].into(),
+        }
     }
 }
 
@@ -509,7 +519,10 @@ where
 {
     tree: &'a Tree<X, M, I>,
     depth: u32,
-    node: VecDeque<(Option<X::ObjectPointer>, Option<<X as HandlerDml>::CacheValueRef>)>,
+    node: VecDeque<(
+        Option<X::ObjectPointer>,
+        Option<<X as HandlerDml>::CacheValueRef>,
+    )>,
 }
 
 impl<'a, X, R, M, I> Iterator for TreeIterator<'a, X, R, M, I>
@@ -528,7 +541,11 @@ where
                 debug!("Level of node {}", n.level());
                 debug!("Total depth {}", self.depth);
                 if let Some(iter) = n.child_pointer_iter() {
-                    for (node, ptr) in iter.filter_map(|elem| elem.read().get_unmodified().and_then(|np| Some((elem, np.clone()))) ) {
+                    for (node, ptr) in iter.filter_map(|elem| {
+                        elem.read()
+                            .get_unmodified()
+                            .and_then(|np| Some((elem, np.clone())))
+                    }) {
                         if n.level() >= self.depth - 1 {
                             self.node.push_back((Some(ptr), None));
                         } else {
@@ -543,11 +560,9 @@ where
                     return self.next();
                 }
                 objptr
-            },
+            }
             // valid object ptr & invalid node (leaf)
-            Some((objptr, None)) => {
-                objptr
-            },
+            Some((objptr, None)) => objptr,
             _ => None,
         }
     }

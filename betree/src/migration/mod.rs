@@ -21,9 +21,7 @@ pub enum MigrationPolicies {
 }
 
 impl MigrationPolicies {
-    pub(crate) fn construct<
-        C: DatabaseBuilder,
-    >(
+    pub(crate) fn construct<C: DatabaseBuilder>(
         self,
         rx: Receiver<ProfileMsg<crate::database::ObjectRef>>,
         db: Arc<RwLock<Database<C>>>,
@@ -63,7 +61,11 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
     type ObjectReference;
     type Message;
 
-    fn build(rx: Receiver<Self::Message>, db: Arc<RwLock<Database<C>>>, config: MigrationConfig) -> Self;
+    fn build(
+        rx: Receiver<Self::Message>,
+        db: Arc<RwLock<Database<C>>>,
+        config: MigrationConfig,
+    ) -> Self;
 
     /// Perform all available operations on a preset storage tier.
     fn action(&self, storage_tier: u8) -> Result<()>;
