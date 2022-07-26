@@ -528,16 +528,17 @@ where
                 debug!("Level of node {}", n.level());
                 debug!("Total depth {}", self.depth);
                 if let Some(iter) = n.child_pointer_iter() {
-                    for node_pointer in iter {
-                        let ptr = node_pointer.read().get_unmodified().unwrap().clone();
+                    for (node, ptr) in iter.filter_map(|elem| elem.read().get_unmodified().and_then(|np| Some((elem, np.clone()))) ) {
                         if n.level() >= self.depth - 1 {
                             self.node.push_back((Some(ptr), None));
                         } else {
-                            let node = self.tree.get_node(node_pointer).expect("DEBUGGING");
-                            self.node.push_back((Some(ptr), Some(node)));
+                            if let Ok(node) = self.tree.get_node(node) {
+                                self.node.push_back((Some(ptr), Some(node)));
+                            }
                         }
                     }
                 }
+                // Prevent early none (for root)
                 if let None = &objptr {
                     return self.next();
                 }
