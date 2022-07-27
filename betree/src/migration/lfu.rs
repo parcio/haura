@@ -12,7 +12,7 @@ use crate::{
     Database,
 };
 
-use super::{MigrationConfig, ProfileMsg};
+use super::{MigrationConfig, ProfileMsg, OpInfo};
 
 const FREQ_LEN: usize = 10;
 
@@ -35,6 +35,11 @@ struct LeafInfo {
 impl LeafInfo {
     fn mid_mut(&self) -> ObjectRef {
         self.mid.clone()
+    }
+}
+
+impl<C: DatabaseBuilder> Lfu<C> {
+    fn update_entry(&mut self, msg: ProfileMsg<ObjectRef>, info: OpInfo<ObjectRef>) {
     }
 }
 
@@ -79,45 +84,63 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
     }
 
     fn update(&mut self) -> super::errors::Result<()> {
+
+        let update_entry = move |leafs: &mut [HashMap<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES], info: OpInfo<ObjectRef>, msg: ProfileMsg<ObjectRef>| {
+            if let Some(entry) = leafs[info.storage_tier as usize]
+                .get_mut(&info.mid.get_unmodified().unwrap().offset())
+            {
+                entry.msgs.push_front(msg);
+                entry.msgs.truncate(FREQ_LEN);
+                // Only classify as soon as enough entries are collected
+                if let (Some(first), Some(last)) =
+                    (entry.msgs.get(0), entry.msgs.get(FREQ_LEN - 1))
+                {
+                    match (first, last) {
+                        (ProfileMsg::Fetch(f), ProfileMsg::Fetch(l))
+                        | (ProfileMsg::Fetch(f), ProfileMsg::Write(l))
+                        | (ProfileMsg::Write(f), ProfileMsg::Fetch(l))
+                        | (ProfileMsg::Write(f), ProfileMsg::Write(l)) => {
+                            entry.freq = FREQ_LEN as f32
+                                / (l.time
+                                    .duration_since(f.time)
+                                    .expect("Events not ordered"))
+                                .as_secs_f32();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        };
+
         // Consume available messages
         for msg in self.rx.try_iter() {
             match msg.clone() {
                 ProfileMsg::Fetch(info) | ProfileMsg::Write(info) => {
                     // Based on the message type we can guarantee that this will only contain Unmodified references.
-                    if let Some(entry) = self.leafs[info.storage_tier as usize]
-                        .get_mut(&info.mid.get_unmodified().unwrap().offset())
+                    if self.leafs[info.storage_tier as usize].contains_key(&info.mid.get_unmodified().unwrap().offset())
                     {
-                        // TODO: Move entry on moving object pointer
-                        entry.msgs.push_front(msg);
-                        entry.msgs.truncate(FREQ_LEN);
-                        // Only classify as soon as enough entries are collected
-                        if let (Some(first), Some(last)) =
-                            (entry.msgs.get(0), entry.msgs.get(FREQ_LEN - 1))
-                        {
-                            match (first, last) {
-                                (ProfileMsg::Fetch(f), ProfileMsg::Fetch(l))
-                                | (ProfileMsg::Fetch(f), ProfileMsg::Write(l))
-                                | (ProfileMsg::Write(f), ProfileMsg::Fetch(l))
-                                | (ProfileMsg::Write(f), ProfileMsg::Write(l)) => {
-                                    entry.freq = FREQ_LEN as f32
-                                        / (l.time
-                                            .duration_since(f.time)
-                                            .expect("Events not ordered"))
-                                        .as_secs_f32();
-                                }
-                                _ => {}
-                            }
-                        }
+                        update_entry(&mut self.leafs, info, msg);
                     } else {
-                        self.leafs[info.storage_tier as usize].insert(
-                            info.mid.get_unmodified().unwrap().offset(),
-                            LeafInfo {
-                                freq: 0.0,
-                                msgs: vec![msg].into(),
-                                info: info.mid.get_unmodified().unwrap().info(),
-                                mid: info.mid,
+                        match info.previous_mid {
+                            Some(mid) => {
+                                let offset = mid.get_unmodified().unwrap().offset();
+                                if let Some(previous_value) = self.leafs[info.storage_tier as usize].remove(&offset) {
+                                    self.leafs[info.storage_tier as usize].insert(info.mid.get_unmodified().unwrap().offset(), previous_value);
+                                }
+                                update_entry(&mut self.leafs, info, msg);
                             },
-                        );
+                            None => {
+                                self.leafs[info.storage_tier as usize].insert(
+                                    info.mid.get_unmodified().unwrap().offset(),
+                                    LeafInfo {
+                                        freq: 0.0,
+                                        msgs: vec![msg].into(),
+                                        info: info.mid.get_unmodified().unwrap().info(),
+                                        mid: info.mid,
+                                    },
+                                );
+                            },
+                        }
                     }
                 }
                 ProfileMsg::Remove(mid) => {

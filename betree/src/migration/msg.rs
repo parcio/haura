@@ -31,7 +31,7 @@ pub trait ConstructReport<M: Clone> {
     fn build_fetch(info: OpInfo<M>) -> Self;
     fn build_write(info: OpInfo<M>) -> Self;
     fn fetch(mid: M, size: Block<u32>, storage_tier: u8) -> Self;
-    fn write(mid: M, size: Block<u32>, storage_tier: u8) -> Self;
+    fn write(mid: M, size: Block<u32>, storage_tier: u8, previous_mid: Option<M>) -> Self;
     fn remove(mid: M) -> Self;
 }
 
@@ -67,16 +67,18 @@ impl<M: Clone> ConstructReport<M> for ProfileMsg<M> {
             storage_tier,
             object: None,
             time: SystemTime::now(),
+            previous_mid: None,
         })
     }
 
-    fn write(mid: M, size: Block<u32>, storage_tier: u8) -> Self {
+    fn write(mid: M, size: Block<u32>, storage_tier: u8, previous_mid: Option<M>) -> Self {
         Self::build_write(OpInfo {
             mid,
             size,
             storage_tier,
             object: None,
             time: SystemTime::now(),
+            previous_mid,
         })
     }
 
@@ -156,4 +158,5 @@ pub struct OpInfo<M: Clone> {
     pub(crate) storage_tier: u8,
     pub(crate) object: Option<ObjectInfo>,
     pub(crate) time: SystemTime,
+    pub(crate) previous_mid: Option<M>,
 }

@@ -45,9 +45,9 @@ pub enum ObjectKey<G> {
 // for now
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ObjectRef<P> {
-    Unmodified(P),
-    Modified(ModifiedObjectId),
-    InWriteback(ModifiedObjectId),
+    Unmodified(P, Option<P>),
+    Modified(ModifiedObjectId, Option<P>),
+    InWriteback(ModifiedObjectId, Option<P>),
 }
 
 impl<D, I, G> super::ObjectRef for ObjectRef<ObjectPointer<D, I, G>>
@@ -59,7 +59,7 @@ where
 {
     type ObjectPointer = ObjectPointer<D, I, G>;
     fn get_unmodified(&self) -> Option<&ObjectPointer<D, I, G>> {
-        if let ObjectRef::Unmodified(ref p) = self {
+        if let ObjectRef::Unmodified(ref p, _) = self {
             Some(p)
         } else {
             None
@@ -70,12 +70,12 @@ where
 impl<D, I, G: Copy> ObjectRef<ObjectPointer<D, I, G>> {
     fn as_key(&self) -> ObjectKey<G> {
         match *self {
-            ObjectRef::Unmodified(ref ptr) => ObjectKey::Unmodified {
+            ObjectRef::Unmodified(ref ptr, _) => ObjectKey::Unmodified {
                 offset: ptr.offset,
                 generation: ptr.generation,
             },
-            ObjectRef::Modified(mid) => ObjectKey::Modified(mid),
-            ObjectRef::InWriteback(mid) => ObjectKey::InWriteback(mid),
+            ObjectRef::Modified(mid, _) => ObjectKey::Modified(mid),
+            ObjectRef::InWriteback(mid, _) => ObjectKey::InWriteback(mid),
         }
     }
 }
@@ -91,8 +91,8 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
 
     fn correct_preference(&self) -> StoragePreference {
         match self {
-            ObjectRef::Unmodified(p) => p.correct_preference(),
-            ObjectRef::Modified(mid) | ObjectRef::InWriteback(mid) => mid.1,
+            ObjectRef::Unmodified(p,_) => p.correct_preference(),
+            ObjectRef::Modified(mid, _) | ObjectRef::InWriteback(mid, _) => mid.1,
         }
     }
 }
@@ -109,13 +109,13 @@ impl<P: Serialize> Serialize for ObjectRef<P> {
         S: Serializer,
     {
         match *self {
-            ObjectRef::Modified(_) => Err(S::Error::custom(
+            ObjectRef::Modified(..) => Err(S::Error::custom(
                 "ObjectRef: Tried to serialize a modified ObjectRef",
             )),
-            ObjectRef::InWriteback(_) => Err(S::Error::custom(
+            ObjectRef::InWriteback(..) => Err(S::Error::custom(
                 "ObjectRef: Tried to serialize a modified ObjectRef which is currently written back",
             )),
-            ObjectRef::Unmodified(ref ptr) => ptr.serialize(serializer),
+            ObjectRef::Unmodified(ref ptr, _) => ptr.serialize(serializer),
         }
     }
 }
@@ -128,11 +128,11 @@ where
     where
         E: Deserializer<'de>,
     {
-        ObjectPointer::<D, I, G>::deserialize(deserializer).map(ObjectRef::Unmodified)
+        ObjectPointer::<D, I, G>::deserialize(deserializer).map(|p| ObjectRef::Unmodified(p, None))
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ObjectPointer<D, I, G> {
     decompression_tag: DecompressionTag,
     checksum: D,
@@ -169,7 +169,7 @@ impl<D: StaticSize, I: StaticSize, G: StaticSize> StaticSize for ObjectPointer<D
 
 impl<D, I, G: Copy> From<ObjectPointer<D, I, G>> for ObjectRef<ObjectPointer<D, I, G>> {
     fn from(ptr: ObjectPointer<D, I, G>) -> Self {
-        ObjectRef::Unmodified(ptr)
+        ObjectRef::Unmodified(ptr, None)
     }
 }
 
@@ -312,7 +312,15 @@ where
             cache.get(&ObjectKey::Modified(mid), false).unwrap()
         };
         let obj = CacheValueRef::write(entry);
-        if let ObjectRef::Unmodified(ptr) = replace(or, ObjectRef::Modified(mid)) {
+        let old_ptr = {
+            // Rescue old ptr position to rewind OR
+            match &or {
+                ObjectRef::Unmodified(_, old) => old.clone(),
+                _ => None,
+            }
+        };
+
+        if let ObjectRef::Unmodified(ptr, _) = replace(or, ObjectRef::Modified(mid, old_ptr)) {
             self.copy_on_write(ptr);
         }
         Ok(Some(obj))
@@ -325,17 +333,17 @@ where
     ///     - Previous eviction after write back (`InWriteback(_)`) Will change
     ///       `or` to `Unmodified(_)`.
     fn fix_or(&self, or: &mut <Self as DmlBase>::ObjectRef) {
-        match *or {
-            ObjectRef::Unmodified(_) => unreachable!(),
-            ObjectRef::Modified(mid) => {
+        match or {
+            ObjectRef::Unmodified(..) => unreachable!(),
+            ObjectRef::Modified(mid, ptr) => {
                 debug!("{mid:?} moved to InWriteback");
-                *or = ObjectRef::InWriteback(mid);
+                *or = ObjectRef::InWriteback(*mid, ptr.clone());
             }
-            ObjectRef::InWriteback(mid) => {
+            ObjectRef::InWriteback(mid, old) => {
                 // The object must have been written back recently.
                 debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(&mid).unwrap();
-                *or = ObjectRef::Unmodified(ptr);
+                *or = ObjectRef::Unmodified(ptr, old.clone());
             }
         }
     }
@@ -356,7 +364,7 @@ where
             &self.report_tx,
         ) {
             (CopyOnWriteEvent::Removed, Some(tx)) => {
-                tx.send(MSG::remove(ObjectRef::Unmodified(obj_ptr)))
+                tx.send(MSG::remove(ObjectRef::Unmodified(obj_ptr, None)))
                     .expect("Channel dead");
             }
             _ => {}
@@ -441,7 +449,7 @@ where
                 ObjectKey::Modified(_) => object
                     .for_each_child(|or| {
                         let is_unmodified = loop {
-                            if let ObjectRef::Unmodified(_) = *or {
+                            if let ObjectRef::Unmodified(..) = *or {
                                 break true;
                             }
                             if cache_contains_key(&or.as_key()) {
@@ -481,7 +489,11 @@ where
         drop(cache);
         let object = CacheValueRef::read(entry);
 
-        self.handle_write_back(object, mid, true)?;
+        // TODO: We might lose information here if the node was previously
+        // written to the disk, we assume it here to be unique and not already
+        // present, though this might  be wrong. To fix this the ObjectKey needs
+        // to be expanded to accomodate the previous location.
+        self.handle_write_back(object, mid, true, None)?;
         Ok(())
     }
 
@@ -490,6 +502,7 @@ where
         object: <Self as super::HandlerDml>::CacheValueRef,
         mid: ModifiedObjectId,
         evict: bool,
+        previous_location: Option<<Self as DmlBase>::ObjectPointer>,
     ) -> Result<<Self as DmlBase>::ObjectPointer, Error> {
         let object_size = {
             #[cfg(debug_assertions)]
@@ -590,13 +603,13 @@ where
             self.copy_on_write(obj_ptr.clone());
         }
 
-        // TODO: Report write event
         if let Some(report_tx) = &self.report_tx {
             report_tx
                 .send(MSG::write(
-                    ObjectRef::Unmodified(obj_ptr.clone()),
+                    ObjectRef::Unmodified(obj_ptr.clone(), previous_location.clone()),
                     size,
                     obj_ptr.offset.storage_class(),
+                    previous_location.map(|op| ObjectRef::Unmodified(op, None)),
                 ))
                 .expect("Channel dropped");
         }
@@ -746,7 +759,7 @@ where
     fn prepare_write_back(
         &self,
         mid: ModifiedObjectId,
-        dep_mids: &mut Vec<ModifiedObjectId>,
+        dep_mids: &mut Vec<(ModifiedObjectId, Option<<Self as super::DmlBase>::ObjectPointer>)>,
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRef>, ()> {
         trace!("prepare_write_back: Enter");
         loop {
@@ -766,13 +779,13 @@ where
                     let mut modified_children = false;
                     object
                         .for_each_child::<(), _>(|or| loop {
-                            let mid = match *or {
-                                ObjectRef::Unmodified(_) => break Ok(()),
-                                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid,
+                            let (mid, oldptr) = match or {
+                                ObjectRef::Unmodified(..) => break Ok(()),
+                                ObjectRef::InWriteback(mid, oldptr) | ObjectRef::Modified(mid, oldptr) => (*mid, oldptr.clone()),
                             };
                             if cache_contains_key(&or.as_key()) {
                                 modified_children = true;
-                                dep_mids.push(mid);
+                                dep_mids.push((mid, oldptr));
                                 break Ok(());
                             }
                             self.fix_or(or);
@@ -830,7 +843,7 @@ where
     }
 
     fn try_get_mut(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRefMut> {
-        if let ObjectRef::Modified(_) = *or {
+        if let ObjectRef::Modified(..) = *or {
             let result = {
                 let cache = self.cache.read();
                 cache.get(&or.as_key(), true)
@@ -848,7 +861,7 @@ where
                 drop(cache);
                 return Ok(CacheValueRef::read(entry));
             }
-            if let ObjectRef::Unmodified(ref ptr) = *or {
+            if let ObjectRef::Unmodified(ref ptr, ref old) = *or {
                 drop(cache);
 
                 self.fetch(ptr)?;
@@ -856,7 +869,7 @@ where
                 if let Some(report_tx) = &self.report_tx {
                     report_tx
                         .send(MSG::fetch(
-                            ObjectRef::Unmodified(ptr.clone()),
+                            ObjectRef::Unmodified(ptr.clone(), old.clone()),
                             ptr.size,
                             ptr.offset.storage_class(),
                         ))
@@ -898,7 +911,7 @@ where
         let key = ObjectKey::Modified(mid);
         let size = object.size();
         self.cache.write().insert(key, RwLock::new(object), size);
-        ObjectRef::Modified(mid)
+        ObjectRef::Modified(mid, None)
     }
 
     fn insert_and_get_mut(
@@ -918,7 +931,7 @@ where
             cache.insert(key, RwLock::new(object), size);
             cache.get(&key, false).unwrap()
         };
-        (CacheValueRef::write(entry), ObjectRef::Modified(mid))
+        (CacheValueRef::write(entry), ObjectRef::Modified(mid, None))
     }
 
     fn remove(&self, or: Self::ObjectRef) {
@@ -927,7 +940,7 @@ where
             // TODO
             Err(RemoveError::Pinned) => unimplemented!(),
         };
-        if let ObjectRef::Unmodified(ref ptr) = or {
+        if let ObjectRef::Unmodified(ref ptr, _) = or {
             self.copy_on_write(ptr.clone());
         }
     }
@@ -942,7 +955,7 @@ where
                 Err(RemoveError::Pinned) => unimplemented!(),
             };
         };
-        if let ObjectRef::Unmodified(ref ptr) = or {
+        if let ObjectRef::Unmodified(ref ptr, _) = or {
             self.copy_on_write(ptr.clone());
         }
         Ok(obj.into_inner())
@@ -983,13 +996,13 @@ where
         FO: DerefMut<Target = Self::ObjectRef>,
     {
         trace!("write_back: Enter");
-        let (object, mid) = loop {
+        let (object, mid, oldptr) = loop {
             trace!("write_back: Trying to acquire lock");
             let mut or = acquire_or_lock();
             trace!("write_back: Acquired lock");
-            let mid = match *or {
-                ObjectRef::Unmodified(ref p) => return Ok(p.clone()),
-                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid,
+            let (mid, oldptr) = match &*or {
+                ObjectRef::Unmodified(ref p, _) => return Ok(p.clone()),
+                ObjectRef::InWriteback(mid, oldptr) | ObjectRef::Modified(mid, oldptr) => (*mid, oldptr.clone()),
             };
             let mut mids = Vec::new();
 
@@ -1006,17 +1019,17 @@ where
                     trace!("write_back: Was Ok(None)");
                     self.fix_or(&mut or)
                 }
-                Ok(Some(object)) => break (object, mid),
+                Ok(Some(object)) => break (object, mid, oldptr),
                 Err(()) => {
                     trace!("write_back: Was Err");
                     drop(or);
-                    while let Some(&mid) = mids.last() {
+                    while let Some((mid, mid_oldptr)) = mids.last().cloned() {
                         trace!("write_back: Trying to prepare write back");
                         match self.prepare_write_back(mid, &mut mids) {
                             Ok(None) => {}
                             Ok(Some(object)) => {
                                 trace!("write_back: Was Ok Some");
-                                self.handle_write_back(object, mid, false).map_err(|err| {
+                                self.handle_write_back(object, mid, false, mid_oldptr).map_err(|err| {
                                     let mut cache = self.cache.write();
                                     cache
                                         .change_key::<(), _>(
@@ -1036,7 +1049,7 @@ where
             }
         };
         trace!("write_back: Leave");
-        self.handle_write_back(object, mid, false)
+        self.handle_write_back(object, mid, false, oldptr)
     }
 
     type Prefetch = Pin<
@@ -1051,8 +1064,8 @@ where
             return Ok(None);
         }
         Ok(match *or {
-            ObjectRef::Modified(_) | ObjectRef::InWriteback(_) => None,
-            ObjectRef::Unmodified(ref p) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
+            ObjectRef::Modified(..) | ObjectRef::InWriteback(..) => None,
+            ObjectRef::Unmodified(ref p, _) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
         })
     }
 
