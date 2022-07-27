@@ -408,7 +408,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
 
     pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg<ObjectRef>>) {
         for node in self.tree.node_iter() {
-            tx.send(ProfileMsg::Discover(ObjectRef::Unmodified(node)))
+            tx.send(ProfileMsg::Discover(ObjectRef::Unmodified(node, None)))
                 .expect("Message receiver has been dropped. Unrecoverable.");
         }
     }
