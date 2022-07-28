@@ -2,7 +2,7 @@ use crossbeam_channel::Receiver;
 use parking_lot::RwLock;
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::Arc, fmt::Display, any::Any,
 };
 
 use crate::{
@@ -30,6 +30,12 @@ struct LeafInfo {
     msgs: VecDeque<ProfileMsg<ObjectRef>>,
     mid: ObjectRef,
     info: DatasetId,
+}
+
+impl Display for LeafInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("LeafInfo {{ freq: {}, mid: {:?}, info: {:?}", self.freq, self.mid, self.info))
+    }
 }
 
 impl LeafInfo {
@@ -66,7 +72,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
             elem.1.freq < 0.25
         }) {
             let mut handle = selected.1.mid_mut();
-            let guard = self.db.write();
+            let guard = self.db.read();
             let dmu = guard.root_tree.dmu();
             let node = dmu.get_mut(&mut handle, selected.1.info).unwrap();
             // TODO: Update system preference of selected nodes
@@ -84,7 +90,6 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
     }
 
     fn update(&mut self) -> super::errors::Result<()> {
-
         let update_entry = move |leafs: &mut [HashMap<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES], info: OpInfo<ObjectRef>, msg: ProfileMsg<ObjectRef>| {
             if let Some(entry) = leafs[info.storage_tier as usize]
                 .get_mut(&info.mid.get_unmodified().unwrap().offset())
@@ -116,20 +121,25 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         for msg in self.rx.try_iter() {
             match msg.clone() {
                 ProfileMsg::Fetch(info) | ProfileMsg::Write(info) => {
+                    // debug!("Node added {:?}", info.mid.get_unmodified().unwrap().offset());
                     // Based on the message type we can guarantee that this will only contain Unmodified references.
                     if self.leafs[info.storage_tier as usize].contains_key(&info.mid.get_unmodified().unwrap().offset())
                     {
+                        // debug!("Known Diskoffset {:?}", info.mid.get_unmodified().unwrap());
                         update_entry(&mut self.leafs, info, msg);
                     } else {
+                        // warn!("Unknown Diskoffset {:?}", info.mid.get_unmodified().unwrap());
                         match info.previous_mid {
                             Some(mid) => {
                                 let offset = mid.get_unmodified().unwrap().offset();
                                 if let Some(previous_value) = self.leafs[info.storage_tier as usize].remove(&offset) {
+                                    debug!("Node has been moved. Moving entry..");
                                     self.leafs[info.storage_tier as usize].insert(info.mid.get_unmodified().unwrap().offset(), previous_value);
                                 }
                                 update_entry(&mut self.leafs, info, msg);
                             },
                             None => {
+                                // debug!("New Entry {:?}", info.mid.get_unmodified().unwrap());
                                 self.leafs[info.storage_tier as usize].insert(
                                     info.mid.get_unmodified().unwrap().offset(),
                                     LeafInfo {
@@ -139,12 +149,14 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                         mid: info.mid,
                                     },
                                 );
+                                // debug!("Map now has {} entries.", self.leafs[info.storage_tier as usize].len());
                             },
                         }
                     }
                 }
                 ProfileMsg::Remove(mid) => {
                     let offset = mid.get_unmodified().unwrap().offset();
+                    // debug!("Node will be removed {:?}", offset);
                     self.leafs[offset.storage_class() as usize].remove(&offset);
                 }
                 ProfileMsg::Discover(mid) => {
