@@ -41,8 +41,6 @@ pub enum ObjectKey<G> {
     InWriteback(ModifiedObjectId),
 }
 
-// TODO: Perhaps extend this with previous storage location, to keep track of the history of nodes in the auto migration feature
-// for now
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ObjectRef<P> {
     Unmodified(P, Option<P>),
@@ -300,6 +298,7 @@ where
         or: &mut <Self as DmlBase>::ObjectRef,
         info: H::Info,
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRefMut>, Error> {
+        debug!("Stealing {or:?}");
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
         let mid = ModifiedObjectId(mid, or.correct_preference());
         let entry = {
@@ -375,6 +374,7 @@ where
     /// cache.
     fn fetch(&self, op: &<Self as DmlBase>::ObjectPointer) -> Result<(), Error> {
         // FIXME: reuse decompression_state
+        debug!("Fetching {op:?}");
         let mut decompression_state = op.decompression_tag.new_decompression()?;
         let offset = op.offset;
         let generation = op.generation;
@@ -863,11 +863,12 @@ where
                 drop(cache);
                 return Ok(CacheValueRef::read(entry));
             }
-            if let ObjectRef::Unmodified(ref ptr, ref old) = *or {
+            if let ObjectRef::Unmodified(ref ptr, ref mut old) = *or {
                 drop(cache);
 
                 self.fetch(ptr)?;
-                // TODO: Report fetch to policies
+                // Modify the given reference to know for future accesses the old position
+                *old = Some(ptr.clone());
                 if let Some(report_tx) = &self.report_tx {
                     report_tx
                         .send(MSG::fetch(
