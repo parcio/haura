@@ -598,10 +598,6 @@ where
                 self.written_back.lock().insert(mid, obj_ptr.clone());
             }
         }
-        if !was_present {
-            // The object has been `stolen`.  Notify the handler.
-            self.copy_on_write(obj_ptr.clone());
-        }
 
         if let Some(report_tx) = &self.report_tx {
             report_tx
@@ -613,6 +609,12 @@ where
                 ))
                 .expect("Channel dropped");
         }
+
+        if !was_present {
+            // The object has been `stolen`.  Notify the handler.
+            self.copy_on_write(obj_ptr.clone());
+        }
+
         trace!("handle_write_back: Leaving");
         Ok(obj_ptr)
     }
