@@ -88,12 +88,14 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
         loop {
             std::thread::sleep(self.config().update_period);
             self.update()?;
-            let space_info = self.db().read().free_space_tier();
-            for (tier, _) in space_info.iter().enumerate().filter(|(_, info)| {
-                (info.free.as_u64() as f32 / info.total.as_u64() as f32)
-                    < (1.0 - self.config().migration_threshold.clamp(0.0, 1.0))
-            }) {
-                self.action(tier as u8)?;
+            if let Some(db) = self.db().try_read() {
+                let space_info = db.free_space_tier();
+                for (tier, _) in space_info.iter().enumerate().filter(|(_, info)| {
+                    (info.free.as_u64() as f32 / info.total.as_u64() as f32)
+                        < (1.0 - self.config().migration_threshold.clamp(0.0, 1.0))
+                }) {
+                    self.action(tier as u8)?;
+                }
             }
         }
     }
