@@ -253,7 +253,7 @@ impl data_management::Handler<ObjectRef> for Handler {
             self.free_space_tier[offset.storage_class() as usize]
                 .fetch_add(size.as_u64(), Ordering::Relaxed);
             self.delayed_messages.lock().push((key.into(), msg));
-            CopyOnWriteEvent::Preserved
+            CopyOnWriteEvent::Removed
         } else {
             // Add to dead list
             let key = &dead_list_key(dataset_id, self.current_generation.read(), offset) as &[_];
@@ -267,7 +267,7 @@ impl data_management::Handler<ObjectRef> for Handler {
 
             let msg = DefaultMessageAction::insert_msg(&data);
             self.delayed_messages.lock().push((key.into(), msg));
-            CopyOnWriteEvent::Removed
+            CopyOnWriteEvent::Preserved
         }
     }
 }
