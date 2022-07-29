@@ -32,7 +32,7 @@ use std::{
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct ModifiedObjectId(u64, StoragePreference);
+pub struct ModifiedObjectId(u64, StoragePreference, Option<DiskOffset>);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ObjectKey<G> {
@@ -126,6 +126,7 @@ where
     where
         E: Deserializer<'de>,
     {
+        // TODO: Unsure about this section in the current version
         ObjectPointer::<D, I, G>::deserialize(deserializer).map(|p| ObjectRef::Unmodified(p, None))
     }
 }
@@ -300,7 +301,14 @@ where
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRefMut>, Error> {
         debug!("Stealing {or:?}");
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
-        let mid = ModifiedObjectId(mid, or.correct_preference());
+        let old_ptr = {
+            // Rescue old ptr position to rewind OR
+            match &or {
+                ObjectRef::Unmodified(_, old) => old.clone(),
+                _ => None,
+            }
+        };
+        let mid = ModifiedObjectId(mid, or.correct_preference(), old_ptr.as_ref().map(|e| e.offset));
         let entry = {
             let mut cache = self.cache.write();
             let was_present = cache.force_change_key(&or.as_key(), ObjectKey::Modified(mid));
@@ -311,13 +319,6 @@ where
             cache.get(&ObjectKey::Modified(mid), false).unwrap()
         };
         let obj = CacheValueRef::write(entry);
-        let old_ptr = {
-            // Rescue old ptr position to rewind OR
-            match &or {
-                ObjectRef::Unmodified(_, old) => old.clone(),
-                _ => None,
-            }
-        };
 
         if let ObjectRef::Unmodified(ptr, _) = replace(or, ObjectRef::Modified(mid, old_ptr)) {
             self.copy_on_write(ptr);
@@ -489,11 +490,7 @@ where
         drop(cache);
         let object = CacheValueRef::read(entry);
 
-        // TODO: We might lose information here if the node was previously
-        // written to the disk, we assume it here to be unique and not already
-        // present, though this might  be wrong. To fix this the ObjectKey needs
-        // to be expanded to accomodate the previous location.
-        self.handle_write_back(object, mid, true, None)?;
+        self.handle_write_back(object, mid, true, mid.2)?;
         Ok(())
     }
 
@@ -502,7 +499,7 @@ where
         object: <Self as super::HandlerDml>::CacheValueRef,
         mid: ModifiedObjectId,
         evict: bool,
-        previous_location: Option<<Self as DmlBase>::ObjectPointer>,
+        previous_location: Option<DiskOffset>,
     ) -> Result<<Self as DmlBase>::ObjectPointer, Error> {
         let object_size = {
             #[cfg(debug_assertions)]
@@ -602,10 +599,10 @@ where
         if let Some(report_tx) = &self.report_tx {
             report_tx
                 .send(MSG::write(
-                    ObjectRef::Unmodified(obj_ptr.clone(), previous_location.clone()),
+                    ObjectRef::Unmodified(obj_ptr.clone(), None),
                     size,
                     obj_ptr.offset.storage_class(),
-                    previous_location.map(|op| ObjectRef::Unmodified(op, None)),
+                    previous_location,
                 ))
                 .expect("Channel dropped");
         }
@@ -909,6 +906,7 @@ where
         let mid = ModifiedObjectId(
             self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
             object.correct_preference(),
+            None
         );
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
@@ -925,6 +923,7 @@ where
         let mid = ModifiedObjectId(
             self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
             object.correct_preference(),
+            None
         );
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
@@ -1032,7 +1031,7 @@ where
                             Ok(None) => {}
                             Ok(Some(object)) => {
                                 trace!("write_back: Was Ok Some");
-                                self.handle_write_back(object, mid, false, mid_oldptr).map_err(|err| {
+                                self.handle_write_back(object, mid, false, mid_oldptr.map(|e| e.offset)).map_err(|err| {
                                     let mut cache = self.cache.write();
                                     cache
                                         .change_key::<(), _>(
@@ -1052,7 +1051,7 @@ where
             }
         };
         trace!("write_back: Leave");
-        self.handle_write_back(object, mid, false, oldptr)
+        self.handle_write_back(object, mid, false, oldptr.map(|e| e.offset))
     }
 
     type Prefetch = Pin<
