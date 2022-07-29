@@ -125,13 +125,12 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                     // Based on the message type we can guarantee that this will only contain Unmodified references.
                     if self.leafs[info.storage_tier as usize].contains_key(&info.mid.get_unmodified().unwrap().offset())
                     {
-                        // debug!("Known Diskoffset {:?}", info.mid.get_unmodified().unwrap());
+                        debug!("Known Diskoffset {:?}", info.mid.get_unmodified().unwrap());
                         update_entry(&mut self.leafs, info, msg);
                     } else {
-                        // warn!("Unknown Diskoffset {:?}", info.mid.get_unmodified().unwrap());
-                        match info.previous_mid {
-                            Some(mid) => {
-                                let offset = mid.get_unmodified().unwrap().offset();
+                        debug!("Unknown Diskoffset {:?}", info.mid.get_unmodified().unwrap());
+                        match info.p_disk_offset {
+                            Some(offset) => {
                                 if let Some(previous_value) = self.leafs[info.storage_tier as usize].remove(&offset) {
                                     debug!("Node has been moved. Moving entry..");
                                     self.leafs[info.storage_tier as usize].insert(info.mid.get_unmodified().unwrap().offset(), previous_value);
