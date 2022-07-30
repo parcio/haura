@@ -3,7 +3,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc, fmt::Display, any::Any,
+    sync::Arc, fmt::Display,
 };
 
 use crate::{
@@ -23,6 +23,7 @@ pub struct Lfu<C: DatabaseBuilder> {
     leafs: [HashMap<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
     rx: Receiver<ProfileMsg<ObjectRef>>,
     db: Arc<RwLock<Database<C>>>,
+    dmu: Arc<<C as DatabaseBuilder>::Dmu>,
     config: MigrationConfig<LfuConfig>,
 }
 
@@ -76,9 +77,11 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         db: Arc<RwLock<Database<C>>>,
         config: MigrationConfig<LfuConfig>,
     ) -> Self {
+        let dmu = Arc::clone(db.read().root_tree.dmu());
         Self {
             leafs: [(); NUM_STORAGE_CLASSES].map(|_| Default::default()),
             rx,
+            dmu,
             db,
             config,
         }
