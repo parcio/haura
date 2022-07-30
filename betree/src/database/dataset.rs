@@ -359,11 +359,8 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     }
 
     pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
-        if let Some(blocks) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
-            Ok(StorageInfo {
-                free: blocks,
-                total: Block(0),
-            })
+        if let Some(info) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
+            Ok(info)
         } else {
             bail!(ErrorKind::DoesNotExist)
         }

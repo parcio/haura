@@ -9,7 +9,6 @@ use betree_storage_stack::{
     storage_pool::{configuration, LeafVdev, TierConfiguration, Vdev},
     Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference,
 };
-
 use std::{
     env,
     io::{BufReader, Read},
@@ -785,6 +784,39 @@ fn space_accounting_smoke() {
     // assert_eq!(after[0].free.as_u64(), expected_free_size_after);
 }
 
+#[rstest]
+fn space_accounting_persistence(
+    file_backed_config: RwLockWriteGuard<'static, DatabaseConfiguration>,
+) {
+    let previous;
+    {
+        // Write some data and close again
+        let cfg = file_backed_config.clone();
+        let shared_db = Database::build_threaded(cfg).unwrap();
+        let mut db = shared_db.write();
+        previous = db.free_space_tier();
+        let ds = db
+            .open_named_object_store(b"test", StoragePreference::NONE)
+            .unwrap();
+        let obj = ds.open_or_create_object(b"foobar").unwrap();
+        let buf = vec![42u8; 1 * TO_MEBIBYTE];
+        dbg!(obj.write_at(&buf, 0).unwrap());
+        db.close_object_store(ds);
+        db.sync().unwrap();
+    }
+    log::info!("Opening Again");
+    let after;
+    {
+        // Open and initialize from superblock
+        let mut cfg = file_backed_config.clone();
+        cfg.access_mode = AccessMode::OpenIfExists;
+        let shared_db = Database::build_threaded(cfg).unwrap();
+        let db = shared_db.write();
+        after = db.free_space_tier();
+    }
+    assert!(previous[0].free > after[0].free);
+}
+
 #[fixture]
 fn file_backed_config() -> RwLockWriteGuard<'static, DatabaseConfiguration> {
     configs::migration_config_file_backed()
@@ -794,11 +826,10 @@ fn file_backed_config() -> RwLockWriteGuard<'static, DatabaseConfiguration> {
 fn migration_policy_object_pointer_iterator_smoke(
     file_backed_config: RwLockWriteGuard<'static, DatabaseConfiguration>,
 ) {
-    env_logger::init();
+    // env_logger::init();
     {
         // Opening and writing a miniscule amount of data
         let cfg = file_backed_config.clone();
-        dbg!(cfg.access_mode);
         let shared_db = Database::build_threaded(cfg).unwrap();
         let mut db = shared_db.write();
         let ds = db

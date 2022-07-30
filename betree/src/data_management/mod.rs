@@ -8,7 +8,7 @@ use crate::{
     size::{Size, StaticSize},
     storage_pool::DiskOffset,
     vdev::Block,
-    StoragePreference,
+    StoragePreference, database::StorageInfo,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use stable_deref_trait::StableDeref;
@@ -222,9 +222,9 @@ pub trait Handler<R: ObjectRef>: HandlerTypes {
         R::ObjectPointer: Serialize + DeserializeOwned;
 
     /// Returns the amount of free space (in blocks) for a given top-level vdev.
-    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<Block<u64>>;
+    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo>;
     /// Returns the amount of free space (in blocks) over a whole storage tier.
-    fn get_free_space_tier(&self, class: u8) -> Option<Block<u64>>;
+    fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo>;
     /// Will be called when an object has been made mutable.
     /// May be used to mark the data blocks for delayed deallocation.
     fn copy_on_write(
