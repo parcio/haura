@@ -6,13 +6,14 @@ use betree_storage_stack::{
     compression::CompressionConfiguration,
     database::AccessMode,
     object::{ObjectHandle, ObjectStore},
-    storage_pool::{LeafVdev, TierConfiguration, Vdev},
+    storage_pool::{configuration, LeafVdev, TierConfiguration, Vdev},
     Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference,
 };
 
 use std::{
     env,
     io::{BufReader, Read},
+    sync::RwLockWriteGuard,
 };
 
 use rand::{prelude::ThreadRng, Rng, SeedableRng};
@@ -784,13 +785,21 @@ fn space_accounting_smoke() {
     // assert_eq!(after[0].free.as_u64(), expected_free_size_after);
 }
 
+#[fixture]
+fn file_backed_config() -> RwLockWriteGuard<'static, DatabaseConfiguration> {
+    configs::migration_config_file_backed()
+}
+
 #[rstest]
-fn object_pointer_iterator_smoke() {
+fn migration_policy_object_pointer_iterator_smoke(
+    file_backed_config: RwLockWriteGuard<'static, DatabaseConfiguration>,
+) {
     env_logger::init();
-    let config = configs::migration_config_file_backed();
     {
         // Opening and writing a miniscule amount of data
-        let shared_db = Database::build_threaded(config.clone()).unwrap();
+        let cfg = file_backed_config.clone();
+        dbg!(cfg.access_mode);
+        let shared_db = Database::build_threaded(cfg).unwrap();
         let mut db = shared_db.write();
         let ds = db
             .open_named_object_store(b"test", StoragePreference::NONE)
@@ -805,7 +814,9 @@ fn object_pointer_iterator_smoke() {
     log::info!("Opening Again");
     {
         // Trying to fetch information of previous state and reinit policies, using tree iterator
-        let shared_db = Database::build_threaded(config).unwrap();
+        let mut cfg = file_backed_config.clone();
+        cfg.access_mode = AccessMode::OpenIfExists;
+        let shared_db = Database::build_threaded(cfg).unwrap();
         let mut db = shared_db.write();
         let ds = db
             .open_named_object_store(b"test", StoragePreference::NONE)
@@ -816,10 +827,7 @@ fn object_pointer_iterator_smoke() {
         // for chunk in obj.read_all_chunks().unwrap() {
         //     log::debug!("{:?}", chunk);
         // }
-        let res = vec![42u8; 42 * TO_MEBIBYTE];
-        dbg!(res[0]);
-        dbg!(&buf);
-        assert_eq!(buf[0], res[0]);
+        assert_eq!(buf[0], 42);
     }
 }
 
@@ -845,7 +853,7 @@ fn migration_policy_smoke() {
         db.sync().unwrap();
     }
     // Rest to let all messages be updated and synchronization proceed
-    std::thread::sleep(std::time::Duration::from_secs(20));
+    std::thread::sleep(std::time::Duration::from_secs(5));
 }
 
 #[rstest]
@@ -855,9 +863,7 @@ fn migration_policy_single_node() {
     let ds;
     {
         let mut db = shared_db.write();
-        ds = db
-            .open_or_create_dataset(b"test")
-            .unwrap();
+        ds = db.open_or_create_dataset(b"test").unwrap();
         db.sync().unwrap();
     }
 
@@ -880,5 +886,5 @@ fn migration_policy_single_node() {
     sync();
     ds.upsert(b"foobar".to_vec(), &[48; 32], 6).unwrap();
     sync();
-    std::thread::sleep(std::time::Duration::from_secs(20));
+    std::thread::sleep(std::time::Duration::from_secs(5));
 }
