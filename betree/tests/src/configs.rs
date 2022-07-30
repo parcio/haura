@@ -27,6 +27,7 @@ pub(crate) fn migration_config() -> DatabaseConfiguration {
             grace_period: std::time::Duration::from_millis(0),
             migration_threshold: 0.7,
             update_period: std::time::Duration::from_millis(100),
+            policy_config: Default::default(),
         })),
         ..Default::default()
     }
@@ -54,6 +55,7 @@ pub(crate) fn migration_config_file_backed() -> RwLockWriteGuard<'static, Databa
                 grace_period: std::time::Duration::from_millis(0),
                 migration_threshold: 0.7,
                 update_period: std::time::Duration::from_millis(100),
+                policy_config: Default::default(),
             })),
             access_mode: AccessMode::AlwaysCreateNew,
             ..Default::default()
