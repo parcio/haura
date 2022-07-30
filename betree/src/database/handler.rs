@@ -1,6 +1,6 @@
 use super::{
     dead_list_key, errors::*, DatasetId, DeadListData, Generation, Object, ObjectPointer,
-    ObjectRef, TreeInner,
+    ObjectRef, TreeInner, AtomicStorageInfo, StorageInfo,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
@@ -43,8 +43,8 @@ pub struct Handler {
         RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
-    pub(crate) free_space: HashMap<(u8, u16), AtomicU64>,
-    pub(crate) free_space_tier: Vec<AtomicU64>,
+    pub(crate) free_space: HashMap<(u8, u16), AtomicStorageInfo>,
+    pub(crate) free_space_tier: Vec<AtomicStorageInfo>,
     pub(crate) delayed_messages: Mutex<Vec<(Box<[u8]>, SlicedCowBytes)>>,
     pub(crate) last_snapshot_generation: RwLock<HashMap<DatasetId, Generation>>,
     pub(crate) allocations: AtomicU64,
@@ -145,16 +145,20 @@ impl data_management::Handler<ObjectRef> for Handler {
                 self.free_space
                     .get(&(offset.storage_class(), offset.disk_id()))
                     .expect("Could not find disk id in storage class")
+                    .free
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
                 self.free_space_tier[offset.storage_class() as usize]
+                    .free
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
             }
             Action::Allocate => {
                 self.free_space
                     .get(&(offset.storage_class(), offset.disk_id()))
                     .expect("Could not find disk id in storage class")
+                    .free
                     .fetch_sub(size.as_u64(), Ordering::Relaxed);
                 self.free_space_tier[offset.storage_class() as usize]
+                    .free
                     .fetch_sub(size.as_u64(), Ordering::Relaxed);
             }
         };
@@ -208,16 +212,16 @@ impl data_management::Handler<ObjectRef> for Handler {
         Ok(allocator)
     }
 
-    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<Block<u64>> {
+    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo> {
         self.free_space
             .get(&(class, disk_id))
-            .map(|elem| Block(elem.load(Ordering::Relaxed)))
+            .map(|elem| elem.into())
     }
 
-    fn get_free_space_tier(&self, class: u8) -> Option<Block<u64>> {
+    fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo> {
         self.free_space_tier
             .get(class as usize)
-            .map(|elem| Block(elem.load(Ordering::Relaxed)))
+            .map(|elem| elem.into())
     }
 
     /// Marks blocks from removed objects to be removed if they are no longer needed.
@@ -249,8 +253,10 @@ impl data_management::Handler<ObjectRef> for Handler {
             self.free_space
                 .get(&(offset.storage_class(), offset.disk_id()))
                 .expect("Could not fetch disk id from storage class")
+                .free
                 .fetch_add(size.as_u64(), Ordering::Relaxed);
             self.free_space_tier[offset.storage_class() as usize]
+                .free
                 .fetch_add(size.as_u64(), Ordering::Relaxed);
             self.delayed_messages.lock().push((key.into(), msg));
             CopyOnWriteEvent::Removed

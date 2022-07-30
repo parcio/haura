@@ -1,9 +1,9 @@
-use super::errors::*;
+use super::{errors::*, StorageInfo};
 use crate::{
     buffer::{Buf, BufWrite},
     checksum::{Builder, State, XxHash, XxHashBuilder},
     size::StaticSize,
-    storage_pool::StoragePoolLayer,
+    storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
 };
 use bincode::{deserialize, serialize_into};
@@ -17,7 +17,8 @@ static MAGIC: &[u8] = b"HEAFSv3\0\n";
 #[derive(Serialize, Deserialize)]
 pub struct Superblock<P> {
     magic: [u8; 9],
-    root_ptr: P,
+    pub(crate) root_ptr: P,
+    pub(crate) tiers: [StorageInfo; NUM_STORAGE_CLASSES],
 }
 
 fn checksum(b: &[u8]) -> XxHash {
@@ -32,7 +33,7 @@ impl<P: DeserializeOwned> Superblock<P> {
     /// a specific version byte sequence (currently `b"HEAFSv3\0\n", but
     /// this sequence is explicitly not part of the stability guarantees),
     /// or the contained checksum doesn't match the actual checksum of the superblock.
-    pub fn unpack(b: &[u8]) -> Result<P> {
+    pub fn unpack(b: &[u8]) -> Result<Superblock<P>> {
         let checksum_size = XxHash::static_size();
         let correct_checksum = checksum(&b[..b.len() - checksum_size]);
         let actual_checksum = deserialize(&b[b.len() - checksum_size..])?;
@@ -43,7 +44,7 @@ impl<P: DeserializeOwned> Superblock<P> {
         if this.magic != MAGIC {
             bail!("Invalid magic");
         }
-        Ok(this.root_ptr)
+        Ok(this)
     }
 }
 
@@ -52,22 +53,23 @@ impl Superblock<super::ObjectPointer> {
     /// of each top-level vdev, returning the newest one if multiple are found.
     pub fn fetch_superblocks<S: StoragePoolLayer>(
         pool: &S,
-    ) -> Result<Option<super::ObjectPointer>> {
+    ) -> Result<Option<Superblock<super::ObjectPointer>>> {
         let v1 = pool.read_raw(Block(1), Block(0))?;
         let v2 = pool.read_raw(Block(1), Block(1))?;
         Ok(v1
             .into_iter()
             .chain(v2)
             .filter_map(|sb_data| Self::unpack(&sb_data).ok())
-            .max_by_key(|ptr| ptr.generation()))
+            .max_by_key(|sb| sb.root_ptr.generation()))
     }
 
     /// Write a superblock to each top-level vdev.
     pub fn write_superblock<S: StoragePoolLayer>(
         pool: &S,
         ptr: &super::ObjectPointer,
+        tiers: &[StorageInfo; NUM_STORAGE_CLASSES],
     ) -> Result<()> {
-        let sb_data = Self::pack(ptr)?;
+        let sb_data = Self::pack(ptr, tiers)?;
         let sb_offset = if ptr.generation().0 & 1 == 0 {
             Block(0)
         } else {
@@ -87,12 +89,13 @@ impl Superblock<super::ObjectPointer> {
 }
 
 impl<P: Serialize> Superblock<P> {
-    fn pack(p: &P) -> Result<Buf> {
+    fn pack(p: &P, tiers: &[StorageInfo; NUM_STORAGE_CLASSES]) -> Result<Buf> {
         let mut data = BufWrite::with_capacity(Block(1));
         {
             let mut this = Superblock {
                 magic: [0; 9],
                 root_ptr: p,
+                tiers: *tiers,
             };
             this.magic.copy_from_slice(MAGIC);
             serialize_into(&mut data, &this)?;

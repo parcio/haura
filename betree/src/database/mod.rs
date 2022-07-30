@@ -241,27 +241,33 @@ impl DatabaseBuilder for DatabaseConfiguration {
             current_generation: SeqLock::new(Generation(1)),
             free_space: HashMap::from_iter((0..spu.storage_class_count()).flat_map(|class| {
                 (0..spu.disk_count(class)).map(move |disk_id| {
-                    (
-                        (class, disk_id),
-                        AtomicU64::new(
-                            spu.effective_free_size(
+                    let free = spu.effective_free_size(
                                 class,
                                 disk_id,
                                 spu.size_in_blocks(class, disk_id),
                             )
-                            .as_u64(),
-                        ),
+                            .as_u64();
+                    (
+                        (class, disk_id),
+                        AtomicStorageInfo {
+                            free: AtomicU64::new(free),
+                            total: AtomicU64::new(free),
+                        }
                     )
                 })
             })),
             // FIXME: This can be done much nicer
             free_space_tier: (0..spu.storage_class_count())
                 .map(|class| {
-                    AtomicU64::new((0..spu.disk_count(class)).fold(0, |acc, disk_id| {
+                    let free = (0..spu.disk_count(class)).fold(0, |acc, disk_id| {
                         acc + spu
                             .effective_free_size(class, disk_id, spu.size_in_blocks(class, disk_id))
                             .as_u64()
-                    }))
+                    });
+                    AtomicStorageInfo {
+                        free: AtomicU64::new(free),
+                        total: AtomicU64::new(free),
+                    }
                 })
                 .collect_vec(),
             delayed_messages: Mutex::new(Vec::new()),
@@ -318,7 +324,8 @@ impl DatabaseBuilder for DatabaseConfiguration {
             None
         };
 
-        if let Some(root_ptr) = root_ptr {
+        if let Some(sb) = root_ptr {
+            let root_ptr = sb.root_ptr;
             let tree = RootTree::open(
                 ROOT_DATASET_ID,
                 root_ptr.clone(),
@@ -326,6 +333,14 @@ impl DatabaseBuilder for DatabaseConfiguration {
                 dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
             );
+
+            // Update space accounting from last execution
+            for (class, info) in sb.tiers.iter().enumerate() {
+                let storage_info = tree.dmu().handler().free_space_tier.get(class).expect("Could not fetch valid storage class");
+                storage_info.free.store(info.free.as_u64(), Ordering::Release);
+                storage_info.total.store(info.total.as_u64(), Ordering::Release);
+            }
+
             *tree.dmu().handler().old_root_allocation.lock_write() =
                 Some((root_ptr.offset(), root_ptr.size()));
             tree.dmu()
@@ -574,7 +589,11 @@ impl<Config: DatabaseBuilder> Database<Config> {
         };
         let pool = self.root_tree.dmu().spl();
         pool.flush()?;
-        Superblock::<ObjectPointer>::write_superblock(pool, &root_ptr)?;
+        let mut info = [StorageInfo { free: Block(0), total: Block(0) }; NUM_STORAGE_CLASSES];
+        for class in 0..NUM_STORAGE_CLASSES {
+            info[class] = self.root_tree.dmu().handler().get_free_space_tier(class as u8).expect("Class hat to exist");
+        }
+        Superblock::<ObjectPointer>::write_superblock(pool, &root_ptr, &info)?;
         pool.flush()?;
         let handler = self.root_tree.dmu().handler();
         *handler.old_root_allocation.lock_write() = None;
@@ -591,14 +610,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
     /// Storage tier information for all available tiers. These are in order as in `storage_prefernce.as_u8()`
     pub fn free_space_tier(&self) -> Vec<StorageInfo> {
         (0..self.root_tree.dmu().spl().storage_class_count())
-            .map(|class| StorageInfo {
-                free: self
-                    .root_tree
-                    .dmu()
-                    .handler()
-                    .get_free_space_tier(class)
-                    .expect("Could not find expected class"),
-                total: Block(0u64),
+            .map(|class| {
+                 self.root_tree.dmu().handler().get_free_space_tier(class).unwrap()
             })
             .collect()
     }
@@ -610,13 +623,32 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 /// Space information representation for a singular storage tier.
 pub struct StorageInfo {
     /// Remaining free storage in blocks.
     pub free: Block<u64>,
     /// Total storage in blocks.
     pub total: Block<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+/// Atomic version of [StorageInfo].
+pub(crate) struct AtomicStorageInfo {
+    pub(crate) free: AtomicU64,
+    pub(crate) total: AtomicU64,
+}
+
+impl From<&AtomicStorageInfo> for StorageInfo {
+    fn from(info: &AtomicStorageInfo) -> Self {
+        Self { free: Block(info.free.load(Ordering::Relaxed)), total: Block(info.total.load(Ordering::Relaxed)) }
+    }
+}
+
+impl From<&StorageInfo> for AtomicStorageInfo {
+    fn from(info: &StorageInfo) -> Self {
+        Self { free: AtomicU64::new(info.free.as_u64()), total: AtomicU64::new(info.total.as_u64()) }
+    }
 }
 
 fn ss_key(ds_id: DatasetId, name: &[u8]) -> Vec<u8> {

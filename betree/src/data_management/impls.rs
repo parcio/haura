@@ -642,12 +642,13 @@ where
                 .handler
                 .get_free_space_tier(class)
                 .expect("Has to exist")
+                .free
                 .as_u64()
                 < size.as_u64()
             {
                 warn!(
                     "Storage tier {class} does not have enough space remaining. {} blocks of {}",
-                    self.handler.get_free_space_tier(class).unwrap().as_u64(),
+                    self.handler.get_free_space_tier(class).unwrap().free.as_u64(),
                     size.as_u64()
                 );
                 continue;
@@ -663,7 +664,8 @@ where
                         disk_id,
                         self.handler
                             .get_free_space(class, disk_id)
-                            .expect("We can be sure that this disk id exists."),
+                            .expect("We can be sure that this disk id exists.")
+                            .free,
                     )
                 })
                 .unwrap();
