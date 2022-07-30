@@ -9,15 +9,15 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::{data_management::ObjectRef, database::DatabaseBuilder, Database};
+use crate::{database::DatabaseBuilder, Database};
 
-use self::lfu::Lfu;
+use self::lfu::{Lfu, LfuConfig};
 
 /// Available policies for auto migrations.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 pub enum MigrationPolicies {
     /// Least frequently used, promote and demote nodes based on their usage in the current session.
-    Lfu(MigrationConfig),
+    Lfu(MigrationConfig<LfuConfig>),
 }
 
 impl MigrationPolicies {
@@ -35,23 +35,25 @@ impl MigrationPolicies {
 use std::time::Duration;
 
 /// Configuration type for [MigrationPolicy]
-/// TODO: Extend for specific policy configuration. Maybe as a trait? Or composed generic.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MigrationConfig {
+pub struct MigrationConfig<Config> {
     /// Time at start where operations are _only_ recorded. This may help in avoiding incorrect early migrations by depending on a larger historical data.
     pub grace_period: Duration,
     /// Threshold at which downwards migrations are considered. Or at which upwards migrations are blocked. Values are on a range of 0 to 1.
     pub migration_threshold: f32,
     /// Duration between consumption of operational messages. Enlarging this leads to greater memory usage, but reduces ongoing computational load.
     pub update_period: Duration,
+    /// Policy dependent configuration
+    pub policy_config: Config,
 }
 
-impl Default for MigrationConfig {
+impl<Config: Default> Default for MigrationConfig<Config> {
     fn default() -> Self {
         MigrationConfig {
             grace_period: Duration::from_secs(300),
             migration_threshold: 0.8,
             update_period: Duration::from_secs(30),
+            policy_config: Default::default(),
         }
     }
 }
@@ -60,11 +62,12 @@ impl Default for MigrationConfig {
 pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
     type ObjectReference;
     type Message;
+    type Config;
 
     fn build(
         rx: Receiver<Self::Message>,
         db: Arc<RwLock<Database<C>>>,
-        config: MigrationConfig,
+        config: MigrationConfig<Self::Config>,
     ) -> Self;
 
     /// Perform all available operations on a preset storage tier.
@@ -80,7 +83,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
     // Getters
     fn db(&self) -> &Arc<RwLock<Database<C>>>;
 
-    fn config(&self) -> &MigrationConfig;
+    fn config(&self) -> &MigrationConfig<Self::Config>;
 
     /// The main loop of the
     fn thread_loop(&mut self) -> Result<()> {
