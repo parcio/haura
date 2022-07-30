@@ -61,12 +61,6 @@ impl LeafInfo {
     }
 }
 
-impl<C: DatabaseBuilder> Lfu<C> {
-    fn update_entry(&mut self, msg: ProfileMsg<ObjectRef>, info: OpInfo<ObjectRef>) {
-    }
-}
-
-
 impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
     type ObjectReference = ObjectRef;
     type Message = ProfileMsg<Self::ObjectReference>;
