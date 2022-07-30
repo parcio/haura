@@ -1,5 +1,6 @@
 use crossbeam_channel::Receiver;
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc, fmt::Display, any::Any,
@@ -15,14 +16,29 @@ use crate::{
 use super::{MigrationConfig, ProfileMsg, OpInfo};
 
 const FREQ_LEN: usize = 10;
+const FREQ_LOWER_BOUND: f32 = 0.0001;
 
 /// Implementation of Least Frequently Used
-
 pub struct Lfu<C: DatabaseBuilder> {
     leafs: [HashMap<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
     rx: Receiver<ProfileMsg<ObjectRef>>,
     db: Arc<RwLock<Database<C>>>,
-    config: MigrationConfig,
+    config: MigrationConfig<LfuConfig>,
+}
+
+/// Lfu specific configuration details.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LfuConfig {
+    /// If any object falls below this threshold we might pick any of these to avoid sorting effort.
+    low_threshold: Option<f32>,
+    /// If any object falls above this mark we may upgrade it without further for other objects.
+    high_threshold: Option<f32>,
+}
+
+impl Default for LfuConfig {
+    fn default() -> Self {
+        Self { low_threshold: Some(FREQ_LOWER_BOUND), high_threshold: None }
+    }
 }
 
 struct LeafInfo {
@@ -49,14 +65,16 @@ impl<C: DatabaseBuilder> Lfu<C> {
     }
 }
 
+
 impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
     type ObjectReference = ObjectRef;
     type Message = ProfileMsg<Self::ObjectReference>;
+    type Config = LfuConfig;
 
     fn build(
         rx: Receiver<Self::Message>,
         db: Arc<RwLock<Database<C>>>,
-        config: MigrationConfig,
+        config: MigrationConfig<LfuConfig>,
     ) -> Self {
         Self {
             leafs: [(); NUM_STORAGE_CLASSES].map(|_| Default::default()),
@@ -85,7 +103,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         &self.db
     }
 
-    fn config(&self) -> &MigrationConfig {
+    fn config(&self) -> &MigrationConfig<LfuConfig> {
         &self.config
     }
 
