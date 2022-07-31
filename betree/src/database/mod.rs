@@ -241,18 +241,15 @@ impl DatabaseBuilder for DatabaseConfiguration {
             current_generation: SeqLock::new(Generation(1)),
             free_space: HashMap::from_iter((0..spu.storage_class_count()).flat_map(|class| {
                 (0..spu.disk_count(class)).map(move |disk_id| {
-                    let free = spu.effective_free_size(
-                                class,
-                                disk_id,
-                                spu.size_in_blocks(class, disk_id),
-                            )
-                            .as_u64();
+                    let free = spu
+                        .effective_free_size(class, disk_id, spu.size_in_blocks(class, disk_id))
+                        .as_u64();
                     (
                         (class, disk_id),
                         AtomicStorageInfo {
                             free: AtomicU64::new(free),
                             total: AtomicU64::new(free),
-                        }
+                        },
                     )
                 })
             })),
@@ -336,9 +333,18 @@ impl DatabaseBuilder for DatabaseConfiguration {
 
             // Update space accounting from last execution
             for (class, info) in sb.tiers.iter().enumerate() {
-                let storage_info = tree.dmu().handler().free_space_tier.get(class).expect("Could not fetch valid storage class");
-                storage_info.free.store(info.free.as_u64(), Ordering::Release);
-                storage_info.total.store(info.total.as_u64(), Ordering::Release);
+                let storage_info = tree
+                    .dmu()
+                    .handler()
+                    .free_space_tier
+                    .get(class)
+                    .expect("Could not fetch valid storage class");
+                storage_info
+                    .free
+                    .store(info.free.as_u64(), Ordering::Release);
+                storage_info
+                    .total
+                    .store(info.total.as_u64(), Ordering::Release);
             }
 
             *tree.dmu().handler().old_root_allocation.lock_write() =
@@ -589,9 +595,17 @@ impl<Config: DatabaseBuilder> Database<Config> {
         };
         let pool = self.root_tree.dmu().spl();
         pool.flush()?;
-        let mut info = [StorageInfo { free: Block(0), total: Block(0) }; NUM_STORAGE_CLASSES];
+        let mut info = [StorageInfo {
+            free: Block(0),
+            total: Block(0),
+        }; NUM_STORAGE_CLASSES];
         for class in 0..NUM_STORAGE_CLASSES {
-            info[class] = self.root_tree.dmu().handler().get_free_space_tier(class as u8).expect("Class hat to exist");
+            info[class] = self
+                .root_tree
+                .dmu()
+                .handler()
+                .get_free_space_tier(class as u8)
+                .expect("Class hat to exist");
         }
         Superblock::<ObjectPointer>::write_superblock(pool, &root_ptr, &info)?;
         pool.flush()?;
@@ -611,7 +625,11 @@ impl<Config: DatabaseBuilder> Database<Config> {
     pub fn free_space_tier(&self) -> Vec<StorageInfo> {
         (0..self.root_tree.dmu().spl().storage_class_count())
             .map(|class| {
-                 self.root_tree.dmu().handler().get_free_space_tier(class).unwrap()
+                self.root_tree
+                    .dmu()
+                    .handler()
+                    .get_free_space_tier(class)
+                    .unwrap()
             })
             .collect()
     }
@@ -641,13 +659,19 @@ pub(crate) struct AtomicStorageInfo {
 
 impl From<&AtomicStorageInfo> for StorageInfo {
     fn from(info: &AtomicStorageInfo) -> Self {
-        Self { free: Block(info.free.load(Ordering::Relaxed)), total: Block(info.total.load(Ordering::Relaxed)) }
+        Self {
+            free: Block(info.free.load(Ordering::Relaxed)),
+            total: Block(info.total.load(Ordering::Relaxed)),
+        }
     }
 }
 
 impl From<&StorageInfo> for AtomicStorageInfo {
     fn from(info: &StorageInfo) -> Self {
-        Self { free: AtomicU64::new(info.free.as_u64()), total: AtomicU64::new(info.total.as_u64()) }
+        Self {
+            free: AtomicU64::new(info.free.as_u64()),
+            total: AtomicU64::new(info.total.as_u64()),
+        }
     }
 }
 
