@@ -53,6 +53,23 @@ impl<R: HasStoragePreference> HasStoragePreference for Node<R> {
             Internal(ref internal) => internal.recalculate(),
         }
     }
+
+    fn system_storage_preference(&self) -> StoragePreference {
+        match self.0 {
+            // A packed leaf does not have a storage preference
+            PackedLeaf(_) => unreachable!("packed leaf preference cannot be determined"),
+            Leaf(ref leaf) => leaf.system_storage_preference(),
+            Internal(ref int) => int.system_storage_preference(),
+        }
+    }
+
+    fn set_system_storage_preference(&self, pref: StoragePreference) {
+        match self.0 {
+            PackedLeaf(_) => unreachable!("packed leaves cannot have their preference updated"),
+            Leaf(ref leaf) => leaf.set_system_storage_preference(pref),
+            Internal(ref int) => int.set_system_storage_preference(pref),
+        }
+    }
 }
 
 impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {

@@ -197,7 +197,7 @@ impl PartialEq for AtomicStoragePreference {
 /// automated migration policy, in contrast to the lower bound by
 /// [StoragePreference]. Acts as a neutral element when set to
 /// [AtomicSystemStoragePreference::NONE].
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct AtomicSystemStoragePreference(AtomicU8);
 
 impl Clone for AtomicSystemStoragePreference {
@@ -212,21 +212,33 @@ impl From<StoragePreference> for AtomicSystemStoragePreference {
     }
 }
 
-impl Into<StoragePreference> for &AtomicSystemStoragePreference {
-    fn into(self) -> StoragePreference {
-        StoragePreference::from_u8(self.0.load(Ordering::Relaxed))
+impl From<AtomicSystemStoragePreference> for StoragePreference {
+    fn from(other: AtomicSystemStoragePreference) -> StoragePreference {
+        StoragePreference::from_u8(other.0.load(Ordering::Relaxed))
     }
 }
 
-impl Into<AtomicStoragePreference> for &AtomicSystemStoragePreference {
-    fn into(self) -> AtomicStoragePreference {
-        AtomicStoragePreference::known(StoragePreference::from_u8(self.0.load(Ordering::Relaxed)))
+impl From<&AtomicSystemStoragePreference> for StoragePreference {
+    fn from(other: &AtomicSystemStoragePreference) -> StoragePreference {
+        StoragePreference::from_u8(other.0.load(Ordering::Relaxed))
+    }
+}
+
+impl From<AtomicSystemStoragePreference> for AtomicStoragePreference {
+    fn from(other: AtomicSystemStoragePreference) -> AtomicStoragePreference {
+        AtomicStoragePreference::known(StoragePreference::from_u8(other.0.load(Ordering::Relaxed)))
+    }
+}
+
+impl From<&AtomicSystemStoragePreference> for AtomicStoragePreference {
+    fn from(other: &AtomicSystemStoragePreference) -> AtomicStoragePreference {
+        AtomicStoragePreference::known(StoragePreference::from_u8(other.0.load(Ordering::Relaxed)))
     }
 }
 
 impl AtomicSystemStoragePreference {
     pub fn set(&self, pref: StoragePreference) {
-        self.0.store(pref.as_u8(), Ordering::Relaxed);
+        self.0.store(pref.as_u8(), Ordering::SeqCst);
     }
 }
 

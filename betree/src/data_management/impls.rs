@@ -89,9 +89,19 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
 
     fn correct_preference(&self) -> StoragePreference {
         match self {
-            ObjectRef::Unmodified(p,_) => p.correct_preference(),
+            ObjectRef::Unmodified(p, _) => p.correct_preference(),
             ObjectRef::Modified(mid, _) | ObjectRef::InWriteback(mid, _) => mid.1,
         }
+    }
+
+    // We do not support encoding in [ObjectRef] at the moment.
+
+    fn system_storage_preference(&self) -> StoragePreference {
+        unimplemented!()
+    }
+
+    fn set_system_storage_preference(&self, pref: StoragePreference) {
+        unimplemented!()
     }
 }
 
@@ -152,6 +162,16 @@ impl<D, I, G> HasStoragePreference for ObjectPointer<D, I, G> {
 
     fn correct_preference(&self) -> StoragePreference {
         StoragePreference::new(self.offset.storage_class())
+    }
+
+    // There is no support in encoding storage preference right now.
+
+    fn system_storage_preference(&self) -> StoragePreference {
+        unimplemented!()
+    }
+
+    fn set_system_storage_preference(&self, pref: StoragePreference) {
+        unimplemented!()
     }
 }
 
@@ -308,7 +328,11 @@ where
                 _ => None,
             }
         };
-        let mid = ModifiedObjectId(mid, or.correct_preference(), old_ptr.as_ref().map(|e| e.offset));
+        let mid = ModifiedObjectId(
+            mid,
+            or.correct_preference(),
+            old_ptr.as_ref().map(|e| e.offset),
+        );
         let entry = {
             let mut cache = self.cache.write();
             let was_present = cache.force_change_key(&or.as_key(), ObjectKey::Modified(mid));
@@ -648,7 +672,11 @@ where
             {
                 warn!(
                     "Storage tier {class} does not have enough space remaining. {} blocks of {}",
-                    self.handler.get_free_space_tier(class).unwrap().free.as_u64(),
+                    self.handler
+                        .get_free_space_tier(class)
+                        .unwrap()
+                        .free
+                        .as_u64(),
                     size.as_u64()
                 );
                 continue;
@@ -760,7 +788,10 @@ where
     fn prepare_write_back(
         &self,
         mid: ModifiedObjectId,
-        dep_mids: &mut Vec<(ModifiedObjectId, Option<<Self as super::DmlBase>::ObjectPointer>)>,
+        dep_mids: &mut Vec<(
+            ModifiedObjectId,
+            Option<<Self as super::DmlBase>::ObjectPointer>,
+        )>,
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRef>, ()> {
         trace!("prepare_write_back: Enter");
         loop {
@@ -782,7 +813,8 @@ where
                         .for_each_child::<(), _>(|or| loop {
                             let (mid, oldptr) = match or {
                                 ObjectRef::Unmodified(..) => break Ok(()),
-                                ObjectRef::InWriteback(mid, oldptr) | ObjectRef::Modified(mid, oldptr) => (*mid, oldptr.clone()),
+                                ObjectRef::InWriteback(mid, oldptr)
+                                | ObjectRef::Modified(mid, oldptr) => (*mid, oldptr.clone()),
                             };
                             if cache_contains_key(&or.as_key()) {
                                 modified_children = true;
@@ -908,7 +940,7 @@ where
         let mid = ModifiedObjectId(
             self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
             object.correct_preference(),
-            None
+            None,
         );
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
@@ -925,7 +957,7 @@ where
         let mid = ModifiedObjectId(
             self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
             object.correct_preference(),
-            None
+            None,
         );
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
@@ -1006,7 +1038,9 @@ where
             trace!("write_back: Acquired lock");
             let (mid, oldptr) = match &*or {
                 ObjectRef::Unmodified(ref p, _) => return Ok(p.clone()),
-                ObjectRef::InWriteback(mid, oldptr) | ObjectRef::Modified(mid, oldptr) => (*mid, oldptr.clone()),
+                ObjectRef::InWriteback(mid, oldptr) | ObjectRef::Modified(mid, oldptr) => {
+                    (*mid, oldptr.clone())
+                }
             };
             let mut mids = Vec::new();
 
@@ -1033,7 +1067,13 @@ where
                             Ok(None) => {}
                             Ok(Some(object)) => {
                                 trace!("write_back: Was Ok Some");
-                                self.handle_write_back(object, mid, false, mid_oldptr.map(|e| e.offset)).map_err(|err| {
+                                self.handle_write_back(
+                                    object,
+                                    mid,
+                                    false,
+                                    mid_oldptr.map(|e| e.offset),
+                                )
+                                .map_err(|err| {
                                     let mut cache = self.cache.write();
                                     cache
                                         .change_key::<(), _>(
@@ -1069,7 +1109,9 @@ where
         }
         Ok(match *or {
             ObjectRef::Modified(..) | ObjectRef::InWriteback(..) => None,
-            ObjectRef::Unmodified(ref p, _) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
+            ObjectRef::Unmodified(ref p, _) => {
+                Some(Box::pin(self.try_fetch_async(p)?.into_future()))
+            }
         })
     }
 

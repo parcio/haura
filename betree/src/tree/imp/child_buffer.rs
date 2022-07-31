@@ -2,6 +2,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::{Size, StaticSize},
+    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
     tree::{KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
@@ -18,6 +19,7 @@ use std::{
 #[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
 pub(super) struct ChildBuffer<N: 'static> {
     pub(super) messages_preference: AtomicStoragePreference,
+    pub(super) system_storage_preference: AtomicSystemStoragePreference,
     buffer_entries_size: usize,
     pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
     #[serde(with = "ser_np")]
@@ -33,12 +35,15 @@ impl Size for (KeyInfo, SlicedCowBytes) {
 
 impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
     fn current_preference(&self) -> Option<StoragePreference> {
-        self.messages_preference.as_option().map(|msg_pref| {
-            StoragePreference::choose_faster(
-                msg_pref,
-                self.node_pointer.read().correct_preference(),
-            )
-        })
+        self.messages_preference
+            .as_option()
+            .map(|msg_pref| {
+                StoragePreference::choose_faster(
+                    msg_pref,
+                    self.node_pointer.read().correct_preference(),
+                )
+            })
+            .map(|p| self.system_storage_preference.weak_bound(&p))
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -52,6 +57,14 @@ impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
 
         // pref can't be lower than that of child nodes
         StoragePreference::choose_faster(pref, self.node_pointer.read().correct_preference())
+    }
+
+    fn system_storage_preference(&self) -> StoragePreference {
+        self.system_storage_preference.borrow().into()
+    }
+
+    fn set_system_storage_preference(&self, pref: StoragePreference) {
+        self.system_storage_preference.set(pref)
     }
 }
 
@@ -148,6 +161,7 @@ impl<N> ChildBuffer<N> {
             buffer,
             buffer_entries_size,
             node_pointer: RwLock::new(node_pointer),
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
         }
     }
 
@@ -222,6 +236,7 @@ impl<N> ChildBuffer<N> {
             buffer: BTreeMap::new(),
             buffer_entries_size: 0,
             node_pointer: RwLock::new(node_pointer),
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
         }
     }
 }
