@@ -1,6 +1,6 @@
 use super::{
-    dead_list_key, errors::*, DatasetId, DeadListData, Generation, Object, ObjectPointer,
-    ObjectRef, TreeInner, AtomicStorageInfo, StorageInfo,
+    dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation, Object,
+    ObjectPointer, ObjectRef, StorageInfo, TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
