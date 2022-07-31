@@ -39,10 +39,9 @@ impl Size for LeafNode {
 
 impl HasStoragePreference for LeafNode {
     fn current_preference(&self) -> Option<StoragePreference> {
-        match self.storage_preference.as_option() {
-            Some(pref) => Some(self.system_storage_preference.weak_bound(&pref)),
-            None => None,
-        }
+        self.storage_preference
+            .as_option()
+            .map(|pref| self.system_storage_preference.weak_bound(&pref))
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -54,6 +53,14 @@ impl HasStoragePreference for LeafNode {
 
         self.storage_preference.set(pref);
         pref
+    }
+
+    fn system_storage_preference(&self) -> StoragePreference {
+        self.system_storage_preference.borrow().into()
+    }
+
+    fn set_system_storage_preference(&self, pref: StoragePreference) {
+        self.system_storage_preference.set(pref)
     }
 }
 

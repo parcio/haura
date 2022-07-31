@@ -3,6 +3,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::{Size, SizeMut, StaticSize},
+    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
     tree::{KeyInfo, MessageAction},
     StoragePreference,
 };
@@ -15,6 +16,7 @@ use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 pub(super) struct InternalNode<T> {
     level: u32,
     entries_size: usize,
+    system_storage_preference: AtomicSystemStoragePreference,
     pub(super) pivot: Vec<CowBytes>,
     children: Vec<T>,
 }
@@ -64,7 +66,10 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     // Furthermore, have a look at the HasStoragePreference trait.
     // We might perform way more operations than really should.
     fn current_preference(&self) -> Option<StoragePreference> {
-        Some(self.recalculate())
+        Some(
+            self.system_storage_preference
+                .weak_bound(&self.recalculate()),
+        )
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -80,6 +85,14 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     fn correct_preference(&self) -> StoragePreference {
         self.recalculate()
     }
+
+    fn system_storage_preference(&self) -> StoragePreference {
+        self.system_storage_preference.borrow().into()
+    }
+
+    fn set_system_storage_preference(&self, pref: StoragePreference) {
+        self.system_storage_preference.set(pref);
+    }
 }
 
 impl<T> InternalNode<T> {
@@ -92,6 +105,7 @@ impl<T> InternalNode<T> {
             entries_size: left_child.size() + right_child.size() + pivot_key.size(),
             pivot: vec![pivot_key],
             children: vec![left_child, right_child],
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
         }
     }
 
@@ -301,11 +315,13 @@ impl<T: Size> InternalNode<T> {
         self.entries_size -= size_delta;
 
         // Neither side is sure about its current storage preference after a split
+        // TODO: One may argue to precautiously copy the system preference of the former node here.
         let right_sibling = InternalNode {
             level: self.level,
             entries_size,
             pivot,
             children,
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
         };
         (right_sibling, pivot_key, -(size_delta as isize))
     }

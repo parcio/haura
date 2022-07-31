@@ -4,11 +4,12 @@
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
+    database::StorageInfo,
     migration::ProfileMsg,
     size::{Size, StaticSize},
-    storage_pool::DiskOffset,
+    storage_pool::{AtomicSystemStoragePreference, DiskOffset},
     vdev::Block,
-    StoragePreference, database::StorageInfo,
+    StoragePreference,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use stable_deref_trait::StableDeref;
@@ -90,6 +91,12 @@ pub trait HasStoragePreference {
             None => self.recalculate(),
         }
     }
+
+    /// Return the system storage preference. Returns None if none is set.
+    fn system_storage_preference(&self) -> StoragePreference;
+
+    /// Rewrite the system storage preference.
+    fn set_system_storage_preference(&self, pref: StoragePreference);
 
     // /// Distribute a desired storage prefrence to all child nodes.
     // /// Cached prefrence are advised to be updated.
@@ -288,7 +295,7 @@ pub trait DmlWithReport<Msg> {
 }
 
 mod delegation;
-mod errors;
+pub(crate) mod errors;
 pub(crate) mod impls;
 // mod handler_test;
 
