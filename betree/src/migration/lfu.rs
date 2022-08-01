@@ -167,7 +167,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                     self.leafs[offset.storage_class() as usize].remove(&offset)
                                 {
                                     debug!("Node has been moved. Moving entry..");
-                                    self.leafs[info.storage_tier as usize]
+                                    self.leafs[new_offset.storage_class() as usize]
                                         .insert(new_offset, previous_value);
 
                                     // FIXME: This is hacky way to transfer the
@@ -178,6 +178,16 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                     for _ in 0..(freq.saturating_sub(1)) {
                                         self.leafs[info.storage_tier as usize].get(&new_offset);
                                     }
+                                } else {
+                                    // For some reason the previous entry could not be found.
+                                    self.leafs[new_offset.storage_class() as usize].insert(
+                                        new_offset,
+                                        LeafInfo {
+                                            mid: info.mid,
+                                            size: info.size,
+                                            info: info.mid.get_unmodified().unwrap().info(),
+                                        },
+                                    );
                                 }
                                 let entry = self.leafs[info.storage_tier as usize]
                                     .get_mut(&offset)
