@@ -9,7 +9,13 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::{database::DatabaseBuilder, Database};
+use crate::{
+    data_management::{DmlWithHandler, Handler},
+    database::DatabaseBuilder,
+    storage_pool::NUM_STORAGE_CLASSES,
+    vdev::Block,
+    Database,
+};
 
 use self::lfu::{Lfu, LfuConfig};
 
@@ -70,18 +76,20 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
         config: MigrationConfig<Self::Config>,
     ) -> Self;
 
-    /// Perform all available operations on a preset storage tier.
-    fn action(&self, storage_tier: u8) -> Result<()>;
+    // /// Perform all available operations on a preset storage tier.
+    // fn action(&mut self, storage_tier: u8) -> Result<Block<u32>>;
 
     // Consume all present messages and update the migration selection
     // status for all afflicted objects
     fn update(&mut self) -> Result<()>;
 
-    // fn promote(&self, storage_tier: u8);
-    // fn demote(&self, storage_tier: u8);
+    fn promote(&mut self, storage_tier: u8, desired: Block<u32>) -> Result<Block<u32>>;
+    fn demote(&mut self, storage_tier: u8, desired: Block<u32>) -> Result<Block<u32>>;
 
     // Getters
     fn db(&self) -> &Arc<RwLock<Database<C>>>;
+
+    fn dmu(&self) -> &Arc<<C as DatabaseBuilder>::Dmu>;
 
     fn config(&self) -> &MigrationConfig<Self::Config>;
 
@@ -89,16 +97,34 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
     fn thread_loop(&mut self) -> Result<()> {
         std::thread::sleep(self.config().grace_period);
         loop {
+            // PAUSE
             std::thread::sleep(self.config().update_period);
+            // Consuming all messages and updating internal state.
             self.update()?;
-            if let Some(db) = self.db().try_read() {
-                let space_info = db.free_space_tier();
-                for (tier, _) in space_info.iter().enumerate().filter(|(_, info)| {
-                    (info.free.as_u64() as f32 / info.total.as_u64() as f32)
-                        < (1.0 - self.config().migration_threshold.clamp(0.0, 1.0))
-                }) {
-                    self.action(tier as u8)?;
-                }
+
+            use crate::database::StorageInfo;
+
+            let threshold = self.config().migration_threshold.clamp(0.0, 1.0);
+            let infos: Vec<(u8, StorageInfo)> = (0u8..NUM_STORAGE_CLASSES as u8)
+                .filter_map(|class| {
+                    self.dmu()
+                        .handler()
+                        .get_free_space_tier(class)
+                        .map(|blocks| (class, blocks))
+                })
+                .collect();
+
+            for (tier, info) in infos.iter().filter(|(_, info)| {
+                (info.free.as_u64() as f32 / info.total.as_u64() as f32) < (1.0 - threshold)
+            }) {
+                // TODO: Calculate moving size, until threshold barely not fulfilled?
+                self.promote(*tier, Block(100u32))?;
+            }
+            for (tier, info) in infos.iter().filter(|(_, info)| {
+                (info.free.as_u64() as f32 / info.total.as_u64() as f32) > (1.0 - threshold)
+            }) {
+                // TODO: Calculate moving size, until threshold barely not fulfilled?
+                self.demote(*tier, Block(100u32))?;
             }
         }
     }

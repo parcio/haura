@@ -1,4 +1,4 @@
-use crate::{database::DatasetId, object::ObjectInfo, vdev::Block, storage_pool::DiskOffset};
+use crate::{database::DatasetId, object::ObjectInfo, storage_pool::DiskOffset, vdev::Block};
 use std::time::SystemTime;
 
 #[derive(Clone)]
@@ -71,7 +71,12 @@ impl<M: Clone> ConstructReport<M> for ProfileMsg<M> {
         })
     }
 
-    fn write(mid: M, size: Block<u32>, storage_tier: u8, p_disk_offset: Option<DiskOffset>) -> Self {
+    fn write(
+        mid: M,
+        size: Block<u32>,
+        storage_tier: u8,
+        p_disk_offset: Option<DiskOffset>,
+    ) -> Self {
         Self::build_write(OpInfo {
             mid,
             size,
