@@ -163,11 +163,13 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                         match info.p_disk_offset {
                             Some(offset) => {
                                 let new_offset = info.mid.get_unmodified().unwrap().offset();
+                                let new_tier = new_offset.storage_class() as usize;
+                                let old_tier = offset.storage_class() as usize;
                                 if let Some((previous_value, freq)) =
-                                    self.leafs[offset.storage_class() as usize].remove(&offset)
+                                    self.leafs[old_tier].remove(&offset)
                                 {
                                     debug!("Node has been moved. Moving entry..");
-                                    self.leafs[new_offset.storage_class() as usize]
+                                    self.leafs[new_tier]
                                         .insert(new_offset, previous_value);
 
                                     // FIXME: This is hacky way to transfer the
@@ -176,11 +178,11 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                     // to do this directly in the lfu cache
                                     // crate.
                                     for _ in 0..(freq.saturating_sub(1)) {
-                                        self.leafs[info.storage_tier as usize].get(&new_offset);
+                                        self.leafs[new_tier].get(&new_offset);
                                     }
                                 } else {
                                     // For some reason the previous entry could not be found.
-                                    self.leafs[new_offset.storage_class() as usize].insert(
+                                    self.leafs[new_tier].insert(
                                         new_offset,
                                         LeafInfo {
                                             mid: info.mid,
@@ -189,8 +191,8 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                         },
                                     );
                                 }
-                                let entry = self.leafs[info.storage_tier as usize]
-                                    .get_mut(&offset)
+                                let entry = self.leafs[new_tier]
+                                    .get_mut(&new_offset)
                                     .unwrap();
                                 entry.mid = info.mid;
                                 entry.size = info.size;
