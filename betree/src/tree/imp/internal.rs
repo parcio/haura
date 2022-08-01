@@ -90,7 +90,7 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
         self.system_storage_preference.borrow().into()
     }
 
-    fn set_system_storage_preference(&self, pref: StoragePreference) {
+    fn set_system_storage_preference(&mut self, pref: StoragePreference) {
         self.system_storage_preference.set(pref);
     }
 }

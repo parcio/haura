@@ -96,7 +96,7 @@ pub trait HasStoragePreference {
     fn system_storage_preference(&self) -> StoragePreference;
 
     /// Rewrite the system storage preference.
-    fn set_system_storage_preference(&self, pref: StoragePreference);
+    fn set_system_storage_preference(&mut self, pref: StoragePreference);
 
     // /// Distribute a desired storage prefrence to all child nodes.
     // /// Cached prefrence are advised to be updated.

@@ -101,7 +101,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
             if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
                 let mut handle = entry.mid_mut();
                 let size = handle.get_unmodified().unwrap().size();
-                let node = self.dmu.get_mut(&mut handle, entry.info)?;
+                let mut node = self.dmu.get_mut(&mut handle, entry.info)?;
                 if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
                     node.set_system_storage_preference(lifted);
                 }
@@ -123,7 +123,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
             if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
                 let mut handle = entry.mid_mut();
                 let size = handle.get_unmodified().unwrap().size();
-                let node = self.dmu.get_mut(&mut handle, entry.info)?;
+                let mut node = self.dmu.get_mut(&mut handle, entry.info)?;
                 if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
                     node.set_system_storage_preference(lowered);
                 }
