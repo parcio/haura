@@ -35,7 +35,7 @@ pub(super) enum Inner<N: 'static> {
     Internal(InternalNode<ChildBuffer<N>>),
 }
 
-impl<R: HasStoragePreference> HasStoragePreference for Node<R> {
+impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
     fn current_preference(&self) -> Option<StoragePreference> {
         match self.0 {
             PackedLeaf(_) => None,
@@ -63,11 +63,15 @@ impl<R: HasStoragePreference> HasStoragePreference for Node<R> {
         }
     }
 
-    fn set_system_storage_preference(&self, pref: StoragePreference) {
+    fn set_system_storage_preference(&mut self, pref: StoragePreference) {
+        // NOTE: This generally has a greater impact as leafs need to be
+        // unpacked asap. Another solution as proposed by similar approaches is
+        // waiting for the next read operation for this leaf.
+        self.ensure_unpacked();
         match self.0 {
             PackedLeaf(_) => unreachable!("packed leaves cannot have their preference updated"),
-            Leaf(ref leaf) => leaf.set_system_storage_preference(pref),
-            Internal(ref int) => int.set_system_storage_preference(pref),
+            Leaf(ref mut leaf) => leaf.set_system_storage_preference(pref),
+            Internal(ref mut int) => int.set_system_storage_preference(pref),
         }
     }
 }

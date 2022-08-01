@@ -100,7 +100,7 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
         unimplemented!()
     }
 
-    fn set_system_storage_preference(&self, pref: StoragePreference) {
+    fn set_system_storage_preference(&mut self, pref: StoragePreference) {
         unimplemented!()
     }
 }
@@ -170,7 +170,7 @@ impl<D, I, G> HasStoragePreference for ObjectPointer<D, I, G> {
         unimplemented!()
     }
 
-    fn set_system_storage_preference(&self, pref: StoragePreference) {
+    fn set_system_storage_preference(&mut self, pref: StoragePreference) {
         unimplemented!()
     }
 }

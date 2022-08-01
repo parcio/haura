@@ -4,6 +4,7 @@ mod msg;
 
 use crossbeam_channel::Receiver;
 use errors::*;
+use itertools::Itertools;
 pub(crate) use msg::*;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -114,18 +115,21 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
                 })
                 .collect();
 
-            for (tier, info) in infos.iter().filter(|(_, info)| {
-                (info.free.as_u64() as f32 / info.total.as_u64() as f32) < (1.0 - threshold)
+            for ((_high_tier, _high_info), (low_tier, _low_info)) in infos.iter().tuple_windows().filter(|((_, high_info), _)| {
+                (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32) < (1.0 - threshold)
             }) {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
-                self.promote(*tier, Block(100u32))?;
+                self.promote(*low_tier, BATCH)?;
             }
-            for (tier, info) in infos.iter().filter(|(_, info)| {
-                (info.free.as_u64() as f32 / info.total.as_u64() as f32) > (1.0 - threshold)
+            for ((high_tier, _high_info), (_low_tier, _low_info)) in infos.iter().tuple_windows().filter(|((_, high_info), (_, low_info))| {
+                (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32) > (1.0 - threshold) &&
+                (low_info.free.as_u64() as f32 / low_info.total.as_u64() as f32) < (1.0 - threshold)
             }) {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
-                self.demote(*tier, Block(100u32))?;
+                self.demote(*high_tier, BATCH)?;
             }
         }
     }
 }
+
+const BATCH: Block<u32> = Block(128);
