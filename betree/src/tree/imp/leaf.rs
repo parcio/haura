@@ -14,7 +14,7 @@ use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct LeafNode {
     storage_preference: AtomicStoragePreference,
-    /// A storage preference assigned by the
+    /// A storage preference assigned by the Migration Policy
     system_storage_preference: AtomicSystemStoragePreference,
     entries_size: usize,
     entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,

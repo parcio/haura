@@ -19,6 +19,7 @@ use std::{
 #[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
 pub(super) struct ChildBuffer<N: 'static> {
     pub(super) messages_preference: AtomicStoragePreference,
+    #[serde(skip)]
     pub(super) system_storage_preference: AtomicSystemStoragePreference,
     buffer_entries_size: usize,
     pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
@@ -278,6 +279,7 @@ mod tests {
                 buffer_entries_size: self.buffer_entries_size,
                 buffer: self.buffer.clone(),
                 node_pointer: RwLock::new(self.node_pointer.read().clone()),
+                system_storage_preference: self.system_storage_preference.clone(),
             }
         }
     }
@@ -313,6 +315,7 @@ mod tests {
                     .sum::<usize>(),
                 buffer,
                 node_pointer: RwLock::new(Arbitrary::arbitrary(g)),
+                system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             }
         }
     }

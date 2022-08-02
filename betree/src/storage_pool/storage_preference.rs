@@ -206,6 +206,12 @@ impl Clone for AtomicSystemStoragePreference {
     }
 }
 
+impl Default for AtomicSystemStoragePreference {
+    fn default() -> Self {
+        Self::from(StoragePreference::NONE)
+    }
+}
+
 impl From<StoragePreference> for AtomicSystemStoragePreference {
     fn from(prf: StoragePreference) -> Self {
         Self(AtomicU8::new(prf.as_u8()))
