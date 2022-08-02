@@ -9,13 +9,14 @@ use crate::{
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
+use std::{borrow::Borrow, collections::BTreeMap, mem::replace, sync::atomic::AtomicU8};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct InternalNode<T> {
     level: u32,
     entries_size: usize,
+    #[serde(skip)]
     system_storage_preference: AtomicSystemStoragePreference,
     pub(super) pivot: Vec<CowBytes>,
     children: Vec<T>,
@@ -542,6 +543,7 @@ mod tests {
                 entries_size: self.entries_size,
                 pivot: self.pivot.clone(),
                 children: self.children.iter().cloned().collect(),
+                system_storage_preference: self.system_storage_preference.clone(),
             }
         }
     }
@@ -571,6 +573,7 @@ mod tests {
                 children,
                 entries_size,
                 level: 1,
+                system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             }
         }
     }
@@ -708,6 +711,7 @@ mod tests {
             level: 1,
             children: vec![],
             pivot: vec![],
+            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
         };
 
         assert_eq!(
