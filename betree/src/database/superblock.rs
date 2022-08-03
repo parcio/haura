@@ -14,7 +14,7 @@ static MAGIC: &[u8] = b"HEAFSv3\0\n";
 
 /// A superblock contains the location of the root tree,
 /// and is read during database initialisation.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Superblock<P> {
     magic: [u8; 9],
     pub(crate) root_ptr: P,
