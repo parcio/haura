@@ -1,4 +1,9 @@
-use crate::{database::DatasetId, object::ObjectInfo, storage_pool::DiskOffset, vdev::Block};
+use crate::{
+    database::DatasetId,
+    object::{ObjectId, ObjectInfo},
+    storage_pool::DiskOffset,
+    vdev::Block,
+};
 use std::time::SystemTime;
 
 #[derive(Clone)]
@@ -11,6 +16,21 @@ pub enum ProfileMsg<M: Clone> {
     ObjectstoreOpen(DatasetId, DatasetId),
     // maybe duplicate
     ObjectstoreClose(DatasetId, DatasetId),
+
+    /// Informs of openend object, adjoint with extra information for access.
+    ObjectOpen {
+        id: ObjectId,
+        data: DatasetId,
+        meta: DatasetId,
+        info: ObjectInfo,
+    },
+    /// Informs of closed object, adjoint with extra information for access.
+    ObjectClose {
+        id: ObjectId,
+        data: DatasetId,
+        meta: DatasetId,
+        info: ObjectInfo,
+    },
 
     // The three base operations of our store.
     // Largely relevant for clearing, and frequency determination in LRU, LFU, FIFO and other policies

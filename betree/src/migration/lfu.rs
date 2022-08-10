@@ -169,8 +169,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                     self.leafs[old_tier].remove(&offset)
                                 {
                                     debug!("Node has been moved. Moving entry..");
-                                    self.leafs[new_tier]
-                                        .insert(new_offset, previous_value);
+                                    self.leafs[new_tier].insert(new_offset, previous_value);
 
                                     // FIXME: This is hacky way to transfer the
                                     // frequency to the new location. It would
@@ -191,9 +190,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                         },
                                     );
                                 }
-                                let entry = self.leafs[new_tier]
-                                    .get_mut(&new_offset)
-                                    .unwrap();
+                                let entry = self.leafs[new_tier].get_mut(&new_offset).unwrap();
                                 entry.mid = info.mid;
                                 entry.size = info.size;
                             }
