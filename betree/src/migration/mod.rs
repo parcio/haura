@@ -115,16 +115,25 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
                 })
                 .collect();
 
-            for ((_high_tier, _high_info), (low_tier, _low_info)) in infos.iter().tuple_windows().filter(|((_, high_info), _)| {
-                (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32) < (1.0 - threshold)
-            }) {
+            for ((_high_tier, _high_info), (low_tier, _low_info)) in
+                infos.iter().tuple_windows().filter(|((_, high_info), _)| {
+                    (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32)
+                        < (1.0 - threshold)
+                })
+            {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
                 self.promote(*low_tier, BATCH)?;
             }
-            for ((high_tier, _high_info), (_low_tier, _low_info)) in infos.iter().tuple_windows().filter(|((_, high_info), (_, low_info))| {
-                (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32) > (1.0 - threshold) &&
-                (low_info.free.as_u64() as f32 / low_info.total.as_u64() as f32) < (1.0 - threshold)
-            }) {
+            for ((high_tier, _high_info), (_low_tier, _low_info)) in infos
+                .iter()
+                .tuple_windows()
+                .filter(|((_, high_info), (_, low_info))| {
+                    (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32)
+                        > (1.0 - threshold)
+                        && (low_info.free.as_u64() as f32 / low_info.total.as_u64() as f32)
+                            < (1.0 - threshold)
+                })
+            {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
                 self.demote(*high_tier, BATCH)?;
             }

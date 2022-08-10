@@ -1,10 +1,7 @@
 //! Objects are built on top of the key-value interface, and while there's nothing to prevent
 //! simultaneous usage of key-value and object interface in the same dataset, it is discouraged.
 //!
-//! An object key can consist of any byte sequence that does not contain internal null (0) bytes.
-//!
-//! An object store consists of two trees, one for the object contents, the other for global and
-//! per-object metadata.
+//! An object key can consist of any byte sequence that does not contain internal null (0) bytes. An object store consists of two trees, one for the object contents, the other for global and per-object metadata.
 //!
 //! ## Metadata tree
 //!
@@ -49,11 +46,13 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, Error, ErrorKind, Result},
+    database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result},
+    migration::ProfileMsg,
     vdev::Block,
     Database, Dataset, StoragePreference,
 };
 
+use crossbeam_channel::Sender;
 use speedy::{Readable, Writable};
 
 use std::{
@@ -108,6 +107,7 @@ pub struct ObjectStore<Config: DatabaseBuilder> {
     metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: AtomicU64,
     default_storage_preference: StoragePreference,
+    report: Option<Sender<ProfileMsg<ObjectRef>>>,
 }
 
 impl<Config: DatabaseBuilder> Database<Config> {
@@ -117,6 +117,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
             self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?,
             self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?,
             StoragePreference::NONE,
+            self.report_tx.clone(),
         )
     }
 
@@ -139,10 +140,19 @@ impl<Config: DatabaseBuilder> Database<Config> {
             self.open_or_create_custom_dataset(&data_name, storage_preference)?,
             self.open_or_create_custom_dataset(&meta_name, storage_preference)?,
             storage_preference,
+            self.report_tx.clone(),
         )
     }
 
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
+        if let Some(tx) = self.report_tx.as_ref() {
+            let _ = tx
+                .send(ProfileMsg::ObjectstoreClose(
+                    store.metadata.id,
+                    store.data.id,
+                ))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
         let _ = self.close_dataset(store.metadata);
         trace!("Metadata closed.");
         let _ = self.close_dataset(store.data);
@@ -157,8 +167,11 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         data: Dataset<Config>,
         metadata: Dataset<Config, MetaMessageAction>,
         default_storage_preference: StoragePreference,
+        report: Option<Sender<ProfileMsg<ObjectRef>>>,
     ) -> Result<ObjectStore<Config>> {
-        Ok(ObjectStore {
+        let d_id = data.id;
+        let m_id = metadata.id;
+        let res = Ok(ObjectStore {
             object_id_counter: {
                 let last_key = data.get(OBJECT_ID_COUNTER_KEY)?.and_then(
                     |slice: SlicedCowBytes| -> Option<[u8; 8]> { (&slice[..]).try_into().ok() },
@@ -175,7 +188,14 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             data,
             metadata,
             default_storage_preference,
-        })
+            report: report.clone(),
+        });
+        if let Some(tx) = report {
+            let _ = tx
+                .send(ProfileMsg::ObjectstoreOpen(d_id, m_id))
+                .map_err(|_| warn!("Channel receiver was dropped."));
+        }
+        res
     }
 
     /// Create a new object handle.
@@ -239,6 +259,17 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         assert!(!key.contains(&0));
 
         let info = self.read_object_info(key)?;
+
+        if let (Some(info), Some(tx)) = (info.clone(), self.report.as_ref()) {
+            let _ = tx
+                .send(ProfileMsg::ObjectOpen {
+                    id: info.object_id,
+                    data: self.data.id,
+                    meta: self.metadata.id,
+                    info,
+                })
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
 
         Ok(info.map(|info| {
             (
@@ -471,6 +502,18 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
     /// Close this object. This function doesn't do anything for now,
     /// but might in the future.
     pub fn close(self) -> Result<()> {
+        // report for semantics
+        if let (Ok(Some(info)), Some(tx)) = (self.info(), self.store.report.as_ref()) {
+            let _ = tx
+                .send(ProfileMsg::ObjectClose {
+                    id: self.object.id,
+                    data: self.store.data.id,
+                    meta: self.store.metadata.id,
+                    info,
+                })
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
+
         // no-op for now
         Ok(())
     }

@@ -18,7 +18,7 @@ where
     Config: DatabaseBuilder,
 {
     pub(super) tree: MessageTree<Config::Dmu, Message>,
-    pub(super) id: DatasetId,
+    pub(crate) id: DatasetId,
     name: Box<[u8]>,
     pub(super) open_snapshots: HashSet<Generation>,
     storage_preference: StoragePreference,

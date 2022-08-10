@@ -400,6 +400,7 @@ pub struct Database<Config: DatabaseBuilder> {
     pub(crate) root_tree: RootTree<Config::Dmu>,
     builder: Config,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
+    pub(crate) report_tx: Option<Sender<ProfileMsg<ObjectRef>>>,
 }
 
 impl Database<DatabaseConfiguration> {
@@ -471,6 +472,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
             root_tree: tree,
             builder,
             open_datasets: Default::default(),
+            report_tx: report_tx.clone(),
         };
 
         // Report all objectpointers known to the migration policy, this might
