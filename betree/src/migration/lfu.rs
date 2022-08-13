@@ -107,6 +107,8 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                 }
                 // node.evict()
                 moved += size;
+            } else {
+                warn!("Cache indicated that it is not empty but no value could be fetched.");
             }
         }
         return Ok(moved);
