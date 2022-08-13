@@ -115,10 +115,13 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
                 })
                 .collect();
 
-            for ((_high_tier, _high_info), (low_tier, _low_info)) in
-                infos.iter().tuple_windows().filter(|((_, high_info), _)| {
+            for ((_high_tier, _high_info), (low_tier, _low_info)) in infos
+                .iter()
+                .tuple_windows()
+                .filter(|((_, high_info), (_, low_info))| {
                     (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32)
-                        < (1.0 - threshold)
+                        > (1.0 - threshold)
+                        && low_info.total != Block(0)
                 })
             {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
@@ -129,9 +132,9 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
                 .tuple_windows()
                 .filter(|((_, high_info), (_, low_info))| {
                     (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32)
-                        > (1.0 - threshold)
+                        < (1.0 - threshold)
                         && (low_info.free.as_u64() as f32 / low_info.total.as_u64() as f32)
-                            < (1.0 - threshold)
+                            > (1.0 - threshold)
                 })
             {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
@@ -141,4 +144,4 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
     }
 }
 
-const BATCH: Block<u32> = Block(128);
+const BATCH: Block<u32> = Block(32768);
