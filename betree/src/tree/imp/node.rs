@@ -499,11 +499,13 @@ pub enum NodeInfo {
     Internal {
         level: u32,
         storage: StoragePreference,
+        system_storage: StoragePreference,
         children: Vec<ChildInfo>,
     },
     Leaf {
         level: u32,
         storage: StoragePreference,
+        system_storage: StoragePreference,
         entry_count: usize,
     },
     Packed {
@@ -543,6 +545,7 @@ impl<N: HasStoragePreference> Node<N> {
         match &self.0 {
             Inner::Internal(int) => NodeInfo::Internal {
                 storage: self.correct_preference(),
+                system_storage: self.system_storage_preference(),
                 level: self.level(),
                 children: {
                     int.iter_with_bounds()
@@ -571,6 +574,7 @@ impl<N: HasStoragePreference> Node<N> {
             },
             Inner::Leaf(leaf) => NodeInfo::Leaf {
                 storage: self.correct_preference(),
+                system_storage: self.system_storage_preference(),
                 level: self.level(),
                 entry_count: leaf.entries().len(),
             },
