@@ -12,8 +12,10 @@ use crate::{
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, process::id, sync::Arc};
 
-/// The data set type.
-pub struct Dataset<Config, Message = DefaultMessageAction>
+/// The internal data set type.
+/// This is the non-user facing variant which is then wrapped in the
+/// [Dataset] type. All methods are relayed by the wrapper whereas
+pub struct DatasetInner<Config, Message = DefaultMessageAction>
 where
     Config: DatabaseBuilder,
 {
@@ -22,6 +24,24 @@ where
     name: Box<[u8]>,
     pub(super) open_snapshots: HashSet<Generation>,
     storage_preference: StoragePreference,
+}
+
+/// The data set type.
+pub struct Dataset<Config, Message = DefaultMessageAction>
+where
+    Config: DatabaseBuilder
+{
+    // NOTE: This lock and option is valid and readable as long as [Dataset] exists.
+    // On closing the dataset this option will be set to [Option::None].
+    inner: Arc<RwLock<Option<DatasetInner<Config, Message>>>>,
+}
+
+impl<Config, Message> From<DatasetInner<Config, Message>> for Dataset<Config, Message> where Config: DatabaseBuilder {
+    fn from(inner: DatasetInner<Config, Message>) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(Some(inner))),
+        }
+    }
 }
 
 impl<Config: DatabaseBuilder> Database<Config> {
@@ -99,13 +119,13 @@ impl<Config: DatabaseBuilder> Database<Config> {
         let erased_tree = Box::new(ds_tree.clone());
         self.open_datasets.insert(id, erased_tree);
 
-        Ok(Dataset {
+        Ok(DatasetInner {
             tree: ds_tree.clone(),
             id,
             name: Box::from(name),
             open_snapshots: Default::default(),
             storage_preference,
-        })
+        }.into())
     }
 
     /// Creates a new data set identified by the given name.
@@ -199,6 +219,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
         &mut self,
         ds: Dataset<Config, Message>,
     ) -> Result<()> {
+        // Deactivate the dataset for further modifications
+        let ds = ds.inner.write().take().unwrap();
         log::trace!("close_dataset: Enter");
         self.sync_ds(ds.id, &ds.tree)?;
         log::trace!("synced dataset");
@@ -214,7 +236,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 }
 
-impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, Message> {
+impl<Message: MessageAction + 'static, Config: DatabaseBuilder> DatasetInner<Config, Message> {
     /// Inserts a message for the given key.
     pub fn insert_msg<K: Borrow<[u8]> + Into<CowBytes>>(
         &self,
@@ -266,7 +288,86 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     }
 }
 
-impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
+// Member access on internal type
+impl<Message, Config: DatabaseBuilder> Dataset<Config, Message> {
+    pub(crate) fn id(&self) -> DatasetId {
+        self.inner.read().as_ref().unwrap().id
+    }
+
+    pub(super) fn call_open_snapshots<F, R>(&self, call: F) -> R
+    where
+        F: FnOnce(&HashSet<Generation>) -> R,
+    {
+        call(&self.inner.read().as_ref().unwrap().open_snapshots)
+    }
+
+    pub(super) fn call_mut_open_snapshots<F, R>(&self, call: F) -> R
+    where
+        F: FnOnce(&mut HashSet<Generation>) -> R,
+    {
+        call(&mut self.inner.write().as_mut().unwrap().open_snapshots)
+    }
+
+    pub(super) fn call_tree<F, R>(&self, call: F) -> R
+    where
+        F: FnOnce(&MessageTree<Config::Dmu, Message>) -> R
+    {
+        call(&self.inner.read().as_ref().unwrap().tree)
+    }
+}
+
+// Mirroring of the [DatasetInner] API
+impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, Message> {
+    /// Inserts a message for the given key.
+    pub fn insert_msg<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        msg: SlicedCowBytes,
+    ) -> Result<()> {
+        self.inner.read().as_ref().unwrap().insert_msg(key, msg)
+    }
+
+    /// Inserts a message for the given key, allowing to override storage preference
+    /// for this operation.
+    pub fn insert_msg_with_pref<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        msg: SlicedCowBytes,
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
+        self.inner.read().as_ref().unwrap().insert_msg_with_pref(key, msg, storage_preference)
+    }
+
+    /// Returns the value for the given key if existing.
+    pub fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>> {
+        self.inner.read().as_ref().unwrap().get(key)
+    }
+
+    /// Iterates over all key-value pairs in the given key range.
+    pub fn range<R, K>(
+        &self,
+        range: R,
+    ) -> Result<Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes)>>>>
+    where
+        R: RangeBounds<K>,
+        K: Borrow<[u8]> + Into<CowBytes>,
+    {
+        self.inner.read().as_ref().unwrap().range(range)
+    }
+
+    /// Returns the name of the data set.
+    pub fn name(&self) -> Box<[u8]> {
+        self.inner.read().as_ref().unwrap().name.clone()
+    }
+
+    #[allow(missing_docs)]
+    #[cfg(feature = "internal-api")]
+    pub fn tree_dump(&self) -> Result<impl serde::Serialize> {
+        self.inner.read().as_ref().unwrap().tree_dump()
+    }
+}
+
+impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
     /// Inserts the given key-value pair.
     ///
     /// Note that any existing value will be overwritten.
@@ -405,10 +506,105 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
 
     pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg<ObjectRef>>) {
         for node in self.tree.node_iter() {
-            tx.send(ProfileMsg::Discover(ObjectRef::Unmodified(node, None)))
+            tx.send(ProfileMsg::Discover(ObjectRef::Unmodified(node)))
                 .expect("Message receiver has been dropped. Unrecoverable.");
         }
     }
 }
+
+// Mirroring the [DatasetInner] API
+impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
+    /// Inserts the given key-value pair.
+    ///
+    /// Note that any existing value will be overwritten.
+    pub fn insert_with_pref<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        data: &[u8],
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
+        self.inner.read().as_ref().unwrap().insert_with_pref(key, data, storage_preference)
+    }
+
+    /// Inserts the given key-value pair.
+    ///
+    /// Note that any existing value will be overwritten.
+    pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
+        self.inner.read().as_ref().unwrap().insert(key,data)
+    }
+
+    /// Upserts the value for the given key at the given offset.
+    ///
+    /// Note that the value will be zeropadded as needed.
+    pub fn upsert_with_pref<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        data: &[u8],
+        offset: u32,
+        storage_preference: StoragePreference,
+    ) -> Result<()> {
+        self.inner.read().as_ref().unwrap().upsert_with_pref(key, data, offset, storage_preference)
+    }
+
+    /// Upserts the value for the given key at the given offset.
+    ///
+    /// Note that the value will be zeropadded as needed.
+    pub fn upsert<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        data: &[u8],
+        offset: u32,
+    ) -> Result<()> {
+        self.inner.read().as_ref().unwrap().upsert(key, data, offset)
+    }
+
+    /// Given a key and storage preference notify for this entry to be moved to a new storage level.
+    /// If the key is already located on this layer no operation is performed and success is returned.
+    ///
+    /// As the migration is for a singular there is no guarantee that when selectiong migrate for a key
+    /// that the value is actually moved to the specified storage tier.
+    /// Internally: The most high required tier will be chosen for one leaf node.
+    pub fn migrate<K: Borrow<[u8]> + Into<CowBytes>>(
+        &self,
+        key: K,
+        pref: StoragePreference,
+    ) -> Result<()> {
+        self.inner.read().as_ref().unwrap().migrate(key, pref)
+    }
+
+    /// Deletes the key-value pair if existing.
+    pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
+        self.inner.read().as_ref().unwrap().delete(key)
+    }
+
+    pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
+        self.inner.read().as_ref().unwrap().free_space_tier(pref)
+    }
+
+    /// Removes all key-value pairs in the given key range.
+    pub fn range_delete<R, K>(&self, range: R) -> Result<()>
+    where
+        R: RangeBounds<K>,
+        K: Borrow<[u8]> + Into<CowBytes>,
+    {
+        self.inner.read().as_ref().unwrap().range_delete(range)
+    }
+
+    /// Migrate a complete range of keys to another storage preference.
+    /// If an entry is already located on this layer no operation is performed and success is returned.
+    pub fn migrate_range<R, K>(&self, range: R, pref: StoragePreference) -> Result<()>
+    where
+        K: Borrow<[u8]> + Into<CowBytes>,
+        R: RangeBounds<K>,
+    {
+        self.inner.read().as_ref().unwrap().migrate_range(range, pref)
+    }
+
+    pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg<ObjectRef>>) {
+        self.inner.read().as_ref().unwrap().report_node_pointers(tx)
+    }
+}
+
 use crate::{database::ObjectRef, migration::ProfileMsg};
 use crossbeam_channel::Sender;
+use parking_lot::{RwLock, RwLockReadGuard};

@@ -148,8 +148,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
         if let Some(tx) = self.report_tx.as_ref() {
             let _ = tx
                 .send(ProfileMsg::ObjectstoreClose(
-                    store.metadata.id,
-                    store.data.id,
+                    store.metadata.id(),
+                    store.data.id(),
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
@@ -169,8 +169,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         default_storage_preference: StoragePreference,
         report: Option<Sender<ProfileMsg<ObjectRef>>>,
     ) -> Result<ObjectStore<Config>> {
-        let d_id = data.id;
-        let m_id = metadata.id;
+        let d_id = data.id();
+        let m_id = metadata.id();
         let res = Ok(ObjectStore {
             object_id_counter: {
                 let last_key = data.get(OBJECT_ID_COUNTER_KEY)?.and_then(
@@ -264,8 +264,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             let _ = tx
                 .send(ProfileMsg::ObjectOpen {
                     id: info.object_id,
-                    data: self.data.id,
-                    meta: self.metadata.id,
+                    data: self.data.id(),
+                    meta: self.metadata.id(),
                     info,
                 })
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -507,8 +507,8 @@ impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
             let _ = tx
                 .send(ProfileMsg::ObjectClose {
                     id: self.object.id,
-                    data: self.store.data.id,
-                    meta: self.store.metadata.id,
+                    data: self.store.data.id(),
+                    meta: self.store.metadata.id(),
                     info,
                 })
                 .map_err(|_| warn!("Channel Receiver has been dropped."));

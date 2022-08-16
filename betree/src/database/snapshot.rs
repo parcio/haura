@@ -31,14 +31,14 @@ impl<Config: DatabaseBuilder> Database<Config> {
         ds: &mut Dataset<Config, M>,
         name: &[u8],
     ) -> Result<Snapshot<Config>> {
-        let id = self.lookup_snapshot_id(ds.id, name)?;
-        if !ds.open_snapshots.insert(id) {
+        let id = self.lookup_snapshot_id(ds.id(), name)?;
+        if !ds.call_mut_open_snapshots(|set| set.insert(id)) {
             bail!(ErrorKind::InUse)
         }
-        let ptr = fetch_ss_data(&self.root_tree, ds.id, id)?.ptr;
+        let ptr = fetch_ss_data(&self.root_tree, ds.id(), id)?.ptr;
         Ok(Snapshot {
             tree: Tree::open(
-                ds.id,
+                ds.id(),
                 ptr,
                 DefaultMessageAction,
                 Arc::clone(self.root_tree.dmu()),
@@ -60,22 +60,22 @@ impl<Config: DatabaseBuilder> Database<Config> {
     /// Note that the creation fails if a snapshot with the same name exists
     /// already for the given data set.
     pub fn create_snapshot<M>(&mut self, ds: &mut Dataset<Config, M>, name: &[u8]) -> Result<()> {
-        match self.lookup_snapshot_id(ds.id, name).err() {
+        match self.lookup_snapshot_id(ds.id(), name).err() {
             None => bail!(ErrorKind::AlreadyExists),
             Some(Error(ErrorKind::DoesNotExist, ..)) => {}
             Some(e) => bail!(e),
         };
 
-        let data = fetch_ds_data(&self.root_tree, ds.id)?;
+        let data = fetch_ds_data(&self.root_tree, ds.id())?;
         let ss_id = data.ptr.generation();
-        let key = &ss_data_key(ds.id, ss_id) as &[_];
+        let key = &ss_data_key(ds.id(), ss_id) as &[_];
         let data = data.pack()?;
         self.root_tree.insert(
             key,
             DefaultMessageAction::insert_msg(&data),
             StoragePreference::NONE,
         )?;
-        let key = &ds_data_key(ds.id) as &[_];
+        let key = &ds_data_key(ds.id()) as &[_];
         self.root_tree.insert(
             key,
             DatasetData::<ObjectPointer>::update_previous_snapshot(Some(ss_id)),
@@ -91,7 +91,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     ) -> Result<impl Iterator<Item = Result<SlicedCowBytes>>> {
         let mut low = [0; 9];
         low[0] = 3;
-        BigEndian::write_u64(&mut low[1..], ds.id.0);
+        BigEndian::write_u64(&mut low[1..], ds.id().0);
         let high = &[4u8] as &[_];
         Ok(self.root_tree.range(&low[..]..high)?.map(|result| {
             let (b, _) = result?;
@@ -105,42 +105,42 @@ impl<Config: DatabaseBuilder> Database<Config> {
     /// Note that the deletion fails if a snapshot with the given name does not
     /// exist for this data set.
     pub fn delete_snapshot<M>(&self, ds: &mut Dataset<Config, M>, name: &[u8]) -> Result<()> {
-        let ss_id = self.lookup_snapshot_id(ds.id, name)?;
-        if ds.open_snapshots.contains(&ss_id) {
+        let ss_id = self.lookup_snapshot_id(ds.id(), name)?;
+        if ds.call_open_snapshots(|set| set.contains(&ss_id)) {
             bail!(ErrorKind::InUse)
         }
 
         self.root_tree.insert(
-            ss_key(ds.id, name),
+            ss_key(ds.id(), name),
             DefaultMessageAction::delete_msg(),
             StoragePreference::NONE,
         )?;
 
-        let previous_ss_id = fetch_ss_data(&self.root_tree, ds.id, ss_id)?.previous_snapshot;
+        let previous_ss_id = fetch_ss_data(&self.root_tree, ds.id(), ss_id)?.previous_snapshot;
         let update_previous_ss_msg =
             DatasetData::<ObjectPointer>::update_previous_snapshot(previous_ss_id);
 
         let max_key_snapshot;
         let max_key_dataset;
 
-        let max_key = if let Some(next_ss_id) = self.next_snapshot_id(ds.id, ss_id)? {
+        let max_key = if let Some(next_ss_id) = self.next_snapshot_id(ds.id(), ss_id)? {
             self.root_tree.insert(
-                &ss_data_key(ds.id, next_ss_id) as &[_],
+                &ss_data_key(ds.id(), next_ss_id) as &[_],
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_snapshot = dead_list_max_key(ds.id, next_ss_id);
+            max_key_snapshot = dead_list_max_key(ds.id(), next_ss_id);
             &max_key_snapshot as &[_]
         } else {
             self.root_tree.insert(
-                &ds_data_key(ds.id) as &[_],
+                &ds_data_key(ds.id()) as &[_],
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_dataset = dead_list_max_key_ds(ds.id);
+            max_key_dataset = dead_list_max_key_ds(ds.id());
             &max_key_dataset as &[_]
         };
-        let min_key = &dead_list_min_key(ds.id, ss_id.next()) as &[_];
+        let min_key = &dead_list_min_key(ds.id(), ss_id.next()) as &[_];
 
         for result in self.root_tree.range(min_key..max_key)? {
             let (key, value) = result?;
