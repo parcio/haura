@@ -44,7 +44,7 @@ impl<
 }
 
 /// A reference to an object managed by a `Dml`.
-pub trait ObjectRef: Serialize + DeserializeOwned + StaticSize + 'static {
+pub trait ObjectRef: Serialize + DeserializeOwned + StaticSize + Debug + 'static {
     /// The ObjectPointer for this ObjectRef.
     type ObjectPointer;
     /// Return a reference to an `Self::ObjectPointer`
@@ -184,6 +184,12 @@ pub trait HandlerDml: DmlBase {
 pub enum CopyOnWriteEvent {
     Preserved,
     Removed,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CopyOnWriteReason {
+    Remove,
+    Steal
 }
 
 /// Handler for a `Dml`.
