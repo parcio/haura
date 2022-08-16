@@ -3,19 +3,19 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     size::Size,
     tree::KeyInfo,
-    StoragePreference,
+    StoragePreference, data_management::HasStoragePreference, storage_pool::AtomicSystemStoragePreference,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::{
     cmp,
     io::{self, Write},
-    mem::size_of,
+    mem::size_of, iter::FromIterator,
 };
 
 // account for trailing fake element
 pub(crate) const HEADER_FIXED_LEN: usize = HEADER_LEN + OFFSET_LEN;
 
-const HEADER_LEN: usize = size_of::<u32>();
+const HEADER_LEN: usize = size_of::<u32>() + size_of::<u8>();
 
 // Offsets are stored as 24-bit unsigned integers in little-endian order
 pub(crate) const OFFSET_LEN: usize = 3;
@@ -28,6 +28,7 @@ pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 /// ```text
 /// Layout:
 ///     entry_count: u32,
+///     system_pref: u8,
 ///     entries: [Entry; entry_count],
 ///     # necessary to compute the length of the last value
 ///     data_end: Offset,
@@ -53,6 +54,7 @@ pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 #[derive(Debug)]
 pub struct PackedMap {
     entry_count: u32,
+    system_preference: u8,
     data: CowBytes,
 }
 
@@ -67,10 +69,12 @@ impl PackedMap {
     pub fn new(data: Vec<u8>) -> Self {
         assert!(data.len() >= 4);
         let entry_count = LittleEndian::read_u32(&data[..4]);
+        let system_preference = data[4];
 
         PackedMap {
             data: data.into(),
             entry_count,
+            system_preference,
         }
     }
 
@@ -211,13 +215,17 @@ impl PackedMap {
     }
 
     pub(super) fn unpack_leaf(&self) -> LeafNode {
-        self.get_all().collect()
+        let mut leaf: LeafNode = self.get_all().collect();
+        // Restore system storage preference state
+        leaf.set_system_storage_preference(StoragePreference::from_u8(self.system_preference));
+        leaf
     }
 
     pub(super) fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<()> {
         let entries = leaf.entries();
         let entries_cnt = entries.len() as u32;
         writer.write_u32::<LittleEndian>(entries_cnt)?;
+        writer.write_u8(leaf.system_storage_preference().as_u8())?;
 
         let mut pos = prefix_size(entries_cnt) as u32;
         for (key, (keyinfo, value)) in entries {
