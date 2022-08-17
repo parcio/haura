@@ -15,11 +15,22 @@ use crate::TO_MEBIBYTE;
 pub(crate) fn migration_config() -> DatabaseConfiguration {
     DatabaseConfiguration {
         storage: StoragePoolConfiguration {
-            tiers: vec![TierConfiguration {
-                top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
-                    mem: 2048 * TO_MEBIBYTE,
-                })],
-            }],
+            tiers: vec![
+                TierConfiguration {
+                    top_level_vdevs: vec![
+                        Vdev::Leaf(LeafVdev::Memory {
+                            mem: 2048 * TO_MEBIBYTE,
+                        }),
+                    ],
+                },
+                TierConfiguration {
+                    top_level_vdevs: vec![
+                        Vdev::Leaf(LeafVdev::Memory {
+                            mem: 2048 * TO_MEBIBYTE,
+                        }),
+                    ],
+                },
+            ],
             ..Default::default()
         },
         access_mode: AccessMode::OpenOrCreate,
@@ -29,6 +40,7 @@ pub(crate) fn migration_config() -> DatabaseConfiguration {
             update_period: std::time::Duration::from_millis(100),
             policy_config: Default::default(),
         })),
+        default_storage_class: 1,
         ..Default::default()
     }
 }

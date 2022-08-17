@@ -905,17 +905,11 @@ fn migration_policy_single_node() {
 
     ds.insert(b"foobar".to_vec(), &[42; 4096]).unwrap();
     sync();
+    assert_json_snapshot!("migration_policy_single_node__before_migration", json!(ds.tree_dump().unwrap()));
+    std::thread::sleep(std::time::Duration::from_secs(1));
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
     sync();
-    ds.upsert(b"foobar".to_vec(), &[44; 512], 2).unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    assert_json_snapshot!("migration_policy_single_node__after_migration",json!(ds.tree_dump().unwrap()));
     sync();
-    ds.upsert(b"foobar".to_vec(), &[45; 256], 3).unwrap();
-    sync();
-    ds.upsert(b"foobar".to_vec(), &[46; 128], 4).unwrap();
-    sync();
-    ds.upsert(b"foobar".to_vec(), &[47; 64], 5).unwrap();
-    sync();
-    ds.upsert(b"foobar".to_vec(), &[48; 32], 6).unwrap();
-    sync();
-    std::thread::sleep(std::time::Duration::from_secs(5));
 }

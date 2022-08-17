@@ -1,0 +1,11 @@
+---
+source: betree/tests/src/lib.rs
+expression: json!(ds.tree_dump().unwrap())
+---
+{
+  "entry_count": 1,
+  "level": 0,
+  "storage": 0,
+  "system_storage": 0,
+  "type": "leaf"
+}
