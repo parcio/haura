@@ -6,8 +6,8 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl, DmlWithStorageHints, Dmu,
-        Handler as DmuHandler, HandlerDml,
+        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl,
+        DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
     migration::{MigrationConfig, MigrationPolicies, MigrationPolicy, ProfileMsg},
@@ -449,10 +449,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
 
     // Construct an instance of [Database] either using external threads or not.
     // Deprecates [with_sync]
-    fn build_internal(
-        builder: Config,
-        report_tx: Option<Sender<ProfileMsg>>,
-    ) -> Result<Self> {
+    fn build_internal(builder: Config, report_tx: Option<Sender<ProfileMsg>>) -> Result<Self> {
         builder.pre_build();
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);

@@ -1,11 +1,8 @@
 use crossbeam_channel::Receiver;
 use lfu_cache::LfuCache;
-use parking_lot::{RwLock, Mutex};
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::Display,
-    sync::Arc, collections::HashMap,
-};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use crate::{
     database::{DatabaseBuilder, DatasetId, ObjectRef},
@@ -142,19 +139,16 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                     match msg.clone() {
                         ProfileMsg::Fetch(_) => warn!("Message: Node fetched {:?}", info.offset),
                         ProfileMsg::Write(_) => warn!("Message: Node written {:?}", info.offset),
-                        _ => {},
+                        _ => {}
                     }
-                    if let Some(entry) = self.leafs[info.offset.storage_class() as usize]
-                        .get_mut(&info.offset)
+                    if let Some(entry) =
+                        self.leafs[info.offset.storage_class() as usize].get_mut(&info.offset)
                     {
                         debug!("Known Diskoffset {:?}", info.offset);
                         entry.offset = info.offset;
                         entry.size = info.size;
                     } else {
-                        warn!(
-                            "Message: Unknown Diskoffset {:?}",
-                            info.offset
-                        );
+                        warn!("Message: Unknown Diskoffset {:?}", info.offset);
                         match info.previous_offset {
                             Some(offset) => {
                                 warn!("Message: Old Offset {offset:?}");

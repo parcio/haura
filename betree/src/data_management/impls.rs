@@ -8,7 +8,7 @@ use crate::{
     cache::{AddSize, Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
     compression::{CompressionBuilder, DecompressionTag},
-    data_management::{DmlWithReport, CopyOnWriteReason},
+    data_management::{CopyOnWriteReason, DmlWithReport},
     migration::{ConstructReport, ProfileMsg},
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
@@ -27,8 +27,12 @@ use std::{
     mem::{replace, transmute, ManuallyDrop},
     ops::{Deref, DerefMut},
     pin::Pin,
-    sync::{atomic::{AtomicU64, Ordering}, Arc},
-    thread::yield_now, time::SystemTime,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    thread::yield_now,
+    time::SystemTime,
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -335,11 +339,7 @@ where
                 ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid.2,
             }
         };
-        let mid = ModifiedObjectId(
-            mid,
-            or.correct_preference(),
-            old_ptr,
-        );
+        let mid = ModifiedObjectId(mid, or.correct_preference(), old_ptr);
         let entry = {
             let mut cache = self.cache.write();
             let was_present = cache.force_change_key(&or.as_key(), ObjectKey::Modified(mid));
@@ -393,9 +393,9 @@ where
                 obj_ptr.info,
             ),
             &self.report_tx,
-            steal
+            steal,
         ) {
-            (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove)  => {
+            (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) => {
                 tx.send(MSG::remove(obj_ptr.offset, obj_ptr.size))
                     .expect("Channel dead");
             }
@@ -608,7 +608,6 @@ where
             info,
         };
 
-
         let was_present;
         {
             let mut cache = self.cache.write();
@@ -637,11 +636,7 @@ where
         } else {
             if let Some(report_tx) = &self.report_tx {
                 report_tx
-                    .send(MSG::write(
-                        obj_ptr.offset,
-                        size,
-                        mid.2,
-                    ))
+                    .send(MSG::write(obj_ptr.offset, size, mid.2))
                     .expect("Channel dropped");
             }
         }
@@ -803,9 +798,7 @@ where
     fn prepare_write_back(
         &self,
         mid: ModifiedObjectId,
-        dep_mids: &mut Vec<
-            ModifiedObjectId,
-        >,
+        dep_mids: &mut Vec<ModifiedObjectId>,
     ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRefMut>, ()> {
         trace!("prepare_write_back: Enter");
         loop {
@@ -827,8 +820,7 @@ where
                         .for_each_child::<(), _>(|or| loop {
                             let (mid) = match or {
                                 ObjectRef::Unmodified(..) => break Ok(()),
-                                ObjectRef::InWriteback(mid)
-                                | ObjectRef::Modified(mid) => (*mid),
+                                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => (*mid),
                             };
                             if cache_contains_key(&or.as_key()) {
                                 modified_children = true;
@@ -915,10 +907,7 @@ where
                 // Modify the given reference to know for future accesses the old position
                 if let Some(report_tx) = &self.report_tx {
                     report_tx
-                        .send(MSG::fetch(
-                            ptr.offset,
-                            ptr.size,
-                        ))
+                        .send(MSG::fetch(ptr.offset, ptr.size))
                         .expect("Channel dropped");
                 }
                 cache = self.cache.read();
@@ -1038,7 +1027,6 @@ where
     G: PodType,
     MSG: ConstructReport,
 {
-
     /// Trigger a write back of an entire subtree.  This is intended for use
     /// with a dataset root, though will function on any subtree specified if
     /// needed.  A write back on a subtree will always write the lowest modified
@@ -1056,9 +1044,7 @@ where
             trace!("write_back: Acquired lock");
             let mid = match &*or {
                 ObjectRef::Unmodified(ref p) => return Ok(p.clone()),
-                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => {
-                    *mid
-                }
+                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => *mid,
             };
             let mut mids = Vec::new();
 
@@ -1085,12 +1071,7 @@ where
                             Ok(None) => {}
                             Ok(Some(object)) => {
                                 trace!("write_back: Was Ok Some");
-                                self.handle_write_back(
-                                    object,
-                                    mid,
-                                    false,
-                                )
-                                .map_err(|err| {
+                                self.handle_write_back(object, mid, false).map_err(|err| {
                                     let mut cache = self.cache.write();
                                     cache
                                         .change_key::<(), _>(
@@ -1127,9 +1108,7 @@ where
         }
         Ok(match *or {
             ObjectRef::Modified(..) | ObjectRef::InWriteback(..) => None,
-            ObjectRef::Unmodified(ref p) => {
-                Some(Box::pin(self.try_fetch_async(p)?.into_future()))
-            }
+            ObjectRef::Unmodified(ref p) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
         })
     }
 
@@ -1149,10 +1128,7 @@ where
         self.insert_object_into_cache(key, RwLock::new(object));
         if let Some(report_tx) = &self.report_tx {
             report_tx
-                .send(MSG::fetch(
-                    ptr.offset,
-                    ptr.size,
-                ))
+                .send(MSG::fetch(ptr.offset, ptr.size))
                 .expect("Channel dropped");
         }
         Ok(())

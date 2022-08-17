@@ -89,11 +89,7 @@ impl ConstructReport for ProfileMsg {
         })
     }
 
-    fn write(
-        offset: DiskOffset,
-        size: Block<u32>,
-        previous_offset: Option<DiskOffset>,
-    ) -> Self {
+    fn write(offset: DiskOffset, size: Block<u32>, previous_offset: Option<DiskOffset>) -> Self {
         Self::build_write(OpInfo {
             offset,
             size,

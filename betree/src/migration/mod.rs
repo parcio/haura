@@ -6,14 +6,14 @@ use crossbeam_channel::Receiver;
 use errors::*;
 use itertools::Itertools;
 pub(crate) use msg::*;
-use parking_lot::{RwLock, Mutex};
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, collections::HashMap};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     data_management::{DmlWithHandler, Handler},
     database::DatabaseBuilder,
-    storage_pool::{NUM_STORAGE_CLASSES, DiskOffset},
+    storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,
     Database, StoragePreference,
 };
