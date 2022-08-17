@@ -7,7 +7,7 @@ use crate::{
 use std::time::SystemTime;
 
 #[derive(Clone)]
-pub enum ProfileMsg<M: Clone> {
+pub enum ProfileMsg {
     // Relevant for Promotion and/or Demotion
     DatasetOpen(DatasetId),
     DatasetClose(DatasetId),
@@ -34,28 +34,28 @@ pub enum ProfileMsg<M: Clone> {
 
     // The three base operations of our store.
     // Largely relevant for clearing, and frequency determination in LRU, LFU, FIFO and other policies
-    Fetch(OpInfo<M>),
-    Write(OpInfo<M>),
-    Remove(M),
+    Fetch(OpInfo),
+    Write(OpInfo),
+    Remove(OpInfo),
 
     // Initial message at the beginning of an session
     // For effectiveness it is advised to discover all nodes in every dataset intially.
-    Discover(M),
+    Discover(DiskOffset),
 }
 
-pub trait ConstructReport<M: Clone> {
+pub trait ConstructReport {
     fn open_dataset(id: DatasetId) -> Self;
     fn close_dataset(id: DatasetId) -> Self;
     fn open_objectstore(meta: DatasetId, data: DatasetId) -> Self;
     fn close_objectstore(meta: DatasetId, data: DatasetId) -> Self;
-    fn build_fetch(info: OpInfo<M>) -> Self;
-    fn build_write(info: OpInfo<M>) -> Self;
-    fn fetch(mid: M, size: Block<u32>, storage_tier: u8) -> Self;
-    fn write(mid: M, size: Block<u32>, storage_tier: u8, previous_mid: Option<DiskOffset>) -> Self;
-    fn remove(mid: M) -> Self;
+    fn build_fetch(info: OpInfo) -> Self;
+    fn build_write(info: OpInfo) -> Self;
+    fn fetch(offset: DiskOffset, size: Block<u32>) -> Self;
+    fn write(offset: DiskOffset, size: Block<u32>, previous_offset: Option<DiskOffset>) -> Self;
+    fn remove(offset: DiskOffset, size: Block<u32>) -> Self;
 }
 
-impl<M: Clone> ConstructReport<M> for ProfileMsg<M> {
+impl ConstructReport for ProfileMsg {
     fn open_dataset(id: DatasetId) -> Self {
         ProfileMsg::DatasetOpen(id)
     }
@@ -72,43 +72,43 @@ impl<M: Clone> ConstructReport<M> for ProfileMsg<M> {
         ProfileMsg::ObjectstoreClose(meta, data)
     }
 
-    fn build_fetch(info: OpInfo<M>) -> Self {
+    fn build_fetch(info: OpInfo) -> Self {
         ProfileMsg::Fetch(info)
     }
 
-    fn build_write(info: OpInfo<M>) -> Self {
+    fn build_write(info: OpInfo) -> Self {
         ProfileMsg::Write(info)
     }
 
-    fn fetch(mid: M, size: Block<u32>, storage_tier: u8) -> Self {
+    fn fetch(offset: DiskOffset, size: Block<u32>) -> Self {
         Self::build_fetch(OpInfo {
-            mid,
+            offset,
             size,
-            storage_tier,
-            object: None,
             time: SystemTime::now(),
-            p_disk_offset: None,
+            previous_offset: None,
         })
     }
 
     fn write(
-        mid: M,
+        offset: DiskOffset,
         size: Block<u32>,
-        storage_tier: u8,
-        p_disk_offset: Option<DiskOffset>,
+        previous_offset: Option<DiskOffset>,
     ) -> Self {
         Self::build_write(OpInfo {
-            mid,
+            offset,
             size,
-            storage_tier,
-            object: None,
             time: SystemTime::now(),
-            p_disk_offset,
+            previous_offset,
         })
     }
 
-    fn remove(mid: M) -> Self {
-        Self::Remove(mid)
+    fn remove(offset: DiskOffset, size: Block<u32>) -> Self {
+        Self::Remove(OpInfo {
+            offset,
+            size,
+            time: SystemTime::now(),
+            previous_offset: None,
+        })
     }
 }
 
@@ -176,13 +176,13 @@ impl<M: Clone> ConstructReport<M> for ProfileMsg<M> {
 //  preferences of the user.
 
 #[derive(Clone)]
-pub struct OpInfo<M: Clone> {
-    pub(crate) mid: M,
+pub struct OpInfo {
+    pub(crate) offset: DiskOffset,
+    // If None, new entry
+    pub(crate) previous_offset: Option<DiskOffset>,
+    // Retrieved from [ObjectPointer]
     pub(crate) size: Block<u32>,
-    // has to come from DMU
-    pub(crate) storage_tier: u8,
-    pub(crate) object: Option<ObjectInfo>,
+    // Maybe include this again?
+    // pub(crate) dataset_id: DatasetId,
     pub(crate) time: SystemTime,
-    // previous disk offset
-    pub(crate) p_disk_offset: Option<DiskOffset>,
 }

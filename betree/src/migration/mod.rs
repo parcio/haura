@@ -6,16 +6,16 @@ use crossbeam_channel::Receiver;
 use errors::*;
 use itertools::Itertools;
 pub(crate) use msg::*;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, Mutex};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 
 use crate::{
     data_management::{DmlWithHandler, Handler},
     database::DatabaseBuilder,
-    storage_pool::NUM_STORAGE_CLASSES,
+    storage_pool::{NUM_STORAGE_CLASSES, DiskOffset},
     vdev::Block,
-    Database,
+    Database, StoragePreference,
 };
 
 use self::lfu::{Lfu, LfuConfig};
@@ -30,11 +30,12 @@ pub enum MigrationPolicies {
 impl MigrationPolicies {
     pub(crate) fn construct<C: DatabaseBuilder>(
         self,
-        rx: Receiver<ProfileMsg<crate::database::ObjectRef>>,
+        rx: Receiver<ProfileMsg>,
         db: Arc<RwLock<Database<C>>>,
+        storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
     ) -> impl MigrationPolicy<C> {
         match self {
-            MigrationPolicies::Lfu(config) => Lfu::build(rx, db, config),
+            MigrationPolicies::Lfu(config) => Lfu::build(rx, db, config, storage_hint_sink),
         }
     }
 }
@@ -75,6 +76,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
         rx: Receiver<Self::Message>,
         db: Arc<RwLock<Database<C>>>,
         config: MigrationConfig<Self::Config>,
+        storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
     ) -> Self;
 
     // /// Perform all available operations on a preset storage tier.

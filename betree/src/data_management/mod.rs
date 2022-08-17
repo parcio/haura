@@ -11,6 +11,7 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
+use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
 use stable_deref_trait::StableDeref;
 use std::{
@@ -18,7 +19,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     io::{self, Write},
-    ops::DerefMut,
+    ops::DerefMut, sync::Arc, collections::HashMap,
 };
 
 use crossbeam_channel::Sender;
@@ -289,6 +290,10 @@ pub trait DmlWithCache {
     type CacheStats: serde::Serialize;
 
     fn cache_stats(&self) -> Self::CacheStats;
+}
+
+pub trait DmlWithStorageHints {
+    fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>;
 }
 
 /// Extension of an DMU to signal that it supports a message based report format.

@@ -504,9 +504,10 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         Ok(())
     }
 
-    pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg<ObjectRef>>) {
+    // FIXME: maybe drop, this is no longer really necessary
+    pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg>) {
         for node in self.tree.node_iter() {
-            tx.send(ProfileMsg::Discover(ObjectRef::Unmodified(node)))
+            tx.send(ProfileMsg::Discover(node.offset()))
                 .expect("Message receiver has been dropped. Unrecoverable.");
         }
     }
@@ -600,7 +601,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         self.inner.read().as_ref().unwrap().migrate_range(range, pref)
     }
 
-    pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg<ObjectRef>>) {
+    pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg>) {
         self.inner.read().as_ref().unwrap().report_node_pointers(tx)
     }
 }
