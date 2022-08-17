@@ -1,7 +1,6 @@
 ---
 source: betree/tests/src/lib.rs
-expression: "json!({\n          \"shape/data\" :\n          self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\"),\n          \"keys/data\" : self.object_store.data_tree().range :: < _, & [u8] >\n          (..).expect(\"Failed to query data keys\").map(| res |\n                                                       res.map(| (k, _v) |\n                                                               k)).collect ::\n          < Result < Vec < _ >, _ >> ().expect(\"Failed to gather data keys\"),\n          \"keys/meta\" : self.object_store.meta_tree().range :: < _, & [u8] >\n          (..).expect(\"Failed to query meta keys\").map(| res |\n                                                       res.map(| (k, _v) |\n                                                               k)).collect ::\n          < Result < Vec < _ >, _ >> ().expect(\"Failed to gather meta keys\")\n      })"
-
+expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_tree().tree_dump().expect(\"Failed to create data tree dump\"),\n        \"keys/data\" : self.object_store.data_tree().range :: < _, & [u8] >\n        (..).expect(\"Failed to query data keys\").map(| res |\n        res.map(| (k, _v) | k)).collect :: < Result < Vec < _ >, _ >>\n        ().expect(\"Failed to gather data keys\"), \"keys/meta\" :\n        self.object_store.meta_tree().range :: < _, & [u8] >\n        (..).expect(\"Failed to query meta keys\").map(| res |\n        res.map(| (k, _v) | k)).collect :: < Result < Vec < _ >, _ >>\n        ().expect(\"Failed to gather meta keys\")\n    })"
 ---
 {
   "keys/data": [
@@ -14032,6 +14031,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": null,
@@ -14043,6 +14043,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0017",
@@ -14054,6 +14055,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 002F",
@@ -14065,6 +14067,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0047",
@@ -14076,6 +14079,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 005F",
@@ -14087,6 +14091,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0077",
@@ -14098,6 +14103,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 008F",
@@ -14109,6 +14115,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 00A7",
@@ -14120,6 +14127,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 00BF",
@@ -14131,6 +14139,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 00D7",
@@ -14142,6 +14151,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 00EF",
@@ -14153,6 +14163,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0107",
@@ -14164,6 +14175,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 011F",
@@ -14175,6 +14187,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0137",
@@ -14186,6 +14199,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 014F",
@@ -14197,6 +14211,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0167",
@@ -14208,6 +14223,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 017F",
@@ -14219,6 +14235,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0197",
@@ -14230,6 +14247,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01AF",
@@ -14241,6 +14259,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01C7",
@@ -14252,6 +14271,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01DF",
@@ -14263,6 +14283,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01F7",
@@ -14274,6 +14295,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 020F",
@@ -14285,6 +14307,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0227",
@@ -14296,6 +14319,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 023F",
@@ -14307,6 +14331,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0257",
@@ -14318,6 +14343,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 026F",
@@ -14329,6 +14355,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0287",
@@ -14340,6 +14367,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 029F",
@@ -14351,6 +14379,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 02B7",
@@ -14362,6 +14391,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 02CF",
@@ -14373,6 +14403,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 02E7",
@@ -14384,6 +14415,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 02FF",
@@ -14395,6 +14427,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0317",
@@ -14406,6 +14439,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 032F",
@@ -14417,6 +14451,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0347",
@@ -14428,6 +14463,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 035F",
@@ -14439,6 +14475,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0377",
@@ -14450,6 +14487,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 038F",
@@ -14461,6 +14499,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 03A7",
@@ -14472,6 +14511,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 24,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 03BF",
@@ -14483,6 +14523,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
           "entry_count": 17,
           "level": 0,
           "storage": 0,
+          "system_storage": 254,
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 03D7",
@@ -14492,6 +14533,7 @@ expression: "json!({\n          \"shape/data\" :\n          self.object_store.da
     ],
     "level": 1,
     "storage": 0,
+    "system_storage": 254,
     "type": "internal"
   }
 }
