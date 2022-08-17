@@ -8,11 +8,38 @@ use std::{
     slice,
 };
 
-/// Configuration of a single storage class.
+/// Access pattern descriptor to differentiate and optimize drive usage. Useful
+/// when working with [Object] with a defined with access pattern. Assignable to
+/// [TierConfiguration].
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
+pub enum PreferredAccessType {
+    /// The default access pattern. No assumptions are made.
+    Unknown,
+    /// Preferred access is a random read pattern, this can be for example a SSD to reduce wear-out.
+    RandomRead,
+    /// Preferred access is a random write pattern, this can be for example some otherwise cached file or NVM.
+    RandomWrite,
+    /// Preferred access is a random read and write pattern, this can be for example a SSD.
+    RandomReadWrite,
+    /// Preferred access is a sequential write pattern, this can be for example tape storage for archival.
+    SequentialWrite,
+    /// Preferred access is a sequential read pattern, this can be for example a HDD.
+    SequentialRead,
+    /// Preferred access is a sequential read and write pattern, this can be for example a HDD mirror1 setup.
+    SequentialReadWrite,
+}
+
+impl Default for PreferredAccessType {
+    fn default() -> Self {
+        PreferredAccessType::Unknown
+    }
+}
+
+/// Configuration of a single storage class.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TierConfiguration {
     pub top_level_vdevs: Vec<Vdev>,
+    pub preferred_access_type: PreferredAccessType,
 }
 
 /// Configuration for the storage pool unit.
@@ -88,7 +115,7 @@ error_chain! {
 impl TierConfiguration {
     /// Returns a new `StorageConfiguration` based on the given top-level vdevs.
     pub fn new(top_level_vdevs: Vec<Vdev>) -> Self {
-        TierConfiguration { top_level_vdevs }
+        TierConfiguration { top_level_vdevs, preferred_access_type: PreferredAccessType::Unknown }
     }
 
     /// Opens file and devices and constructs a `Vec<Vdev>`.
@@ -135,7 +162,7 @@ impl TierConfiguration {
                 .collect();
             v.push(f(leaves));
         }
-        Ok(TierConfiguration { top_level_vdevs: v })
+        Ok(TierConfiguration { top_level_vdevs: v, preferred_access_type: PreferredAccessType::Unknown })
     }
 
     /// Returns the configuration in a ZFS-like string representation.
@@ -178,6 +205,7 @@ impl FromIterator<Vdev> for TierConfiguration {
     fn from_iter<T: IntoIterator<Item = Vdev>>(iter: T) -> Self {
         TierConfiguration {
             top_level_vdevs: iter.into_iter().collect(),
+            preferred_access_type: PreferredAccessType::Unknown,
         }
     }
 }

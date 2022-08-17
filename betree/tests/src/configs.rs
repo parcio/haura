@@ -22,6 +22,7 @@ pub(crate) fn migration_config() -> DatabaseConfiguration {
                             mem: 2048 * TO_MEBIBYTE,
                         }),
                     ],
+                    ..Default::default()
                 },
                 TierConfiguration {
                     top_level_vdevs: vec![
@@ -29,6 +30,7 @@ pub(crate) fn migration_config() -> DatabaseConfiguration {
                             mem: 2048 * TO_MEBIBYTE,
                         }),
                     ],
+                    ..Default::default()
                 },
             ],
             ..Default::default()
@@ -60,6 +62,7 @@ pub(crate) fn migration_config_file_backed() -> RwLockWriteGuard<'static, Databa
                     top_level_vdevs: vec![Vdev::Leaf(LeafVdev::File(
                         "test_disk_tier_fastest".into(),
                     ))],
+                    ..Default::default()
                 }],
                 ..Default::default()
             },
