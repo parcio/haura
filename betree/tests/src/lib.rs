@@ -28,6 +28,7 @@ fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
             tiers: (0..tiers)
                 .map(|_| TierConfiguration {
                     top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory { mem: tier_size })],
+                    ..Default::default()
                 })
                 .collect(),
             ..Default::default()
@@ -50,6 +51,7 @@ fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database<DatabaseConfigu
                     top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
                         mem: mb_per_tier[idx] as usize * TO_MEBIBYTE,
                     })],
+                    ..Default::default()
                 })
                 .collect(),
             ..Default::default()
