@@ -551,14 +551,13 @@ where
         debug!("Estimated object size is {object_size} bytes");
         debug!("Using compression {:?}", &self.default_compression);
         let generation = self.handler.current_generation();
-        let storage_preference = object.correct_preference();
         // Use storage hints if available
         if let Some(old_pos) = &mid.2 {
             if let Some(pref) = self.storage_hints.lock().remove(&old_pos) {
                 object.set_system_storage_preference(pref);
             }
         }
-        let system_preference = object.system_storage_preference();
+        let storage_preference = object.correct_preference();
         let storage_class = storage_preference
             .preferred_class()
             .unwrap_or(self.default_storage_class);
