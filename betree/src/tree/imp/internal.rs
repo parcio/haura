@@ -573,7 +573,9 @@ mod tests {
                 children,
                 entries_size,
                 level: 1,
-                system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+                system_storage_preference: AtomicSystemStoragePreference::from(
+                    StoragePreference::NONE,
+                ),
             }
         }
     }

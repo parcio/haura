@@ -15,11 +15,13 @@ use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
 use stable_deref_trait::StableDeref;
 use std::{
+    collections::HashMap,
     error,
     fmt::Debug,
     hash::Hash,
     io::{self, Write},
-    ops::DerefMut, sync::Arc, collections::HashMap,
+    ops::DerefMut,
+    sync::Arc,
 };
 
 use crossbeam_channel::Sender;
@@ -190,7 +192,7 @@ pub enum CopyOnWriteEvent {
 #[derive(Debug, PartialEq, Eq)]
 pub enum CopyOnWriteReason {
     Remove,
-    Steal
+    Steal,
 }
 
 /// Handler for a `Dml`.

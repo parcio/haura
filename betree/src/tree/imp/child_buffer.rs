@@ -315,7 +315,9 @@ mod tests {
                     .sum::<usize>(),
                 buffer,
                 node_pointer: RwLock::new(Arbitrary::arbitrary(g)),
-                system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+                system_storage_preference: AtomicSystemStoragePreference::from(
+                    StoragePreference::NONE,
+                ),
             }
         }
     }

@@ -1,15 +1,18 @@
 use super::leaf::LeafNode;
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::HasStoragePreference,
     size::Size,
+    storage_pool::AtomicSystemStoragePreference,
     tree::KeyInfo,
-    StoragePreference, data_management::HasStoragePreference, storage_pool::AtomicSystemStoragePreference,
+    StoragePreference,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::{
     cmp,
     io::{self, Write},
-    mem::size_of, iter::FromIterator,
+    iter::FromIterator,
+    mem::size_of,
 };
 
 // account for trailing fake element

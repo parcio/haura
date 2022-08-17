@@ -416,7 +416,6 @@ where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
         ensure!(!key.borrow().is_empty(), ErrorKind::EmptyKey);
-
         let mut parent = None;
         let mut node = {
             let mut node = self.get_mut_root_node()?;

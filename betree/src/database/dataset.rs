@@ -29,14 +29,17 @@ where
 /// The data set type.
 pub struct Dataset<Config, Message = DefaultMessageAction>
 where
-    Config: DatabaseBuilder
+    Config: DatabaseBuilder,
 {
     // NOTE: This lock and option is valid and readable as long as [Dataset] exists.
     // On closing the dataset this option will be set to [Option::None].
     inner: Arc<RwLock<Option<DatasetInner<Config, Message>>>>,
 }
 
-impl<Config, Message> From<DatasetInner<Config, Message>> for Dataset<Config, Message> where Config: DatabaseBuilder {
+impl<Config, Message> From<DatasetInner<Config, Message>> for Dataset<Config, Message>
+where
+    Config: DatabaseBuilder,
+{
     fn from(inner: DatasetInner<Config, Message>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(Some(inner))),
@@ -125,7 +128,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
             name: Box::from(name),
             open_snapshots: Default::default(),
             storage_preference,
-        }.into())
+        }
+        .into())
     }
 
     /// Creates a new data set identified by the given name.
@@ -310,7 +314,7 @@ impl<Message, Config: DatabaseBuilder> Dataset<Config, Message> {
 
     pub(super) fn call_tree<F, R>(&self, call: F) -> R
     where
-        F: FnOnce(&MessageTree<Config::Dmu, Message>) -> R
+        F: FnOnce(&MessageTree<Config::Dmu, Message>) -> R,
     {
         call(&self.inner.read().as_ref().unwrap().tree)
     }
@@ -335,7 +339,11 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         msg: SlicedCowBytes,
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        self.inner.read().as_ref().unwrap().insert_msg_with_pref(key, msg, storage_preference)
+        self.inner
+            .read()
+            .as_ref()
+            .unwrap()
+            .insert_msg_with_pref(key, msg, storage_preference)
     }
 
     /// Returns the value for the given key if existing.
@@ -524,14 +532,18 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         data: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        self.inner.read().as_ref().unwrap().insert_with_pref(key, data, storage_preference)
+        self.inner
+            .read()
+            .as_ref()
+            .unwrap()
+            .insert_with_pref(key, data, storage_preference)
     }
 
     /// Inserts the given key-value pair.
     ///
     /// Note that any existing value will be overwritten.
     pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
-        self.inner.read().as_ref().unwrap().insert(key,data)
+        self.inner.read().as_ref().unwrap().insert(key, data)
     }
 
     /// Upserts the value for the given key at the given offset.
@@ -544,7 +556,11 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         offset: u32,
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        self.inner.read().as_ref().unwrap().upsert_with_pref(key, data, offset, storage_preference)
+        self.inner
+            .read()
+            .as_ref()
+            .unwrap()
+            .upsert_with_pref(key, data, offset, storage_preference)
     }
 
     /// Upserts the value for the given key at the given offset.
@@ -556,7 +572,11 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         data: &[u8],
         offset: u32,
     ) -> Result<()> {
-        self.inner.read().as_ref().unwrap().upsert(key, data, offset)
+        self.inner
+            .read()
+            .as_ref()
+            .unwrap()
+            .upsert(key, data, offset)
     }
 
     /// Given a key and storage preference notify for this entry to be moved to a new storage level.
@@ -598,7 +618,11 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         K: Borrow<[u8]> + Into<CowBytes>,
         R: RangeBounds<K>,
     {
-        self.inner.read().as_ref().unwrap().migrate_range(range, pref)
+        self.inner
+            .read()
+            .as_ref()
+            .unwrap()
+            .migrate_range(range, pref)
     }
 
     pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg>) {
