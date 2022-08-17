@@ -2,7 +2,7 @@
 
 ./scripts/prepare-test.sh
 
-num_thread=$(echo "$(head -n 1 /proc/meminfo | xargs | cut -d ' ' -f 2) / 1024 / 1024 / 2" | bc)
+num_thread=$(echo "$(head -n 1 /proc/meminfo | xargs | cut -d ' ' -f 2) / 1024 / 1024 / 4" | bc)
 
 if [ "$num_thread" -gt "$(nproc)" ]
 then
