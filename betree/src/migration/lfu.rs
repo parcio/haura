@@ -136,29 +136,25 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         for msg in self.rx.try_iter() {
             match msg.clone() {
                 ProfileMsg::Fetch(info) | ProfileMsg::Write(info) => {
-                    match msg.clone() {
-                        ProfileMsg::Fetch(_) => warn!("Message: Node fetched {:?}", info.offset),
-                        ProfileMsg::Write(_) => warn!("Message: Node written {:?}", info.offset),
-                        _ => {}
-                    }
                     if let Some(entry) =
                         self.leafs[info.offset.storage_class() as usize].get_mut(&info.offset)
                     {
-                        debug!("Known Diskoffset {:?}", info.offset);
+                        // Known Offset
                         entry.offset = info.offset;
                         entry.size = info.size;
                     } else {
-                        warn!("Message: Unknown Diskoffset {:?}", info.offset);
+                        // Unknonwn Offset
                         match info.previous_offset {
                             Some(offset) => {
-                                warn!("Message: Old Offset {offset:?}");
+                                debug!("Message: Old Offset {offset:?}");
+                                // Moved Entry
                                 let new_offset = info.offset;
                                 let new_tier = new_offset.storage_class() as usize;
                                 let old_tier = offset.storage_class() as usize;
                                 if let Some((previous_value, freq)) =
                                     self.leafs[old_tier].remove(&offset)
                                 {
-                                    warn!("Message: Moving entry..");
+                                    debug!("Message: Moving entry..");
                                     self.leafs[new_tier].insert(new_offset, previous_value);
 
                                     // FIXME: This is hacky way to transfer the
@@ -184,7 +180,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                 entry.size = info.size;
                             }
                             None => {
-                                warn!("Message: New Entry {:?}", info.offset);
+                                // New Entry
                                 self.leafs[info.offset.storage_class() as usize].insert(
                                     info.offset,
                                     LeafInfo {
@@ -197,7 +193,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                     }
                 }
                 ProfileMsg::Remove(opinfo) => {
-                    debug!("Message: Node removed {:?}", opinfo.offset);
+                    // Delete Offset
                     self.leafs[opinfo.offset.storage_class() as usize].remove(&opinfo.offset);
                 }
                 // This policy ignores all other messages.
