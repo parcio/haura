@@ -632,6 +632,17 @@ where
         if !was_present {
             // The object has been `stolen`.  Notify the handler.
             self.copy_on_write(obj_ptr.clone(), CopyOnWriteReason::Steal);
+            // NOTE: Since this position is immediately deallocated we report
+            // here a write for the old position. This has to be done since we
+            // can't modify the old position as the the tree ObjectRef will not
+            // be updated until the next writeback when it is inserted in
+            // written back. Otherwise we can't find the Cache value anymore
+            // from the tree...  o.O
+            if let (Some(report_tx), Some(old_offset)) = (&self.report_tx, mid.2) {
+                report_tx
+                    .send(MSG::write(old_offset, size, mid.2))
+                    .expect("Channel dropped");
+            }
         } else {
             if let Some(report_tx) = &self.report_tx {
                 report_tx
