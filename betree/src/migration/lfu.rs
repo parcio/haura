@@ -1,34 +1,29 @@
 use crossbeam_channel::Receiver;
 use lfu_cache::LfuCache;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, Mutex};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
     fmt::Display,
-    sync::Arc,
-    time::Instant,
+    sync::Arc, collections::HashMap,
 };
 
 use crate::{
-    data_management::{HandlerDml, HasStoragePreference, ObjectRef as ObjectRefTrait},
     database::{DatabaseBuilder, DatasetId, ObjectRef},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,
     Database, StoragePreference,
 };
 
-use super::{MigrationConfig, OpInfo, ProfileMsg};
-
-const FREQ_LEN: usize = 10;
-const FREQ_LOWER_BOUND: f32 = 0.0001;
+use super::{MigrationConfig, ProfileMsg};
 
 /// Implementation of Least Frequently Used
 pub struct Lfu<C: DatabaseBuilder> {
     leafs: [LfuCache<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
-    rx: Receiver<ProfileMsg<ObjectRef>>,
+    rx: Receiver<ProfileMsg>,
     db: Arc<RwLock<Database<C>>>,
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
     config: MigrationConfig<LfuConfig>,
+    storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
 }
 
 /// Lfu specific configuration details.
@@ -43,42 +38,36 @@ pub struct LfuConfig {
 impl Default for LfuConfig {
     fn default() -> Self {
         Self {
-            low_threshold: Some(FREQ_LOWER_BOUND),
+            low_threshold: None,
             high_threshold: None,
         }
     }
 }
 
 struct LeafInfo {
-    mid: ObjectRef,
+    offset: DiskOffset,
     size: Block<u32>,
-    info: DatasetId,
 }
 
 impl Display for LeafInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "LeafInfo {{ mid: {:?}, info: {:?}",
-            self.mid, self.info
+            "LeafInfo {{ mid: {:?}, size: {:?}",
+            self.offset, self.size
         ))
-    }
-}
-
-impl LeafInfo {
-    fn mid_mut(&self) -> ObjectRef {
-        self.mid.clone()
     }
 }
 
 impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
     type ObjectReference = ObjectRef;
-    type Message = ProfileMsg<Self::ObjectReference>;
+    type Message = ProfileMsg;
     type Config = LfuConfig;
 
     fn build(
         rx: Receiver<Self::Message>,
         db: Arc<RwLock<Database<C>>>,
         config: MigrationConfig<LfuConfig>,
+        storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
     ) -> Self {
         let dmu = Arc::clone(db.read().root_tree.dmu());
         Self {
@@ -87,6 +76,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
             dmu,
             db,
             config,
+            storage_hint_sink,
         }
     }
 
@@ -99,14 +89,13 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         let mut moved = Block(0_u32);
         while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
             if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
-                let mut handle = entry.mid_mut();
-                let size = handle.get_unmodified().unwrap().size();
-                let mut node = self.dmu.get_mut(&mut handle, entry.info)?;
                 if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
-                    node.set_system_storage_preference(lifted);
+                    debug!("Moving {:?}", entry.offset);
+                    debug!("Was on storage tier: {:?}", storage_tier);
+                    self.storage_hint_sink.lock().insert(entry.offset, lifted);
+                    moved += entry.size;
+                    debug!("New storage preference: {:?}", lifted);
                 }
-                // node.evict()
-                moved += size;
             } else {
                 warn!("Cache indicated that it is not empty but no value could be fetched.");
             }
@@ -123,14 +112,15 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         let mut moved = Block(0_u32);
         while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
             if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
-                let mut handle = entry.mid_mut();
-                let size = handle.get_unmodified().unwrap().size();
-                let mut node = self.dmu.get_mut(&mut handle, entry.info)?;
-                if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
-                    node.set_system_storage_preference(lowered);
+                if let Some(lifted) = StoragePreference::from_u8(storage_tier).lower() {
+                    debug!("Moving {:?}", entry.offset);
+                    debug!("Was on storage tier: {:?}", storage_tier);
+                    self.storage_hint_sink.lock().insert(entry.offset, lifted);
+                    moved += entry.size;
+                    debug!("New storage preference: {:?}", lifted);
                 }
-                // node.evict()
-                moved += size;
+            } else {
+                warn!("Cache indicated that it is not empty but no value could be fetched.");
             }
         }
         return Ok(moved);
@@ -149,28 +139,32 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         for msg in self.rx.try_iter() {
             match msg.clone() {
                 ProfileMsg::Fetch(info) | ProfileMsg::Write(info) => {
-                    // debug!("Node added {:?}", info.mid.get_unmodified().unwrap().offset());
-                    // Based on the message type we can guarantee that this will only contain Unmodified references.
-                    if let Some(entry) = self.leafs[info.storage_tier as usize]
-                        .get_mut(&info.mid.get_unmodified().unwrap().offset())
+                    match msg.clone() {
+                        ProfileMsg::Fetch(_) => warn!("Message: Node fetched {:?}", info.offset),
+                        ProfileMsg::Write(_) => warn!("Message: Node written {:?}", info.offset),
+                        _ => {},
+                    }
+                    if let Some(entry) = self.leafs[info.offset.storage_class() as usize]
+                        .get_mut(&info.offset)
                     {
-                        debug!("Known Diskoffset {:?}", info.mid.get_unmodified().unwrap());
-                        entry.mid = info.mid;
+                        debug!("Known Diskoffset {:?}", info.offset);
+                        entry.offset = info.offset;
                         entry.size = info.size;
                     } else {
-                        debug!(
-                            "Unknown Diskoffset {:?}",
-                            info.mid.get_unmodified().unwrap()
+                        warn!(
+                            "Message: Unknown Diskoffset {:?}",
+                            info.offset
                         );
-                        match info.p_disk_offset {
+                        match info.previous_offset {
                             Some(offset) => {
-                                let new_offset = info.mid.get_unmodified().unwrap().offset();
+                                warn!("Message: Old Offset {offset:?}");
+                                let new_offset = info.offset;
                                 let new_tier = new_offset.storage_class() as usize;
                                 let old_tier = offset.storage_class() as usize;
                                 if let Some((previous_value, freq)) =
                                     self.leafs[old_tier].remove(&offset)
                                 {
-                                    debug!("Node has been moved. Moving entry..");
+                                    warn!("Message: Moving entry..");
                                     self.leafs[new_tier].insert(new_offset, previous_value);
 
                                     // FIXME: This is hacky way to transfer the
@@ -186,43 +180,31 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                                     self.leafs[new_tier].insert(
                                         new_offset,
                                         LeafInfo {
-                                            mid: info.mid,
+                                            offset: info.offset,
                                             size: info.size,
-                                            info: info.mid.get_unmodified().unwrap().info(),
                                         },
                                     );
                                 }
                                 let entry = self.leafs[new_tier].get_mut(&new_offset).unwrap();
-                                entry.mid = info.mid;
+                                entry.offset = info.offset;
                                 entry.size = info.size;
                             }
                             None => {
-                                // debug!("New Entry {:?}", info.mid.get_unmodified().unwrap());
-                                self.leafs[info.storage_tier as usize].insert(
-                                    info.mid.get_unmodified().unwrap().offset(),
+                                warn!("Message: New Entry {:?}", info.offset);
+                                self.leafs[info.offset.storage_class() as usize].insert(
+                                    info.offset,
                                     LeafInfo {
-                                        info: info.mid.get_unmodified().unwrap().info(),
-                                        mid: info.mid,
+                                        offset: info.offset,
                                         size: info.size,
                                     },
                                 );
-                                // debug!("Map now has {} entries.", self.leafs[info.storage_tier as usize].len());
                             }
                         }
                     }
                 }
-                ProfileMsg::Remove(mid) => {
-                    let offset = mid.get_unmodified().unwrap().offset();
-                    // debug!("Node will be removed {:?}", offset);
-                    self.leafs[offset.storage_class() as usize].remove(&offset);
-                }
-                ProfileMsg::Discover(mid) => {
-                    let op = mid.get_unmodified().unwrap();
-                    let offset = op.offset();
-                    let info = op.info();
-                    let size = op.size();
-                    self.leafs[offset.storage_class() as usize]
-                        .insert(offset, LeafInfo { mid, info, size });
+                ProfileMsg::Remove(opinfo) => {
+                    debug!("Message: Node removed {:?}", opinfo.offset);
+                    self.leafs[opinfo.offset.storage_class() as usize].remove(&opinfo.offset);
                 }
                 // This policy ignores all other messages.
                 _ => {}

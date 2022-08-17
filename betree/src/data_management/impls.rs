@@ -28,7 +28,7 @@ use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
     sync::{atomic::{AtomicU64, Ordering}, Arc},
-    thread::yield_now,
+    thread::yield_now, time::SystemTime,
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -313,7 +313,7 @@ where
     H::Object: Object<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
     I: PodType,
     G: PodType,
-    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
+    MSG: ConstructReport,
 {
     /// Stealing an [ObjectRef] can have multiple effects.  First, the
     /// corresponding node is moved in cache to the [ObjectKey::Modified] state.
@@ -396,7 +396,7 @@ where
             steal
         ) {
             (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove)  => {
-                tx.send(MSG::remove(ObjectRef::Unmodified(obj_ptr)))
+                tx.send(MSG::remove(obj_ptr.offset, obj_ptr.size))
                     .expect("Channel dead");
             }
             _ => {}
@@ -638,9 +638,8 @@ where
             if let Some(report_tx) = &self.report_tx {
                 report_tx
                     .send(MSG::write(
-                        ObjectRef::Unmodified(obj_ptr.clone()),
+                        obj_ptr.offset,
                         size,
-                        obj_ptr.offset.storage_class(),
                         mid.2,
                     ))
                     .expect("Channel dropped");
@@ -875,7 +874,7 @@ where
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
-    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
+    MSG: ConstructReport,
 {
     type Object = H::Object;
     type CacheValueRef = CacheValueRef<E::ValueRef, RwLockReadGuard<'static, H::Object>>;
@@ -917,9 +916,8 @@ where
                 if let Some(report_tx) = &self.report_tx {
                     report_tx
                         .send(MSG::fetch(
-                            ObjectRef::Unmodified(ptr.clone()),
+                            ptr.offset,
                             ptr.size,
-                            ptr.offset.storage_class(),
                         ))
                         .expect("Channel dropped");
                 }
@@ -1038,7 +1036,7 @@ where
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
-    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
+    MSG: ConstructReport,
 {
 
     /// Trigger a write back of an entire subtree.  This is intended for use
@@ -1152,9 +1150,8 @@ where
         if let Some(report_tx) = &self.report_tx {
             report_tx
                 .send(MSG::fetch(
-                    ObjectRef::Unmodified(ptr.clone()),
+                    ptr.offset,
                     ptr.size,
-                    ptr.offset.storage_class(),
                 ))
                 .expect("Channel dropped");
         }
@@ -1233,6 +1230,22 @@ where
     }
 }
 
+impl<E, SPL, H, I, G, MSG> super::DmlWithStorageHints for Dmu<E, SPL, H, I, G, MSG>
+where
+    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    H::Object: SizeMut,
+    SPL: StoragePoolLayer,
+    SPL::Checksum: StaticSize,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H::Object: Object<<Self as DmlBase>::ObjectRef>,
+    I: PodType,
+    G: PodType,
+{
+    fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>> {
+        Arc::clone(&self.storage_hints)
+    }
+}
+
 impl<E, SPL, H, I, G, MSG> super::DmlWithReport<MSG> for Dmu<E, SPL, H, I, G, MSG>
 where
     E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
@@ -1243,7 +1256,7 @@ where
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
     I: PodType,
     G: PodType,
-    MSG: ConstructReport<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
+    MSG: ConstructReport,
 {
     fn with_report(mut self, tx: Sender<MSG>) -> Self {
         self.report_tx = Some(tx);

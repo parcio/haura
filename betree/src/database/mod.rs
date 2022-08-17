@@ -6,7 +6,7 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl, Dmu,
+        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl, DmlWithStorageHints, Dmu,
         Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
@@ -77,7 +77,7 @@ pub(crate) type RootDmu = Dmu<
     Handler,
     DatasetId,
     Generation,
-    ProfileMsg<ObjectRef>,
+    ProfileMsg,
 >;
 
 pub(crate) type MessageTree<Dmu, Message> =
@@ -102,7 +102,8 @@ where
         + DmlWithHandler<Handler = handler::Handler>
         + DmlWithSpl<Spl = Self::Spu>
         + DmlWithCache
-        + DmlWithReport<ProfileMsg<ObjectRef>>
+        + DmlWithStorageHints
+        + DmlWithReport<ProfileMsg>
         + Send
         + Sync
         + 'static,
@@ -400,7 +401,7 @@ pub struct Database<Config: DatabaseBuilder> {
     pub(crate) root_tree: RootTree<Config::Dmu>,
     builder: Config,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
-    pub(crate) report_tx: Option<Sender<ProfileMsg<ObjectRef>>>,
+    pub(crate) report_tx: Option<Sender<ProfileMsg>>,
 }
 
 impl Database<DatabaseConfiguration> {
@@ -450,7 +451,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     // Deprecates [with_sync]
     fn build_internal(
         builder: Config,
-        report_tx: Option<Sender<ProfileMsg<ObjectRef>>>,
+        report_tx: Option<Sender<ProfileMsg>>,
     ) -> Result<Self> {
         builder.pre_build();
         let spl = builder.new_spu()?;
@@ -501,7 +502,8 @@ impl<Config: DatabaseBuilder> Database<Config> {
                 let db = Arc::new(RwLock::new(Self::build_internal(builder, Some(report_tx))?));
                 let other = db.clone();
                 thread::spawn(move || {
-                    let mut policy = pol.construct(report_rx, other);
+                    let hints = other.read().root_tree.dmu().storage_hints();
+                    let mut policy = pol.construct(report_rx, other, hints);
                     loop {
                         if let Err(e) = policy.thread_loop() {
                             error!("Automatic Migration Policy encountered {:?}", e);

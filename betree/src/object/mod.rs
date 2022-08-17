@@ -107,7 +107,7 @@ pub struct ObjectStore<Config: DatabaseBuilder> {
     metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: AtomicU64,
     default_storage_preference: StoragePreference,
-    report: Option<Sender<ProfileMsg<ObjectRef>>>,
+    report: Option<Sender<ProfileMsg>>,
 }
 
 impl<Config: DatabaseBuilder> Database<Config> {
@@ -167,7 +167,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         data: Dataset<Config>,
         metadata: Dataset<Config, MetaMessageAction>,
         default_storage_preference: StoragePreference,
-        report: Option<Sender<ProfileMsg<ObjectRef>>>,
+        report: Option<Sender<ProfileMsg>>,
     ) -> Result<ObjectStore<Config>> {
         let d_id = data.id();
         let m_id = metadata.id();
