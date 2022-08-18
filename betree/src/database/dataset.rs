@@ -8,10 +8,10 @@ use crate::{
     database::DatabaseBuilder,
     migration::DatabaseMsg,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
-    vdev::Block,
     StoragePreference,
 };
-use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, process::id, sync::Arc};
+use parking_lot::RwLock;
+use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
 /// The internal data set type.  This is the non-user facing variant which is
 /// then wrapped in the [Dataset] type.
@@ -140,7 +140,8 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         .into();
 
         if let Some(tx) = &self.db_tx {
-            let _ = tx.send(DatabaseMsg::DatasetOpen(id))
+            let _ = tx
+                .send(DatabaseMsg::DatasetOpen(id))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
@@ -239,7 +240,8 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         ds: Dataset<Config, Message>,
     ) -> Result<()> {
         if let Some(tx) = &self.db_tx {
-            let _ = tx.send(DatabaseMsg::DatasetClose(ds.id()))
+            let _ = tx
+                .send(DatabaseMsg::DatasetClose(ds.id()))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         // Deactivate the dataset for further modifications
@@ -636,6 +638,3 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
             .migrate_range(range, pref)
     }
 }
-
-use crossbeam_channel::Sender;
-use parking_lot::{RwLock, RwLockReadGuard};

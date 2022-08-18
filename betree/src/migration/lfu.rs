@@ -11,12 +11,13 @@ use crate::{
     Database, StoragePreference,
 };
 
-use super::{DmlMsg, MigrationConfig};
+use super::{errors::Result, DatabaseMsg, DmlMsg, MigrationConfig};
 
 /// Implementation of Least Frequently Used
 pub struct Lfu<C: DatabaseBuilder + Clone> {
     leafs: [LfuCache<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
-    rx: Receiver<DmlMsg>,
+    dml_rx: Receiver<DmlMsg>,
+    db_rx: Receiver<DatabaseMsg<C>>,
     db: Arc<RwLock<Database<C>>>,
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
     config: MigrationConfig<LfuConfig>,
@@ -59,89 +60,10 @@ impl Display for LeafInfo {
     }
 }
 
-impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
-    type Message = DmlMsg;
-    type Config = LfuConfig;
-
-    fn build(
-        rx: Receiver<Self::Message>,
-        db: Arc<RwLock<Database<C>>>,
-        config: MigrationConfig<LfuConfig>,
-        storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
-    ) -> Self {
-        let dmu = Arc::clone(db.read().root_tree.dmu());
-        Self {
-            leafs: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
-            rx,
-            dmu,
-            db,
-            config,
-            storage_hint_dml,
-        }
-    }
-
-    fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u32>> {
-        // PROMOTE
-        let mut moved = Block(0_u32);
-        let mut num_moved = 0;
-        while moved < self.config.policy_config.promote_size
-            && num_moved < self.config.policy_config.promote_num
-            && !self.leafs[storage_tier as usize].is_empty()
-        {
-            if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
-                if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
-                    debug!("Moving {:?}", entry.offset);
-                    debug!("Was on storage tier: {:?}", storage_tier);
-                    self.storage_hint_dml.lock().insert(entry.offset, lifted);
-                    debug!("New storage preference: {:?}", lifted);
-                    moved += entry.size;
-                    num_moved += 1;
-                }
-            } else {
-                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
-                // See https://github.com/jwuensche/lfu-cache
-                warn!("Cache indicated that it is not empty but no value could be fetched.");
-            }
-        }
-        return Ok(moved);
-    }
-
-    fn demote(
-        &mut self,
-        storage_tier: u8,
-        desired: Block<u32>,
-    ) -> super::errors::Result<Block<u32>> {
-        // DEMOTE
-        let mut moved = Block(0_u32);
-        while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
-            if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
-                if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
-                    debug!("Moving {:?}", entry.offset);
-                    debug!("Was on storage tier: {:?}", storage_tier);
-                    self.storage_hint_dml.lock().insert(entry.offset, lowered);
-                    moved += entry.size;
-                    debug!("New storage preference: {:?}", lowered);
-                }
-            } else {
-                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
-                // See https://github.com/jwuensche/lfu-cache
-                warn!("Cache indicated that it is not empty but no value could be fetched.");
-            }
-        }
-        return Ok(moved);
-    }
-
-    fn db(&self) -> &Arc<RwLock<Database<C>>> {
-        &self.db
-    }
-
-    fn config(&self) -> &MigrationConfig<LfuConfig> {
-        &self.config
-    }
-
-    fn update(&mut self) -> super::errors::Result<()> {
+impl<C: DatabaseBuilder + Clone> Lfu<C> {
+    fn update_dml(&mut self) -> Result<()> {
         // Consume available messages
-        for msg in self.rx.try_iter() {
+        for msg in self.dml_rx.try_iter() {
             match msg.clone() {
                 DmlMsg::Fetch(info) | DmlMsg::Write(info) => {
                     if let Some(entry) =
@@ -209,6 +131,94 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
             }
         }
         Ok(())
+    }
+
+    fn update_db(&mut self) -> Result<()> {
+        while let Ok(_) = self.db_rx.try_recv() {}
+        Ok(())
+    }
+}
+
+impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
+    type Config = LfuConfig;
+
+    fn build(
+        dml_rx: Receiver<DmlMsg>,
+        db_rx: Receiver<DatabaseMsg<C>>,
+        db: Arc<RwLock<Database<C>>>,
+        config: MigrationConfig<LfuConfig>,
+        storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+    ) -> Self {
+        let dmu = Arc::clone(db.read().root_tree.dmu());
+        Self {
+            leafs: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
+            dml_rx,
+            db_rx,
+            dmu,
+            db,
+            config,
+            storage_hint_dml,
+        }
+    }
+
+    fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u32>> {
+        // PROMOTE
+        let mut moved = Block(0_u32);
+        let mut num_moved = 0;
+        while moved < self.config.policy_config.promote_size
+            && num_moved < self.config.policy_config.promote_num
+            && !self.leafs[storage_tier as usize].is_empty()
+        {
+            if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
+                if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
+                    debug!("Moving {:?}", entry.offset);
+                    debug!("Was on storage tier: {:?}", storage_tier);
+                    self.storage_hint_dml.lock().insert(entry.offset, lifted);
+                    debug!("New storage preference: {:?}", lifted);
+                    moved += entry.size;
+                    num_moved += 1;
+                }
+            } else {
+                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
+                // See https://github.com/jwuensche/lfu-cache
+                warn!("Cache indicated that it is not empty but no value could be fetched.");
+            }
+        }
+        return Ok(moved);
+    }
+
+    fn demote(&mut self, storage_tier: u8, desired: Block<u32>) -> Result<Block<u32>> {
+        // DEMOTE
+        let mut moved = Block(0_u32);
+        while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
+            if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
+                if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
+                    debug!("Moving {:?}", entry.offset);
+                    debug!("Was on storage tier: {:?}", storage_tier);
+                    self.storage_hint_dml.lock().insert(entry.offset, lowered);
+                    moved += entry.size;
+                    debug!("New storage preference: {:?}", lowered);
+                }
+            } else {
+                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
+                // See https://github.com/jwuensche/lfu-cache
+                warn!("Cache indicated that it is not empty but no value could be fetched.");
+            }
+        }
+        return Ok(moved);
+    }
+
+    fn db(&self) -> &Arc<RwLock<Database<C>>> {
+        &self.db
+    }
+
+    fn config(&self) -> &MigrationConfig<LfuConfig> {
+        &self.config
+    }
+
+    fn update(&mut self) -> Result<()> {
+        self.update_dml()?;
+        self.update_db()
     }
 
     fn dmu(&self) -> &Arc<<C as DatabaseBuilder>::Dmu> {

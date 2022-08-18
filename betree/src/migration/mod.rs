@@ -36,7 +36,9 @@ impl MigrationPolicies {
         storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
     ) -> impl MigrationPolicy<C> {
         match self {
-            MigrationPolicies::Lfu(config) => Lfu::build(dml_rx, db, config, storage_hint_sink),
+            MigrationPolicies::Lfu(config) => {
+                Lfu::build(dml_rx, db_rx, db, config, storage_hint_sink)
+            }
         }
     }
 }
@@ -69,11 +71,11 @@ impl<Config: Default> Default for MigrationConfig<Config> {
 
 // FIXME: Draft, no types are final
 pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
-    type Message;
     type Config;
 
     fn build(
-        rx: Receiver<Self::Message>,
+        dml_rx: Receiver<DmlMsg>,
+        db_rx: Receiver<DatabaseMsg<C>>,
         db: Arc<RwLock<Database<C>>>,
         config: MigrationConfig<Self::Config>,
         storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
