@@ -109,6 +109,7 @@ fn decode_object_chunk_key(key: &[u8; 8 + 4]) -> (ObjectId, u32) {
 /// for individual data purposes.
 #[derive(Clone)]
 pub struct ObjectStore<Config: DatabaseBuilder> {
+    name: Box<u8>,
     data: Dataset<Config>,
     metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: Arc<AtomicU64>,
@@ -121,6 +122,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     /// Create an object store backed by a single database.
     pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
+            &[0],
             self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?,
             self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?,
             StoragePreference::NONE,
@@ -172,6 +174,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     /// Provide custom datasets for the object store, allowing to use different pools backed by
     /// different storage classes.
     pub fn with_datasets(
+        name: &[u8],
         data: Dataset<Config>,
         metadata: Dataset<Config, MetaMessageAction>,
         default_storage_preference: StoragePreference,
@@ -179,7 +182,8 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
     ) -> Result<ObjectStore<Config>> {
         let d_id = data.id();
         let m_id = metadata.id();
-        let res = Ok(ObjectStore {
+        let store = Ok(ObjectStore {
+            name: Box::new(name),
             object_id_counter: {
                 let last_key = data.get(OBJECT_ID_COUNTER_KEY)?.and_then(
                     |slice: SlicedCowBytes| -> Option<[u8; 8]> { (&slice[..]).try_into().ok() },
@@ -197,13 +201,13 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             metadata,
             default_storage_preference,
             report: report.clone(),
-        });
+        })?;
         if let Some(tx) = report {
             let _ = tx
                 .send(ProfileMsg::ObjectstoreOpen(d_id, m_id))
                 .map_err(|_| warn!("Channel receiver was dropped."));
         }
-        res
+        Ok(store)
     }
 
     /// Create a new object handle.
