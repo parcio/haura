@@ -396,7 +396,8 @@ where
             steal,
         ) {
             (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) => {
-                let _ = tx.send(MSG::remove(obj_ptr.offset, obj_ptr.size))
+                let _ = tx
+                    .send(MSG::remove(obj_ptr.offset, obj_ptr.size))
                     .map_err(|_| warn!("Channel Receiver has been dropped."));
             }
             _ => {}
