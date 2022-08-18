@@ -10,7 +10,7 @@ use crate::{
         DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{MigrationConfig, MigrationPolicies, MigrationPolicy, ProfileMsg},
+    migration::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicies, MigrationPolicy},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -77,7 +77,7 @@ pub(crate) type RootDmu = Dmu<
     Handler,
     DatasetId,
     Generation,
-    ProfileMsg,
+    DmlMsg,
 >;
 
 pub(crate) type MessageTree<Dmu, Message> =
@@ -103,7 +103,7 @@ where
         + DmlWithSpl<Spl = Self::Spu>
         + DmlWithCache
         + DmlWithStorageHints
-        + DmlWithReport<ProfileMsg>
+        + DmlWithReport<DmlMsg>
         + Send
         + Sync
         + 'static,
@@ -397,11 +397,11 @@ impl DatabaseBuilder for DatabaseConfiguration {
 type ErasedTree = dyn ErasedTreeSync<Pointer = ObjectPointer, ObjectRef = ObjectRef> + Send + Sync;
 
 /// The database type.
-pub struct Database<Config: DatabaseBuilder> {
+pub struct Database<Config: DatabaseBuilder + Clone> {
     pub(crate) root_tree: RootTree<Config::Dmu>,
     builder: Config,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
-    pub(crate) report_tx: Option<Sender<ProfileMsg>>,
+    pub(crate) db_tx: Option<Sender<DatabaseMsg<Config>>>,
 }
 
 impl Database<DatabaseConfiguration> {
@@ -440,21 +440,25 @@ impl Database<DatabaseConfiguration> {
     }
 }
 
-impl<Config: DatabaseBuilder> Database<Config> {
+impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Opens or creates a database given by the storage pool configuration and
     /// sets the given cache size.
     pub fn build(builder: Config) -> Result<Self> {
-        Self::build_internal(builder, None)
+        Self::build_internal(builder, None, None)
     }
 
     // Construct an instance of [Database] either using external threads or not.
     // Deprecates [with_sync]
-    fn build_internal(builder: Config, report_tx: Option<Sender<ProfileMsg>>) -> Result<Self> {
+    fn build_internal(
+        builder: Config,
+        dml_tx: Option<Sender<DmlMsg>>,
+        db_tx: Option<Sender<DatabaseMsg<Config>>>,
+    ) -> Result<Self> {
         builder.pre_build();
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);
         let mut dmu = builder.new_dmu(spl, handler);
-        if let Some(tx) = &report_tx {
+        if let Some(tx) = &dml_tx {
             dmu.set_report(tx.clone());
         }
 
@@ -466,28 +470,12 @@ impl<Config: DatabaseBuilder> Database<Config> {
             DefaultMessageAction,
         ));
 
-        let mut db = Database {
+        Ok(Database {
             root_tree: tree,
             builder,
             open_datasets: Default::default(),
-            report_tx: report_tx.clone(),
-        };
-
-        // Report all objectpointers known to the migration policy, this might
-        // take some time
-        if let Some(tx) = report_tx {
-            let start = std::time::Instant::now();
-            for ds_id in db.iter_datasets()? {
-                let id = &*ds_id?;
-                let ds = db.open_dataset_with_id::<DefaultMessageAction>(&id)?;
-                ds.report_node_pointers(tx.clone());
-                db.close_dataset(ds)?;
-            }
-            let time_reporting = start.elapsed();
-            debug!("Reporting of nodes took {} ms", time_reporting.as_millis());
-        }
-
-        Ok(db)
+            db_tx: db_tx.clone(),
+        })
     }
 
     /// Opens or create a database given by the storage pool configuration, sets the given cache size and spawns threads to periodically perform
@@ -495,12 +483,17 @@ impl<Config: DatabaseBuilder> Database<Config> {
     pub fn build_threaded(builder: Config) -> Result<Arc<RwLock<Self>>> {
         let db = match builder.migration_policy() {
             Some(pol) => {
-                let (report_tx, report_rx) = crossbeam_channel::unbounded();
-                let db = Arc::new(RwLock::new(Self::build_internal(builder, Some(report_tx))?));
+                let (dml_tx, dml_rx) = crossbeam_channel::unbounded();
+                let (db_tx, db_rx) = crossbeam_channel::unbounded();
+                let db = Arc::new(RwLock::new(Self::build_internal(
+                    builder,
+                    Some(dml_tx),
+                    Some(db_tx),
+                )?));
                 let other = db.clone();
                 thread::spawn(move || {
                     let hints = other.read().root_tree.dmu().storage_hints();
-                    let mut policy = pol.construct(report_rx, other, hints);
+                    let mut policy = pol.construct(dml_rx, db_rx, other, hints);
                     loop {
                         if let Err(e) = policy.thread_loop() {
                             error!("Automatic Migration Policy encountered {:?}", e);
@@ -510,7 +503,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
                 });
                 db
             }
-            None => Arc::new(RwLock::new(Self::build_internal(builder, None)?)),
+            None => Arc::new(RwLock::new(Self::build_internal(builder, None, None)?)),
         };
         Ok(Self::with_sync(db))
     }

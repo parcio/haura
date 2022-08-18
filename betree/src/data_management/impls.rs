@@ -9,7 +9,7 @@ use crate::{
     checksum::{Builder, Checksum, State},
     compression::{CompressionBuilder, DecompressionTag},
     data_management::{CopyOnWriteReason, DmlWithReport},
-    migration::{ConstructReport, ProfileMsg},
+    migration::{ConstructReport, DmlMsg},
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},

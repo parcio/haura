@@ -28,14 +28,15 @@ pub enum MigrationPolicies {
 }
 
 impl MigrationPolicies {
-    pub(crate) fn construct<C: DatabaseBuilder>(
+    pub(crate) fn construct<C: DatabaseBuilder + Clone>(
         self,
-        rx: Receiver<ProfileMsg>,
+        dml_rx: Receiver<DmlMsg>,
+        db_rx: Receiver<DatabaseMsg<C>>,
         db: Arc<RwLock<Database<C>>>,
         storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
     ) -> impl MigrationPolicy<C> {
         match self {
-            MigrationPolicies::Lfu(config) => Lfu::build(rx, db, config, storage_hint_sink),
+            MigrationPolicies::Lfu(config) => Lfu::build(dml_rx, db, config, storage_hint_sink),
         }
     }
 }
@@ -67,7 +68,7 @@ impl<Config: Default> Default for MigrationConfig<Config> {
 }
 
 // FIXME: Draft, no types are final
-pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
+pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
     type Message;
     type Config;
 

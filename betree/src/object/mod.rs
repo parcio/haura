@@ -47,7 +47,7 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result},
-    migration::ProfileMsg,
+    migration::DatabaseMsg,
     vdev::Block,
     Database, Dataset, StoragePreference,
 };
@@ -61,7 +61,10 @@ use std::{
     mem,
     ops::{Range, RangeBounds},
     result,
-    sync::{atomic::{AtomicU64, Ordering}, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::SystemTime,
 };
 
@@ -108,17 +111,16 @@ fn decode_object_chunk_key(key: &[u8; 8 + 4]) -> (ObjectId, u32) {
 /// scheme like scoped threads for example when holding multiple object stores
 /// for individual data purposes.
 #[derive(Clone)]
-pub struct ObjectStore<Config: DatabaseBuilder> {
-    name: Box<u8>,
+pub struct ObjectStore<Config: DatabaseBuilder + Clone> {
+    name: Box<[u8]>,
     data: Dataset<Config>,
     metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: Arc<AtomicU64>,
     default_storage_preference: StoragePreference,
-    report: Option<Sender<ProfileMsg>>,
+    report: Option<Sender<DatabaseMsg<Config>>>,
 }
 
-
-impl<Config: DatabaseBuilder> Database<Config> {
+impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Create an object store backed by a single database.
     pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
@@ -126,7 +128,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
             self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?,
             self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?,
             StoragePreference::NONE,
-            self.report_tx.clone(),
+            self.db_tx.clone(),
         )
     }
 
@@ -150,17 +152,14 @@ impl<Config: DatabaseBuilder> Database<Config> {
             self.open_or_create_custom_dataset(&data_name, storage_preference)?,
             self.open_or_create_custom_dataset(&meta_name, storage_preference)?,
             storage_preference,
-            self.report_tx.clone(),
+            self.db_tx.clone(),
         )
     }
 
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
-        if let Some(tx) = &self.report_tx {
+        if let Some(tx) = &self.db_tx {
             let _ = tx
-                .send(ProfileMsg::ObjectstoreClose(
-                    store.metadata.id(),
-                    store.data.id(),
-                ))
+                .send(DatabaseMsg::ObjectstoreClose(store.name.clone()))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         let _ = self.close_dataset(store.metadata);
@@ -170,7 +169,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 }
 
-impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
+impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     /// Provide custom datasets for the object store, allowing to use different pools backed by
     /// different storage classes.
     pub fn with_datasets(
@@ -178,12 +177,12 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
         data: Dataset<Config>,
         metadata: Dataset<Config, MetaMessageAction>,
         default_storage_preference: StoragePreference,
-        report: Option<Sender<ProfileMsg>>,
+        report: Option<Sender<DatabaseMsg<Config>>>,
     ) -> Result<ObjectStore<Config>> {
         let d_id = data.id();
         let m_id = metadata.id();
-        let store = Ok(ObjectStore {
-            name: Box::new(name),
+        let store = ObjectStore {
+            name: name.into(),
             object_id_counter: {
                 let last_key = data.get(OBJECT_ID_COUNTER_KEY)?.and_then(
                     |slice: SlicedCowBytes| -> Option<[u8; 8]> { (&slice[..]).try_into().ok() },
@@ -201,10 +200,10 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
             metadata,
             default_storage_preference,
             report: report.clone(),
-        })?;
+        };
         if let Some(tx) = report {
             let _ = tx
-                .send(ProfileMsg::ObjectstoreOpen(d_id, m_id))
+                .send(DatabaseMsg::ObjectstoreOpen(store.clone()))
                 .map_err(|_| warn!("Channel receiver was dropped."));
         }
         Ok(store)
@@ -274,7 +273,7 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
 
         if let (Some(info), Some(tx)) = (info.clone(), self.report.as_ref()) {
             let _ = tx
-                .send(ProfileMsg::ObjectOpen {
+                .send(DatabaseMsg::ObjectOpen {
                     id: info.object_id,
                     data: self.data.id(),
                     meta: self.metadata.id(),
@@ -495,13 +494,13 @@ impl Object {
 
 /// A handle to an object which may or may not exist in the [ObjectStore] it was created from.
 #[must_use]
-pub struct ObjectHandle<'os, Config: DatabaseBuilder> {
+pub struct ObjectHandle<'os, Config: DatabaseBuilder + Clone> {
     store: &'os ObjectStore<Config>,
     /// The [Object] addressed by this handle
     pub object: Object,
 }
 
-impl<'os, Config: DatabaseBuilder> Clone for ObjectHandle<'os, Config> {
+impl<'os, Config: DatabaseBuilder + Clone> Clone for ObjectHandle<'os, Config> {
     fn clone(&self) -> Self {
         ObjectHandle {
             store: self.store,
@@ -510,14 +509,14 @@ impl<'os, Config: DatabaseBuilder> Clone for ObjectHandle<'os, Config> {
     }
 }
 
-impl<'ds, Config: DatabaseBuilder> ObjectHandle<'ds, Config> {
+impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
     /// Close this object. This function doesn't do anything for now,
     /// but might in the future.
     pub fn close(self) -> Result<()> {
         // report for semantics
         if let (Ok(Some(info)), Some(tx)) = (self.info(), self.store.report.as_ref()) {
             let _ = tx
-                .send(ProfileMsg::ObjectClose {
+                .send(DatabaseMsg::ObjectClose {
                     id: self.object.id,
                     data: self.store.data.id(),
                     meta: self.store.metadata.id(),

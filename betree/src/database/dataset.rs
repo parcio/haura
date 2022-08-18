@@ -6,6 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{DmlWithHandler, Handler},
     database::DatabaseBuilder,
+    migration::DatabaseMsg,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
     vdev::Block,
     StoragePreference,
@@ -26,7 +27,6 @@ where
 }
 
 /// The data set type.
-#[derive(Clone)]
 pub struct Dataset<Config, Message = DefaultMessageAction>
 where
     Config: DatabaseBuilder,
@@ -34,6 +34,14 @@ where
     // NOTE: This lock and option is valid and readable as long as [Dataset] exists.
     // On closing the dataset this option will be set to [Option::None].
     inner: Arc<RwLock<Option<DatasetInner<Config, Message>>>>,
+}
+
+impl<Config: DatabaseBuilder, Message> Clone for Dataset<Config, Message> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
 }
 
 impl<Config, Message> From<DatasetInner<Config, Message>> for Dataset<Config, Message>
@@ -47,7 +55,7 @@ where
     }
 }
 
-impl<Config: DatabaseBuilder> Database<Config> {
+impl<Config: DatabaseBuilder + Clone> Database<Config> {
     fn lookup_dataset_id(&self, name: &[u8]) -> Result<DatasetId> {
         let mut key = Vec::with_capacity(1 + name.len());
         key.push(1);
@@ -122,24 +130,27 @@ impl<Config: DatabaseBuilder> Database<Config> {
         let erased_tree = Box::new(ds_tree.clone());
         self.open_datasets.insert(id, erased_tree);
 
-        if let Some(tx) = &self.report_tx {
-            tx.send(ProfileMsg::DatasetOpen(id)).expect("Channel dropped");
-        }
-
-        Ok(DatasetInner {
+        let ds: Dataset<Config, M> = DatasetInner {
             tree: ds_tree.clone(),
             id,
             name: Box::from(name),
             open_snapshots: Default::default(),
             storage_preference,
         }
-        .into())
+        .into();
+
+        if let Some(tx) = &self.db_tx {
+            tx.send(DatabaseMsg::DatasetOpen(id))
+                .expect("Channel dropped");
+        }
+
+        Ok(ds)
     }
 
     /// Creates a new data set identified by the given name.
     ///
     /// Fails if a data set with the same name exists already.
-    pub fn create_custom_dataset<M: MessageAction>(
+    pub fn create_custom_dataset<M: MessageAction + Clone>(
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
@@ -180,7 +191,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     /// Opens a dataset, creating a new one if none exists by the given name.
-    pub fn open_or_create_custom_dataset<M: MessageAction + Default + 'static>(
+    pub fn open_or_create_custom_dataset<M: MessageAction + Default + Clone + 'static>(
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
@@ -227,8 +238,9 @@ impl<Config: DatabaseBuilder> Database<Config> {
         &mut self,
         ds: Dataset<Config, Message>,
     ) -> Result<()> {
-        if let Some(tx) = &self.report_tx {
-            tx.send(ProfileMsg::DatasetClose(ds.id())).expect("Channel dropped");
+        if let Some(tx) = &self.db_tx {
+            tx.send(DatabaseMsg::DatasetClose(ds.id()))
+                .expect("Channel dropped");
         }
         // Deactivate the dataset for further modifications
         let ds = ds.inner.write().take().unwrap();
@@ -518,14 +530,6 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         }
         Ok(())
     }
-
-    // FIXME: maybe drop, this is no longer really necessary
-    pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg>) {
-        for node in self.tree.node_iter() {
-            tx.send(ProfileMsg::Discover(node.offset()))
-                .expect("Message receiver has been dropped. Unrecoverable.");
-        }
-    }
 }
 
 // Mirroring the [DatasetInner] API
@@ -631,12 +635,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
             .unwrap()
             .migrate_range(range, pref)
     }
-
-    pub(super) fn report_node_pointers(&self, tx: Sender<ProfileMsg>) {
-        self.inner.read().as_ref().unwrap().report_node_pointers(tx)
-    }
 }
 
-use crate::{database::ObjectRef, migration::ProfileMsg};
 use crossbeam_channel::Sender;
 use parking_lot::{RwLock, RwLockReadGuard};

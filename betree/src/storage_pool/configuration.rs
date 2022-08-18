@@ -115,7 +115,10 @@ error_chain! {
 impl TierConfiguration {
     /// Returns a new `StorageConfiguration` based on the given top-level vdevs.
     pub fn new(top_level_vdevs: Vec<Vdev>) -> Self {
-        TierConfiguration { top_level_vdevs, preferred_access_type: PreferredAccessType::Unknown }
+        TierConfiguration {
+            top_level_vdevs,
+            preferred_access_type: PreferredAccessType::Unknown,
+        }
     }
 
     /// Opens file and devices and constructs a `Vec<Vdev>`.
@@ -162,7 +165,10 @@ impl TierConfiguration {
                 .collect();
             v.push(f(leaves));
         }
-        Ok(TierConfiguration { top_level_vdevs: v, preferred_access_type: PreferredAccessType::Unknown })
+        Ok(TierConfiguration {
+            top_level_vdevs: v,
+            preferred_access_type: PreferredAccessType::Unknown,
+        })
     }
 
     /// Returns the configuration in a ZFS-like string representation.
