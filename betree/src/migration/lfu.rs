@@ -28,17 +28,19 @@ pub struct Lfu<C: DatabaseBuilder> {
 /// Lfu specific configuration details.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct LfuConfig {
-    /// If any object falls below this threshold we might pick any of these to avoid sorting effort.
-    low_threshold: Option<f32>,
-    /// If any object falls above this mark we may upgrade it without further for other objects.
-    high_threshold: Option<f32>,
+    /// Maximum number of nodes to be promoted at once. An object size is
+    /// maximum 4 MiB.
+    promote_num: u32,
+    /// Maximum amount of blocks to promote at once. An object size is maximum 4
+    /// MiB.
+    promote_size: Block<u32>,
 }
 
 impl Default for LfuConfig {
     fn default() -> Self {
         Self {
-            low_threshold: None,
-            high_threshold: None,
+            promote_num: u32::MAX,
+            promote_size: Block(128),
         }
     }
 }
@@ -58,7 +60,6 @@ impl Display for LeafInfo {
 }
 
 impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
-    type ObjectReference = ObjectRef;
     type Message = ProfileMsg;
     type Config = LfuConfig;
 
@@ -82,20 +83,26 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
     fn promote(
         &mut self,
         storage_tier: u8,
-        desired: Block<u32>,
     ) -> super::errors::Result<Block<u32>> {
         // PROMOTE
         let mut moved = Block(0_u32);
-        while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
+        let mut num_moved = 0;
+        while moved < self.config.policy_config.promote_size
+            && num_moved < self.config.policy_config.promote_num
+            && !self.leafs[storage_tier as usize].is_empty()
+        {
             if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
                 if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
                     debug!("Moving {:?}", entry.offset);
                     debug!("Was on storage tier: {:?}", storage_tier);
                     self.storage_hint_dml.lock().insert(entry.offset, lifted);
-                    moved += entry.size;
                     debug!("New storage preference: {:?}", lifted);
+                    moved += entry.size;
+                    num_moved += 1;
                 }
             } else {
+                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
+                // See https://github.com/jwuensche/lfu-cache
                 warn!("Cache indicated that it is not empty but no value could be fetched.");
             }
         }
@@ -119,6 +126,8 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                     debug!("New storage preference: {:?}", lowered);
                 }
             } else {
+                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
+                // See https://github.com/jwuensche/lfu-cache
                 warn!("Cache indicated that it is not empty but no value could be fetched.");
             }
         }
