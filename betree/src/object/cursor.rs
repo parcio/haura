@@ -12,13 +12,13 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 /// A streaming interface for [ObjectHandle]s, allowing the use of [Read], [Write], and [Seek]
 /// to interoperate with other libraries. Additionally, the per-object storage preference can
 /// be overridden with [ObjectHandle::cursor_with_pref] and [ObjectCursor::set_storage_preference].
-pub struct ObjectCursor<'handle, 'r, Config: DatabaseBuilder> {
+pub struct ObjectCursor<'handle, 'r, Config: DatabaseBuilder + Clone> {
     handle: &'r ObjectHandle<'handle, Config>,
     pos: u64,
     pref: StoragePreference,
 }
 
-impl<'handle, Config: DatabaseBuilder> ObjectHandle<'handle, Config> {
+impl<'handle, Config: DatabaseBuilder + Clone> ObjectHandle<'handle, Config> {
     /// Create a cursor with a storage preference override, at position 0.
     pub fn cursor_with_pref<'r>(
         &'handle self,
@@ -37,7 +37,7 @@ impl<'handle, Config: DatabaseBuilder> ObjectHandle<'handle, Config> {
     }
 }
 
-impl<'handle, 'r, Config: DatabaseBuilder> ObjectCursor<'handle, 'r, Config> {
+impl<'handle, 'r, Config: DatabaseBuilder + Clone> ObjectCursor<'handle, 'r, Config> {
     /// Override the storage preference to use for future operations with this cursor.
     pub fn set_storage_preference(&mut self, pref: StoragePreference) {
         self.pref = pref;
@@ -60,7 +60,7 @@ fn convert_err(database::Error(kind, _): database::Error) -> io::Error {
     }
 }
 
-impl<'a, 'b, Config: DatabaseBuilder> Read for ObjectCursor<'a, 'b, Config> {
+impl<'a, 'b, Config: DatabaseBuilder + Clone> Read for ObjectCursor<'a, 'b, Config> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let res = self.handle.read_at(buf, self.pos);
 
@@ -72,7 +72,7 @@ impl<'a, 'b, Config: DatabaseBuilder> Read for ObjectCursor<'a, 'b, Config> {
     }
 }
 
-impl<'a, 'b, Config: DatabaseBuilder> Write for ObjectCursor<'a, 'b, Config> {
+impl<'a, 'b, Config: DatabaseBuilder + Clone> Write for ObjectCursor<'a, 'b, Config> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let res = self.handle.write_at_with_pref(buf, self.pos, self.pref);
 
@@ -88,7 +88,7 @@ impl<'a, 'b, Config: DatabaseBuilder> Write for ObjectCursor<'a, 'b, Config> {
     }
 }
 
-impl<'a, 'b, Config: DatabaseBuilder> Seek for ObjectCursor<'a, 'b, Config> {
+impl<'a, 'b, Config: DatabaseBuilder + Clone> Seek for ObjectCursor<'a, 'b, Config> {
     fn seek(&mut self, target: SeekFrom) -> io::Result<u64> {
         fn add_u64_i64(base: u64, delta: i64) -> Option<u64> {
             if delta >= 0 {

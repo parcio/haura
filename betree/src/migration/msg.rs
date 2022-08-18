@@ -1,21 +1,37 @@
 use crate::{
-    database::DatasetId,
-    object::{ObjectId, ObjectInfo},
+    database::{DatabaseBuilder, Dataset, DatasetId},
+    object::{ObjectId, ObjectInfo, ObjectStore},
     storage_pool::DiskOffset,
     vdev::Block,
 };
 use std::time::SystemTime;
 
 #[derive(Clone)]
-pub enum ProfileMsg {
+pub enum DmlMsg {
+    // The three base operations of our store.
+    // Largely relevant for clearing, and frequency determination in LRU, LFU,
+    // FIFO and other policies
+    Fetch(OpInfo),
+    Write(OpInfo),
+    Remove(OpInfo),
+
+    // Initial message at the beginning of an session
+    // For effectiveness it is advised to discover all nodes in every dataset intially.
+    Discover(DiskOffset),
+}
+
+// This is has been designed to be it's own separate message to allow for
+// separate handling of objects and nodes and to prevent recursive type
+// definitions on [DatabaseBuilder].
+#[derive(Clone)]
+pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     // Relevant for Promotion and/or Demotion
     DatasetOpen(DatasetId),
     DatasetClose(DatasetId),
 
-    // maybe duplicate
-    ObjectstoreOpen(DatasetId, DatasetId),
-    // maybe duplicate
-    ObjectstoreClose(DatasetId, DatasetId),
+    /// Announce and deliver an accessible copy of active object stores.
+    ObjectstoreOpen(ObjectStore<Config>),
+    ObjectstoreClose(Box<[u8]>),
 
     /// Informs of openend object, adjoint with extra information for access.
     ObjectOpen {
@@ -31,23 +47,9 @@ pub enum ProfileMsg {
         meta: DatasetId,
         info: ObjectInfo,
     },
-
-    // The three base operations of our store.
-    // Largely relevant for clearing, and frequency determination in LRU, LFU, FIFO and other policies
-    Fetch(OpInfo),
-    Write(OpInfo),
-    Remove(OpInfo),
-
-    // Initial message at the beginning of an session
-    // For effectiveness it is advised to discover all nodes in every dataset intially.
-    Discover(DiskOffset),
 }
 
 pub trait ConstructReport {
-    fn open_dataset(id: DatasetId) -> Self;
-    fn close_dataset(id: DatasetId) -> Self;
-    fn open_objectstore(meta: DatasetId, data: DatasetId) -> Self;
-    fn close_objectstore(meta: DatasetId, data: DatasetId) -> Self;
     fn build_fetch(info: OpInfo) -> Self;
     fn build_write(info: OpInfo) -> Self;
     fn fetch(offset: DiskOffset, size: Block<u32>) -> Self;
@@ -55,29 +57,13 @@ pub trait ConstructReport {
     fn remove(offset: DiskOffset, size: Block<u32>) -> Self;
 }
 
-impl ConstructReport for ProfileMsg {
-    fn open_dataset(id: DatasetId) -> Self {
-        ProfileMsg::DatasetOpen(id)
-    }
-
-    fn close_dataset(id: DatasetId) -> Self {
-        ProfileMsg::DatasetClose(id)
-    }
-
-    fn open_objectstore(meta: DatasetId, data: DatasetId) -> Self {
-        ProfileMsg::ObjectstoreOpen(meta, data)
-    }
-
-    fn close_objectstore(meta: DatasetId, data: DatasetId) -> Self {
-        ProfileMsg::ObjectstoreClose(meta, data)
-    }
-
+impl ConstructReport for DmlMsg {
     fn build_fetch(info: OpInfo) -> Self {
-        ProfileMsg::Fetch(info)
+        Self::Fetch(info)
     }
 
     fn build_write(info: OpInfo) -> Self {
-        ProfileMsg::Write(info)
+        Self::Write(info)
     }
 
     fn fetch(offset: DiskOffset, size: Block<u32>) -> Self {

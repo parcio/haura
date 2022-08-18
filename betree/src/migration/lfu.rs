@@ -11,12 +11,12 @@ use crate::{
     Database, StoragePreference,
 };
 
-use super::{MigrationConfig, ProfileMsg};
+use super::{DmlMsg, MigrationConfig};
 
 /// Implementation of Least Frequently Used
-pub struct Lfu<C: DatabaseBuilder> {
+pub struct Lfu<C: DatabaseBuilder + Clone> {
     leafs: [LfuCache<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
-    rx: Receiver<ProfileMsg>,
+    rx: Receiver<DmlMsg>,
     db: Arc<RwLock<Database<C>>>,
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
     config: MigrationConfig<LfuConfig>,
@@ -59,8 +59,8 @@ impl Display for LeafInfo {
     }
 }
 
-impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
-    type Message = ProfileMsg;
+impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
+    type Message = DmlMsg;
     type Config = LfuConfig;
 
     fn build(
@@ -80,10 +80,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         }
     }
 
-    fn promote(
-        &mut self,
-        storage_tier: u8,
-    ) -> super::errors::Result<Block<u32>> {
+    fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u32>> {
         // PROMOTE
         let mut moved = Block(0_u32);
         let mut num_moved = 0;
@@ -146,7 +143,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         // Consume available messages
         for msg in self.rx.try_iter() {
             match msg.clone() {
-                ProfileMsg::Fetch(info) | ProfileMsg::Write(info) => {
+                DmlMsg::Fetch(info) | DmlMsg::Write(info) => {
                     if let Some(entry) =
                         self.leafs[info.offset.storage_class() as usize].get_mut(&info.offset)
                     {
@@ -203,7 +200,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                         }
                     }
                 }
-                ProfileMsg::Remove(opinfo) => {
+                DmlMsg::Remove(opinfo) => {
                     // Delete Offset
                     self.leafs[opinfo.offset.storage_class() as usize].remove(&opinfo.offset);
                 }

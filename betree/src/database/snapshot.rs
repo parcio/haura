@@ -24,7 +24,7 @@ where
     name: Box<[u8]>,
 }
 
-impl<Config: DatabaseBuilder> Database<Config> {
+impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Open a snapshot for the given data set identified by the given name.
     pub fn open_snapshot<M>(
         &self,
