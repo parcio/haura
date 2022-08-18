@@ -20,7 +20,9 @@ pub struct Lfu<C: DatabaseBuilder> {
     db: Arc<RwLock<Database<C>>>,
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
     config: MigrationConfig<LfuConfig>,
-    storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+    /// HashMap accessible by the DML, resolution is not guaranteed but always
+    /// used when a object is written.
+    storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
 }
 
 /// Lfu specific configuration details.
@@ -64,7 +66,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         rx: Receiver<Self::Message>,
         db: Arc<RwLock<Database<C>>>,
         config: MigrationConfig<LfuConfig>,
-        storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+        storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
     ) -> Self {
         let dmu = Arc::clone(db.read().root_tree.dmu());
         Self {
@@ -73,7 +75,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
             dmu,
             db,
             config,
-            storage_hint_sink,
+            storage_hint_dml,
         }
     }
 
@@ -89,7 +91,7 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
                 if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
                     debug!("Moving {:?}", entry.offset);
                     debug!("Was on storage tier: {:?}", storage_tier);
-                    self.storage_hint_sink.lock().insert(entry.offset, lifted);
+                    self.storage_hint_dml.lock().insert(entry.offset, lifted);
                     moved += entry.size;
                     debug!("New storage preference: {:?}", lifted);
                 }
@@ -109,12 +111,12 @@ impl<C: DatabaseBuilder> super::MigrationPolicy<C> for Lfu<C> {
         let mut moved = Block(0_u32);
         while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
             if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
-                if let Some(lifted) = StoragePreference::from_u8(storage_tier).lower() {
+                if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
                     debug!("Moving {:?}", entry.offset);
                     debug!("Was on storage tier: {:?}", storage_tier);
-                    self.storage_hint_sink.lock().insert(entry.offset, lifted);
+                    self.storage_hint_dml.lock().insert(entry.offset, lowered);
                     moved += entry.size;
-                    debug!("New storage preference: {:?}", lifted);
+                    debug!("New storage preference: {:?}", lowered);
                 }
             } else {
                 warn!("Cache indicated that it is not empty but no value could be fetched.");
