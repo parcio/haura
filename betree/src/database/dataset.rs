@@ -122,6 +122,10 @@ impl<Config: DatabaseBuilder> Database<Config> {
         let erased_tree = Box::new(ds_tree.clone());
         self.open_datasets.insert(id, erased_tree);
 
+        if let Some(tx) = &self.report_tx {
+            tx.send(ProfileMsg::DatasetOpen(id)).expect("Channel dropped");
+        }
+
         Ok(DatasetInner {
             tree: ds_tree.clone(),
             id,
@@ -223,6 +227,9 @@ impl<Config: DatabaseBuilder> Database<Config> {
         &mut self,
         ds: Dataset<Config, Message>,
     ) -> Result<()> {
+        if let Some(tx) = &self.report_tx {
+            tx.send(ProfileMsg::DatasetClose(ds.id())).expect("Channel dropped");
+        }
         // Deactivate the dataset for further modifications
         let ds = ds.inner.write().take().unwrap();
         log::trace!("close_dataset: Enter");
