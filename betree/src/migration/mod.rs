@@ -68,7 +68,6 @@ impl<Config: Default> Default for MigrationConfig<Config> {
 
 // FIXME: Draft, no types are final
 pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
-    type ObjectReference;
     type Message;
     type Config;
 
@@ -86,7 +85,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
     // status for all afflicted objects
     fn update(&mut self) -> Result<()>;
 
-    fn promote(&mut self, storage_tier: u8, desired: Block<u32>) -> Result<Block<u32>>;
+    fn promote(&mut self, storage_tier: u8) -> Result<Block<u32>>;
     fn demote(&mut self, storage_tier: u8, desired: Block<u32>) -> Result<Block<u32>>;
 
     // Getters
@@ -127,7 +126,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder> {
                 })
             {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
-                self.promote(*low_tier, BATCH)?;
+                self.promote(*low_tier)?;
             }
             for ((high_tier, _high_info), (_low_tier, _low_info)) in infos
                 .iter()
