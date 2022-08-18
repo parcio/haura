@@ -12,9 +12,8 @@ use crate::{
 };
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, process::id, sync::Arc};
 
-/// The internal data set type.
-/// This is the non-user facing variant which is then wrapped in the
-/// [Dataset] type. All methods are relayed by the wrapper whereas
+/// The internal data set type.  This is the non-user facing variant which is
+/// then wrapped in the [Dataset] type.
 pub struct DatasetInner<Config, Message = DefaultMessageAction>
 where
     Config: DatabaseBuilder,
@@ -27,6 +26,7 @@ where
 }
 
 /// The data set type.
+#[derive(Clone)]
 pub struct Dataset<Config, Message = DefaultMessageAction>
 where
     Config: DatabaseBuilder,
