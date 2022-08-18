@@ -140,8 +140,8 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         .into();
 
         if let Some(tx) = &self.db_tx {
-            tx.send(DatabaseMsg::DatasetOpen(id))
-                .expect("Channel dropped");
+            let _ = tx.send(DatabaseMsg::DatasetOpen(id))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
         Ok(ds)
@@ -239,8 +239,8 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         ds: Dataset<Config, Message>,
     ) -> Result<()> {
         if let Some(tx) = &self.db_tx {
-            tx.send(DatabaseMsg::DatasetClose(ds.id()))
-                .expect("Channel dropped");
+            let _ = tx.send(DatabaseMsg::DatasetClose(ds.id()))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         // Deactivate the dataset for further modifications
         let ds = ds.inner.write().take().unwrap();

@@ -396,8 +396,8 @@ where
             steal,
         ) {
             (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) => {
-                tx.send(MSG::remove(obj_ptr.offset, obj_ptr.size))
-                    .expect("Channel dead");
+                let _ = tx.send(MSG::remove(obj_ptr.offset, obj_ptr.size))
+                    .map_err(|_| warn!("Channel Receiver has been dropped."));
             }
             _ => {}
         }
@@ -639,15 +639,15 @@ where
             // written back. Otherwise we can't find the Cache value anymore
             // from the tree...  o.O
             if let (Some(report_tx), Some(old_offset)) = (&self.report_tx, mid.2) {
-                report_tx
+                let _ = report_tx
                     .send(MSG::write(old_offset, size, mid.2))
-                    .expect("Channel dropped");
+                    .map_err(|_| warn!("Channel Receiver has been dropped."));
             }
         } else {
             if let Some(report_tx) = &self.report_tx {
-                report_tx
+                let _ = report_tx
                     .send(MSG::write(obj_ptr.offset, size, mid.2))
-                    .expect("Channel dropped");
+                    .map_err(|_| warn!("Channel Receiver has been dropped."));
             }
         }
 
@@ -916,9 +916,9 @@ where
                 self.fetch(ptr)?;
                 // Modify the given reference to know for future accesses the old position
                 if let Some(report_tx) = &self.report_tx {
-                    report_tx
+                    let _ = report_tx
                         .send(MSG::fetch(ptr.offset, ptr.size))
-                        .expect("Channel dropped");
+                        .map_err(|_| warn!("Channel Receiver has been dropped."));
                 }
                 cache = self.cache.read();
             } else {
@@ -1137,9 +1137,9 @@ where
         };
         self.insert_object_into_cache(key, RwLock::new(object));
         if let Some(report_tx) = &self.report_tx {
-            report_tx
+            let _ = report_tx
                 .send(MSG::fetch(ptr.offset, ptr.size))
-                .expect("Channel dropped");
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         Ok(())
     }
