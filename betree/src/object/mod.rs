@@ -61,7 +61,7 @@ use std::{
     mem,
     ops::{Range, RangeBounds},
     result,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{atomic::{AtomicU64, Ordering}, Arc},
     time::SystemTime,
 };
 
@@ -101,14 +101,21 @@ fn decode_object_chunk_key(key: &[u8; 8 + 4]) -> (ObjectId, u32) {
     (ObjectId(id), offset)
 }
 
-/// An object store
+/// An object store which can be shared with multiple threads by cloning.  After
+/// the first instance is closed all others are blocked from access. This is
+/// useful in situations where independent asynchronously running threads need
+/// access to the same resources but do not share some inherent synchronization
+/// scheme like scoped threads for example when holding multiple object stores
+/// for individual data purposes.
+#[derive(Clone)]
 pub struct ObjectStore<Config: DatabaseBuilder> {
     data: Dataset<Config>,
     metadata: Dataset<Config, MetaMessageAction>,
-    object_id_counter: AtomicU64,
+    object_id_counter: Arc<AtomicU64>,
     default_storage_preference: StoragePreference,
     report: Option<Sender<ProfileMsg>>,
 }
+
 
 impl<Config: DatabaseBuilder> Database<Config> {
     /// Create an object store backed by a single database.
@@ -137,6 +144,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
         meta_name.extend_from_slice(b"meta");
 
         ObjectStore::with_datasets(
+            name,
             self.open_or_create_custom_dataset(&data_name, storage_preference)?,
             self.open_or_create_custom_dataset(&meta_name, storage_preference)?,
             storage_preference,
@@ -145,7 +153,7 @@ impl<Config: DatabaseBuilder> Database<Config> {
     }
 
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
-        if let Some(tx) = self.report_tx.as_ref() {
+        if let Some(tx) = &self.report_tx {
             let _ = tx
                 .send(ProfileMsg::ObjectstoreClose(
                     store.metadata.id(),
@@ -178,11 +186,11 @@ impl<'os, Config: DatabaseBuilder> ObjectStore<Config> {
                 );
                 if let Some(bytes) = last_key {
                     // the last used id was stored, so start with the next one
-                    AtomicU64::new(u64::from_le_bytes(bytes) + 1)
+                    Arc::new(AtomicU64::new(u64::from_le_bytes(bytes) + 1))
                 } else {
                     log::info!("no saved oid counter, resetting to 0");
                     // no last id saved, start from 0
-                    AtomicU64::new(0)
+                    Arc::new(AtomicU64::new(0))
                 }
             },
             data,

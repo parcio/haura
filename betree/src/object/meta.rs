@@ -149,7 +149,7 @@ impl MetaMessage {
 /// Fixed metadata messages have no Rust structure, their encoding is:
 /// - [0], as a deletion message
 /// - [1]<user-provided value>, as a replacement message
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MetaMessageAction;
 
 const FIXED_DELETE: u8 = 0;
