@@ -8,6 +8,7 @@ use std::{
 /// A unit which represents a number of bytes which are a multiple of
 /// `BLOCK_SIZE`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Block<T: Uint>(pub T);
 
 pub trait Uint:
