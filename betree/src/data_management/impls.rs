@@ -915,11 +915,17 @@ where
                 drop(cache);
 
                 self.fetch(ptr)?;
-                // Modify the given reference to know for future accesses the old position
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
                         .send(MSG::fetch(ptr.offset, ptr.size))
                         .map_err(|_| warn!("Channel Receiver has been dropped."));
+                }
+                // Check if any storage hints are available and update the node.
+                // This moves the object reference into the modified state.
+                if let Some(pref) = self.storage_hints.lock().remove(&ptr.offset) {
+                    if let Some(mut obj) = self.steal(or, ptr.info)? {
+                        obj.set_system_storage_preference(pref)
+                    }
                 }
                 cache = self.cache.read();
             } else {
