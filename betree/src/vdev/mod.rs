@@ -24,6 +24,9 @@ pub struct Statistics {
     pub checksum_errors: Block<u64>,
     /// The total number of blocks of failed write requests
     pub failed_writes: Block<u64>,
+    #[cfg(feature = "latency_metrics")]
+    /// The average latency over all read operations
+    pub read_latency: u64,
 }
 
 #[derive(Default)]
@@ -34,6 +37,10 @@ struct AtomicStatistics {
     checksum_errors: AtomicU64,
     repaired: AtomicU64,
     failed_writes: AtomicU64,
+    #[cfg(feature = "latency_metrics")]
+    read_op: AtomicU64,
+    #[cfg(feature = "latency_metrics")]
+    read_op_latency: AtomicU64,
 }
 
 impl AtomicStatistics {
@@ -44,6 +51,9 @@ impl AtomicStatistics {
             failed_reads: Block(self.failed_reads.load(Ordering::Relaxed)),
             checksum_errors: Block(self.checksum_errors.load(Ordering::Relaxed)),
             failed_writes: Block(self.failed_writes.load(Ordering::Relaxed)),
+            #[cfg(feature = "latency_metrics")]
+            read_latency: self.read_op_latency.load(Ordering::Relaxed)
+                / self.read_op.load(Ordering::Relaxed),
         }
     }
 }

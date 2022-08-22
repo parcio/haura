@@ -6,6 +6,7 @@ use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
 use std::{
+    convert::TryInto,
     fs, io,
     os::unix::{
         fs::{FileExt, FileTypeExt},
@@ -151,9 +152,34 @@ impl VdevLeafRead for File {
     async fn read_raw<T: AsMut<[u8]> + Send>(&self, mut buf: T, offset: Block<u64>) -> Result<T> {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
+        #[cfg(feature = "latency_metrics")]
+        {
+            self.stats.read_op.fetch_add(1, Ordering::Relaxed);
+            let start = std::time::Instant::now();
+        }
         match self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
-            Ok(()) => Ok(buf),
+            Ok(()) => {
+                #[cfg(feature = "latency_metrics")]
+                self.stats.read_op_latency.fetch_add(
+                    start
+                        .elapsed()
+                        .as_nanos()
+                        .try_into()
+                        .unwrap_or(u32::MAX as u64),
+                    Ordering::Relaxed,
+                );
+                Ok(buf)
+            }
             Err(e) => {
+                #[cfg(feature = "latency_metrics")]
+                self.stats.read_op_latency.fetch_add(
+                    start
+                        .elapsed()
+                        .as_nanos()
+                        .try_into()
+                        .unwrap_or(u32::MAX as u64),
+                    Ordering::Relaxed,
+                );
                 self.stats
                     .failed_reads
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
