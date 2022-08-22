@@ -154,10 +154,9 @@ impl VdevLeafRead for Memory {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let buf_mut = buf.as_mut();
         #[cfg(feature = "latency_metrics")]
-        {
-            self.stats.read_op.fetch_add(1, Ordering::Relaxed);
-            let start = std::time::Instant::now();
-        }
+        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "latency_metrics")]
+        let start = std::time::Instant::now();
         match self.slice(buf_mut.len(), offset.to_bytes() as usize) {
             Ok(src) => {
                 buf_mut.copy_from_slice(&src);

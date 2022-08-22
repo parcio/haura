@@ -153,10 +153,9 @@ impl VdevLeafRead for File {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         #[cfg(feature = "latency_metrics")]
-        {
-            self.stats.read_op.fetch_add(1, Ordering::Relaxed);
-            let start = std::time::Instant::now();
-        }
+        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "latency_metrics")]
+        let start = std::time::Instant::now();
         match self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
             Ok(()) => {
                 #[cfg(feature = "latency_metrics")]
