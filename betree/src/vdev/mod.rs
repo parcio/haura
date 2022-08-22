@@ -45,7 +45,7 @@ struct AtomicStatistics {
 
 impl AtomicStatistics {
     fn as_stats(&self) -> Statistics {
-        Statistics {
+        let res = Statistics {
             read: Block(self.read.load(Ordering::Relaxed)),
             written: Block(self.written.load(Ordering::Relaxed)),
             failed_reads: Block(self.failed_reads.load(Ordering::Relaxed)),
@@ -57,7 +57,13 @@ impl AtomicStatistics {
                 .load(Ordering::Relaxed)
                 .checked_div(self.read_op.load(Ordering::Relaxed))
                 .unwrap_or(0),
+        };
+        #[cfg(feature = "latency_metrics")]
+        {
+            self.read_op_latency.store(0, Ordering::Relaxed);
+            self.read_op.store(0, Ordering::Relaxed);
         }
+        res
     }
 }
 
