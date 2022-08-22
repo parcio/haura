@@ -69,3 +69,8 @@ default = ["init_env_logger", "figment_config"]
 internal-api = []
 init_env_logger = ["env_logger"]
 figment_config = ["figment"]
+
+# Add an additional field to the metrics which measures access times for each
+# leaf vdev. This requires additional system calls due to time measuring and is
+# therefore safeguarded into it's own feature
+latency_metrics = []
