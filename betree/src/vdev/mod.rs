@@ -52,8 +52,11 @@ impl AtomicStatistics {
             checksum_errors: Block(self.checksum_errors.load(Ordering::Relaxed)),
             failed_writes: Block(self.failed_writes.load(Ordering::Relaxed)),
             #[cfg(feature = "latency_metrics")]
-            read_latency: self.read_op_latency.load(Ordering::Relaxed)
-                / self.read_op.load(Ordering::Relaxed),
+            read_latency: self
+                .read_op_latency
+                .load(Ordering::Relaxed)
+                .checked_div(self.read_op.load(Ordering::Relaxed))
+                .unwrap_or(0),
         }
     }
 }
