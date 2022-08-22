@@ -60,14 +60,36 @@ impl Memory {
 
     fn slice_read(&self, size: Block<u32>, offset: Block<u64>) -> Result<Buf> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
+        #[cfg(feature = "latency_metrics")]
+        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "latency_metrics")]
+        let start = std::time::Instant::now();
 
         match self.slice_blocks(size, offset) {
             Ok(slice) => {
                 let mut buf = BufWrite::with_capacity(size);
                 buf.write_all(&*slice)?;
+                #[cfg(feature = "latency_metrics")]
+                self.stats.read_op_latency.fetch_add(
+                    start
+                        .elapsed()
+                        .as_nanos()
+                        .try_into()
+                        .unwrap_or(u32::MAX as u64),
+                    Ordering::Relaxed,
+                );
                 Ok(buf.into_buf())
             }
             Err(e) => {
+                #[cfg(feature = "latency_metrics")]
+                self.stats.read_op_latency.fetch_add(
+                    start
+                        .elapsed()
+                        .as_nanos()
+                        .try_into()
+                        .unwrap_or(u32::MAX as u64),
+                    Ordering::Relaxed,
+                );
                 self.stats
                     .failed_reads
                     .fetch_add(size.as_u64(), Ordering::Relaxed);

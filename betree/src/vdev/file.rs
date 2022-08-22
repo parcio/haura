@@ -70,12 +70,34 @@ impl VdevRead for File {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let buf = {
             let mut buf = Buf::zeroed(size).into_full_mut();
+            #[cfg(feature = "latency_metrics")]
+            self.stats.read_op.fetch_add(1, Ordering::Relaxed);
+            #[cfg(feature = "latency_metrics")]
+            let start = std::time::Instant::now();
             if let Err(e) = self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
+                #[cfg(feature = "latency_metrics")]
+                self.stats.read_op_latency.fetch_add(
+                    start
+                        .elapsed()
+                        .as_nanos()
+                        .try_into()
+                        .unwrap_or(u32::MAX as u64),
+                    Ordering::Relaxed,
+                );
                 self.stats
                     .failed_reads
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
                 bail!(e)
             }
+            #[cfg(feature = "latency_metrics")]
+            self.stats.read_op_latency.fetch_add(
+                start
+                    .elapsed()
+                    .as_nanos()
+                    .try_into()
+                    .unwrap_or(u32::MAX as u64),
+                Ordering::Relaxed,
+            );
             buf.into_full_buf()
         };
 
@@ -107,9 +129,33 @@ impl VdevRead for File {
     async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let mut buf = Buf::zeroed(size).into_full_mut();
+        #[cfg(feature = "latency_metrics")]
+        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "latency_metrics")]
+        let start = std::time::Instant::now();
         match self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
-            Ok(()) => Ok(vec![buf.into_full_buf()]),
+            Ok(()) => {
+                #[cfg(feature = "latency_metrics")]
+                self.stats.read_op_latency.fetch_add(
+                    start
+                        .elapsed()
+                        .as_nanos()
+                        .try_into()
+                        .unwrap_or(u32::MAX as u64),
+                    Ordering::Relaxed,
+                );
+                Ok(vec![buf.into_full_buf()])
+            }
             Err(e) => {
+                #[cfg(feature = "latency_metrics")]
+                self.stats.read_op_latency.fetch_add(
+                    start
+                        .elapsed()
+                        .as_nanos()
+                        .try_into()
+                        .unwrap_or(u32::MAX as u64),
+                    Ordering::Relaxed,
+                );
                 self.stats
                     .failed_reads
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
