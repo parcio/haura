@@ -61,8 +61,6 @@ impl Memory {
     fn slice_read(&self, size: Block<u32>, offset: Block<u64>) -> Result<Buf> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         #[cfg(feature = "latency_metrics")]
-        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
-        #[cfg(feature = "latency_metrics")]
         let start = std::time::Instant::now();
 
         match self.slice_blocks(size, offset) {
@@ -175,8 +173,6 @@ impl VdevLeafRead for Memory {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let buf_mut = buf.as_mut();
-        #[cfg(feature = "latency_metrics")]
-        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
         #[cfg(feature = "latency_metrics")]
         let start = std::time::Instant::now();
         match self.slice(buf_mut.len(), offset.to_bytes() as usize) {
