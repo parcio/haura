@@ -38,7 +38,7 @@ struct AtomicStatistics {
     repaired: AtomicU64,
     failed_writes: AtomicU64,
     #[cfg(feature = "latency_metrics")]
-    read_op: AtomicU64,
+    prev_read: AtomicU64,
     #[cfg(feature = "latency_metrics")]
     read_op_latency: AtomicU64,
 }
@@ -55,13 +55,17 @@ impl AtomicStatistics {
             read_latency: self
                 .read_op_latency
                 .load(Ordering::Relaxed)
-                .checked_div(self.read_op.load(Ordering::Relaxed))
+                .checked_div(
+                    self.read
+                        .load(Ordering::Relaxed)
+                        .saturating_sub(self.prev_read.load(Ordering::Relaxed)),
+                )
                 .unwrap_or(0),
         };
         #[cfg(feature = "latency_metrics")]
         {
-            self.read_op_latency.store(0, Ordering::Relaxed);
-            self.read_op.store(0, Ordering::Relaxed);
+            self.prev_read
+                .store(self.read.load(Ordering::Relaxed), Ordering::Relaxed)
         }
         res
     }

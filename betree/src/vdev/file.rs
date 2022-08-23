@@ -71,8 +71,6 @@ impl VdevRead for File {
         let buf = {
             let mut buf = Buf::zeroed(size).into_full_mut();
             #[cfg(feature = "latency_metrics")]
-            self.stats.read_op.fetch_add(1, Ordering::Relaxed);
-            #[cfg(feature = "latency_metrics")]
             let start = std::time::Instant::now();
             if let Err(e) = self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
                 #[cfg(feature = "latency_metrics")]
@@ -129,8 +127,6 @@ impl VdevRead for File {
     async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let mut buf = Buf::zeroed(size).into_full_mut();
-        #[cfg(feature = "latency_metrics")]
-        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
         #[cfg(feature = "latency_metrics")]
         let start = std::time::Instant::now();
         match self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
@@ -198,8 +194,6 @@ impl VdevLeafRead for File {
     async fn read_raw<T: AsMut<[u8]> + Send>(&self, mut buf: T, offset: Block<u64>) -> Result<T> {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
-        #[cfg(feature = "latency_metrics")]
-        self.stats.read_op.fetch_add(1, Ordering::Relaxed);
         #[cfg(feature = "latency_metrics")]
         let start = std::time::Instant::now();
         match self.file.read_exact_at(buf.as_mut(), offset.to_bytes()) {
