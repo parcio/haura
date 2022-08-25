@@ -296,6 +296,8 @@ pub trait DmlWithCache {
 
 pub trait DmlWithStorageHints {
     fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>;
+    /// Returns the default storage class used when [StoragePreference] is `None`.
+    fn default_storage_class(&self) -> StoragePreference;
 }
 
 /// Extension of an DMU to signal that it supports a message based report format.
