@@ -232,6 +232,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
             object_id: oid,
             size: 0,
             mtime: SystemTime::now(),
+            pref: storage_preference,
         };
 
         self.update_object_info(key, &MetaMessage::set_info(&info))?;
@@ -712,6 +713,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         }
 
         meta_change.mtime = Some(SystemTime::now());
+        meta_change.pref = Some(storage_pref);
         self.store
             .update_object_info(&self.object.key, &meta_change)
             .map(|()| total_written)

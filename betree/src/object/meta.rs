@@ -5,6 +5,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     object::ObjectId,
     tree::MessageAction,
+    StoragePreference,
 };
 
 use std::{
@@ -20,6 +21,7 @@ pub struct ObjectInfo {
     pub object_id: ObjectId,
     pub size: u64,
     pub mtime: SystemTime,
+    pub pref: StoragePreference,
 }
 
 /// Every message represents an overwrite or merge of a set of [ObjectInfo] properties.
@@ -32,6 +34,7 @@ pub(super) struct MetaMessage {
     pub(super) object_id: Option<ObjectId>,
     pub(super) size: Option<u64>,
     pub(super) mtime: Option<SystemTime>,
+    pub(super) pref: Option<StoragePreference>,
 }
 
 const CONTENT_FLAG_NONE: u8 = MetaMessage::delete().to_content_flags();
@@ -39,6 +42,7 @@ const CONTENT_FLAG_ALL: u8 = (MetaMessage {
     object_id: Some(ObjectId(0)),
     size: Some(0),
     mtime: Some(UNIX_EPOCH),
+    pref: Some(StoragePreference::NONE),
 })
 .to_content_flags();
 
@@ -49,33 +53,44 @@ impl MetaMessage {
         object_id: Option<ObjectId>,
         size: Option<u64>,
         mtime: Option<SystemTime>,
+        pref: Option<StoragePreference>,
     ) -> Self {
         MetaMessage {
             object_id,
             size,
             mtime,
+            pref,
         }
     }
 
     pub const fn delete() -> MetaMessage {
-        MetaMessage::new(None, None, None)
+        MetaMessage::new(None, None, None, None)
     }
 
     pub fn set_info(info: &ObjectInfo) -> MetaMessage {
-        MetaMessage::new(Some(info.object_id), Some(info.size), Some(info.mtime))
+        MetaMessage::new(
+            Some(info.object_id),
+            Some(info.size),
+            Some(info.mtime),
+            Some(info.pref),
+        )
     }
 
     /// Encodes which of the properties this message changes.
+    /// MetaMessage uses bit mask flags the current distribution is (8 bits):
+    ///
     const fn to_content_flags(&self) -> u8 {
         (if self.object_id.is_some() { 1 } else { 0 })
             | (if self.size.is_some() { 2 } else { 0 })
             | (if self.mtime.is_some() { 4 } else { 0 })
+            | (if self.pref.is_some() { 8 } else { 0 })
     }
 
     const fn encoded_length(&self) -> usize {
         1 + (if self.object_id.is_some() { 8 } else { 0 })
             + (if self.size.is_some() { 8 } else { 0 })
             + (if self.mtime.is_some() { 8 } else { 0 })
+            + (if self.pref.is_some() { 1 } else { 0 })
     }
 
     pub(crate) fn pack(&self) -> CowBytes {
@@ -99,6 +114,9 @@ impl MetaMessage {
 
             let _ = v.write_u64::<LittleEndian>(us_since_epoch);
         }
+        if let Some(pref) = self.pref {
+            let _ = v.write_u8(pref.as_u8());
+        }
 
         CowBytes::from(v)
     }
@@ -118,6 +136,9 @@ impl MetaMessage {
             let us_since_epoch = cursor.read_u64::<LittleEndian>()?;
             let mtime = UNIX_EPOCH + Duration::from_micros(us_since_epoch);
             message.mtime = Some(mtime);
+        }
+        if content_flags & 8 != 0 {
+            message.pref = Some(StoragePreference::from_u8(cursor.read_u8()?));
         }
 
         Ok(message)
@@ -180,12 +201,14 @@ impl MessageAction for MetaMessageAction {
                     object_id: Some(object_id),
                     size: Some(size),
                     mtime: Some(mtime),
+                    pref: Some(pref),
                 } => {
                     // message overwrites entirely, don't bother unpacking existing data
                     let info = ObjectInfo {
                         object_id,
                         size,
                         mtime,
+                        pref,
                     };
                     *data =
                         Some(CowBytes::from(info.write_to_vec_with_ctx(ENDIAN).unwrap()).into());
@@ -194,6 +217,7 @@ impl MessageAction for MetaMessageAction {
                     object_id: None,
                     size: None,
                     mtime: None,
+                    pref: None,
                 } => {
                     // message deletes entirely
                     *data = None;
@@ -202,6 +226,7 @@ impl MessageAction for MetaMessageAction {
                     object_id,
                     size,
                     mtime,
+                    pref,
                 } => {
                     if let Some(d) = data {
                         let mut info = ObjectInfo::read_from_buffer_with_ctx(ENDIAN, &d).unwrap();
@@ -214,6 +239,9 @@ impl MessageAction for MetaMessageAction {
                         }
                         if let Some(mtime) = mtime {
                             info.mtime = mtime;
+                        }
+                        if let Some(pref) = pref {
+                            info.pref = pref;
                         }
 
                         *data = Some(
@@ -261,6 +289,8 @@ impl MessageAction for MetaMessageAction {
                         object_id: upper.object_id.or(lower.object_id),
                         size: or_max(upper.size, lower.size),
                         mtime: or_max(upper.mtime, lower.mtime),
+                        // Prefer newer if set
+                        pref: upper.pref.or(lower.pref),
                     };
                     new.pack().into()
                 }
