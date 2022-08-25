@@ -3,6 +3,7 @@ use crate::{
     object::{ObjectId, ObjectInfo, ObjectStore},
     storage_pool::DiskOffset,
     vdev::Block,
+    StoragePreference,
 };
 use std::time::SystemTime;
 
@@ -20,9 +21,33 @@ pub enum DmlMsg {
     Discover(DiskOffset),
 }
 
-// This is has been designed to be it's own separate message to allow for
-// separate handling of objects and nodes and to prevent recursive type
-// definitions on [DatabaseBuilder].
+#[derive(Hash, PartialEq, Eq, Clone)]
+pub struct StoreKey {
+    data: DatasetId,
+    meta: DatasetId,
+}
+#[derive(Hash, PartialEq, Eq, Clone)]
+pub struct ObjectKey(StoreKey, ObjectId);
+
+impl ObjectKey {
+    pub fn build(data: DatasetId, meta: DatasetId, id: ObjectId) -> Self {
+        Self(StoreKey { data, meta }, id)
+    }
+}
+
+impl StoreKey {
+    pub fn build(data: DatasetId, meta: DatasetId) -> Self {
+        Self { data, meta }
+    }
+}
+
+/// This is has been designed to be it's own separate message to allow for
+/// separate handling of objects and nodes and to prevent recursive type
+/// definitions on [DatabaseBuilder].
+///
+/// The object migration must happen on a _best_ estimation basis. An object
+/// might be distributed on multiple storage tiers and must not adhere to the
+/// storage preference given.
 #[derive(Clone)]
 pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     // Relevant for Promotion and/or Demotion
@@ -30,23 +55,19 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     DatasetClose(DatasetId),
 
     /// Announce and deliver an accessible copy of active object stores.
-    ObjectstoreOpen(ObjectStore<Config>),
-    ObjectstoreClose(Box<[u8]>),
+    ObjectstoreOpen(StoreKey, ObjectStore<Config>),
+    ObjectstoreClose(StoreKey),
 
     /// Informs of openend object, adjoint with extra information for access.
-    ObjectOpen {
-        id: ObjectId,
-        data: DatasetId,
-        meta: DatasetId,
-        info: ObjectInfo,
-    },
+    ObjectOpen(ObjectKey, ObjectInfo),
     /// Informs of closed object, adjoint with extra information for access.
-    ObjectClose {
-        id: ObjectId,
-        data: DatasetId,
-        meta: DatasetId,
-        info: ObjectInfo,
-    },
+    ObjectClose(ObjectKey, ObjectInfo),
+    /// Frequency information about read and write operations on an object.
+    ObjectRead(ObjectKey),
+    /// Report the written storage class with the new size of the object.
+    ObjectWrite(ObjectKey, u64, StoragePreference),
+    /// Notification if a manual migration took place.
+    ObjectMigrate(ObjectKey, StoragePreference),
 }
 
 pub trait ConstructReport {
