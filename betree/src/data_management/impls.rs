@@ -1237,6 +1237,10 @@ where
     fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>> {
         Arc::clone(&self.storage_hints)
     }
+
+    fn default_storage_class(&self) -> StoragePreference {
+        StoragePreference::from_u8(self.default_storage_class)
+    }
 }
 
 impl<E, SPL, H, I, G, MSG> super::DmlWithReport<MSG> for Dmu<E, SPL, H, I, G, MSG>
