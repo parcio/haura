@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use speedy::{Readable, Writable};
 use std::{
     cmp,
     sync::atomic::{AtomicU8, Ordering},
@@ -26,7 +27,7 @@ const SLOWEST: u8 = 3;
 ///
 /// This type is not an `Option<u8>`, because it saves one byte per value, and allows the
 /// implementation of convenience methods on itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Readable, Writable)]
 #[repr(transparent)]
 pub struct StoragePreference(u8);
 impl StoragePreference {
