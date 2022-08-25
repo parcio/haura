@@ -47,7 +47,7 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result},
-    migration::DatabaseMsg,
+    migration::{DatabaseMsg, ObjectKey, StoreKey},
     vdev::Block,
     Database, Dataset, StoragePreference,
 };
@@ -78,13 +78,12 @@ pub use cursor::ObjectCursor;
 
 const OBJECT_ID_COUNTER_KEY: &[u8] = b"\0oid";
 
-#[derive(Debug, Clone, Copy, Readable, Writable)]
+#[derive(Debug, Clone, Copy, Readable, Writable, PartialEq, Eq, Hash)]
 /// The internal id of an object after name resolution, to be treated as an opaque identifier of
 /// fixed but unreliable size.
 pub struct ObjectId(u64);
 impl ObjectId {
     #[allow(missing_docs)]
-    #[cfg(feature = "internal-api")]
     pub fn as_u64(&self) -> u64 {
         self.0
     }
@@ -112,7 +111,6 @@ fn decode_object_chunk_key(key: &[u8; 8 + 4]) -> (ObjectId, u32) {
 /// for individual data purposes.
 #[derive(Clone)]
 pub struct ObjectStore<Config: DatabaseBuilder + Clone> {
-    name: Box<[u8]>,
     data: Dataset<Config>,
     metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: Arc<AtomicU64>,
@@ -124,7 +122,6 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Create an object store backed by a single database.
     pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
         ObjectStore::with_datasets(
-            &[0],
             self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?,
             self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?,
             StoragePreference::NONE,
@@ -148,7 +145,6 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         meta_name.extend_from_slice(b"meta");
 
         ObjectStore::with_datasets(
-            name,
             self.open_or_create_custom_dataset(&data_name, storage_preference)?,
             self.open_or_create_custom_dataset(&meta_name, storage_preference)?,
             storage_preference,
@@ -159,7 +155,10 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
         if let Some(tx) = &self.db_tx {
             let _ = tx
-                .send(DatabaseMsg::ObjectstoreClose(store.name.clone()))
+                .send(DatabaseMsg::ObjectstoreClose(StoreKey::build(
+                    store.data.id(),
+                    store.metadata.id(),
+                )))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         let _ = self.close_dataset(store.metadata);
@@ -173,7 +172,6 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     /// Provide custom datasets for the object store, allowing to use different pools backed by
     /// different storage classes.
     pub fn with_datasets(
-        name: &[u8],
         data: Dataset<Config>,
         metadata: Dataset<Config, MetaMessageAction>,
         default_storage_preference: StoragePreference,
@@ -182,7 +180,6 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         let d_id = data.id();
         let m_id = metadata.id();
         let store = ObjectStore {
-            name: name.into(),
             object_id_counter: {
                 let last_key = data.get(OBJECT_ID_COUNTER_KEY)?.and_then(
                     |slice: SlicedCowBytes| -> Option<[u8; 8]> { (&slice[..]).try_into().ok() },
@@ -203,7 +200,10 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         };
         if let Some(tx) = report {
             let _ = tx
-                .send(DatabaseMsg::ObjectstoreOpen(store.clone()))
+                .send(DatabaseMsg::ObjectstoreOpen(
+                    StoreKey::build(store.data.id(), store.metadata.id()),
+                    store.clone(),
+                ))
                 .map_err(|_| warn!("Channel receiver was dropped."));
         }
         Ok(store)
@@ -274,12 +274,10 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
 
         if let (Some(info), Some(tx)) = (info.clone(), self.report.as_ref()) {
             let _ = tx
-                .send(DatabaseMsg::ObjectOpen {
-                    id: info.object_id,
-                    data: self.data.id(),
-                    meta: self.metadata.id(),
+                .send(DatabaseMsg::ObjectOpen(
+                    ObjectKey::build(self.data.id(), self.metadata.id(), info.object_id),
                     info,
-                })
+                ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
@@ -517,12 +515,14 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         // report for semantics
         if let (Ok(Some(info)), Some(tx)) = (self.info(), self.store.report.as_ref()) {
             let _ = tx
-                .send(DatabaseMsg::ObjectClose {
-                    id: self.object.id,
-                    data: self.store.data.id(),
-                    meta: self.store.metadata.id(),
+                .send(DatabaseMsg::ObjectClose(
+                    ObjectKey::build(
+                        self.store.data.id(),
+                        self.store.metadata.id(),
+                        self.object.id,
+                    ),
                     info,
-                })
+                ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
@@ -575,6 +575,15 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
     /// Read object data into `buf`, starting at offset `offset`, and returning the amount of
     /// actually read bytes.
     pub fn read_at(&self, mut buf: &mut [u8], offset: u64) -> result::Result<u64, (u64, Error)> {
+        if let Some(tx) = &self.store.report {
+            let _ = tx
+                .send(DatabaseMsg::ObjectRead(ObjectKey::build(
+                    self.store.data.id(),
+                    self.store.metadata.id(),
+                    self.object.id,
+                )))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
         let oid = self.object.id;
         let mut total_read = 0;
 
@@ -634,6 +643,15 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         &self,
         chunk_range: Range<u32>,
     ) -> Result<impl Iterator<Item = Result<(Range<u64>, SlicedCowBytes)>>> {
+        if let Some(tx) = &self.store.report {
+            let _ = tx
+                .send(DatabaseMsg::ObjectRead(ObjectKey::build(
+                    self.store.data.id(),
+                    self.store.metadata.id(),
+                    self.object.id,
+                )))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
         let iter = self.store.data.range(
             &object_chunk_key(self.object.id, chunk_range.start)[..]
                 ..&object_chunk_key(self.object.id, chunk_range.end),
@@ -712,6 +730,19 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
             meta_change.size = Some(chunk.end.as_bytes());
         }
 
+        if let (Some(tx), Some(size)) = (&self.store.report, meta_change.size) {
+            let _ = tx
+                .send(DatabaseMsg::ObjectWrite(
+                    ObjectKey::build(
+                        self.store.data.id(),
+                        self.store.metadata.id(),
+                        self.object.id,
+                    ),
+                    size,
+                    storage_pref
+                ))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
         meta_change.mtime = Some(SystemTime::now());
         meta_change.pref = Some(storage_pref);
         self.store
