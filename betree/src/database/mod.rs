@@ -43,7 +43,7 @@ use std::{
 };
 
 mod dataset;
-mod errors;
+pub(crate) mod errors;
 mod handler;
 mod snapshot;
 mod superblock;
