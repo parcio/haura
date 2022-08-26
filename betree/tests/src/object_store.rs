@@ -52,3 +52,12 @@ fn object_store_iter() {
         assert_eq!(osl.next().unwrap().unwrap().as_u64(), 2);
         assert_eq!(osl.next().unwrap().unwrap().as_u64(), 3);
 }
+
+#[test]
+fn object_store_reinit_from_id() {
+        let mut db = test_db(2, 64);
+        let os = db.open_object_store().unwrap();
+        db.close_object_store(os);
+        let mut osl = db.iter_object_stores().unwrap();
+        let _ = db.open_object_store_with_id(osl.next().unwrap().unwrap()).unwrap();
+}
