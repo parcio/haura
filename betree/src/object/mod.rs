@@ -46,12 +46,14 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result},
+    database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result, DatasetId},
     migration::{DatabaseMsg, ObjectKey, StoreKey},
     vdev::Block,
-    Database, Dataset, StoragePreference,
+    tree::{TreeBaseLayer, DefaultMessageAction},
+    Database, Dataset, StoragePreference, size::StaticSize,
 };
 
+use byteorder::LittleEndian;
 use crossbeam_channel::Sender;
 use speedy::{Readable, Writable};
 
@@ -111,6 +113,7 @@ fn decode_object_chunk_key(key: &[u8; 8 + 4]) -> (ObjectId, u32) {
 /// for individual data purposes.
 #[derive(Clone)]
 pub struct ObjectStore<Config: DatabaseBuilder + Clone> {
+    id: ObjectStoreId,
     data: Dataset<Config>,
     metadata: Dataset<Config, MetaMessageAction>,
     object_id_counter: Arc<AtomicU64>,
@@ -118,12 +121,94 @@ pub struct ObjectStore<Config: DatabaseBuilder + Clone> {
     report: Option<Sender<DatabaseMsg<Config>>>,
 }
 
+// A type alias to represent the on disk identifier for a specific object store.
+// Required to find object stores on reinitialization without names.
+type ObjectStoreId = DatasetId;
+
+struct ObjectStoreData {
+    data: DatasetId,
+    meta: DatasetId,
+}
+
+use std::io::Write;
+impl ObjectStoreData {
+    fn pack(&self) -> Result<Vec<u8>> {
+        let mut buf = vec![0; 2 * DatasetId::static_size()];
+        (&mut buf[0..]).write_all(&self.data.pack())?;
+        (&mut buf[DatasetId::static_size()..]).write_all(&self.data.pack())?;
+        Ok(buf)
+    }
+
+    fn unpack(data: &[u8]) -> ObjectStoreData {
+        Self {
+            data: DatasetId::unpack(&data[0..DatasetId::static_size()]),
+            meta: DatasetId::unpack(&data[DatasetId::static_size()..]),
+        }
+    }
+}
+
+const OBJECT_STORE_ID_COUNTER_PREFIX: u8 = 6;
+const OBJECT_STORE_NAME_TO_ID_PREFIX: u8 = 7;
+const OBJECT_STORE_DATA_PREFIX: u8 = 8;
+
 impl<Config: DatabaseBuilder + Clone> Database<Config> {
+    fn allocate_os_id(&mut self) -> Result<ObjectStoreId> {
+        let key = &[OBJECT_STORE_ID_COUNTER_PREFIX] as &[_];
+        let last_os_id = self
+            .root_tree
+            .get(key)?
+            .map(|b| ObjectStoreId::unpack(&b))
+            .unwrap_or_default();
+        let next_os_id = last_os_id.next();
+        let data = &next_os_id.pack() as &[_];
+        self.root_tree.insert(
+            key,
+            DefaultMessageAction::insert_msg(data),
+            StoragePreference::NONE,
+        )?;
+        Ok(next_os_id)
+    }
+
+    fn get_or_create_os_id(&mut self, name: &[u8]) -> Result<ObjectStoreId> {
+        let mut key = Vec::new();
+        key.push(OBJECT_STORE_NAME_TO_ID_PREFIX);
+        key.extend_from_slice(name);
+        match self
+            .root_tree
+            .get(key.clone())?
+            .map(|b| ObjectStoreId::unpack(&b)) {
+                Some(id) => Ok(id),
+                None => {
+                    let new_id = self.allocate_os_id()?;
+                    self.root_tree.insert(key, DefaultMessageAction::insert_msg(&new_id.pack()), StoragePreference::NONE)?;
+                    Ok(new_id)
+                }
+            }
+    }
+
+    fn store_os_data(&mut self, os_id: ObjectStoreId, os_data: ObjectStoreData) -> Result<()>{
+        let mut key = Vec::new();
+        key.push(OBJECT_STORE_DATA_PREFIX);
+        key.extend_from_slice(&os_id.pack());
+        let data = os_data.pack()?;
+        self.root_tree.insert(
+            key,
+            DefaultMessageAction::insert_msg(&data),
+            StoragePreference::NONE,
+        )?;
+        Ok(())
+    }
+
     /// Create an object store backed by a single database.
     pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
+        let id = self.get_or_create_os_id(&[0])?;
+        let data = self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?;
+        let meta = self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?;
+        self.store_os_data(id.clone(), ObjectStoreData { data: data.id(), meta: meta.id() })?;
         ObjectStore::with_datasets(
-            self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?,
-            self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?,
+            id,
+            data,
+            meta,
             StoragePreference::NONE,
             self.db_tx.clone(),
         )
@@ -139,14 +224,20 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         let mut v = name.to_vec();
         v.push(0);
 
+        let id = self.get_or_create_os_id(name.clone())?;
+
         let mut data_name = v.clone();
         data_name.extend_from_slice(b"data");
         let mut meta_name = v;
         meta_name.extend_from_slice(b"meta");
+        let data = self.open_or_create_custom_dataset(&data_name, storage_preference)?;
+        let meta = self.open_or_create_custom_dataset(&meta_name, storage_preference)?;
+        self.store_os_data(id.clone(), ObjectStoreData { data: data.id(), meta: meta.id() })?;
 
         ObjectStore::with_datasets(
-            self.open_or_create_custom_dataset(&data_name, storage_preference)?,
-            self.open_or_create_custom_dataset(&meta_name, storage_preference)?,
+            id,
+            data,
+            meta,
             storage_preference,
             self.db_tx.clone(),
         )
@@ -172,6 +263,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     /// Provide custom datasets for the object store, allowing to use different pools backed by
     /// different storage classes.
     pub fn with_datasets(
+        id: ObjectStoreId,
         data: Dataset<Config>,
         metadata: Dataset<Config, MetaMessageAction>,
         default_storage_preference: StoragePreference,
@@ -180,6 +272,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         let d_id = data.id();
         let m_id = metadata.id();
         let store = ObjectStore {
+            id,
             object_id_counter: {
                 let last_key = data.get(OBJECT_ID_COUNTER_KEY)?.and_then(
                     |slice: SlicedCowBytes| -> Option<[u8; 8]> { (&slice[..]).try_into().ok() },
