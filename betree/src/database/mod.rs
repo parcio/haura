@@ -792,6 +792,10 @@ impl DatasetId {
     pub(crate) fn next(self) -> Self {
         DatasetId(self.0 + 1)
     }
+
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
 }
 
 impl StaticSize for DatasetId {
