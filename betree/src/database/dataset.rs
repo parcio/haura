@@ -92,12 +92,11 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     }
 
     /// Internal function to open a dataset based on it's internal id, saves knowing the actual name.
-    /// THE NAME IS NOT KNOW IN THIS CASE AND THE NAME BOX EMPTY.
-    pub(super) fn open_dataset_with_id<M: MessageAction + Default + 'static>(
+    /// THE NAME IS NOT KNOWN IN THIS CASE AND THE NAME BOX EMPTY.
+    pub(crate) fn open_dataset_with_id<M: MessageAction + Default + 'static>(
         &mut self,
-        id: &[u8],
+        id: DatasetId,
     ) -> Result<Dataset<Config, M>> {
-        let id = DatasetId::unpack(id);
         self.open_dataset_with_id_and_name(id, &[])
     }
 

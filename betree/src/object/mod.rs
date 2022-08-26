@@ -199,6 +199,26 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         Ok(())
     }
 
+    fn fetch_os_data(&mut self, os_id: &ObjectStoreId) -> Result<Option<ObjectStoreData>> {
+        let mut key = vec![OBJECT_STORE_DATA_PREFIX];
+        key.extend_from_slice(&os_id.pack());
+        Ok(self.root_tree.get(key)?.map(|buf| ObjectStoreData::unpack(&buf)))
+    }
+
+    pub fn open_object_store_with_id(&mut self, os_id: ObjectStoreId) -> Result<ObjectStore<Config>> {
+        let store = self.fetch_os_data(&os_id)?
+                        .map(|x| Ok::<ObjectStoreData, crate::database::errors::Error>(x))
+                        .unwrap_or_else(|| bail!(crate::database::errors::ErrorKind::DoesNotExist))?;
+
+        ObjectStore::with_datasets(
+            os_id,
+            self.open_dataset_with_id(store.data)?,
+            self.open_dataset_with_id(store.meta)?,
+            StoragePreference::NONE,
+            self.db_tx.clone(),
+        )
+    }
+
     /// Iterates over all object stores in the database.
     pub fn iter_object_stores(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
         let low = &[OBJECT_STORE_DATA_PREFIX] as &[_];
