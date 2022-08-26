@@ -50,6 +50,7 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     /// Announce and deliver an accessible copy of active object stores.
     ObjectstoreOpen(ObjectStoreId, ObjectStore<Config>),
     ObjectstoreClose(ObjectStoreId),
+    ObjectstoreDiscover(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.
     ObjectOpen(ObjectKey, ObjectInfo),
