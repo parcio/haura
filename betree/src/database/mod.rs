@@ -779,17 +779,17 @@ impl DeadListData {
 pub struct DatasetId(u64);
 
 impl DatasetId {
-    fn pack(self) -> [u8; 8] {
+    pub(crate) fn pack(self) -> [u8; 8] {
         let mut b = [0; 8];
         BigEndian::write_u64(&mut b, self.0);
         b
     }
 
-    fn unpack(b: &[u8]) -> Self {
+    pub(crate) fn unpack(b: &[u8]) -> Self {
         DatasetId(BigEndian::read_u64(b))
     }
 
-    fn next(self) -> Self {
+    pub(crate) fn next(self) -> Self {
         DatasetId(self.0 + 1)
     }
 }
