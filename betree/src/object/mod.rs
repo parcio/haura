@@ -135,7 +135,7 @@ impl ObjectStoreData {
     fn pack(&self) -> Result<Vec<u8>> {
         let mut buf = vec![0; 2 * DatasetId::static_size()];
         (&mut buf[0..]).write_all(&self.data.pack())?;
-        (&mut buf[DatasetId::static_size()..]).write_all(&self.data.pack())?;
+        (&mut buf[DatasetId::static_size()..]).write_all(&self.meta.pack())?;
         Ok(buf)
     }
 
