@@ -28,7 +28,7 @@ pub struct Lfu<C: DatabaseBuilder + Clone> {
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
     config: MigrationConfig<LfuConfig>,
     // Store open object stores to move inactive objects within.
-    active_object_stores: HashMap<ObjectStoreId, ObjectStore<C>>,
+    object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
     /// Object Buckets dividing them into multiple file size ranges,
     /// taken from https://doi.org/10.1145/3489143
     objects: HashMap<ObjectKey, ObjectLocation>,
@@ -201,10 +201,10 @@ impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
                 DatabaseMsg::DatasetOpen(_) => {},
                 DatabaseMsg::DatasetClose(_) => {},
                 DatabaseMsg::ObjectstoreOpen(key, store) => {
-                    self.active_object_stores.insert(key, store);
+                    self.object_stores.insert(key, Some(store));
                 }
-                DatabaseMsg::ObjectstoreClose(key) => {
-                    self.active_object_stores.remove(&key);
+                DatabaseMsg::ObjectstoreClose(key) | DatabaseMsg::ObjectstoreDiscover(key) => {
+                    self.object_stores.insert(key, None);
                 }
                 DatabaseMsg::ObjectOpen(key, info) | DatabaseMsg::ObjectClose(key, info) => {
                     // Insert and get old value

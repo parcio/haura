@@ -488,8 +488,14 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
                 let db = Arc::new(RwLock::new(Self::build_internal(
                     builder,
                     Some(dml_tx),
-                    Some(db_tx),
+                    Some(db_tx.clone()),
                 )?));
+
+                // Discovery Initializiation
+                for os_id in db.read().iter_object_stores()? {
+                    db_tx.send(DatabaseMsg::ObjectstoreDiscover(os_id?)).expect("UNREACHABLE");
+                }
+
                 let other = db.clone();
                 thread::spawn(move || {
                     let hints = other.read().root_tree.dmu().storage_hints();
