@@ -49,7 +49,7 @@ use crate::{
     database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result, DatasetId},
     migration::{DatabaseMsg, ObjectKey, StoreKey},
     vdev::Block,
-    tree::{TreeBaseLayer, DefaultMessageAction},
+    tree::{TreeBaseLayer, DefaultMessageAction, TreeLayer},
     Database, Dataset, StoragePreference, size::StaticSize,
 };
 
@@ -197,6 +197,16 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
             StoragePreference::NONE,
         )?;
         Ok(())
+    }
+
+    /// Iterates over all object stores in the database.
+    pub fn iter_object_stores(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
+        let low = &[OBJECT_STORE_DATA_PREFIX] as &[_];
+        let high = &[OBJECT_STORE_DATA_PREFIX + 1] as &[_];
+        Ok(self.root_tree.range(low..high)?.map(move |result| {
+            let (b, _) = result?;
+            Ok(ObjectStoreId::unpack(&b[1..]))
+        }))
     }
 
     /// Create an object store backed by a single database.
