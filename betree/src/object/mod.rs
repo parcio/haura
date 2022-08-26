@@ -329,6 +329,15 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         Ok(store)
     }
 
+    /// Return an iterator overall object names and metadata in this object store.
+    pub fn iter_objects(&self) -> Result<impl Iterator<Item = (CowBytes, ObjectInfo)>> {
+        // Iterate over the metadata and create tuples of object keys and ids.
+        Ok(self.metadata.range(&[0u8] as &[_]..&[u8::MAX] as &[_])?.map(|res| {
+            let (k,v) = res.unwrap();
+            (k, ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &v).unwrap())
+        }))
+    }
+
     /// Create a new object handle.
     pub fn create_object_with_pref(
         &'os self,
