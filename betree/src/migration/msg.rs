@@ -1,6 +1,6 @@
 use crate::{
     database::{DatabaseBuilder, Dataset, DatasetId},
-    object::{ObjectId, ObjectInfo, ObjectStore},
+    object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
     vdev::Block,
     StoragePreference,
@@ -22,22 +22,15 @@ pub enum DmlMsg {
 }
 
 #[derive(Hash, PartialEq, Eq, Clone)]
-pub struct StoreKey {
-    data: DatasetId,
-    meta: DatasetId,
-}
-#[derive(Hash, PartialEq, Eq, Clone)]
-pub struct ObjectKey(StoreKey, ObjectId);
+pub struct ObjectKey(ObjectStoreId, ObjectId);
 
 impl ObjectKey {
-    pub fn build(data: DatasetId, meta: DatasetId, id: ObjectId) -> Self {
-        Self(StoreKey { data, meta }, id)
+    pub fn build(os_id: ObjectStoreId, id: ObjectId) -> Self {
+        Self(os_id, id)
     }
-}
 
-impl StoreKey {
-    pub fn build(data: DatasetId, meta: DatasetId) -> Self {
-        Self { data, meta }
+    pub(crate) fn store_key(&self) -> &ObjectStoreId {
+        &self.0
     }
 }
 
@@ -55,8 +48,8 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     DatasetClose(DatasetId),
 
     /// Announce and deliver an accessible copy of active object stores.
-    ObjectstoreOpen(StoreKey, ObjectStore<Config>),
-    ObjectstoreClose(StoreKey),
+    ObjectstoreOpen(ObjectStoreId, ObjectStore<Config>),
+    ObjectstoreClose(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.
     ObjectOpen(ObjectKey, ObjectInfo),

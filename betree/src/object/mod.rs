@@ -47,7 +47,7 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result, DatasetId},
-    migration::{DatabaseMsg, ObjectKey, StoreKey},
+    migration::{DatabaseMsg, ObjectKey},
     vdev::Block,
     tree::{TreeBaseLayer, DefaultMessageAction, TreeLayer},
     Database, Dataset, StoragePreference, size::StaticSize,
@@ -123,7 +123,7 @@ pub struct ObjectStore<Config: DatabaseBuilder + Clone> {
 
 // A type alias to represent the on disk identifier for a specific object store.
 // Required to find object stores on reinitialization without names.
-type ObjectStoreId = DatasetId;
+pub(crate) type ObjectStoreId = DatasetId;
 
 struct ObjectStoreData {
     data: DatasetId,
@@ -256,10 +256,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
         if let Some(tx) = &self.db_tx {
             let _ = tx
-                .send(DatabaseMsg::ObjectstoreClose(StoreKey::build(
-                    store.data.id(),
-                    store.metadata.id(),
-                )))
+                .send(DatabaseMsg::ObjectstoreClose(store.id))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         let _ = self.close_dataset(store.metadata);
@@ -304,7 +301,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         if let Some(tx) = report {
             let _ = tx
                 .send(DatabaseMsg::ObjectstoreOpen(
-                    StoreKey::build(store.data.id(), store.metadata.id()),
+                    store.id,
                     store.clone(),
                 ))
                 .map_err(|_| warn!("Channel receiver was dropped."));
@@ -378,7 +375,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         if let (Some(info), Some(tx)) = (info.clone(), self.report.as_ref()) {
             let _ = tx
                 .send(DatabaseMsg::ObjectOpen(
-                    ObjectKey::build(self.data.id(), self.metadata.id(), info.object_id),
+                    ObjectKey::build(self.id, info.object_id),
                     info,
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -620,8 +617,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
             let _ = tx
                 .send(DatabaseMsg::ObjectClose(
                     ObjectKey::build(
-                        self.store.data.id(),
-                        self.store.metadata.id(),
+                        self.store.id,
                         self.object.id,
                     ),
                     info,
@@ -681,8 +677,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let Some(tx) = &self.store.report {
             let _ = tx
                 .send(DatabaseMsg::ObjectRead(ObjectKey::build(
-                    self.store.data.id(),
-                    self.store.metadata.id(),
+                    self.store.id,
                     self.object.id,
                 )))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -749,8 +744,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let Some(tx) = &self.store.report {
             let _ = tx
                 .send(DatabaseMsg::ObjectRead(ObjectKey::build(
-                    self.store.data.id(),
-                    self.store.metadata.id(),
+                    self.store.id,
                     self.object.id,
                 )))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -837,8 +831,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
             let _ = tx
                 .send(DatabaseMsg::ObjectWrite(
                     ObjectKey::build(
-                        self.store.data.id(),
-                        self.store.metadata.id(),
+                        self.store.id,
                         self.object.id,
                     ),
                     size,
