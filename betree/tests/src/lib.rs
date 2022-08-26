@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 mod configs;
+mod object_store;
 
 use betree_storage_stack::{
     compression::CompressionConfiguration,
