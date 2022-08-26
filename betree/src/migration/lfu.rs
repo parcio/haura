@@ -7,13 +7,13 @@ use std::{collections::{HashMap, hash_map::Entry}, fmt::Display, sync::Arc};
 use crate::{
     database::{DatabaseBuilder, DatasetId, ObjectRef},
     data_management::{DmlWithStorageHints},
-    object::{ObjectId, ObjectStore},
+    object::{ObjectId, ObjectStore, ObjectStoreId},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
     Database, StoragePreference,
 };
 
-use super::{errors::Result, DatabaseMsg, DmlMsg, MigrationConfig, ObjectKey, StoreKey};
+use super::{errors::Result, DatabaseMsg, DmlMsg, MigrationConfig, ObjectKey};
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 /// Internal Object Representation to locate objects on changing buckets and tiers
@@ -28,7 +28,7 @@ pub struct Lfu<C: DatabaseBuilder + Clone> {
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
     config: MigrationConfig<LfuConfig>,
     // Store open object stores to move inactive objects within.
-    active_object_stores: HashMap<StoreKey, ObjectStore<C>>,
+    active_object_stores: HashMap<ObjectStoreId, ObjectStore<C>>,
     /// Object Buckets dividing them into multiple file size ranges,
     /// taken from https://doi.org/10.1145/3489143
     objects: HashMap<ObjectKey, ObjectLocation>,
