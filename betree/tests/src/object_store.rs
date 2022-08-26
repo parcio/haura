@@ -54,6 +54,17 @@ fn object_store_iter() {
 }
 
 #[test]
+fn object_store_object_iter() {
+    let mut db = test_db(2, 64);
+    let os = db.open_object_store().unwrap();
+    let _ = os.open_or_create_object(b"hewo").unwrap();
+    let _ = os.open_or_create_object(b"uwu").unwrap();
+    let mut objs = os.iter_objects().unwrap();
+    assert_eq!(objs.next().unwrap().0, b"hewo");
+    assert_eq!(objs.next().unwrap().0, b"uwu");
+}
+
+#[test]
 fn object_store_reinit_from_id() {
         let mut db = test_db(2, 64);
         let os = db.open_object_store().unwrap();
