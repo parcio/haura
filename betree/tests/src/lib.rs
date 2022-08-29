@@ -916,3 +916,22 @@ fn migration_policy_single_node() {
     assert_json_snapshot!("migration_policy_single_node__after_migration",json!(ds.tree_dump().unwrap()));
     sync();
 }
+
+#[rstest]
+fn migration_policy_single_object() {
+    let shared_db = Database::build_threaded(configs::migration_config()).unwrap();
+    let os;
+    {
+        let mut db = shared_db.write();
+        os = db.open_object_store().unwrap();
+        db.sync().unwrap();
+    }
+    let obj = os.open_or_create_object_with_pref(b"foo", StoragePreference::FASTEST).unwrap().0;
+    let buf = vec![42; 1500 * TO_MEBIBYTE];
+    obj.write_at_with_pref(&buf, 0, StoragePreference::FASTEST).unwrap();
+    shared_db.write().sync().unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    shared_db.write().close_object_store(os);
+    let free = shared_db.read().free_space_tier();
+    assert!(free[0].free > free[1].free);
+}
