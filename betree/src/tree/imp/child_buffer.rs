@@ -125,6 +125,13 @@ impl<N> ChildBuffer<N> {
     pub fn get(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         self.buffer.get(key)
     }
+
+    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> Option<()> {
+        self.buffer.get_mut(key).map(|(keyinfo, _bytes)| {
+            keyinfo.storage_preference = pref;
+            ()
+        })
+    }
 }
 
 impl<N> ChildBuffer<N> {

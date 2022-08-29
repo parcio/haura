@@ -165,6 +165,14 @@ impl<N> InternalNode<ChildBuffer<N>> {
         (&child.node_pointer, msg)
     }
 
+    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N {
+        let idx = self.idx(key);
+        let child = &mut self.children[idx];
+
+        child.apply_with_info(key, pref);
+        child.node_pointer.get_mut()
+    }
+
     pub fn get_range(
         &self,
         key: &[u8],

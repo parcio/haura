@@ -291,6 +291,11 @@ pub(super) enum GetResult<'a, N: 'a> {
     NextNode(&'a RwLock<N>),
 }
 
+pub(super) enum ApplyResult<'a, N: 'a> {
+    Leaf(Option<KeyInfo>),
+    NextNode(&'a mut N),
+}
+
 pub(super) enum GetRangeResult<'a, T, N: 'a> {
     Data(T),
     NextNode {
@@ -383,6 +388,29 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                     internal.insert_msg_buffer(msg_buffer, msg_action) as isize
                 }
             })
+    }
+
+    pub(super) fn apply_with_info(
+        &mut self,
+        key: &[u8],
+        pref: StoragePreference,
+    ) ->ApplyResult<N> {
+        // FIXME: This is bad for performance, what we want to do here is modify
+        // the preference in place determine the new preference and write the
+        // PACKED leaf as is again. This violates the restriction that they may
+        // never be written again, therefore we need a new interface preparing
+        // packed leafs for this exact and only purpose.
+        self.ensure_unpacked();
+        match self.0 {
+            // FIXME: see above
+            PackedLeaf(_) => unreachable!(),
+            Leaf(ref mut leaf) => {
+                ApplyResult::Leaf(leaf.apply(key, pref))
+            },
+            Internal(ref mut internal) => {
+                ApplyResult::NextNode(internal.apply_with_info(key, pref))
+            },
+        }
     }
 }
 

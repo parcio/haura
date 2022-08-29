@@ -180,6 +180,21 @@ impl LeafNode {
         (pivot_key, size_delta)
     }
 
+    pub fn apply<K>(
+        &mut self,
+        key: K,
+        pref: StoragePreference,
+    ) -> Option<KeyInfo>
+    where
+        K: Borrow<[u8]>,
+    {
+        self.storage_preference.invalidate();
+        self.entries.get_mut(key.borrow()).map(|entry| {
+            entry.0.storage_preference = pref;
+            entry.0.clone()
+        })
+    }
+
     /// Inserts a new message as leaf entry.
     pub fn insert<Q, M>(
         &mut self,
