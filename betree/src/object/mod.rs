@@ -371,6 +371,16 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
             storage_preference,
         )?;
 
+        if let Some(tx) = self.report.as_ref() {
+            let _ = tx
+                .send(DatabaseMsg::ObjectOpen(
+                    ObjectKey::build(self.id, info.object_id),
+                    info.clone(),
+                    CowBytes::from(key),
+                ))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
+
         Ok((
             ObjectHandle {
                 store: self,
@@ -1011,6 +1021,21 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
             &object_chunk_key(self.object.id, chunk_range.start.chunk_id)[..]
                 ..&object_chunk_key(self.object.id, chunk_range.end.chunk_id),
             pref,
-        )
+        )?;
+        if let Some(tx) = &self.store.report {
+            let _ = tx
+                .send(DatabaseMsg::ObjectMigrate(
+                    ObjectKey::build(
+                        self.store.id,
+                        self.object.id,
+                    ),
+                    pref
+                ))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
+        let mut meta_change = MetaMessage::default();
+        meta_change.pref = Some(pref);
+        self.store
+            .update_object_info(&self.object.key, &meta_change)
     }
 }
