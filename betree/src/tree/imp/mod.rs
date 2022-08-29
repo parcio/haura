@@ -1,4 +1,4 @@
-use self::{flush::Ref, node::GetResult};
+use self::{flush::Ref, node::{GetResult, ApplyResult}};
 use super::{
     errors::*,
     layer::{ErasedTreeSync, TreeBaseLayer, TreeLayer},
@@ -374,6 +374,27 @@ where
                 Ok(Some((info, data)))
             }
         }
+    }
+
+    /// "Piercing" update, with insertion logic of a B-Tree.
+    /// To keep data sanity only modification of the key information is allowed
+    /// and all key infos on the paths will be updated to reflect this change.
+    pub(crate) fn apply_with_info<K: Borrow<[u8]>>(
+        &self,
+        key: K,
+        pref: StoragePreference,
+    ) -> Result<Option<KeyInfo>, Error> {
+        let key = key.borrow();
+        let mut node = self.get_mut_root_node()?;
+        // Iterate to leaf
+        let res = Ok(loop {
+            let next_node = match node.apply_with_info(key, pref) {
+                ApplyResult::NextNode(np) => self.get_mut_node_mut(np)?,
+                ApplyResult::Leaf(info) => break info,
+            };
+            node = next_node;
+        });
+        res
     }
 }
 
