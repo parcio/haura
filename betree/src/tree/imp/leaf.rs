@@ -52,7 +52,7 @@ impl HasStoragePreference for LeafNode {
         }
 
         self.storage_preference.set(pref);
-        pref
+        self.system_storage_preference.weak_bound(&pref)
     }
 
     fn system_storage_preference(&self) -> StoragePreference {
