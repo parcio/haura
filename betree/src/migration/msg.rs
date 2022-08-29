@@ -6,6 +6,7 @@ use crate::{
     StoragePreference,
 };
 use std::time::SystemTime;
+use crate::cow_bytes::CowBytes;
 
 #[derive(Clone)]
 pub enum DmlMsg {
@@ -53,7 +54,7 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     ObjectstoreDiscover(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.
-    ObjectOpen(ObjectKey, ObjectInfo),
+    ObjectOpen(ObjectKey, ObjectInfo, CowBytes),
     /// Informs of closed object, adjoint with extra information for access.
     ObjectClose(ObjectKey, ObjectInfo),
     /// Frequency information about read and write operations on an object.
@@ -62,6 +63,8 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     ObjectWrite(ObjectKey, u64, StoragePreference),
     /// Notification if a manual migration took place.
     ObjectMigrate(ObjectKey, StoragePreference),
+    /// Notification similar to [ObjectOpen] but with different semantics.
+    ObjectDiscover(ObjectKey, ObjectInfo, CowBytes),
 }
 
 pub trait ConstructReport {

@@ -89,7 +89,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
     fn update(&mut self) -> Result<()>;
 
     fn promote(&mut self, storage_tier: u8) -> Result<Block<u32>>;
-    fn demote(&mut self, storage_tier: u8, desired: Block<u32>) -> Result<Block<u32>>;
+    fn demote(&mut self, storage_tier: u8, desired: Block<u64>) -> Result<Block<u64>>;
 
     // Getters
     fn db(&self) -> &Arc<RwLock<Database<C>>>;
@@ -128,10 +128,9 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                         && low_info.total != Block(0)
                 })
             {
-                // TODO: Calculate moving size, until threshold barely not fulfilled?
                 self.promote(*low_tier)?;
             }
-            for ((high_tier, _high_info), (_low_tier, _low_info)) in infos
+            for ((high_tier, high_info), (_low_tier, _low_info)) in infos
                 .iter()
                 .tuple_windows()
                 .filter(|((_, high_info), (_, low_info))| {
@@ -142,10 +141,9 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                 })
             {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
-                self.demote(*high_tier, BATCH)?;
+                let desired: Block<u64> = Block((high_info.total.as_u64() as f32 * (1.0 - threshold)) as u64) - high_info.free.as_u64();
+                self.demote(*high_tier, desired)?;
             }
         }
     }
 }
-
-const BATCH: Block<u32> = Block(32768);

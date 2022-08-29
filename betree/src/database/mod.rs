@@ -10,7 +10,7 @@ use crate::{
         DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicies, MigrationPolicy},
+    migration::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicies, MigrationPolicy, ObjectKey},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -20,6 +20,7 @@ use crate::{
         DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
         TreeLayer,
     },
+    object::ObjectStoreId,
     vdev::Block,
     StoragePreference,
 };
@@ -59,7 +60,6 @@ pub use self::{
     snapshot::Snapshot,
     superblock::Superblock,
 };
-
 const ROOT_DATASET_ID: DatasetId = DatasetId(0);
 const ROOT_TREE_STORAGE_PREFERENCE: StoragePreference = StoragePreference::FASTEST;
 const DEFAULT_CACHE_SIZE: usize = 256 * 1024 * 1024;
@@ -492,8 +492,17 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
                 )?));
 
                 // Discovery Initializiation
-                for os_id in db.read().iter_object_stores()? {
-                    db_tx.send(DatabaseMsg::ObjectstoreDiscover(os_id?)).expect("UNREACHABLE");
+                let os_ids: Vec<Result<ObjectStoreId>> = db.read().iter_object_stores()?.collect();
+                for os_id in os_ids.into_iter() {
+                    // NOTE: If any of the result resolutions here fail the
+                    // state of the datastore is anyway corrupt and we can
+                    // escalate.
+                    let id = os_id?;
+                    let os = db.write().open_object_store_with_id(id.clone())?;
+                    for (key, info) in os.iter_objects()? {
+                        db_tx.send(DatabaseMsg::ObjectDiscover(ObjectKey::build(id.clone(), info.object_id), info, key)).expect("UNREACHABLE");
+                    }
+                    db.write().close_object_store(os);
                 }
 
                 let other = db.clone();
