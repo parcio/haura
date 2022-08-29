@@ -416,6 +416,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
                 .send(DatabaseMsg::ObjectOpen(
                     ObjectKey::build(self.id, info.object_id),
                     info,
+                    CowBytes::from(key),
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
