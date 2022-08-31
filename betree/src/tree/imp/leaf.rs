@@ -180,11 +180,7 @@ impl LeafNode {
         (pivot_key, size_delta)
     }
 
-    pub fn apply<K>(
-        &mut self,
-        key: K,
-        pref: StoragePreference,
-    ) -> Option<KeyInfo>
+    pub fn apply<K>(&mut self, key: K, pref: StoragePreference) -> Option<KeyInfo>
     where
         K: Borrow<[u8]>,
     {

@@ -394,7 +394,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         &mut self,
         key: &[u8],
         pref: StoragePreference,
-    ) ->ApplyResult<N> {
+    ) -> ApplyResult<N> {
         // FIXME: This is bad for performance, what we want to do here is modify
         // the preference in place determine the new preference and write the
         // PACKED leaf as is again. This violates the restriction that they may
@@ -404,12 +404,10 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         match self.0 {
             // FIXME: see above
             PackedLeaf(_) => unreachable!(),
-            Leaf(ref mut leaf) => {
-                ApplyResult::Leaf(leaf.apply(key, pref))
-            },
+            Leaf(ref mut leaf) => ApplyResult::Leaf(leaf.apply(key, pref)),
             Internal(ref mut internal) => {
                 ApplyResult::NextNode(internal.apply_with_info(key, pref))
-            },
+            }
         }
     }
 }

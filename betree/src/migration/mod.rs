@@ -142,7 +142,9 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                 })
             {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
-                let desired: Block<u64> = Block((high_info.total.as_u64() as f32 * (1.0 - threshold)) as u64) - high_info.free.as_u64();
+                let desired: Block<u64> =
+                    Block((high_info.total.as_u64() as f32 * (1.0 - threshold)) as u64)
+                        - high_info.free.as_u64();
                 self.demote(*high_tier, desired)?;
             }
         }

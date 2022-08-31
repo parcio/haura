@@ -1,4 +1,5 @@
 use crate::{
+    cow_bytes::CowBytes,
     database::{DatabaseBuilder, Dataset, DatasetId},
     object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
@@ -6,7 +7,6 @@ use crate::{
     StoragePreference,
 };
 use std::time::SystemTime;
-use crate::cow_bytes::CowBytes;
 
 #[derive(Clone)]
 pub enum DmlMsg {

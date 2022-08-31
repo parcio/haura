@@ -1,4 +1,7 @@
-use self::{flush::Ref, node::{GetResult, ApplyResult}};
+use self::{
+    flush::Ref,
+    node::{ApplyResult, GetResult},
+};
 use super::{
     errors::*,
     layer::{ErasedTreeSync, TreeBaseLayer, TreeLayer},

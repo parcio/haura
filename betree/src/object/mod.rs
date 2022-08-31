@@ -46,11 +46,12 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, Error, ErrorKind, ObjectRef, Result, DatasetId},
+    database::{DatabaseBuilder, DatasetId, Error, ErrorKind, ObjectRef, Result},
     migration::{DatabaseMsg, ObjectKey},
+    size::StaticSize,
+    tree::{DefaultMessageAction, TreeBaseLayer, TreeLayer},
     vdev::Block,
-    tree::{TreeBaseLayer, DefaultMessageAction, TreeLayer},
-    Database, Dataset, StoragePreference, size::StaticSize,
+    Database, Dataset, StoragePreference,
 };
 
 use byteorder::LittleEndian;
@@ -176,17 +177,22 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         match self
             .root_tree
             .get(key.clone())?
-            .map(|b| ObjectStoreId::unpack(&b)) {
-                Some(id) => Ok(id),
-                None => {
-                    let new_id = self.allocate_os_id()?;
-                    self.root_tree.insert(key, DefaultMessageAction::insert_msg(&new_id.pack()), StoragePreference::NONE)?;
-                    Ok(new_id)
-                }
+            .map(|b| ObjectStoreId::unpack(&b))
+        {
+            Some(id) => Ok(id),
+            None => {
+                let new_id = self.allocate_os_id()?;
+                self.root_tree.insert(
+                    key,
+                    DefaultMessageAction::insert_msg(&new_id.pack()),
+                    StoragePreference::NONE,
+                )?;
+                Ok(new_id)
             }
+        }
     }
 
-    fn store_os_data(&mut self, os_id: ObjectStoreId, os_data: ObjectStoreData) -> Result<()>{
+    fn store_os_data(&mut self, os_id: ObjectStoreId, os_data: ObjectStoreData) -> Result<()> {
         let mut key = Vec::new();
         key.push(OBJECT_STORE_DATA_PREFIX);
         key.extend_from_slice(&os_id.pack());
@@ -202,13 +208,20 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     fn fetch_os_data(&mut self, os_id: &ObjectStoreId) -> Result<Option<ObjectStoreData>> {
         let mut key = vec![OBJECT_STORE_DATA_PREFIX];
         key.extend_from_slice(&os_id.pack());
-        Ok(self.root_tree.get(key)?.map(|buf| ObjectStoreData::unpack(&buf)))
+        Ok(self
+            .root_tree
+            .get(key)?
+            .map(|buf| ObjectStoreData::unpack(&buf)))
     }
 
-    pub fn open_object_store_with_id(&mut self, os_id: ObjectStoreId) -> Result<ObjectStore<Config>> {
-        let store = self.fetch_os_data(&os_id)?
-                        .map(|x| Ok::<ObjectStoreData, crate::database::errors::Error>(x))
-                        .unwrap_or_else(|| bail!(crate::database::errors::ErrorKind::DoesNotExist))?;
+    pub fn open_object_store_with_id(
+        &mut self,
+        os_id: ObjectStoreId,
+    ) -> Result<ObjectStore<Config>> {
+        let store = self
+            .fetch_os_data(&os_id)?
+            .map(|x| Ok::<ObjectStoreData, crate::database::errors::Error>(x))
+            .unwrap_or_else(|| bail!(crate::database::errors::ErrorKind::DoesNotExist))?;
 
         ObjectStore::with_datasets(
             os_id,
@@ -234,14 +247,14 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         let id = self.get_or_create_os_id(&[0])?;
         let data = self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?;
         let meta = self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?;
-        self.store_os_data(id.clone(), ObjectStoreData { data: data.id(), meta: meta.id() })?;
-        ObjectStore::with_datasets(
-            id,
-            data,
-            meta,
-            StoragePreference::NONE,
-            self.db_tx.clone(),
-        )
+        self.store_os_data(
+            id.clone(),
+            ObjectStoreData {
+                data: data.id(),
+                meta: meta.id(),
+            },
+        )?;
+        ObjectStore::with_datasets(id, data, meta, StoragePreference::NONE, self.db_tx.clone())
     }
 
     /// Create a namespaced object store, with the datasets "{name}\0data" and "{name}\0meta".
@@ -262,15 +275,15 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         meta_name.extend_from_slice(b"meta");
         let data = self.open_or_create_custom_dataset(&data_name, storage_preference)?;
         let meta = self.open_or_create_custom_dataset(&meta_name, storage_preference)?;
-        self.store_os_data(id.clone(), ObjectStoreData { data: data.id(), meta: meta.id() })?;
+        self.store_os_data(
+            id.clone(),
+            ObjectStoreData {
+                data: data.id(),
+                meta: meta.id(),
+            },
+        )?;
 
-        ObjectStore::with_datasets(
-            id,
-            data,
-            meta,
-            storage_preference,
-            self.db_tx.clone(),
-        )
+        ObjectStore::with_datasets(id, data, meta, storage_preference, self.db_tx.clone())
     }
 
     pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
@@ -320,10 +333,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         };
         if let Some(tx) = report {
             let _ = tx
-                .send(DatabaseMsg::ObjectstoreOpen(
-                    store.id,
-                    store.clone(),
-                ))
+                .send(DatabaseMsg::ObjectstoreOpen(store.id, store.clone()))
                 .map_err(|_| warn!("Channel receiver was dropped."));
         }
         Ok(store)
@@ -332,10 +342,16 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     /// Return an iterator overall object names and metadata in this object store.
     pub fn iter_objects(&self) -> Result<impl Iterator<Item = (CowBytes, ObjectInfo)>> {
         // Iterate over the metadata and create tuples of object keys and ids.
-        Ok(self.metadata.range(&[0u8] as &[_]..=&[u8::MAX] as &[_])?.map(|res| {
-            let (k,v) = res.unwrap();
-            (k, ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &v).unwrap())
-        }))
+        Ok(self
+            .metadata
+            .range(&[0u8] as &[_]..=&[u8::MAX] as &[_])?
+            .map(|res| {
+                let (k, v) = res.unwrap();
+                (
+                    k,
+                    ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &v).unwrap(),
+                )
+            }))
     }
 
     /// Create a new object handle.
@@ -656,10 +672,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let (Ok(Some(info)), Some(tx)) = (self.info(), self.store.report.as_ref()) {
             let _ = tx
                 .send(DatabaseMsg::ObjectClose(
-                    ObjectKey::build(
-                        self.store.id,
-                        self.object.id,
-                    ),
+                    ObjectKey::build(self.store.id, self.object.id),
                     info,
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -870,12 +883,9 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let (Some(tx), Some(size)) = (&self.store.report, meta_change.size) {
             let _ = tx
                 .send(DatabaseMsg::ObjectWrite(
-                    ObjectKey::build(
-                        self.store.id,
-                        self.object.id,
-                    ),
+                    ObjectKey::build(self.store.id, self.object.id),
                     size,
-                    storage_pref
+                    storage_pref,
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
@@ -1026,11 +1036,8 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let Some(tx) = &self.store.report {
             let _ = tx
                 .send(DatabaseMsg::ObjectMigrate(
-                    ObjectKey::build(
-                        self.store.id,
-                        self.object.id,
-                    ),
-                    pref
+                    ObjectKey::build(self.store.id, self.object.id),
+                    pref,
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
