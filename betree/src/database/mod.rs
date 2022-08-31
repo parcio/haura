@@ -10,7 +10,10 @@ use crate::{
         DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicies, MigrationPolicy, ObjectKey},
+    migration::{
+        DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicies, MigrationPolicy, ObjectKey,
+    },
+    object::ObjectStoreId,
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -20,7 +23,6 @@ use crate::{
         DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
         TreeLayer,
     },
-    object::ObjectStoreId,
     vdev::Block,
     StoragePreference,
 };
@@ -500,7 +502,13 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
                     let id = os_id?;
                     let os = db.write().open_object_store_with_id(id.clone())?;
                     for (key, info) in os.iter_objects()? {
-                        db_tx.send(DatabaseMsg::ObjectDiscover(ObjectKey::build(id.clone(), info.object_id), info, key)).expect("UNREACHABLE");
+                        db_tx
+                            .send(DatabaseMsg::ObjectDiscover(
+                                ObjectKey::build(id.clone(), info.object_id),
+                                info,
+                                key,
+                            ))
+                            .expect("UNREACHABLE");
                     }
                     db.write().close_object_store(os);
                 }

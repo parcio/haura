@@ -2,13 +2,17 @@ use crossbeam_channel::Receiver;
 use lfu_cache::LfuCache;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
-use std::{collections::{HashMap, hash_map::Entry}, fmt::Display, sync::Arc};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    fmt::Display,
+    sync::Arc,
+};
 
 use crate::{
-    database::{DatabaseBuilder, DatasetId, ObjectRef},
-    data_management::{DmlWithStorageHints},
-    object::{ObjectId, ObjectStore, ObjectStoreId},
     cow_bytes::CowBytes,
+    data_management::DmlWithStorageHints,
+    database::{DatabaseBuilder, DatasetId, ObjectRef},
+    object::{ObjectId, ObjectStore, ObjectStoreId},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
     Database, StoragePreference,
@@ -33,8 +37,10 @@ pub struct Lfu<C: DatabaseBuilder + Clone> {
     /// Object Buckets dividing them into multiple file size ranges,
     /// taken from https://doi.org/10.1145/3489143
     objects: HashMap<ObjectKey, ObjectLocation>,
-    object_buckets:
-        ([[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES], StoragePreference),
+    object_buckets: (
+        [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+        StoragePreference,
+    ),
     /// HashMap accessible by the DML, resolution is not guaranteed but always
     /// used when a object is written.
     storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
@@ -72,7 +78,6 @@ impl ObjectLocation {
     }
 }
 
-
 /// Lfu specific configuration details.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct LfuConfig {
@@ -107,16 +112,38 @@ impl Display for LeafInfo {
     }
 }
 
-impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
-    fn get_object(store: &'lfu mut ([[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES], StoragePreference), loc: &ObjectLocation, key: &ObjectKey) -> Option<&'lfu CowBytes> {
+impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
+    fn get_object(
+        store: &'lfu mut (
+            [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+            StoragePreference,
+        ),
+        loc: &ObjectLocation,
+        key: &ObjectKey,
+    ) -> Option<&'lfu CowBytes> {
         store.0[loc.pref_id(store.1)][loc.bucket_id()].get(key)
     }
 
-    fn insert_object(store: &'lfu mut ([[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES], StoragePreference), loc: ObjectLocation, key: ObjectKey, name: CowBytes) -> Option<CowBytes> {
+    fn insert_object(
+        store: &'lfu mut (
+            [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+            StoragePreference,
+        ),
+        loc: ObjectLocation,
+        key: ObjectKey,
+        name: CowBytes,
+    ) -> Option<CowBytes> {
         store.0[loc.pref_id(store.1)][loc.bucket_id()].insert(key, name)
     }
 
-    fn remove_object(store: &'lfu mut ([[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES], StoragePreference), loc: &ObjectLocation, key: &ObjectKey) -> Option<(CowBytes, usize)> {
+    fn remove_object(
+        store: &'lfu mut (
+            [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+            StoragePreference,
+        ),
+        loc: &ObjectLocation,
+        key: &ObjectKey,
+    ) -> Option<(CowBytes, usize)> {
         store.0[loc.pref_id(store.1)][loc.bucket_id()].remove(&key)
     }
 
@@ -199,8 +226,8 @@ impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
                 // FIXME: Noop for now, this should optimally be maybe matching
                 // which datasets are active to prevent migrations from them or
                 // some other kind of preference treatment
-                DatabaseMsg::DatasetOpen(_) => {},
-                DatabaseMsg::DatasetClose(_) => {},
+                DatabaseMsg::DatasetOpen(_) => {}
+                DatabaseMsg::DatasetClose(_) => {}
                 DatabaseMsg::ObjectstoreOpen(key, store) => {
                     dbg!("ObjectStore opened");
                     self.object_stores.insert(key, Some(store));
@@ -209,7 +236,8 @@ impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
                     dbg!("ObjectStore closed");
                     self.object_stores.insert(key, None);
                 }
-                DatabaseMsg::ObjectOpen(key, info, name) | DatabaseMsg::ObjectDiscover(key, info, name) => {
+                DatabaseMsg::ObjectOpen(key, info, name)
+                | DatabaseMsg::ObjectDiscover(key, info, name) => {
                     dbg!("Object opened or discovered.");
                     let new_location = ObjectLocation(info.pref, info.size);
                     let old = self.objects.insert(key.clone(), new_location.clone());
@@ -220,13 +248,25 @@ impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
                         }
                         Some(old_value) => {
                             // For some reason move
-                            if let Some((name, _)) = Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key) {
-                                Lfu::<C>::insert_object(&mut self.object_buckets, new_location, key, name);
+                            if let Some((name, _)) =
+                                Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key)
+                            {
+                                Lfu::<C>::insert_object(
+                                    &mut self.object_buckets,
+                                    new_location,
+                                    key,
+                                    name,
+                                );
                             }
                         }
                         None => {
                             // Insert new
-                            Lfu::<C>::insert_object(&mut self.object_buckets, new_location, key, name);
+                            Lfu::<C>::insert_object(
+                                &mut self.object_buckets,
+                                new_location,
+                                key,
+                                name,
+                            );
                         }
                     }
                 }
@@ -234,7 +274,10 @@ impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
                     dbg!("Object closed.");
                     // Insert and get old value
                     let new_location = ObjectLocation(info.pref, info.size);
-                    let old = self.objects.insert(key.clone(), new_location.clone()).clone();
+                    let old = self
+                        .objects
+                        .insert(key.clone(), new_location.clone())
+                        .clone();
                     match old {
                         Some(old_value) if old_value == new_location => {
                             // Update
@@ -242,11 +285,18 @@ impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
                         }
                         Some(old_value) => {
                             // For some reason move
-                            if let Some((name, _)) = Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key) {
-                                Lfu::<C>::insert_object(&mut self.object_buckets, new_location, key, name);
+                            if let Some((name, _)) =
+                                Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key)
+                            {
+                                Lfu::<C>::insert_object(
+                                    &mut self.object_buckets,
+                                    new_location,
+                                    key,
+                                    name,
+                                );
                             }
                         }
-                        None => unreachable!()
+                        None => unreachable!(),
                     }
                 }
                 DatabaseMsg::ObjectRead(key) => {
@@ -254,36 +304,53 @@ impl<'lfu,C: DatabaseBuilder + Clone> Lfu<C> {
                     if let Some(location) = self.objects.get(&key) {
                         Lfu::<C>::get_object(&mut self.object_buckets, &location, &key);
                     }
-                },
+                }
                 DatabaseMsg::ObjectWrite(key, size, pref) => {
                     dbg!("Object written to.");
                     let new_location = ObjectLocation(pref, size);
-                    let old = self.objects.insert(key.clone(), new_location.clone()).clone();
+                    let old = self
+                        .objects
+                        .insert(key.clone(), new_location.clone())
+                        .clone();
                     match old {
                         Some(old_value) if old_value == new_location => {
                             // Update
                             Lfu::<C>::get_object(&mut self.object_buckets, &old_value, &key);
                         }
                         Some(old_value) => {
-                            if let Some((name, _)) = Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key) {
-                                Lfu::<C>::insert_object(&mut self.object_buckets, new_location, key, name);
+                            if let Some((name, _)) =
+                                Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key)
+                            {
+                                Lfu::<C>::insert_object(
+                                    &mut self.object_buckets,
+                                    new_location,
+                                    key,
+                                    name,
+                                );
                             }
                         }
                         None => unreachable!(),
                     }
-                },
+                }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     dbg!("Object migrated.");
                     if let Some(location) = self.objects.get(&key) {
                         if location.0 != pref {
                             // Move in representation
                             let new_location = ObjectLocation(pref, location.1);
-                            if let Some((name, _)) = Lfu::<C>::remove_object(&mut self.object_buckets, &location, &key) {
-                                Lfu::<C>::insert_object(&mut self.object_buckets, new_location, key, name);
+                            if let Some((name, _)) =
+                                Lfu::<C>::remove_object(&mut self.object_buckets, &location, &key)
+                            {
+                                Lfu::<C>::insert_object(
+                                    &mut self.object_buckets,
+                                    new_location,
+                                    key,
+                                    name,
+                                );
                             }
                         }
                     }
-                },
+                }
             }
         }
 
@@ -313,8 +380,11 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
             storage_hint_dml,
             objects: Default::default(),
             object_stores: Default::default(),
-            object_buckets: ([(); NUM_STORAGE_CLASSES]
-                .map(|_| [(); NUM_SIZE_BUCKETS].map(|_| LfuCache::unbounded())), default_storage_class),
+            object_buckets: (
+                [(); NUM_STORAGE_CLASSES]
+                    .map(|_| [(); NUM_SIZE_BUCKETS].map(|_| LfuCache::unbounded())),
+                default_storage_class,
+            ),
         }
     }
 
@@ -358,8 +428,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
             // also to reduce it's complexity. If you are reading this "we"
             // might be even you :D
             let mut foo = vec![];
-            while let Some((objectkey, name)) = self.object_buckets.0[storage_tier as usize][bucket].pop_lfu_key_value() {
-                if let (Some(store_result), Some(lowered)) = (self.object_stores.get(objectkey.store_key()), StoragePreference::from_u8(storage_tier).lower()) {
+            while let Some((objectkey, name)) =
+                self.object_buckets.0[storage_tier as usize][bucket].pop_lfu_key_value()
+            {
+                if let (Some(store_result), Some(lowered)) = (
+                    self.object_stores.get(objectkey.store_key()),
+                    StoragePreference::from_u8(storage_tier).lower(),
+                ) {
                     dbg!(&lowered);
                     dbg!(&storage_tier);
                     // NOTE: Object store can either be unused or active.
@@ -391,7 +466,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
 
                     if moved >= desired {
                         dbg!("moved enough");
-                        break
+                        break;
                     }
                 } else {
                     foo.push((objectkey, name))
@@ -402,7 +477,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                 self.object_buckets.0[storage_tier as usize][bucket].insert(key, name);
             }
             if moved >= desired {
-                break
+                break;
             }
         }
 
