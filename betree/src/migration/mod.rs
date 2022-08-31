@@ -1,6 +1,7 @@
 mod errors;
 mod lfu;
 mod msg;
+mod reinforcment_learning;
 
 use crossbeam_channel::Receiver;
 use errors::*;
