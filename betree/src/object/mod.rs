@@ -68,7 +68,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::SystemTime,
+    time::{Instant, SystemTime},
 };
 
 mod chunk;
@@ -727,14 +727,6 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
     /// Read object data into `buf`, starting at offset `offset`, and returning the amount of
     /// actually read bytes.
     pub fn read_at(&self, mut buf: &mut [u8], offset: u64) -> result::Result<u64, (u64, Error)> {
-        if let Some(tx) = &self.store.report {
-            let _ = tx
-                .send(DatabaseMsg::ObjectRead(ObjectKey::build(
-                    self.store.id,
-                    self.object.id,
-                )))
-                .map_err(|_| warn!("Channel Receiver has been dropped."));
-        }
         let oid = self.object.id;
         let mut total_read = 0;
 
@@ -749,6 +741,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         let to_be_read = (buf.len() as u64).min(remaining_data);
         let chunk_range = ChunkRange::from_byte_bounds(offset, to_be_read);
 
+        let start = Instant::now();
         for chunk in chunk_range.split_at_chunk_bounds() {
             let want_len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(oid, chunk.start.chunk_id);
@@ -781,6 +774,14 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
             total_read += want_len as u64;
             buf = &mut buf[want_len..];
         }
+        if let Some(tx) = &self.store.report {
+            let _ = tx
+                .send(DatabaseMsg::ObjectRead(
+                    ObjectKey::build(self.store.id, self.object.id),
+                    start.elapsed(),
+                ))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
 
         Ok(total_read)
     }
@@ -794,14 +795,8 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         &self,
         chunk_range: Range<u32>,
     ) -> Result<impl Iterator<Item = Result<(Range<u64>, SlicedCowBytes)>>> {
-        if let Some(tx) = &self.store.report {
-            let _ = tx
-                .send(DatabaseMsg::ObjectRead(ObjectKey::build(
-                    self.store.id,
-                    self.object.id,
-                )))
-                .map_err(|_| warn!("Channel Receiver has been dropped."));
-        }
+        // FIXME: This is incorrect, correctly we shoud measure how long each individual fetch takes
+        let start = Instant::now();
         let iter = self.store.data.range(
             &object_chunk_key(self.object.id, chunk_range.start)[..]
                 ..&object_chunk_key(self.object.id, chunk_range.end),
@@ -821,6 +816,14 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
             }
             Err(e) => Err(e),
         });
+        if let Some(tx) = &self.store.report {
+            let _ = tx
+                .send(DatabaseMsg::ObjectRead(
+                    ObjectKey::build(self.store.id, self.object.id),
+                    start.elapsed(),
+                ))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
+        }
 
         Ok(with_chunks)
     }
@@ -854,6 +857,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         let mut total_written = 0;
         log::trace!("Entered object::write_at_with_pref");
 
+        let start = Instant::now();
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(self.object.id, chunk.start.chunk_id);
@@ -886,6 +890,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
                     ObjectKey::build(self.store.id, self.object.id),
                     size,
                     storage_pref,
+                    start.elapsed(),
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }

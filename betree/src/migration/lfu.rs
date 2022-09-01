@@ -232,13 +232,16 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     dbg!("ObjectStore opened");
                     self.object_stores.insert(key, Some(store));
                 }
-                DatabaseMsg::ObjectstoreClose(key) | DatabaseMsg::ObjectstoreDiscover(key) => {
+                DatabaseMsg::ObjectstoreClose(key) => {
                     dbg!("ObjectStore closed");
                     self.object_stores.insert(key, None);
                 }
                 DatabaseMsg::ObjectOpen(key, info, name)
                 | DatabaseMsg::ObjectDiscover(key, info, name) => {
                     dbg!("Object opened or discovered.");
+                    if let Entry::Vacant(e) = self.object_stores.entry(key.store_key().clone()) {
+                        e.insert(None);
+                    }
                     let new_location = ObjectLocation(info.pref, info.size);
                     let old = self.objects.insert(key.clone(), new_location.clone());
                     match old {
@@ -299,13 +302,13 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                         None => unreachable!(),
                     }
                 }
-                DatabaseMsg::ObjectRead(key) => {
+                DatabaseMsg::ObjectRead(key, _) => {
                     dbg!("Object read.");
                     if let Some(location) = self.objects.get(&key) {
                         Lfu::<C>::get_object(&mut self.object_buckets, &location, &key);
                     }
                 }
-                DatabaseMsg::ObjectWrite(key, size, pref) => {
+                DatabaseMsg::ObjectWrite(key, size, pref, _) => {
                     dbg!("Object written to.");
                     let new_location = ObjectLocation(pref, size);
                     let old = self
