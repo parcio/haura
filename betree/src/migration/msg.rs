@@ -6,7 +6,7 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 #[derive(Clone)]
 pub enum DmlMsg {
@@ -51,16 +51,15 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     /// Announce and deliver an accessible copy of active object stores.
     ObjectstoreOpen(ObjectStoreId, ObjectStore<Config>),
     ObjectstoreClose(ObjectStoreId),
-    ObjectstoreDiscover(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.
     ObjectOpen(ObjectKey, ObjectInfo, CowBytes),
     /// Informs of closed object, adjoint with extra information for access.
     ObjectClose(ObjectKey, ObjectInfo),
     /// Frequency information about read and write operations on an object.
-    ObjectRead(ObjectKey),
+    ObjectRead(ObjectKey, Duration),
     /// Report the written storage class with the new size of the object.
-    ObjectWrite(ObjectKey, u64, StoragePreference),
+    ObjectWrite(ObjectKey, u64, StoragePreference, Duration),
     /// Notification if a manual migration took place.
     ObjectMigrate(ObjectKey, StoragePreference),
     /// Notification similar to [ObjectOpen] but with different semantics.
