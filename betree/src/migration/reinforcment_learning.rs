@@ -667,8 +667,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         for (_obj, entry) in self.objects.iter_mut() {
             entry.0 = Default::default();
         }
-
-        todo!()
+        Ok(())
     }
 }
 
@@ -808,7 +807,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                 }
             }
         }
-        todo!()
+        Ok(())
     }
 
     fn promote(&mut self, storage_tier: u8) -> super::errors::Result<crate::vdev::Block<u32>> {
