@@ -37,7 +37,7 @@ mod learning {
 
     use crate::{migration::ObjectKey, StoragePreference};
 
-    const EULER: f32 = 2.71828;
+    pub(super) const EULER: f32 = 2.71828;
 
     // How often a file is accessed in certain time range.
     #[derive(Clone, Copy)]
@@ -51,8 +51,13 @@ mod learning {
         fn clamp_valid(&mut self) {
             self.0 = self.0.clamp(0.1, 1.0)
         }
+
+        pub(super) fn as_f32(&self) -> f32 {
+            self.0
+        }
     }
 
+    #[derive(Clone, Debug)]
     pub struct Size(u64);
 
     impl Size {
@@ -82,6 +87,26 @@ mod learning {
 
         pub fn wipe_requests(&mut self) {
             self.reqs = Default::default();
+        }
+
+        pub fn contains(&self, key: &ObjectKey) -> bool {
+            self.files.contains_key(key)
+        }
+
+        pub fn file_info(&self, key: &ObjectKey) -> Option<&(Hotness, Size, u64)> {
+            self.files.get(key)
+        }
+
+        pub fn update_or_not(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
+            if self.files.contains_key(&key) {
+                self.remove(&key);
+            } else {
+                self.insert_with_values(key, entry)
+            }
+        }
+
+        fn insert_with_values(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
+            self.files.insert(key, entry);
         }
 
         pub fn insert(&mut self, key: ObjectKey, size: u64) {
@@ -181,6 +206,7 @@ mod learning {
     }
     use rand::Rng;
 
+    #[derive(Clone, Copy, Debug)]
     pub struct Reward(f32);
 
     /// The state of a single tier.
@@ -228,7 +254,7 @@ mod learning {
         }
     }
 
-    struct TDAgent {
+    pub(super) struct TDAgent {
         p: [f32; 8],
         z: [f32; 8],
         a_i: [f32; 3],
@@ -236,6 +262,8 @@ mod learning {
         alpha: [f32; 8],
         beta: f32,
         lambda: f32,
+        // FIXME: Patch phi list; to work as we don't want to pass it around all the time
+        phi_list: Vec<[f32; 8]>,
     }
 
     enum Action {
@@ -243,6 +271,7 @@ mod learning {
         Demote(),
     }
 
+    #[derive(Clone, Debug)]
     pub struct Request {
         response_time: Duration,
     }
@@ -254,7 +283,13 @@ mod learning {
     }
 
     impl TDAgent {
-        fn build(p_init: [f32; 8], beta: f32, lambda: f32, a_i: [f32; 3], b_i: [f32; 3]) -> Self {
+        pub(super) fn new(
+            p_init: [f32; 8],
+            beta: f32,
+            lambda: f32,
+            a_i: [f32; 3],
+            b_i: [f32; 3],
+        ) -> Self {
             Self {
                 alpha: [0.0; 8],
                 z: [0.0; 8],
@@ -263,21 +298,28 @@ mod learning {
                 b_i,
                 beta,
                 lambda,
+                phi_list: vec![[0.0; 8]],
             }
         }
 
-        fn learn(
+        pub(super) fn learn(
             &mut self,
             state: State,
-            reward: f32,
+            reward: Reward,
             state_next: State,
-            phi_list: Vec<[f32; 8]>,
         ) -> [f32; 8] {
             let (c_n, phi_n) = self.cost_phy(state);
             let (c_n_1, phi) = self.cost_phy(state_next);
 
+            let phi_len = self.phi_list.len();
             for idx in 0..self.alpha.len() {
-                self.alpha[idx] = 0.1 / (1.0 + 100.0 * phi_list[idx][..7].iter().sum::<f32>())
+                self.alpha[idx] = 0.1
+                    / (1.0
+                        + 100.0
+                            * self.phi_list[0..phi_len - 1]
+                                .iter()
+                                .map(|sub| sub[idx])
+                                .sum::<f32>())
             }
 
             for idx in 0..self.z.len() {
@@ -289,10 +331,11 @@ mod learning {
             for idx in 0..self.p.len() {
                 self.p[idx] = self.p[idx]
                     + self.alpha[idx]
-                        * (reward + EULER.powf(-self.beta * state.2.as_secs_f32()) * c_n_1 - c_n)
+                        * (reward.0 + EULER.powf(-self.beta * state.2.as_secs_f32()) * c_n_1 - c_n)
                         * self.z[idx];
             }
 
+            self.phi_list.push(phi.clone());
             return phi;
         }
 
@@ -322,12 +365,12 @@ mod learning {
         }
 
         // NOTE: reqs contains requests for this specific tier.
-        fn c_up_c_not(
+        pub(super) fn c_up_c_not(
             &self,
             tier: &mut Tier,
             obj: ObjectKey,
             temp: (Hotness, Size, u64),
-            obj_reqs: Vec<Request>,
+            obj_reqs: &Vec<Request>,
         ) -> (f32, Hotness, f32, Hotness) {
             // This method branches into two main flows in the original one handling if the file is contained in the tier and one if it is not
             let s1_not;
@@ -448,7 +491,7 @@ mod learning {
                 );
                 let s3_up;
                 let num_added_obj_reqs = obj_reqs.len();
-                tier.reqs.insert(obj.clone(), obj_reqs);
+                tier.reqs.insert(obj.clone(), obj_reqs.clone());
                 if num_added_obj_reqs + num_reqs == 0 {
                     s3_up = Duration::from_secs_f32(0.0);
                 } else {
@@ -477,15 +520,156 @@ mod learning {
 
 // FIXME: Add agent
 pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
-    tiers: [learning::Tier; NUM_STORAGE_CLASSES],
+    tiers: Vec<TierAgent>,
     object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
     // Stores the most recently known storage location and all requests
     objects: HashMap<ObjectKey, (Vec<learning::Request>, StoragePreference, CowBytes)>,
+    active_storage_classes: u8,
     config: MigrationConfig<()>,
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg<C>>,
     db: Arc<RwLock<Database<C>>>,
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
+}
+
+struct TierAgent {
+    tier: learning::Tier,
+    agent: learning::TDAgent,
+}
+
+const DEFAULT_BETA: f32 = 0.05;
+const DEFAULT_LAMBDA: f32 = 0.8;
+
+impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
+    fn timestep(&mut self) -> super::errors::Result<()> {
+        // length of tiers
+        // saves for each tier the list of possible states?
+        let mut tier_results: Vec<learning::State> = vec![];
+        // length of tiers
+        let mut tier_rewards: Vec<learning::Reward> = vec![];
+        for idx in 0..self.active_storage_classes {
+            let (state, reward) = self.tiers[idx as usize].tier.step(DEFAULT_BETA);
+            tier_results.push(state);
+            tier_rewards.push(reward);
+        }
+
+        let mut request_weight = 0;
+        let mut request_large = 0;
+
+        let active_objects_iter = self.objects.iter().filter(|(_, req)| req.0.len() > 0);
+
+        for (active_obj, _data) in active_objects_iter {
+            // one tier must exist
+            if self.tiers[0].tier.contains(active_obj) {
+                // file in fastest tier
+                self.tiers[0].tier.hot_cold(active_obj);
+                let file_info = self.tiers[0].tier.file_info(active_obj).unwrap();
+
+                request_weight += file_info.1.num_bytes();
+                // magic 5000
+                if file_info.1.num_bytes() > 5000 {
+                    request_large += 1
+                }
+                continue;
+            }
+
+            // NOTE: Instead we iterate to one more level here
+            // see comment below
+            for tier_id in 1..(self.active_storage_classes) as usize {
+                if self.tiers[tier_id].tier.contains(active_obj) {
+                    // file can be updated or downgraded
+                    self.tiers[tier_id].tier.hot_cold(active_obj);
+                    let file_info = self.tiers[tier_id]
+                        .tier
+                        .file_info(active_obj)
+                        .unwrap()
+                        .clone();
+                    request_weight += file_info.1.num_bytes();
+                    // magic 5000
+                    if file_info.1.num_bytes() > 5000 {
+                        request_large += 1
+                    }
+
+                    // Calculate changes
+                    let obj_reqs = &self.objects.get(active_obj).unwrap().0;
+                    // Please borrow checker believe me..
+                    let tier_agent_upper = &mut self.tiers[tier_id - 1];
+                    let (c_not_t_upper, s1_not_t_upper, c_up_t_upper, s1_up_t_upper) =
+                        tier_agent_upper.agent.c_up_c_not(
+                            &mut tier_agent_upper.tier,
+                            active_obj.clone(),
+                            file_info.clone(),
+                            obj_reqs,
+                        );
+                    let tier_agent_low = &mut self.tiers[tier_id];
+                    let (c_not_t_lower, s1_not_t_lower, c_up_t_lower, s1_up_t_lower) =
+                        tier_agent_low.agent.c_up_c_not(
+                            &mut tier_agent_low.tier,
+                            active_obj.clone(),
+                            file_info.clone(),
+                            obj_reqs,
+                        );
+
+                    // Improvement?
+                    if c_up_t_upper * s1_up_t_upper.as_f32() + c_up_t_lower * s1_up_t_lower.as_f32()
+                        > c_not_t_upper * s1_not_t_upper.as_f32()
+                            + c_not_t_lower * s1_not_t_lower.as_f32()
+                    {
+                        // FIXME: Here actual migration takes place
+                        self.tiers[tier_id - 1]
+                            .tier
+                            .update_or_not(active_obj.clone(), file_info.clone());
+                        self.tiers[tier_id]
+                            .tier
+                            .update_or_not(active_obj.clone(), file_info.clone());
+
+                        // NOTE: The original code simply performs an evitction
+                        // of too full storage tiers as a manner of downward
+                        // migration, we simply pick the lowest temperature for
+                        // that.
+
+                        // FIXME: Check if we are close to the limit already, if
+                        // yes perform eviction from the upper tier.
+                    }
+                }
+                continue;
+            }
+
+            // NOTE:
+            // In the original source code there is a section of code which
+            // duplicates exactly what we've done above, but for the lowest
+            // tiers, from the comments I assume that this rule intially
+            // catapulted data from the last to the first tier, but this
+            // behavior has been changed to be more like a gradual upwards
+            // migration.
+        }
+
+        // NOTE: Check improvements for each tier and learn agents
+        // length of tiers
+        for idx in 0..self.active_storage_classes {
+            let (state, _) = self.tiers[idx as usize].tier.step(DEFAULT_BETA);
+            self.tiers[idx as usize].agent.learn(
+                tier_results[idx as usize],
+                tier_rewards[idx as usize],
+                state,
+            );
+        }
+
+        // decreasing overall temperatures
+        for ta in self.tiers.iter_mut() {
+            ta.tier.temp_decrease();
+        }
+
+        // Clean-up
+        for tier in self.tiers.iter_mut() {
+            tier.tier.wipe_requests();
+        }
+        for (_obj, entry) in self.objects.iter_mut() {
+            entry.0 = Default::default();
+        }
+
+        todo!()
+    }
 }
 
 impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
@@ -496,18 +680,62 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         db_rx: crossbeam_channel::Receiver<super::DatabaseMsg<C>>,
         db: std::sync::Arc<parking_lot::RwLock<crate::Database<C>>>,
         config: super::MigrationConfig<Self::Config>,
-        storage_hint_sink: std::sync::Arc<
+        _storage_hint_sink: std::sync::Arc<
             parking_lot::Mutex<HashMap<crate::storage_pool::DiskOffset, crate::StoragePreference>>,
         >,
     ) -> Self {
         // We do not provide single node hints in this policy
         let dmu = Arc::clone(db.read().root_tree.dmu());
+        let active_storage_classes = db
+            .read()
+            .free_space_tier()
+            .iter()
+            .filter(|tier| tier.free.as_u64() > 0)
+            .count() as u8;
+        let mut tiers = vec![];
+        // Initail parameters
+        let b1t1 = 7.33 / 0.3;
+        let a1t1 = learning::EULER.powf(b1t1 * 0.3);
+        let b2t1 = 7.33 / 1500.0;
+        let a2t1 = learning::EULER.powf(b2t1 * 1750.0);
+        let b3t1 = 7.33 / 1.0;
+        let a3t1 = learning::EULER.powf(b3t1 * 0.5);
+
+        // Alternative Paramters?
+        // let b1t2=7.33/0.5;
+        // let a1t2=learning::EULER.powf(b1t2*0.55);
+        // let b2t2=7.33/1800.0;
+        // let a2t2=learning::EULER.powf(b2t2*2500.0);
+        // let b3t2=7.33/1.0;
+        // let a3t2=learning::EULER.powf(b3t2*0.5);
+
+        // Alternative Paramters?
+        // let b1t3=7.33/0.5;
+        // let a1t3=learning::EULER.powf(b1t3*0.75);
+        // let b2t3=7.33/2000.0;
+        // let a2t3=learning::EULER.powf(b2t3*1700.0);
+        // let b3t3=7.33/1.0;
+        // let a3t3=learning::EULER.powf(b3t3*0.5);
+
+        for _ in 0..active_storage_classes {
+            tiers.push(TierAgent {
+                tier: learning::Tier::new(),
+                agent: learning::TDAgent::new(
+                    [0.0; 8],
+                    DEFAULT_BETA,
+                    DEFAULT_LAMBDA,
+                    [a1t1, a2t1, a3t1],
+                    [b1t1, b2t1, b3t1],
+                ),
+            })
+        }
         Self {
             dml_rx,
             db_rx,
             db,
             dmu,
-            tiers: [(); NUM_STORAGE_CLASSES].map(|_| learning::Tier::new()),
+            tiers,
+            active_storage_classes,
             config,
             object_stores: Default::default(),
             objects: Default::default(),
@@ -540,8 +768,10 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     // Does this count as an operation? Not really if we define it as some modification operations, have a look at the paper
                     if let Some(prev) = self.objects.get_mut(&key) {
                         if prev.1 != info.pref {
-                            self.tiers[prev.1.as_u8() as usize].remove(&key);
-                            self.tiers[info.pref.as_u8() as usize].insert(key, info.size);
+                            self.tiers[prev.1.as_u8() as usize].tier.remove(&key);
+                            self.tiers[info.pref.as_u8() as usize]
+                                .tier
+                                .insert(key, info.size);
                         }
                         prev.1 = info.pref;
                         prev.2 = name;
@@ -554,40 +784,35 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                 DatabaseMsg::ObjectRead(key, dur) => {
                     let mut obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.as_u8() as usize].msg(key, dur);
+                    self.tiers[obj_info.1.as_u8() as usize].tier.msg(key, dur);
                 }
                 DatabaseMsg::ObjectWrite(key, _, _, dur) => {
                     // FIXME: This might again change the storage tier in which the object is stored
                     // This cannot happen on a read operation
                     let mut obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.as_u8() as usize].msg(key, dur);
+                    self.tiers[obj_info.1.as_u8() as usize].tier.msg(key, dur);
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     let prev = self.objects.get_mut(&key).unwrap();
                     if pref != prev.1 {
-                        let size = self.tiers[prev.1.as_u8() as usize].remove(&key).unwrap();
-                        self.tiers[pref.as_u8() as usize].insert(key, size.num_bytes());
+                        let size = self.tiers[prev.1.as_u8() as usize]
+                            .tier
+                            .remove(&key)
+                            .unwrap();
+                        self.tiers[pref.as_u8() as usize]
+                            .tier
+                            .insert(key, size.num_bytes());
                     }
                     prev.1 = pref;
                 }
             }
         }
-
-        // Perform learning and alike
-
-        // Clean-up
-        for tier in self.tiers.iter_mut() {
-            tier.wipe_requests();
-        }
-        for (obj, entry) in self.objects.iter_mut() {
-            entry.0 = Default::default();
-        }
         todo!()
     }
 
     fn promote(&mut self, storage_tier: u8) -> super::errors::Result<crate::vdev::Block<u32>> {
-        todo!()
+        unimplemented!()
     }
 
     fn demote(
@@ -595,7 +820,16 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         storage_tier: u8,
         desired: crate::vdev::Block<u64>,
     ) -> super::errors::Result<crate::vdev::Block<u64>> {
-        todo!()
+        unimplemented!()
+    }
+
+    fn thread_loop(&mut self) -> super::errors::Result<()> {
+        std::thread::sleep(self.config.grace_period);
+        loop {
+            std::thread::sleep(self.config.update_period);
+            self.update()?;
+            self.timestep()?;
+        }
     }
 
     fn db(&self) -> &std::sync::Arc<parking_lot::RwLock<crate::Database<C>>> {
