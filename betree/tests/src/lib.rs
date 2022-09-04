@@ -653,14 +653,11 @@ fn object_migrate_down(#[case] tier_size_mb: u32) {
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .unwrap();
     let mut obj = os.open_or_create_object(b"foobar").unwrap();
-    let mut buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
+    let buf = vec![42; (tier_size_mb as f32 * 0.7) as usize * TO_MEBIBYTE];
     obj.write_at(&buf, 0).unwrap();
     db.sync().expect("Could not sync database");
     dbg!(db.free_space_tier());
     obj.migrate(StoragePreference::FAST).unwrap();
-    // log::debug!("DONE WITH MIGRATION");
-    obj.write_at_with_pref(&buf, 0, StoragePreference::FAST);
-    // log::debug!("DONE WITH WRITING");
     db.sync().expect("Could not sync database");
     dbg!(db.free_space_tier());
 }
