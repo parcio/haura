@@ -312,6 +312,8 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> DatasetInner<Con
     }
 }
 
+use super::errors::ErrorKind;
+
 // Member access on internal type
 impl<Message, Config: DatabaseBuilder> Dataset<Config, Message> {
     pub(crate) fn id(&self) -> DatasetId {
@@ -348,7 +350,11 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         key: K,
         msg: SlicedCowBytes,
     ) -> Result<()> {
-        self.inner.read().as_ref().unwrap().insert_msg(key, msg)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .insert_msg(key, msg)
     }
 
     /// Inserts a message for the given key, allowing to override storage preference
@@ -362,13 +368,17 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         self.inner
             .read()
             .as_ref()
-            .unwrap()
+            .ok_or(ErrorKind::Closed)?
             .insert_msg_with_pref(key, msg, storage_preference)
     }
 
     /// Returns the value for the given key if existing.
     pub fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>> {
-        self.inner.read().as_ref().unwrap().get(key)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .get(key)
     }
 
     /// Iterates over all key-value pairs in the given key range.
@@ -380,7 +390,11 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
     {
-        self.inner.read().as_ref().unwrap().range(range)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .range(range)
     }
 
     /// Returns the name of the data set.
@@ -391,7 +405,11 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
     pub fn tree_dump(&self) -> Result<impl serde::Serialize> {
-        self.inner.read().as_ref().unwrap().tree_dump()
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .tree_dump()
     }
 }
 
@@ -546,7 +564,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         self.inner
             .read()
             .as_ref()
-            .unwrap()
+            .ok_or(ErrorKind::Closed)?
             .insert_with_pref(key, data, storage_preference)
     }
 
@@ -554,7 +572,11 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ///
     /// Note that any existing value will be overwritten.
     pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
-        self.inner.read().as_ref().unwrap().insert(key, data)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .insert(key, data)
     }
 
     /// Upserts the value for the given key at the given offset.
@@ -570,7 +592,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         self.inner
             .read()
             .as_ref()
-            .unwrap()
+            .ok_or(ErrorKind::Closed)?
             .upsert_with_pref(key, data, offset, storage_preference)
     }
 
@@ -586,7 +608,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         self.inner
             .read()
             .as_ref()
-            .unwrap()
+            .ok_or(ErrorKind::Closed)?
             .upsert(key, data, offset)
     }
 
@@ -601,16 +623,28 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         key: K,
         pref: StoragePreference,
     ) -> Result<Option<()>> {
-        self.inner.read().as_ref().unwrap().migrate(key, pref)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .migrate(key, pref)
     }
 
     /// Deletes the key-value pair if existing.
     pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
-        self.inner.read().as_ref().unwrap().delete(key)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .delete(key)
     }
 
     pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
-        self.inner.read().as_ref().unwrap().free_space_tier(pref)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .free_space_tier(pref)
     }
 
     /// Removes all key-value pairs in the given key range.
@@ -619,7 +653,11 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
     {
-        self.inner.read().as_ref().unwrap().range_delete(range)
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .range_delete(range)
     }
 
     /// Migrate a complete range of keys to another storage preference.
@@ -632,7 +670,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         self.inner
             .read()
             .as_ref()
-            .unwrap()
+            .ok_or(ErrorKind::Closed)?
             .migrate_range(range, pref)
     }
 }

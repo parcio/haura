@@ -187,7 +187,6 @@ pub struct DatabaseConfiguration {
     pub sync_interval_ms: Option<u64>,
 
     /// Set the migration policy to be used.
-    /// TODO: This can be extended on by adding a MigrationConfig or similar to modify grace period, fetch interval, action thresholds..
     pub migration_policy: Option<MigrationPolicies>,
 
     /// If and how to log database metrics

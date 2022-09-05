@@ -9,6 +9,7 @@ error_chain! {
         Io(std::io::Error);
     }
     errors {
+        Closed
         InvalidSuperblock
         DoesNotExist
         AlreadyExists
