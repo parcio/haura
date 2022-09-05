@@ -105,7 +105,7 @@ mod learning {
             }
         }
 
-        fn insert_with_values(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
+        pub(super) fn insert_with_values(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
             self.files.insert(key, entry);
         }
 
@@ -115,6 +115,17 @@ mod learning {
 
         pub fn remove(&mut self, key: &ObjectKey) -> Option<Size> {
             self.files.remove(key).map(|(_, s, _)| s)
+        }
+
+        pub fn coldest(&mut self) -> Option<(ObjectKey, (Hotness, Size, u64))> {
+            self.files
+                .iter()
+                .min_by(|(_, v_left), (_, v_right)| v_left.0 .0.total_cmp(&v_right.0 .0))
+                .map(|(key, val)| (key.clone(), val.clone()))
+                .and_then(|(key, val)| {
+                    self.files.remove(&key);
+                    Some((key, val))
+                })
         }
 
         pub fn msg(&mut self, key: ObjectKey, dur: Duration) {
@@ -262,7 +273,6 @@ mod learning {
         alpha: [f32; 8],
         beta: f32,
         lambda: f32,
-        // FIXME: Patch phi list; to work as we don't want to pass it around all the time
         phi_list: Vec<[f32; 8]>,
     }
 
@@ -478,7 +488,6 @@ mod learning {
             } else {
                 // TIER does not contain the file, how will it fair if we add it?
                 tier.files.insert(obj.clone(), temp);
-                // FIXME: Remove the entry again?
                 let s1_up = Hotness(
                     tier.files.iter().map(|(_, v)| v.0 .0).sum::<f32>() / tier.files.len() as f32,
                 );
@@ -518,7 +527,6 @@ mod learning {
     }
 }
 
-// FIXME: Add agent
 pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     tiers: Vec<TierAgent>,
     object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
@@ -541,6 +549,14 @@ const DEFAULT_BETA: f32 = 0.05;
 const DEFAULT_LAMBDA: f32 = 0.8;
 
 impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
+    fn get_or_open_object_store(&self, os_id: &ObjectStoreId) -> ObjectStore<C> {
+        if let Some(store) = self.object_stores.get(&os_id) {
+            todo!()
+        } else {
+            todo!()
+        }
+    }
+
     fn timestep(&mut self) -> super::errors::Result<()> {
         // length of tiers
         // saves for each tier the list of possible states?
@@ -558,7 +574,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
         let active_objects_iter = self.objects.iter().filter(|(_, req)| req.0.len() > 0);
 
-        for (active_obj, _data) in active_objects_iter {
+        for (active_obj, obj_data) in active_objects_iter {
             // one tier must exist
             if self.tiers[0].tier.contains(active_obj) {
                 // file in fastest tier
@@ -615,6 +631,42 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         > c_not_t_upper * s1_not_t_upper.as_f32()
                             + c_not_t_lower * s1_not_t_lower.as_f32()
                     {
+                        let free_space = self.db.read().free_space_tier();
+
+                        // NOTE: The original code simply performs an evitction
+                        // of too full storage tiers as a manner of downward
+                        // migration, we simply pick the lowest temperature for
+                        // that.
+                        if ((free_space[tier_id - 1].total.as_u64() as f32
+                            * self.config.migration_threshold) as u64)
+                            > free_space[tier_id - 1].free.as_u64()
+                        {
+                            // if there is not enough space left migrate down
+                            // get coldest file
+                            if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
+                                if coldest.1 .1.num_bytes() > free_space[tier_id].free.to_bytes() {
+                                    warn!("Could not get enough space for file to be migrated downwards");
+                                    continue;
+                                }
+                                // We can move an object from the upper layer
+                                self.tiers[tier_id]
+                                    .tier
+                                    .insert_with_values(coldest.0.clone(), coldest.1);
+                                let target = StoragePreference::from_u8(tier_id as u8);
+                                let os = self.get_or_open_object_store(coldest.0.store_key());
+                                let obj_key = &self.objects.get(&coldest.0).unwrap().2;
+                                let mut obj = os.open_object(obj_key)?.unwrap();
+                                obj.migrate(target)?;
+                                obj.close()?;
+                                self.db.write().close_object_store(os);
+                            } else {
+                                warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
+                                warn!("Continuing but functionality may be inhibited.");
+                                warn!("Consider using a different policy.");
+                                continue;
+                            }
+                        }
+
                         // FIXME: Here actual migration takes place
                         self.tiers[tier_id - 1]
                             .tier
@@ -623,13 +675,13 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             .tier
                             .update_or_not(active_obj.clone(), file_info.clone());
 
-                        // NOTE: The original code simply performs an evitction
-                        // of too full storage tiers as a manner of downward
-                        // migration, we simply pick the lowest temperature for
-                        // that.
-
-                        // FIXME: Check if we are close to the limit already, if
-                        // yes perform eviction from the upper tier.
+                        // NOTE: Migrate new object up
+                        let target = StoragePreference::from_u8(tier_id as u8 - 1);
+                        let os = self.get_or_open_object_store(active_obj.store_key());
+                        let mut obj = os.open_object(&obj_data.2)?.unwrap();
+                        obj.migrate(target)?;
+                        obj.close()?;
+                        self.db.write().close_object_store(os);
                     }
                 }
                 continue;
@@ -669,16 +721,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         }
         Ok(())
     }
-}
 
-impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
-    type Config = ();
-
-    fn build(
+    pub(super) fn build(
         dml_rx: crossbeam_channel::Receiver<super::DmlMsg>,
         db_rx: crossbeam_channel::Receiver<super::DatabaseMsg<C>>,
         db: std::sync::Arc<parking_lot::RwLock<crate::Database<C>>>,
-        config: super::MigrationConfig<Self::Config>,
+        config: super::MigrationConfig<()>,
         _storage_hint_sink: std::sync::Arc<
             parking_lot::Mutex<HashMap<crate::storage_pool::DiskOffset, crate::StoragePreference>>,
         >,
@@ -740,7 +788,9 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
             objects: Default::default(),
         }
     }
+}
 
+impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
     // One update call represents one epoch
     fn update(&mut self) -> super::errors::Result<()> {
         // FIXME: This is an inefficient way to get rid of the accumulated
@@ -839,7 +889,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         &self.dmu
     }
 
-    fn config(&self) -> &super::MigrationConfig<Self::Config> {
-        &self.config
+    fn config(&self) -> super::MigrationConfig<()> {
+        self.config.erased()
     }
 }
