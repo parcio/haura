@@ -862,10 +862,8 @@ fn migration_policy_object_pointer_iterator_smoke(
     }
 }
 
-#[rstest]
-fn migration_policy_smoke() {
-    // env_logger::init();
-    let shared_db = Database::build_threaded(configs::migration_config()).unwrap();
+fn migration_policy_smoke(cfg: DatabaseConfiguration) {
+    let shared_db = Database::build_threaded(cfg).unwrap();
     let ds;
     {
         let mut db = shared_db.write();
@@ -888,9 +886,21 @@ fn migration_policy_smoke() {
 }
 
 #[rstest]
+fn migration_policy_smoke_rl() {
+    env_logger::init();
+    migration_policy_smoke(configs::migration_config_rl());
+}
+
+#[rstest]
+fn migration_policy_smoke_lfu() {
+    // env_logger::init();
+    migration_policy_smoke(configs::migration_config_lfu());
+}
+
+#[rstest]
 fn migration_policy_single_node() {
     // env_logger::init();
-    let shared_db = Database::build_threaded(configs::migration_config()).unwrap();
+    let shared_db = Database::build_threaded(configs::migration_config_lfu()).unwrap();
     let ds;
     {
         let mut db = shared_db.write();
@@ -916,7 +926,7 @@ fn migration_policy_single_node() {
 
 #[rstest]
 fn migration_policy_single_object() {
-    let shared_db = Database::build_threaded(configs::migration_config()).unwrap();
+    let shared_db = Database::build_threaded(configs::migration_config_lfu()).unwrap();
     let os;
     {
         let mut db = shared_db.write();
