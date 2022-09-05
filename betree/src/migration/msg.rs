@@ -22,7 +22,7 @@ pub enum DmlMsg {
     Discover(DiskOffset),
 }
 
-#[derive(Hash, PartialEq, Eq, Clone)]
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
 pub struct ObjectKey(ObjectStoreId, ObjectId);
 
 impl ObjectKey {
