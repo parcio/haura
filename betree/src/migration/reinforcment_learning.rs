@@ -7,6 +7,7 @@ use crate::{
     object::{ObjectStore, ObjectStoreId},
     storage_pool::NUM_STORAGE_CLASSES,
     Database, StoragePreference,
+    data_management::DmlWithStorageHints,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -40,7 +41,7 @@ mod learning {
     pub(super) const EULER: f32 = 2.71828;
 
     // How often a file is accessed in certain time range.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     pub struct Hotness(f32);
 
     impl Hotness {
@@ -154,7 +155,9 @@ mod learning {
                 rewards +=
                     req.response_time.as_secs_f32() * EULER.powf(-beta * (idx / total) as f32);
             }
-            rewards /= total as f32;
+            if total != 0 {
+                rewards /= total as f32;
+            }
 
             // 2. Calculate current state
             let s1;
@@ -433,17 +436,22 @@ mod learning {
                 let s2_up;
                 let s3_up;
                 if let Some(dropped) = tier.files.remove(&obj) {
-                    s1_up = Hotness(
-                        tier.files.iter().map(|(_, v)| v.0 .0).sum::<f32>()
-                            / tier.files.len() as f32,
-                    );
-                    s2_up = Hotness(
-                        tier.files
-                            .iter()
-                            .map(|(_, v)| v.0 .0 * v.1.num_bytes() as f32)
-                            .sum::<f32>()
-                            / tier.files.len() as f32,
-                    );
+                    if tier.files.is_empty() {
+                        s1_up = Hotness(0.0);
+                        s2_up = Hotness(100000.0);
+                    } else {
+                        s1_up = Hotness(
+                            tier.files.iter().map(|(_, v)| v.0 .0).sum::<f32>()
+                                / tier.files.len() as f32,
+                        );
+                        s2_up = Hotness(
+                            tier.files
+                                .iter()
+                                .map(|(_, v)| v.0 .0 * v.1.num_bytes() as f32)
+                                .sum::<f32>()
+                                / tier.files.len() as f32,
+                        );
+                    }
                     if let Some(dropped_reqs) = tier.reqs.remove(&obj) {
                         if tier.reqs.is_empty() {
                             s3_up = Duration::from_secs_f32(0.0);
@@ -513,7 +521,7 @@ mod learning {
                                     .sum::<f32>()
                             })
                             .sum::<f32>()
-                            / (num_reqs - num_added_obj_reqs) as f32,
+                            / (num_reqs + num_added_obj_reqs) as f32,
                     );
                 }
                 // Clean-up
@@ -533,6 +541,7 @@ pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     // Stores the most recently known storage location and all requests
     objects: HashMap<ObjectKey, (Vec<learning::Request>, StoragePreference, CowBytes)>,
     active_storage_classes: u8,
+    default_storage_class: StoragePreference,
     config: MigrationConfig<()>,
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg<C>>,
@@ -649,7 +658,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                     continue;
                                 }
                                 // We can move an object from the upper layer
+                                // NOTE: Tranfer the object from one to another store.
                                 self.tiers[tier_id]
+                                    .tier
+                                    .remove(&coldest.0);
+                                self.tiers[tier_id - 1]
                                     .tier
                                     .insert_with_values(coldest.0.clone(), coldest.1);
                                 let target = StoragePreference::from_u8(tier_id as u8);
@@ -667,20 +680,20 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             }
                         }
 
-                        // FIXME: Here actual migration takes place
-                        self.tiers[tier_id - 1]
-                            .tier
-                            .update_or_not(active_obj.clone(), file_info.clone());
-                        self.tiers[tier_id]
-                            .tier
-                            .update_or_not(active_obj.clone(), file_info.clone());
-
                         // NOTE: Migrate new object up
                         let target = StoragePreference::from_u8(tier_id as u8 - 1);
                         let os = self.get_or_open_object_store(active_obj.store_key());
-                        let mut obj = os.open_object(&obj_data.2)?.unwrap();
-                        obj.migrate(target)?;
-                        obj.close()?;
+                        if let Some(mut obj) = os.open_object(&obj_data.2)? {
+                            obj.migrate(target)?;
+                            obj.close()?;
+                            // NOTE: Tranfer the object from one to another store.
+                            self.tiers[tier_id - 1]
+                                .tier
+                                .remove(&active_obj);
+                            self.tiers[tier_id]
+                                .tier
+                                .insert_with_values(active_obj.clone(), file_info.clone());
+                        }
                         self.db.write().close_object_store(os);
                     }
                 }
@@ -776,6 +789,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 ),
             })
         }
+        let default_storage_class = dmu.default_storage_class();
         Self {
             dml_rx,
             db_rx,
@@ -783,6 +797,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             dmu,
             tiers,
             active_storage_classes,
+            default_storage_class,
             config,
             object_stores: Default::default(),
             objects: Default::default(),
@@ -813,12 +828,12 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                 }
                 DatabaseMsg::ObjectOpen(key, info, name)
                 | DatabaseMsg::ObjectDiscover(key, info, name) => {
-                    // Add the object to the belonging tier
+                    // FIXME: Add the object to the belonging tier
                     // Does this count as an operation? Not really if we define it as some modification operations, have a look at the paper
                     if let Some(prev) = self.objects.get_mut(&key) {
                         if prev.1 != info.pref {
-                            self.tiers[prev.1.as_u8() as usize].tier.remove(&key);
-                            self.tiers[info.pref.as_u8() as usize]
+                            self.tiers[prev.1.or(self.default_storage_class).as_u8() as usize].tier.remove(&key);
+                            self.tiers[info.pref.or(self.default_storage_class).as_u8() as usize]
                                 .tier
                                 .insert(key, info.size);
                         }
@@ -826,30 +841,33 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                         prev.2 = name;
                     } else {
                         // Insert new entry
-                        self.objects.insert(key, (Vec::new(), info.pref, name));
+                        self.objects.insert(key.clone(), (Vec::new(), info.pref, name));
+                        self.tiers[info.pref.or(self.default_storage_class).as_u8() as usize]
+                            .tier
+                            .insert(key, info.size);
                     }
                 }
                 DatabaseMsg::ObjectClose(_, _) => todo!(),
                 DatabaseMsg::ObjectRead(key, dur) => {
-                    let mut obj_info = self.objects.get_mut(&key).unwrap();
+                    let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.as_u8() as usize].tier.msg(key, dur);
+                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.msg(key, dur);
                 }
                 DatabaseMsg::ObjectWrite(key, _, _, dur) => {
                     // FIXME: This might again change the storage tier in which the object is stored
                     // This cannot happen on a read operation
-                    let mut obj_info = self.objects.get_mut(&key).unwrap();
+                    let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.as_u8() as usize].tier.msg(key, dur);
+                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.msg(key, dur);
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     let prev = self.objects.get_mut(&key).unwrap();
                     if pref != prev.1 {
-                        let size = self.tiers[prev.1.as_u8() as usize]
+                        let size = self.tiers[prev.1.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .remove(&key)
                             .unwrap();
-                        self.tiers[pref.as_u8() as usize]
+                        self.tiers[pref.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .insert(key, size.num_bytes());
                     }
