@@ -12,7 +12,7 @@ use betree_storage_stack::{
 
 use crate::TO_MEBIBYTE;
 
-pub(crate) fn migration_config() -> DatabaseConfiguration {
+pub(crate) fn migration_config_lfu() -> DatabaseConfiguration {
     DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: vec![
@@ -41,6 +41,41 @@ pub(crate) fn migration_config() -> DatabaseConfiguration {
             migration_threshold: 0.7,
             update_period: std::time::Duration::from_millis(100),
             policy_config: Default::default(),
+        })),
+        default_storage_class: 1,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn migration_config_rl() -> DatabaseConfiguration {
+    DatabaseConfiguration {
+        storage: StoragePoolConfiguration {
+            tiers: vec![
+                TierConfiguration {
+                    top_level_vdevs: vec![
+                        Vdev::Leaf(LeafVdev::Memory {
+                            mem: 2048 * TO_MEBIBYTE,
+                        }),
+                    ],
+                    ..Default::default()
+                },
+                TierConfiguration {
+                    top_level_vdevs: vec![
+                        Vdev::Leaf(LeafVdev::Memory {
+                            mem: 2048 * TO_MEBIBYTE,
+                        }),
+                    ],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        },
+        access_mode: AccessMode::OpenOrCreate,
+        migration_policy: Some(MigrationPolicies::ReinforcementLearning(MigrationConfig {
+            grace_period: std::time::Duration::from_millis(0),
+            migration_threshold: 0.7,
+            update_period: std::time::Duration::from_millis(100),
+            policy_config: (),
         })),
         default_storage_class: 1,
         ..Default::default()
