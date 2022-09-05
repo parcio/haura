@@ -359,12 +359,8 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
 
         Ok(())
     }
-}
 
-impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
-    type Config = LfuConfig;
-
-    fn build(
+    pub(super) fn build(
         dml_rx: Receiver<DmlMsg>,
         db_rx: Receiver<DatabaseMsg<C>>,
         db: Arc<RwLock<Database<C>>>,
@@ -390,7 +386,9 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
             ),
         }
     }
+}
 
+impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
     fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u32>> {
         // PROMOTE OF NODES
         let mut moved = Block(0_u32);
@@ -506,8 +504,8 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
         &self.db
     }
 
-    fn config(&self) -> &MigrationConfig<LfuConfig> {
-        &self.config
+    fn config(&self) -> MigrationConfig<()> {
+        self.config.erased()
     }
 
     fn update(&mut self) -> Result<()> {

@@ -19,13 +19,18 @@ use crate::{
     Database, StoragePreference,
 };
 
-use self::lfu::{Lfu, LfuConfig};
+use self::{
+    lfu::{Lfu, LfuConfig},
+    reinforcment_learning::ZhangHellanderToor,
+};
 
 /// Available policies for auto migrations.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 pub enum MigrationPolicies {
     /// Least frequently used, promote and demote nodes based on their usage in the current session.
     Lfu(MigrationConfig<LfuConfig>),
+    /// Reinforcment Learning based tier classfication based on Zhang et al. (2022)
+    ReinforcementLearning(MigrationConfig<()>),
 }
 
 impl MigrationPolicies {
@@ -35,11 +40,14 @@ impl MigrationPolicies {
         db_rx: Receiver<DatabaseMsg<C>>,
         db: Arc<RwLock<Database<C>>>,
         storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
-    ) -> impl MigrationPolicy<C> {
+    ) -> Box<dyn MigrationPolicy<C>> {
         match self {
             MigrationPolicies::Lfu(config) => {
-                Lfu::build(dml_rx, db_rx, db, config, storage_hint_sink)
+                Box::new(Lfu::build(dml_rx, db_rx, db, config, storage_hint_sink))
             }
+            MigrationPolicies::ReinforcementLearning(config) => Box::new(
+                ZhangHellanderToor::build(dml_rx, db_rx, db, config, storage_hint_sink),
+            ),
         }
     }
 }
@@ -59,6 +67,19 @@ pub struct MigrationConfig<Config> {
     pub policy_config: Config,
 }
 
+impl<Config> MigrationConfig<Config> {
+    /// Create an erased version of this configuration with the specific
+    /// migration policy options removed.
+    fn erased(self) -> MigrationConfig<()> {
+        MigrationConfig {
+            policy_config: (),
+            grace_period: self.grace_period,
+            migration_threshold: self.migration_threshold,
+            update_period: self.update_period,
+        }
+    }
+}
+
 impl<Config: Default> Default for MigrationConfig<Config> {
     fn default() -> Self {
         MigrationConfig {
@@ -72,16 +93,6 @@ impl<Config: Default> Default for MigrationConfig<Config> {
 
 // FIXME: Draft, no types are final
 pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
-    type Config;
-
-    fn build(
-        dml_rx: Receiver<DmlMsg>,
-        db_rx: Receiver<DatabaseMsg<C>>,
-        db: Arc<RwLock<Database<C>>>,
-        config: MigrationConfig<Self::Config>,
-        storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
-    ) -> Self;
-
     // /// Perform all available operations on a preset storage tier.
     // fn action(&mut self, storage_tier: u8) -> Result<Block<u32>>;
 
@@ -97,7 +108,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
 
     fn dmu(&self) -> &Arc<<C as DatabaseBuilder>::Dmu>;
 
-    fn config(&self) -> &MigrationConfig<Self::Config>;
+    fn config(&self) -> MigrationConfig<()>;
 
     /// The main loop of the
     fn thread_loop(&mut self) -> Result<()> {
