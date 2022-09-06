@@ -672,6 +672,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 obj.migrate(target)?;
                                 obj.close()?;
                                 self.db.write().close_object_store(os);
+                                debug!("Migrating object: {:?} - {} - {tier_id}", coldest.0, tier_id - 1);
                             } else {
                                 warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
                                 warn!("Continuing but functionality may be inhibited.");
@@ -685,6 +686,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         let os = self.get_or_open_object_store(active_obj.store_key());
                         if let Some(mut obj) = os.open_object(&obj_data.2)? {
                             obj.migrate(target)?;
+                            debug!("Migrating object: {:?} - {tier_id} - {}", active_obj, tier_id - 1);
                             obj.close()?;
                             // NOTE: Tranfer the object from one to another store.
                             self.tiers[tier_id - 1]
