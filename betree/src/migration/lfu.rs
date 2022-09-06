@@ -229,16 +229,13 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                 DatabaseMsg::DatasetOpen(_) => {}
                 DatabaseMsg::DatasetClose(_) => {}
                 DatabaseMsg::ObjectstoreOpen(key, store) => {
-                    dbg!("ObjectStore opened");
                     self.object_stores.insert(key, Some(store));
                 }
                 DatabaseMsg::ObjectstoreClose(key) => {
-                    dbg!("ObjectStore closed");
                     self.object_stores.insert(key, None);
                 }
                 DatabaseMsg::ObjectOpen(key, info, name)
                 | DatabaseMsg::ObjectDiscover(key, info, name) => {
-                    dbg!("Object opened or discovered.");
                     if let Entry::Vacant(e) = self.object_stores.entry(key.store_key().clone()) {
                         e.insert(None);
                     }
@@ -274,7 +271,6 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     }
                 }
                 DatabaseMsg::ObjectClose(key, info) => {
-                    dbg!("Object closed.");
                     // Insert and get old value
                     let new_location = ObjectLocation(info.pref, info.size);
                     let old = self
@@ -303,13 +299,11 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     }
                 }
                 DatabaseMsg::ObjectRead(key, _) => {
-                    dbg!("Object read.");
                     if let Some(location) = self.objects.get(&key) {
                         Lfu::<C>::get_object(&mut self.object_buckets, &location, &key);
                     }
                 }
                 DatabaseMsg::ObjectWrite(key, size, pref, _) => {
-                    dbg!("Object written to.");
                     let new_location = ObjectLocation(pref, size);
                     let old = self
                         .objects
@@ -336,7 +330,6 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     }
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
-                    dbg!("Object migrated.");
                     if let Some(location) = self.objects.get(&key) {
                         if location.0 != pref {
                             // Move in representation
@@ -436,12 +429,9 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                     self.object_stores.get(objectkey.store_key()),
                     StoragePreference::from_u8(storage_tier).lower(),
                 ) {
-                    dbg!(&lowered);
-                    dbg!(&storage_tier);
                     // NOTE: Object store can either be unused or active.
                     if let Some(active_store) = store_result.as_ref() {
                         let mut obj = active_store.open_object(&name).unwrap().unwrap();
-                        dbg!("Migrating Object..");
                         obj.migrate(lowered).expect("Could not migrate");
                         for _ in obj.read_all_chunks()? {}
                         let size = self.objects.get(&objectkey).unwrap().1;
@@ -455,7 +445,6 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                         if let Some(mut db) = self.db.try_write() {
                             let os = db.open_object_store_with_id(objectkey.store_key().clone())?;
                             if let Some(mut obj) = os.open_object(&*name)? {
-                                dbg!("Migrating Object..");
                                 obj.migrate(lowered)?;
                                 for _ in obj.read_all_chunks()? {}
                                 let size = self.objects.get(&objectkey).unwrap().1;
@@ -466,7 +455,6 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                     }
 
                     if moved >= desired {
-                        dbg!("moved enough");
                         break;
                     }
                 } else {
