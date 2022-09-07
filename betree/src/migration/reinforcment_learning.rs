@@ -118,6 +118,10 @@ mod learning {
             self.files.remove(key).map(|(_, s, _)| s)
         }
 
+        pub fn update_size(&mut self, key: &ObjectKey, size: u64) {
+            self.files.get_mut(key).map(|entry| entry.1 = Size(size));
+        }
+
         pub fn coldest(&mut self) -> Option<(ObjectKey, (Hotness, Size, u64))> {
             self.files
                 .iter()
@@ -855,11 +859,12 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     obj_info.0.push(learning::Request::new(dur.clone()));
                     self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.msg(key, dur);
                 }
-                DatabaseMsg::ObjectWrite(key, _, _, dur) => {
+                DatabaseMsg::ObjectWrite(key, size, _, dur) => {
                     // FIXME: This might again change the storage tier in which the object is stored
                     // This cannot happen on a read operation
                     let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
+                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.update_size(&key, size);
                     self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.msg(key, dur);
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
