@@ -702,6 +702,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         }
                         self.db.write().close_object_store(os);
                     }
+                    break;
                 }
                 continue;
             }
