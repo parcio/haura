@@ -664,10 +664,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 }
                                 // We can move an object from the upper layer
                                 // NOTE: Tranfer the object from one to another store.
-                                self.tiers[tier_id]
+                                self.tiers[tier_id - 1]
                                     .tier
                                     .remove(&coldest.0);
-                                self.tiers[tier_id - 1]
+                                self.tiers[tier_id]
                                     .tier
                                     .insert_with_values(coldest.0.clone(), coldest.1);
                                 let target = StoragePreference::from_u8(tier_id as u8);
@@ -698,10 +698,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             debug!("Migrating object: {:?} - {tier_id} - {}", active_obj, tier_id - 1);
                             obj.close()?;
                             // NOTE: Tranfer the object from one to another store.
-                            self.tiers[tier_id - 1]
+                            self.tiers[tier_id]
                                 .tier
                                 .remove(&active_obj);
-                            self.tiers[tier_id]
+                            self.tiers[tier_id - 1]
                                 .tier
                                 .insert_with_values(active_obj.clone(), file_info.clone());
                         }
@@ -755,10 +755,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     }
                     // We can move an object from the upper layer
                     // NOTE: Tranfer the object from one to another store.
-                    self.tiers[tier_id]
+                    self.tiers[tier_id - 1]
                         .tier
                         .remove(&coldest.0);
-                    self.tiers[tier_id - 1]
+                    self.tiers[tier_id]
                         .tier
                         .insert_with_values(coldest.0.clone(), coldest.1);
                     let target = StoragePreference::from_u8(tier_id as u8);
