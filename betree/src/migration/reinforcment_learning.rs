@@ -727,6 +727,49 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             );
         }
 
+
+        let mut free_space = self.db.read().free_space_tier();
+
+        for tier_id in 1..self.active_storage_classes as usize {
+            while (free_space[tier_id - 1].free.as_u64() as f32) < free_space[tier_id - 1].total.as_u64() as f32 * self.config.migration_threshold {
+                // NOTE:
+                // In this case we obviously have insufficient info
+                // This is due to the uncertainty of objects in the underlying storage, we might end up anywhere
+                // TODO: Maybe probing as a quick fix for this, otherwise we
+                // need some kind of reporting to the objects in which storage
+                // they end up.
+                if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
+                    if coldest.1 .1.num_bytes() > free_space[tier_id].free.to_bytes() {
+                        warn!("Could not get enough space for file to be migrated downwards");
+                        break;
+                    }
+                    // We can move an object from the upper layer
+                    // NOTE: Tranfer the object from one to another store.
+                    self.tiers[tier_id]
+                        .tier
+                        .remove(&coldest.0);
+                    self.tiers[tier_id - 1]
+                        .tier
+                        .insert_with_values(coldest.0.clone(), coldest.1);
+                    let target = StoragePreference::from_u8(tier_id as u8);
+                    let os = self.get_or_open_object_store(coldest.0.store_key());
+                    let obj_key = &self.objects.get(&coldest.0).unwrap().2;
+                    let mut obj = os.open_object(obj_key)?.unwrap();
+                    obj.migrate(target)?;
+                    obj.close()?;
+                    self.db.write().close_object_store(os);
+                    debug!("Migrating object: {:?} - {} - {tier_id}", coldest.0, tier_id - 1);
+                    free_space = self.db.read().free_space_tier();
+                } else {
+                    warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
+                    warn!("Continuing but functionality may be inhibited.");
+                    warn!("Consider using a different policy.");
+                    break;
+                }
+            }
+        }
+
+
         // decreasing overall temperatures
         for ta in self.tiers.iter_mut() {
             ta.tier.temp_decrease();
