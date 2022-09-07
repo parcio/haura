@@ -3,11 +3,11 @@ use parking_lot::RwLock;
 
 use crate::{
     cow_bytes::CowBytes,
+    data_management::DmlWithStorageHints,
     database::DatabaseBuilder,
     object::{ObjectStore, ObjectStoreId},
     storage_pool::NUM_STORAGE_CLASSES,
     Database, StoragePreference,
-    data_management::DmlWithStorageHints,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -566,7 +566,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         if let Some(Some(store)) = self.object_stores.get(os_id) {
             store.clone()
         } else {
-            self.db.write().open_object_store_with_id(os_id.clone()).unwrap()
+            self.db
+                .write()
+                .open_object_store_with_id(os_id.clone())
+                .unwrap()
         }
     }
 
@@ -664,9 +667,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 }
                                 // We can move an object from the upper layer
                                 // NOTE: Tranfer the object from one to another store.
-                                self.tiers[tier_id - 1]
-                                    .tier
-                                    .remove(&coldest.0);
+                                self.tiers[tier_id - 1].tier.remove(&coldest.0);
                                 self.tiers[tier_id]
                                     .tier
                                     .insert_with_values(coldest.0.clone(), coldest.1);
@@ -681,7 +682,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                     self.db.write().close_object_store(os);
                                 }
                                 // self.db.write().close_object_store(os);
-                                debug!("Migrating object: {:?} - {} - {tier_id}", coldest.0, tier_id - 1);
+                                debug!(
+                                    "Migrating object: {:?} - {} - {tier_id}",
+                                    coldest.0,
+                                    tier_id - 1
+                                );
                             } else {
                                 warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
                                 warn!("Continuing but functionality may be inhibited.");
@@ -695,12 +700,14 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         let os = self.get_or_open_object_store(active_obj.store_key());
                         if let Some(mut obj) = os.open_object(&obj_data.2)? {
                             obj.migrate(target)?;
-                            debug!("Migrating object: {:?} - {tier_id} - {}", active_obj, tier_id - 1);
+                            debug!(
+                                "Migrating object: {:?} - {tier_id} - {}",
+                                active_obj,
+                                tier_id - 1
+                            );
                             obj.close()?;
                             // NOTE: Tranfer the object from one to another store.
-                            self.tiers[tier_id]
-                                .tier
-                                .remove(&active_obj);
+                            self.tiers[tier_id].tier.remove(&active_obj);
                             self.tiers[tier_id - 1]
                                 .tier
                                 .insert_with_values(active_obj.clone(), file_info.clone());
@@ -736,11 +743,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             );
         }
 
-
         let mut free_space = self.db.read().free_space_tier();
 
         for tier_id in 1..self.active_storage_classes as usize {
-            while (free_space[tier_id - 1].free.as_u64() as f32) < free_space[tier_id - 1].total.as_u64() as f32 * self.config.migration_threshold {
+            while (free_space[tier_id - 1].free.as_u64() as f32)
+                < free_space[tier_id - 1].total.as_u64() as f32 * self.config.migration_threshold
+            {
                 debug!("trying to evict full layer");
                 // NOTE:
                 // In this case we obviously have insufficient info
@@ -755,9 +763,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     }
                     // We can move an object from the upper layer
                     // NOTE: Tranfer the object from one to another store.
-                    self.tiers[tier_id - 1]
-                        .tier
-                        .remove(&coldest.0);
+                    self.tiers[tier_id - 1].tier.remove(&coldest.0);
                     self.tiers[tier_id]
                         .tier
                         .insert_with_values(coldest.0.clone(), coldest.1);
@@ -771,7 +777,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     if let None = self.object_stores.get(coldest.0.store_key()) {
                         self.db.write().close_object_store(os);
                     }
-                    debug!("Migrating object: {:?} - {} - {tier_id}", coldest.0, tier_id - 1);
+                    debug!(
+                        "Migrating object: {:?} - {} - {tier_id}",
+                        coldest.0,
+                        tier_id - 1
+                    );
                     free_space = self.db.read().free_space_tier();
                 } else {
                     warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
@@ -781,7 +791,6 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 }
             }
         }
-
 
         // decreasing overall temperatures
         for ta in self.tiers.iter_mut() {
@@ -895,7 +904,9 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     // Does this count as an operation? Not really if we define it as some modification operations, have a look at the paper
                     if let Some(prev) = self.objects.get_mut(&key) {
                         if prev.1 != info.pref {
-                            self.tiers[prev.1.or(self.default_storage_class).as_u8() as usize].tier.remove(&key);
+                            self.tiers[prev.1.or(self.default_storage_class).as_u8() as usize]
+                                .tier
+                                .remove(&key);
                             self.tiers[info.pref.or(self.default_storage_class).as_u8() as usize]
                                 .tier
                                 .insert(key, info.size);
@@ -904,36 +915,45 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                         prev.2 = name;
                     } else {
                         // Insert new entry
-                        self.objects.insert(key.clone(), (Vec::new(), info.pref, name));
+                        self.objects
+                            .insert(key.clone(), (Vec::new(), info.pref, name));
                         self.tiers[info.pref.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .insert(key, info.size);
                     }
                 }
-                DatabaseMsg::ObjectClose(_, _) => {},
+                DatabaseMsg::ObjectClose(_, _) => {}
                 DatabaseMsg::ObjectRead(key, dur) => {
                     let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.msg(key, dur);
+                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize]
+                        .tier
+                        .msg(key, dur);
                 }
                 DatabaseMsg::ObjectWrite(key, size, _, dur) => {
                     // FIXME: This might again change the storage tier in which the object is stored
                     // This cannot happen on a read operation
                     let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.update_size(&key, size);
-                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize].tier.msg(key, dur);
+                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize]
+                        .tier
+                        .update_size(&key, size);
+                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize]
+                        .tier
+                        .msg(key, dur);
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     let prev = self.objects.get_mut(&key).unwrap();
                     if pref != prev.1 {
-                        let size = self.tiers[prev.1.or(self.default_storage_class).as_u8() as usize]
+                        if let Some(size) = self.tiers
+                            [prev.1.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .remove(&key)
-                            .unwrap();
-                        self.tiers[pref.or(self.default_storage_class).as_u8() as usize]
-                            .tier
-                            .insert(key, size.num_bytes());
+                        {
+                            self.tiers[pref.or(self.default_storage_class).as_u8() as usize]
+                                .tier
+                                .insert(key, size.num_bytes());
+                        }
                     }
                     prev.1 = pref;
                 }
