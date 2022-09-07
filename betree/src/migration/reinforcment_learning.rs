@@ -644,6 +644,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         > c_not_t_upper * s1_not_t_upper.as_f32()
                             + c_not_t_lower * s1_not_t_lower.as_f32()
                     {
+                        debug!("Found possible improvement");
                         let free_space = self.db.read().free_space_tier();
 
                         // NOTE: The original code simply performs an evitction
@@ -732,6 +733,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
         for tier_id in 1..self.active_storage_classes as usize {
             while (free_space[tier_id - 1].free.as_u64() as f32) < free_space[tier_id - 1].total.as_u64() as f32 * self.config.migration_threshold {
+                debug!("trying to evict full layer");
                 // NOTE:
                 // In this case we obviously have insufficient info
                 // This is due to the uncertainty of objects in the underlying storage, we might end up anywhere
