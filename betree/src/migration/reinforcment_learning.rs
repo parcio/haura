@@ -910,7 +910,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                             .insert(key, info.size);
                     }
                 }
-                DatabaseMsg::ObjectClose(_, _) => todo!(),
+                DatabaseMsg::ObjectClose(_, _) => {},
                 DatabaseMsg::ObjectRead(key, dur) => {
                     let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.0.push(learning::Request::new(dur.clone()));
