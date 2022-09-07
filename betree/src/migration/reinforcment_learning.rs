@@ -563,10 +563,10 @@ const DEFAULT_LAMBDA: f32 = 0.8;
 
 impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
     fn get_or_open_object_store(&self, os_id: &ObjectStoreId) -> ObjectStore<C> {
-        if let Some(store) = self.object_stores.get(&os_id) {
-            todo!()
+        if let Some(Some(store)) = self.object_stores.get(os_id) {
+            store.clone()
         } else {
-            todo!()
+            self.db.write().open_object_store_with_id(os_id.clone()).unwrap()
         }
     }
 
@@ -676,7 +676,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 let mut obj = os.open_object(obj_key)?.unwrap();
                                 obj.migrate(target)?;
                                 obj.close()?;
-                                self.db.write().close_object_store(os);
+                                // NOTE: Object Store should not be open, close quickly..
+                                if let None = self.object_stores.get(coldest.0.store_key()) {
+                                    self.db.write().close_object_store(os);
+                                }
+                                // self.db.write().close_object_store(os);
                                 debug!("Migrating object: {:?} - {} - {tier_id}", coldest.0, tier_id - 1);
                             } else {
                                 warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
@@ -701,7 +705,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 .tier
                                 .insert_with_values(active_obj.clone(), file_info.clone());
                         }
-                        self.db.write().close_object_store(os);
+                        // NOTE: Object Store should not be open, close quickly..
+                        if let None = self.object_stores.get(active_obj.store_key()) {
+                            self.db.write().close_object_store(os);
+                        }
+                        // self.db.write().close_object_store(os);
                     }
                     break;
                 }
@@ -759,7 +767,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     let mut obj = os.open_object(obj_key)?.unwrap();
                     obj.migrate(target)?;
                     obj.close()?;
-                    self.db.write().close_object_store(os);
+                    // NOTE: Object Store should not be open, close quickly..
+                    if let None = self.object_stores.get(coldest.0.store_key()) {
+                        self.db.write().close_object_store(os);
+                    }
                     debug!("Migrating object: {:?} - {} - {tier_id}", coldest.0, tier_id - 1);
                     free_space = self.db.read().free_space_tier();
                 } else {
