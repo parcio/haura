@@ -165,6 +165,11 @@ impl<N> InternalNode<ChildBuffer<N>> {
         (&child.node_pointer, msg)
     }
 
+    pub fn probe_storage_level(&self, key: &[u8]) -> &RwLock<N> {
+        let child = &self.children[self.idx(key)];
+        &child.node_pointer
+    }
+
     pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N {
         let idx = self.idx(key);
         let child = &mut self.children[idx];

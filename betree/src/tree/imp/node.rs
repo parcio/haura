@@ -296,6 +296,11 @@ pub(super) enum ApplyResult<'a, N: 'a> {
     NextNode(&'a mut N),
 }
 
+pub(super) enum ProbeResult<'a, N: 'a> {
+    Leaf,
+    NextNode(&'a RwLock<N>),
+}
+
 pub(super) enum GetRangeResult<'a, T, N: 'a> {
     Data(T),
     NextNode {
@@ -388,6 +393,14 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                     internal.insert_msg_buffer(msg_buffer, msg_action) as isize
                 }
             })
+    }
+
+    pub(super) fn probe_storage_level(&self, key: &[u8]) -> ProbeResult<N> {
+        match self.0 {
+            PackedLeaf(_) => ProbeResult::Leaf,
+            Leaf(_) => ProbeResult::Leaf,
+            Internal(ref internal) => ProbeResult::NextNode(internal.probe_storage_level(key)),
+        }
     }
 
     pub(super) fn apply_with_info(

@@ -14,6 +14,7 @@ use crate::{
     },
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
+    storage_pool::DiskOffset,
     tree::MessageAction,
     StoragePreference,
 };
@@ -377,6 +378,25 @@ where
                 Ok(Some((info, data)))
             }
         }
+    }
+
+    pub(crate) fn probe_storage_level<K: Borrow<[u8]>>(
+        &self,
+        key: K,
+    ) -> Result<StoragePreference, Error> {
+        let key = key.borrow();
+        let mut node = self.get_root_node()?;
+        let mut last_pointer = node.correct_preference();
+        Ok(loop {
+            let next_node = match node.probe_storage_level(key) {
+                node::ProbeResult::Leaf => break last_pointer,
+                node::ProbeResult::NextNode(np) => {
+                    last_pointer = np.read().correct_preference();
+                    self.get_node(np)?
+                }
+            };
+            node = next_node;
+        })
     }
 
     /// "Piercing" update, with insertion logic of a B-Tree.
