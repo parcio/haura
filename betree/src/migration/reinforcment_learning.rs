@@ -667,21 +667,21 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 }
                                 // We can move an object from the upper layer
                                 // NOTE: Tranfer the object from one to another store.
-                                self.tiers[tier_id - 1].tier.remove(&coldest.0);
-                                self.tiers[tier_id]
-                                    .tier
-                                    .insert_with_values(coldest.0.clone(), coldest.1);
                                 let target = StoragePreference::from_u8(tier_id as u8);
                                 let os = self.get_or_open_object_store(coldest.0.store_key());
                                 let obj_key = &self.objects.get(&coldest.0).unwrap().2;
-                                let mut obj = os.open_object(obj_key)?.unwrap();
-                                obj.migrate(target)?;
-                                obj.close()?;
+                                if let Some(mut obj) = os.open_object(obj_key)? {
+                                    obj.migrate(target)?;
+                                    obj.close()?;
+                                    self.tiers[tier_id - 1].tier.remove(&coldest.0);
+                                    self.tiers[tier_id]
+                                        .tier
+                                        .insert_with_values(coldest.0.clone(), coldest.1);
+                                }
                                 // NOTE: Object Store should not be open, close quickly..
                                 if let None = self.object_stores.get(coldest.0.store_key()) {
                                     self.db.write().close_object_store(os);
                                 }
-                                // self.db.write().close_object_store(os);
                                 debug!(
                                     "Migrating object: {:?} - {} - {tier_id}",
                                     coldest.0,
@@ -968,8 +968,8 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
 
     fn demote(
         &mut self,
-        storage_tier: u8,
-        desired: crate::vdev::Block<u64>,
+        _storage_tier: u8,
+        _desired: crate::vdev::Block<u64>,
     ) -> super::errors::Result<crate::vdev::Block<u64>> {
         unimplemented!()
     }
