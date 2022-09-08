@@ -477,6 +477,13 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         self.upsert_with_pref(key, data, offset, StoragePreference::NONE)
     }
 
+    pub(crate) fn probe_storage_location<K: Borrow<[u8]>>(
+        &self,
+        key: K,
+    ) -> Result<StoragePreference> {
+        Ok(self.tree.probe_storage_level(key)?)
+    }
+
     /// Given a key and storage preference notify for this entry to be moved to a new storage level.
     /// If the key is already located on this layer no operation is performed and success is returned.
     ///
@@ -610,6 +617,17 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
             .as_ref()
             .ok_or(ErrorKind::Closed)?
             .upsert(key, data, offset)
+    }
+
+    pub(crate) fn probe_storage_location<K: Borrow<[u8]>>(
+        &self,
+        key: K,
+    ) -> Result<StoragePreference> {
+        self.inner
+            .read()
+            .as_ref()
+            .ok_or(ErrorKind::Closed)?
+            .probe_storage_location(key)
     }
 
     /// Given a key and storage preference notify for this entry to be moved to a new storage level.
