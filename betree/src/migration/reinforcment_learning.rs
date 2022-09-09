@@ -590,6 +590,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
         let active_objects_iter = self.objects.iter().filter(|(_, req)| req.0.len() > 0);
 
+        let mut moved = vec![];
+
         for (active_obj, obj_data) in active_objects_iter {
             // one tier must exist
             if self.tiers[0].tier.contains(active_obj) {
@@ -677,6 +679,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                     self.tiers[tier_id]
                                         .tier
                                         .insert_with_values(coldest.0.clone(), coldest.1);
+                                    moved.push((coldest.0.clone(), tier_id));
                                 }
                                 // NOTE: Object Store should not be open, close quickly..
                                 if let None = self.object_stores.get(coldest.0.store_key()) {
@@ -711,6 +714,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             self.tiers[tier_id - 1]
                                 .tier
                                 .insert_with_values(active_obj.clone(), file_info.clone());
+                            moved.push((active_obj.clone(), tier_id - 1));
                         }
                         // NOTE: Object Store should not be open, close quickly..
                         if let None = self.object_stores.get(active_obj.store_key()) {
@@ -741,6 +745,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 tier_rewards[idx as usize],
                 state,
             );
+        }
+
+        for (key, tier) in moved.into_iter() {
+            self.objects.get_mut(&key).unwrap().1 = StoragePreference::from_u8(tier as u8);
         }
 
         let mut free_space = self.db.read().free_space_tier();
@@ -777,6 +785,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     if let None = self.object_stores.get(coldest.0.store_key()) {
                         self.db.write().close_object_store(os);
                     }
+                    self.objects.get_mut(&coldest.0).unwrap().1 = StoragePreference::from_u8(tier_id as u8 - 1);
                     debug!(
                         "Migrating object: {:?} - {} - {tier_id}",
                         coldest.0,
@@ -802,7 +811,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             tier.tier.wipe_requests();
         }
         for (_obj, entry) in self.objects.iter_mut() {
-            entry.0 = Default::default();
+            entry.0.clear();
         }
         Ok(())
     }
