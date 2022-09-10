@@ -875,7 +875,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         }
 
         for (key, _from, to) in self.delta_moved.iter() {
-            self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(to as u8);
+            self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(*to as u8);
         }
 
         let mut free_space = self.state.db.read().free_space_tier();
@@ -905,10 +905,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     let target = StoragePreference::from_u8(tier_id as u8);
                     let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                     self.state.migrate(&coldest.0, obj_key, target)?;
-                    self.delta_moved
-                        .push((coldest.0, tier_id as u8 - 1, tier_id as u8));
                     self.objects.get_mut(&coldest.0).unwrap().pref =
                         StoragePreference::from_u8(tier_id as u8 - 1);
+                    self.delta_moved
+                        .push((coldest.0, tier_id as u8 - 1, tier_id as u8));
                     free_space = self.db().read().free_space_tier();
                 } else {
                     warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
