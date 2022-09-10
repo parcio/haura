@@ -43,7 +43,8 @@ impl ObjectKey {
 impl Serialize for ObjectKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer {
+        S: serde::Serializer,
+    {
         let key = format!("{}-{}", self.0, self.1);
         serializer.serialize_str(&key)
     }
