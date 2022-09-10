@@ -61,6 +61,7 @@ use speedy::{Readable, Writable};
 use std::{
     borrow::Borrow,
     convert::TryInto,
+    fmt::Display,
     mem,
     ops::{Range, RangeBounds},
     result,
@@ -81,7 +82,9 @@ pub use cursor::ObjectCursor;
 
 const OBJECT_ID_COUNTER_KEY: &[u8] = b"\0oid";
 
-#[derive(Debug, Clone, Copy, Readable, Writable, PartialEq, Eq, Hash)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, Readable, Writable, PartialEq, Eq, Hash, Serialize)]
 /// The internal id of an object after name resolution, to be treated as an opaque identifier of
 /// fixed but unreliable size.
 pub struct ObjectId(u64);
@@ -89,6 +92,12 @@ impl ObjectId {
     #[allow(missing_docs)]
     pub fn as_u64(&self) -> u64 {
         self.0
+    }
+}
+
+impl Display for ObjectId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
     }
 }
 
