@@ -539,18 +539,86 @@ mod learning {
     }
 }
 
+/// Implementation of a reinforcement learning migration policy proposed by
+/// Zhang, Hellander and Toor.
 pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     tiers: Vec<TierAgent>,
-    object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
     // Stores the most recently known storage location and all requests
-    objects: HashMap<ObjectKey, (Vec<learning::Request>, StoragePreference, CowBytes)>,
-    active_storage_classes: u8,
+    objects: HashMap<ObjectKey, ObjectInfo>,
     default_storage_class: StoragePreference,
     config: MigrationConfig<()>,
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg<C>>,
+    state: DatabaseState<C>,
+}
+
+/// A convenience struct to manage all the objects easier. And to please the borrow checker.
+struct DatabaseState<C: DatabaseBuilder + Clone> {
+    object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
+    active_storage_classes: u8,
     db: Arc<RwLock<Database<C>>>,
     dmu: Arc<<C as DatabaseBuilder>::Dmu>,
+}
+
+impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
+    fn get_or_open_object_store<'a>(&'a self, os_id: &ObjectStoreId) -> OsHandle<'a, C> {
+        let os = if let Some(Some(store)) = self.object_stores.get(os_id) {
+            store.clone()
+        } else {
+            self.db
+                .write()
+                .open_object_store_with_id(os_id.clone())
+                .unwrap()
+        };
+        OsHandle {
+            state: &self,
+            act: os,
+            os_id: os_id.clone(),
+        }
+    }
+
+    fn migrate(&mut self, obj_id: &ObjectKey, obj_key: &CowBytes, target: StoragePreference) -> super::errors::Result<()> {
+        let os = self.get_or_open_object_store(obj_id.store_key());
+        let tier_id = target.as_u8() as usize;
+        let mut obj = os.act.open_object(obj_key)?.unwrap();
+        obj.migrate(target)?;
+        obj.close()?;
+        debug!(
+            "Migrating object: {:?} - {} - {tier_id}",
+            obj_id,
+            tier_id - 1
+        );
+        Ok(())
+    }
+}
+
+struct OsHandle<'a, C: DatabaseBuilder + Clone> {
+    state: &'a DatabaseState<C>,
+    act: ObjectStore<C>,
+    os_id: ObjectStoreId,
+}
+
+impl<'a, C: DatabaseBuilder + Clone> Drop for OsHandle<'a, C> {
+    fn drop(&mut self) {
+        // NOTE: Object Store should not be open, close quickly..
+        if let None = self.state.object_stores.get(&self.os_id) {
+            self.state.db.write().close_object_store(self.act.clone());
+        }
+    }
+}
+
+struct ObjectInfo {
+    reqs: Vec<learning::Request>,
+    pref: StoragePreference,
+    key: CowBytes,
+    // An eventual trigger to use when we readjust objects so that we don't move them to their original file back
+    probed_lvl: Option<StoragePreference>,
+}
+
+impl ObjectInfo {
+    fn storage_lvl(&self) -> StoragePreference {
+        self.probed_lvl.unwrap_or(self.pref)
+    }
 }
 
 struct TierAgent {
@@ -562,16 +630,6 @@ const DEFAULT_BETA: f32 = 0.05;
 const DEFAULT_LAMBDA: f32 = 0.8;
 
 impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
-    fn get_or_open_object_store(&self, os_id: &ObjectStoreId) -> ObjectStore<C> {
-        if let Some(Some(store)) = self.object_stores.get(os_id) {
-            store.clone()
-        } else {
-            self.db
-                .write()
-                .open_object_store_with_id(os_id.clone())
-                .unwrap()
-        }
-    }
 
     fn timestep(&mut self) -> super::errors::Result<()> {
         // length of tiers
@@ -579,7 +637,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         let mut tier_results: Vec<learning::State> = vec![];
         // length of tiers
         let mut tier_rewards: Vec<learning::Reward> = vec![];
-        for idx in 0..self.active_storage_classes {
+        for idx in 0..self.state.active_storage_classes {
             let (state, reward) = self.tiers[idx as usize].tier.step(DEFAULT_BETA);
             tier_results.push(state);
             tier_rewards.push(reward);
@@ -588,7 +646,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         let mut request_weight = 0;
         let mut request_large = 0;
 
-        let active_objects_iter = self.objects.iter().filter(|(_, req)| req.0.len() > 0);
+        let active_objects_iter = self.objects.iter().filter(|(_, obj_info)| obj_info.reqs.len() > 0);
 
         let mut moved = vec![];
 
@@ -609,7 +667,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
             // NOTE: Instead we iterate to one more level here
             // see comment below
-            for tier_id in 1..(self.active_storage_classes) as usize {
+            for tier_id in 1..(self.state.active_storage_classes) as usize {
                 if self.tiers[tier_id].tier.contains(active_obj) {
                     // file can be updated or downgraded
                     self.tiers[tier_id].tier.hot_cold(active_obj);
@@ -625,7 +683,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     }
 
                     // Calculate changes
-                    let obj_reqs = &self.objects.get(active_obj).unwrap().0;
+                    let obj_reqs = &self.objects.get(active_obj).unwrap().reqs;
                     // Please borrow checker believe me..
                     let tier_agent_upper = &mut self.tiers[tier_id - 1];
                     let (c_not_t_upper, s1_not_t_upper, c_up_t_upper, s1_up_t_upper) =
@@ -650,7 +708,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             + c_not_t_lower * s1_not_t_lower.as_f32()
                     {
                         debug!("Found possible improvement");
-                        let free_space = self.db.read().free_space_tier();
+                        let free_space = self.state.db.read().free_space_tier();
 
                         // NOTE: The original code simply performs an evitction
                         // of too full storage tiers as a manner of downward
@@ -670,26 +728,13 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 // We can move an object from the upper layer
                                 // NOTE: Tranfer the object from one to another store.
                                 let target = StoragePreference::from_u8(tier_id as u8);
-                                let os = self.get_or_open_object_store(coldest.0.store_key());
-                                let obj_key = &self.objects.get(&coldest.0).unwrap().2;
-                                if let Some(mut obj) = os.open_object(obj_key)? {
-                                    obj.migrate(target)?;
-                                    obj.close()?;
-                                    self.tiers[tier_id - 1].tier.remove(&coldest.0);
-                                    self.tiers[tier_id]
-                                        .tier
-                                        .insert_with_values(coldest.0.clone(), coldest.1);
-                                    moved.push((coldest.0.clone(), tier_id));
-                                }
-                                // NOTE: Object Store should not be open, close quickly..
-                                if let None = self.object_stores.get(coldest.0.store_key()) {
-                                    self.db.write().close_object_store(os);
-                                }
-                                debug!(
-                                    "Migrating object: {:?} - {} - {tier_id}",
-                                    coldest.0,
-                                    tier_id - 1
-                                );
+                                let obj_key = &self.objects.get(&coldest.0).unwrap().key;
+                                self.state.migrate(&coldest.0, obj_key, target)?;
+                                self.tiers[tier_id - 1].tier.remove(&coldest.0);
+                                self.tiers[tier_id]
+                                    .tier
+                                    .insert_with_values(coldest.0.clone(), coldest.1);
+                                moved.push((coldest.0, tier_id));
                             } else {
                                 warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
                                 warn!("Continuing but functionality may be inhibited.");
@@ -700,27 +745,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
                         // NOTE: Migrate new object up
                         let target = StoragePreference::from_u8(tier_id as u8 - 1);
-                        let os = self.get_or_open_object_store(active_obj.store_key());
-                        if let Some(mut obj) = os.open_object(&obj_data.2)? {
-                            obj.migrate(target)?;
-                            debug!(
-                                "Migrating object: {:?} - {tier_id} - {}",
-                                active_obj,
-                                tier_id - 1
-                            );
-                            obj.close()?;
-                            // NOTE: Tranfer the object from one to another store.
-                            self.tiers[tier_id].tier.remove(&active_obj);
-                            self.tiers[tier_id - 1]
-                                .tier
-                                .insert_with_values(active_obj.clone(), file_info.clone());
-                            moved.push((active_obj.clone(), tier_id - 1));
-                        }
-                        // NOTE: Object Store should not be open, close quickly..
-                        if let None = self.object_stores.get(active_obj.store_key()) {
-                            self.db.write().close_object_store(os);
-                        }
-                        // self.db.write().close_object_store(os);
+                        self.state.migrate(&active_obj, &obj_data.key, target)?;
+                        self.tiers[tier_id].tier.remove(&active_obj);
+                        self.tiers[tier_id - 1]
+                            .tier
+                            .insert_with_values(active_obj.clone(), file_info.clone());
+                        moved.push((active_obj.clone(), tier_id - 1));
                     }
                     break;
                 }
@@ -738,7 +768,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
         // NOTE: Check improvements for each tier and learn agents
         // length of tiers
-        for idx in 0..self.active_storage_classes {
+        for idx in 0..self.state.active_storage_classes {
             let (state, _) = self.tiers[idx as usize].tier.step(DEFAULT_BETA);
             self.tiers[idx as usize].agent.learn(
                 tier_results[idx as usize],
@@ -748,12 +778,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         }
 
         for (key, tier) in moved.into_iter() {
-            self.objects.get_mut(&key).unwrap().1 = StoragePreference::from_u8(tier as u8);
+            self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(tier as u8);
         }
 
-        let mut free_space = self.db.read().free_space_tier();
+        let mut free_space = self.state.db.read().free_space_tier();
 
-        for tier_id in 1..self.active_storage_classes as usize {
+        for tier_id in 1..self.state.active_storage_classes as usize {
             while (free_space[tier_id - 1].free.as_u64() as f32)
                 < free_space[tier_id - 1].total.as_u64() as f32 * self.config.migration_threshold
             {
@@ -776,22 +806,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         .tier
                         .insert_with_values(coldest.0.clone(), coldest.1);
                     let target = StoragePreference::from_u8(tier_id as u8);
-                    let os = self.get_or_open_object_store(coldest.0.store_key());
-                    let obj_key = &self.objects.get(&coldest.0).unwrap().2;
-                    let mut obj = os.open_object(obj_key)?.unwrap();
-                    obj.migrate(target)?;
-                    obj.close()?;
-                    // NOTE: Object Store should not be open, close quickly..
-                    if let None = self.object_stores.get(coldest.0.store_key()) {
-                        self.db.write().close_object_store(os);
-                    }
-                    self.objects.get_mut(&coldest.0).unwrap().1 = StoragePreference::from_u8(tier_id as u8 - 1);
-                    debug!(
-                        "Migrating object: {:?} - {} - {tier_id}",
-                        coldest.0,
-                        tier_id - 1
-                    );
-                    free_space = self.db.read().free_space_tier();
+                    let obj_key = &self.objects.get(&coldest.0).unwrap().key;
+                    self.state.migrate(&coldest.0, obj_key, target)?;
+                    self.objects.get_mut(&coldest.0).unwrap().pref = StoragePreference::from_u8(tier_id as u8 - 1);
+                    free_space = self.db().read().free_space_tier();
                 } else {
                     warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
                     warn!("Continuing but functionality may be inhibited.");
@@ -811,7 +829,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             tier.tier.wipe_requests();
         }
         for (_obj, entry) in self.objects.iter_mut() {
-            entry.0.clear();
+            entry.reqs.clear();
         }
         Ok(())
     }
@@ -874,14 +892,16 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         Self {
             dml_rx,
             db_rx,
-            db,
-            dmu,
             tiers,
-            active_storage_classes,
             default_storage_class,
             config,
-            object_stores: Default::default(),
             objects: Default::default(),
+            state: DatabaseState {
+                db,
+                dmu,
+                active_storage_classes,
+                object_stores: Default::default(),
+            },
         }
     }
 }
@@ -902,30 +922,23 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
 
                 // Accumulate object stores
                 DatabaseMsg::ObjectstoreOpen(key, os) => {
-                    self.object_stores.insert(key, Some(os));
+                    self.state.object_stores.insert(key, Some(os));
                 }
                 DatabaseMsg::ObjectstoreClose(key) => {
-                    self.object_stores.insert(key, None);
+                    self.state.object_stores.insert(key, None);
                 }
                 DatabaseMsg::ObjectOpen(key, info, name)
                 | DatabaseMsg::ObjectDiscover(key, info, name) => {
-                    // FIXME: Add the object to the belonging tier
-                    // Does this count as an operation? Not really if we define it as some modification operations, have a look at the paper
-                    if let Some(prev) = self.objects.get_mut(&key) {
-                        if prev.1 != info.pref {
-                            self.tiers[prev.1.or(self.default_storage_class).as_u8() as usize]
-                                .tier
-                                .remove(&key);
-                            self.tiers[info.pref.or(self.default_storage_class).as_u8() as usize]
-                                .tier
-                                .insert(key, info.size);
-                        }
-                        prev.1 = info.pref;
-                        prev.2 = name;
-                    } else {
+                    if !self.objects.contains_key(&key) {
+                        let obj_info = ObjectInfo {
+                            reqs: Vec::new(),
+                            pref: info.pref,
+                            key: name,
+                            probed_lvl: None,
+                        };
                         // Insert new entry
                         self.objects
-                            .insert(key.clone(), (Vec::new(), info.pref, name));
+                            .insert(key.clone(), obj_info);
                         self.tiers[info.pref.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .insert(key, info.size);
@@ -934,8 +947,9 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                 DatabaseMsg::ObjectClose(_, _) => {}
                 DatabaseMsg::ObjectRead(key, dur) => {
                     let obj_info = self.objects.get_mut(&key).unwrap();
-                    obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize]
+                    obj_info.reqs.push(learning::Request::new(dur.clone()));
+                    let pref = obj_info.storage_lvl().or(self.default_storage_class);
+                    self.tiers[pref.as_u8() as usize]
                         .tier
                         .msg(key, dur);
                 }
@@ -943,19 +957,25 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     // FIXME: This might again change the storage tier in which the object is stored
                     // This cannot happen on a read operation
                     let obj_info = self.objects.get_mut(&key).unwrap();
-                    obj_info.0.push(learning::Request::new(dur.clone()));
-                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize]
+                    obj_info.reqs.push(learning::Request::new(dur.clone()));
+                    if obj_info.probed_lvl.is_none() {
+                        let os = self.state.get_or_open_object_store(key.store_key());
+                        let obj = os.act.open_object(&obj_info.key)?.unwrap();
+                        obj_info.probed_lvl = Some(obj.probe_storage_level(0)?);
+                    }
+                    let pref = obj_info.storage_lvl().or(self.default_storage_class);
+                    self.tiers[pref.as_u8() as usize]
                         .tier
                         .update_size(&key, size);
-                    self.tiers[obj_info.1.or(self.default_storage_class).as_u8() as usize]
+                    self.tiers[pref.as_u8() as usize]
                         .tier
                         .msg(key, dur);
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     let prev = self.objects.get_mut(&key).unwrap();
-                    if pref != prev.1 {
+                    if pref != prev.pref {
                         if let Some(size) = self.tiers
-                            [prev.1.or(self.default_storage_class).as_u8() as usize]
+                            [prev.pref.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .remove(&key)
                         {
@@ -964,7 +984,8 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                                 .insert(key, size.num_bytes());
                         }
                     }
-                    prev.1 = pref;
+                    prev.pref = pref;
+                    prev.probed_lvl = None;
                 }
             }
         }
@@ -993,11 +1014,11 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
     }
 
     fn db(&self) -> &std::sync::Arc<parking_lot::RwLock<crate::Database<C>>> {
-        &self.db
+        &self.state.db
     }
 
     fn dmu(&self) -> &std::sync::Arc<<C as DatabaseBuilder>::Dmu> {
-        &self.dmu
+        &self.state.dmu
     }
 
     fn config(&self) -> super::MigrationConfig<()> {
