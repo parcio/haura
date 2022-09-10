@@ -9,7 +9,13 @@ use crate::{
     storage_pool::NUM_STORAGE_CLASSES,
     Database, StoragePreference,
 };
-use std::{collections::HashMap, sync::Arc};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    io::Write,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use super::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicy, ObjectKey};
 // This file contains a migration policy based on reinforcement learning.
@@ -41,7 +47,7 @@ mod learning {
     pub(super) const EULER: f32 = 2.71828;
 
     // How often a file is accessed in certain time range.
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, Serialize)]
     pub struct Hotness(f32);
 
     impl Hotness {
@@ -58,7 +64,7 @@ mod learning {
         }
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Serialize)]
     pub struct Size(u64);
 
     impl Size {
@@ -67,6 +73,7 @@ mod learning {
         }
     }
 
+    #[derive(Serialize)]
     pub struct Tier {
         files: HashMap<ObjectKey, (Hotness, Size, u64)>,
         reqs: HashMap<ObjectKey, Vec<Request>>,
@@ -84,6 +91,10 @@ mod learning {
                 // Constant taken from the original implementation
                 decline_step: 10,
             }
+        }
+
+        pub fn size(&self, obj: &ObjectKey) -> Option<Size> {
+            self.files.get(obj).map(|n| n.1.clone())
         }
 
         pub fn wipe_requests(&mut self) {
@@ -223,12 +234,13 @@ mod learning {
         }
     }
     use rand::Rng;
+    use serde::Serialize;
 
     #[derive(Clone, Copy, Debug)]
     pub struct Reward(f32);
 
     /// The state of a single tier.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Serialize)]
     pub struct State(Hotness, Hotness, Duration);
 
     impl State {
@@ -288,7 +300,7 @@ mod learning {
         Demote(),
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Serialize)]
     pub struct Request {
         response_time: Duration,
     }
@@ -541,15 +553,27 @@ mod learning {
 
 /// Implementation of a reinforcement learning migration policy proposed by
 /// Zhang, Hellander and Toor.
+///
+/// This policy is intended to be used on "uniform" objets which do not use
+/// partial speed up, based on user made assumptions of the object.
 pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     tiers: Vec<TierAgent>,
     // Stores the most recently known storage location and all requests
     objects: HashMap<ObjectKey, ObjectInfo>,
     default_storage_class: StoragePreference,
-    config: MigrationConfig<()>,
+    config: MigrationConfig<Option<RlConfig>>,
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg<C>>,
+    delta_moved: Vec<(ObjectKey, u8, u8)>,
     state: DatabaseState<C>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RlConfig {
+    // Print post-timestep "known" timestep
+    path_state: std::path::PathBuf,
+    // Migration decisions
+    path_delta: std::path::PathBuf,
 }
 
 /// A convenience struct to manage all the objects easier. And to please the borrow checker.
@@ -577,7 +601,12 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
         }
     }
 
-    fn migrate(&mut self, obj_id: &ObjectKey, obj_key: &CowBytes, target: StoragePreference) -> super::errors::Result<()> {
+    fn migrate(
+        &mut self,
+        obj_id: &ObjectKey,
+        obj_key: &CowBytes,
+        target: StoragePreference,
+    ) -> super::errors::Result<()> {
         let os = self.get_or_open_object_store(obj_id.store_key());
         let tier_id = target.as_u8() as usize;
         let mut obj = os.act.open_object(obj_key)?.unwrap();
@@ -629,7 +658,65 @@ struct TierAgent {
 const DEFAULT_BETA: f32 = 0.05;
 const DEFAULT_LAMBDA: f32 = 0.8;
 
+use std::io::BufWriter;
+
+fn open_file_buf_write(
+    path: &std::path::PathBuf,
+) -> super::errors::Result<BufWriter<std::fs::File>> {
+    Ok(BufWriter::new(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(path)?,
+    ))
+}
+
 impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
+    fn metrics(&mut self) -> super::errors::Result<()> {
+        if let Some(p_config) = &self.config.policy_config {
+            // Open files
+            //
+            let total_file = open_file_buf_write(&p_config.path_state)?;
+            let mut delta_file = open_file_buf_write(&p_config.path_delta)?;
+
+            // Write out state
+            //
+            // State is new-line delimited json as the rest of the relevant files
+            serde_json::to_writer(
+                total_file,
+                &self
+                    .tiers
+                    .iter()
+                    .map(|lvl| &lvl.tier)
+                    .collect::<Vec<&learning::Tier>>(),
+            )?;
+            // Write delta
+            //
+            let time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            for event in self.delta_moved.iter() {
+                let pref = self
+                    .objects
+                    .get(&event.0)
+                    .unwrap()
+                    .storage_lvl()
+                    .or(self.default_storage_class);
+                let size = self.tiers[pref.as_u8() as usize]
+                    .tier
+                    .size(&event.0)
+                    .unwrap()
+                    .num_bytes();
+                delta_file.write_fmt(format_args!(
+                    "{},{},{time},{},{}\n",
+                    event.0, size, event.1, event.2
+                ))?;
+            }
+            delta_file.flush()?;
+        }
+        Ok(())
+    }
 
     fn timestep(&mut self) -> super::errors::Result<()> {
         // length of tiers
@@ -646,7 +733,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         let mut request_weight = 0;
         let mut request_large = 0;
 
-        let active_objects_iter = self.objects.iter().filter(|(_, obj_info)| obj_info.reqs.len() > 0);
+        let active_objects_iter = self
+            .objects
+            .iter()
+            .filter(|(_, obj_info)| obj_info.reqs.len() > 0);
 
         let mut moved = vec![];
 
@@ -808,7 +898,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     let target = StoragePreference::from_u8(tier_id as u8);
                     let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                     self.state.migrate(&coldest.0, obj_key, target)?;
-                    self.objects.get_mut(&coldest.0).unwrap().pref = StoragePreference::from_u8(tier_id as u8 - 1);
+                    self.objects.get_mut(&coldest.0).unwrap().pref =
+                        StoragePreference::from_u8(tier_id as u8 - 1);
                     free_space = self.db().read().free_space_tier();
                 } else {
                     warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
@@ -823,7 +914,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         for ta in self.tiers.iter_mut() {
             ta.tier.temp_decrease();
         }
+        Ok(())
+    }
 
+    fn cleanup(&mut self) {
         // Clean-up
         for tier in self.tiers.iter_mut() {
             tier.tier.wipe_requests();
@@ -831,17 +925,14 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         for (_obj, entry) in self.objects.iter_mut() {
             entry.reqs.clear();
         }
-        Ok(())
+        self.delta_moved.clear();
     }
 
     pub(super) fn build(
         dml_rx: crossbeam_channel::Receiver<super::DmlMsg>,
         db_rx: crossbeam_channel::Receiver<super::DatabaseMsg<C>>,
         db: std::sync::Arc<parking_lot::RwLock<crate::Database<C>>>,
-        config: super::MigrationConfig<()>,
-        _storage_hint_sink: std::sync::Arc<
-            parking_lot::Mutex<HashMap<crate::storage_pool::DiskOffset, crate::StoragePreference>>,
-        >,
+        config: super::MigrationConfig<Option<RlConfig>>,
     ) -> Self {
         // We do not provide single node hints in this policy
         let dmu = Arc::clone(db.read().root_tree.dmu());
@@ -896,6 +987,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             default_storage_class,
             config,
             objects: Default::default(),
+            delta_moved: Vec::new(),
             state: DatabaseState {
                 db,
                 dmu,
@@ -937,8 +1029,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                             probed_lvl: None,
                         };
                         // Insert new entry
-                        self.objects
-                            .insert(key.clone(), obj_info);
+                        self.objects.insert(key.clone(), obj_info);
                         self.tiers[info.pref.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .insert(key, info.size);
@@ -949,9 +1040,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.reqs.push(learning::Request::new(dur.clone()));
                     let pref = obj_info.storage_lvl().or(self.default_storage_class);
-                    self.tiers[pref.as_u8() as usize]
-                        .tier
-                        .msg(key, dur);
+                    self.tiers[pref.as_u8() as usize].tier.msg(key, dur);
                 }
                 DatabaseMsg::ObjectWrite(key, size, _, dur) => {
                     // FIXME: This might again change the storage tier in which the object is stored
@@ -967,9 +1056,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     self.tiers[pref.as_u8() as usize]
                         .tier
                         .update_size(&key, size);
-                    self.tiers[pref.as_u8() as usize]
-                        .tier
-                        .msg(key, dur);
+                    self.tiers[pref.as_u8() as usize].tier.msg(key, dur);
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     let prev = self.objects.get_mut(&key).unwrap();
@@ -1010,6 +1097,8 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
             std::thread::sleep(self.config.update_period);
             self.update()?;
             self.timestep()?;
+            self.metrics()?;
+            self.cleanup();
         }
     }
 
@@ -1022,6 +1111,6 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
     }
 
     fn config(&self) -> super::MigrationConfig<()> {
-        self.config.erased()
+        self.config.clone().erased()
     }
 }

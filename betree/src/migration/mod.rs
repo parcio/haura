@@ -21,16 +21,16 @@ use crate::{
 
 use self::{
     lfu::{Lfu, LfuConfig},
-    reinforcment_learning::ZhangHellanderToor,
+    reinforcment_learning::{RlConfig, ZhangHellanderToor},
 };
 
 /// Available policies for auto migrations.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum MigrationPolicies {
     /// Least frequently used, promote and demote nodes based on their usage in the current session.
     Lfu(MigrationConfig<LfuConfig>),
     /// Reinforcment Learning based tier classfication based on Zhang et al. (2022)
-    ReinforcementLearning(MigrationConfig<()>),
+    ReinforcementLearning(MigrationConfig<Option<RlConfig>>),
 }
 
 impl MigrationPolicies {
@@ -45,9 +45,9 @@ impl MigrationPolicies {
             MigrationPolicies::Lfu(config) => {
                 Box::new(Lfu::build(dml_rx, db_rx, db, config, storage_hint_sink))
             }
-            MigrationPolicies::ReinforcementLearning(config) => Box::new(
-                ZhangHellanderToor::build(dml_rx, db_rx, db, config, storage_hint_sink),
-            ),
+            MigrationPolicies::ReinforcementLearning(config) => {
+                Box::new(ZhangHellanderToor::build(dml_rx, db_rx, db, config))
+            }
         }
     }
 }
