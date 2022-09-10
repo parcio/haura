@@ -800,6 +800,14 @@ impl DeadListData {
 )]
 pub struct DatasetId(u64);
 
+use std::fmt::Display;
+
+impl Display for DatasetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
+    }
+}
+
 impl DatasetId {
     pub(crate) fn pack(self) -> [u8; 8] {
         let mut b = [0; 8];
