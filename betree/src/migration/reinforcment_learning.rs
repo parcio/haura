@@ -564,7 +564,7 @@ pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     config: MigrationConfig<Option<RlConfig>>,
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg<C>>,
-    delta_moved: Vec<(ObjectKey, u8, u8)>,
+    delta_moved: Vec<(ObjectKey, u64, u8, u8)>,
     state: DatabaseState<C>,
 }
 
@@ -698,20 +698,9 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 .unwrap()
                 .as_secs();
             for event in self.delta_moved.iter() {
-                let pref = self
-                    .objects
-                    .get(&event.0)
-                    .unwrap()
-                    .storage_lvl()
-                    .or(self.default_storage_class);
-                let size = self.tiers[pref.as_u8() as usize]
-                    .tier
-                    .size(&event.0)
-                    .unwrap()
-                    .num_bytes();
                 delta_file.write_fmt(format_args!(
                     "{},{},{time},{},{}\n",
-                    event.0, size, event.1, event.2
+                    event.0, event.1, event.2, event.3
                 ))?;
             }
             delta_file.flush()?;
@@ -822,9 +811,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 self.tiers[tier_id - 1].tier.remove(&coldest.0);
                                 self.tiers[tier_id]
                                     .tier
-                                    .insert_with_values(coldest.0.clone(), coldest.1);
+                                    .insert_with_values(coldest.0.clone(), coldest.1.clone());
                                 self.delta_moved.push((
                                     coldest.0,
+                                    coldest.1.1.num_bytes(),
                                     tier_id as u8 - 1,
                                     tier_id as u8,
                                 ));
@@ -845,6 +835,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             .insert_with_values(active_obj.clone(), file_info.clone());
                         self.delta_moved.push((
                             active_obj.clone(),
+                            file_info.1.num_bytes(),
                             tier_id as u8,
                             tier_id as u8 - 1,
                         ));
@@ -874,7 +865,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             );
         }
 
-        for (key, _from, to) in self.delta_moved.iter() {
+        for (key, _size, _from, to) in self.delta_moved.iter() {
             self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(*to as u8);
         }
 
@@ -901,14 +892,14 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     self.tiers[tier_id - 1].tier.remove(&coldest.0);
                     self.tiers[tier_id]
                         .tier
-                        .insert_with_values(coldest.0.clone(), coldest.1);
+                        .insert_with_values(coldest.0.clone(), coldest.1.clone());
                     let target = StoragePreference::from_u8(tier_id as u8);
                     let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                     self.state.migrate(&coldest.0, obj_key, target)?;
                     self.objects.get_mut(&coldest.0).unwrap().pref =
                         StoragePreference::from_u8(tier_id as u8 - 1);
                     self.delta_moved
-                        .push((coldest.0, tier_id as u8 - 1, tier_id as u8));
+                        .push((coldest.0, coldest.1.1.num_bytes(), tier_id as u8 - 1, tier_id as u8));
                     free_space = self.db().read().free_space_tier();
                 } else {
                     warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
