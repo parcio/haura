@@ -667,6 +667,7 @@ fn open_file_buf_write(
         std::fs::OpenOptions::new()
             .write(true)
             .append(true)
+            .create(true)
             .open(path)?,
     ))
 }
