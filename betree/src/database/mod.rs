@@ -391,7 +391,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
     }
 
     fn migration_policy(&self) -> Option<MigrationPolicies> {
-        self.migration_policy
+        self.migration_policy.clone()
     }
 }
 

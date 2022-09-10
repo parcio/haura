@@ -6,7 +6,10 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
-use std::time::{Duration, SystemTime};
+use std::{
+    fmt::Display,
+    time::{Duration, SystemTime},
+};
 
 #[derive(Clone)]
 pub enum DmlMsg {
@@ -22,7 +25,9 @@ pub enum DmlMsg {
     Discover(DiskOffset),
 }
 
-#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+use serde::Serialize;
+
+#[derive(Hash, PartialEq, Eq, Clone, Debug, Serialize)]
 pub struct ObjectKey(ObjectStoreId, ObjectId);
 
 impl ObjectKey {
@@ -32,6 +37,12 @@ impl ObjectKey {
 
     pub(crate) fn store_key(&self) -> &ObjectStoreId {
         &self.0
+    }
+}
+
+impl Display for ObjectKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}-{}", self.0, self.1))
     }
 }
 
