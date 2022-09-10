@@ -677,20 +677,21 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         if let Some(p_config) = &self.config.policy_config {
             // Open files
             //
-            let total_file = open_file_buf_write(&p_config.path_state)?;
+            let mut total_file = open_file_buf_write(&p_config.path_state)?;
             let mut delta_file = open_file_buf_write(&p_config.path_delta)?;
 
             // Write out state
             //
             // State is new-line delimited json as the rest of the relevant files
             serde_json::to_writer(
-                total_file,
+                &mut total_file,
                 &self
                     .tiers
                     .iter()
                     .map(|lvl| &lvl.tier)
                     .collect::<Vec<&learning::Tier>>(),
             )?;
+            total_file.write_all(b"\n")?;
             // Write delta
             //
             let time = SystemTime::now()
@@ -814,7 +815,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                     .insert_with_values(coldest.0.clone(), coldest.1.clone());
                                 self.delta_moved.push((
                                     coldest.0,
-                                    coldest.1.1.num_bytes(),
+                                    coldest.1 .1.num_bytes(),
                                     tier_id as u8 - 1,
                                     tier_id as u8,
                                 ));
@@ -898,8 +899,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     self.state.migrate(&coldest.0, obj_key, target)?;
                     self.objects.get_mut(&coldest.0).unwrap().pref =
                         StoragePreference::from_u8(tier_id as u8 - 1);
-                    self.delta_moved
-                        .push((coldest.0, coldest.1.1.num_bytes(), tier_id as u8 - 1, tier_id as u8));
+                    self.delta_moved.push((
+                        coldest.0,
+                        coldest.1 .1.num_bytes(),
+                        tier_id as u8 - 1,
+                        tier_id as u8,
+                    ));
                     free_space = self.db().read().free_space_tier();
                 } else {
                     warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
