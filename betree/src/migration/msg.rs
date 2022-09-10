@@ -27,7 +27,7 @@ pub enum DmlMsg {
 
 use serde::Serialize;
 
-#[derive(Hash, PartialEq, Eq, Clone, Debug, Serialize)]
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
 pub struct ObjectKey(ObjectStoreId, ObjectId);
 
 impl ObjectKey {
@@ -37,6 +37,15 @@ impl ObjectKey {
 
     pub(crate) fn store_key(&self) -> &ObjectStoreId {
         &self.0
+    }
+}
+
+impl Serialize for ObjectKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        let key = format!("{}-{}", self.0, self.1);
+        serializer.serialize_str(&key)
     }
 }
 
