@@ -739,8 +739,6 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             .iter()
             .filter(|(_, obj_info)| obj_info.reqs.len() > 0);
 
-        let mut moved = vec![];
-
         for (active_obj, obj_data) in active_objects_iter {
             // one tier must exist
             if self.tiers[0].tier.contains(active_obj) {
@@ -825,7 +823,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 self.tiers[tier_id]
                                     .tier
                                     .insert_with_values(coldest.0.clone(), coldest.1);
-                                moved.push((coldest.0, tier_id));
+                                self.delta_moved.push((
+                                    coldest.0,
+                                    tier_id as u8 - 1,
+                                    tier_id as u8,
+                                ));
                             } else {
                                 warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
                                 warn!("Continuing but functionality may be inhibited.");
@@ -841,7 +843,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         self.tiers[tier_id - 1]
                             .tier
                             .insert_with_values(active_obj.clone(), file_info.clone());
-                        moved.push((active_obj.clone(), tier_id - 1));
+                        self.delta_moved.push((
+                            active_obj.clone(),
+                            tier_id as u8,
+                            tier_id as u8 - 1,
+                        ));
                     }
                     break;
                 }
@@ -868,8 +874,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             );
         }
 
-        for (key, tier) in moved.into_iter() {
-            self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(tier as u8);
+        for (key, _from, to) in self.delta_moved.iter() {
+            self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(to as u8);
         }
 
         let mut free_space = self.state.db.read().free_space_tier();
@@ -899,6 +905,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     let target = StoragePreference::from_u8(tier_id as u8);
                     let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                     self.state.migrate(&coldest.0, obj_key, target)?;
+                    self.delta_moved
+                        .push((coldest.0, tier_id as u8 - 1, tier_id as u8));
                     self.objects.get_mut(&coldest.0).unwrap().pref =
                         StoragePreference::from_u8(tier_id as u8 - 1);
                     free_space = self.db().read().free_space_tier();
