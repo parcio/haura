@@ -49,8 +49,12 @@ mod dataset;
 pub(crate) mod errors;
 mod handler;
 mod snapshot;
+mod storage_info;
 mod superblock;
 mod sync_timer;
+
+use storage_info::AtomicStorageInfo;
+pub use storage_info::StorageInfo;
 
 #[cfg(feature = "figment_config")]
 mod figment;
@@ -654,40 +658,6 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     #[cfg(feature = "internal-api")]
     pub fn root_tree(&self) -> &RootTree<Config::Dmu> {
         &self.root_tree
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-/// Space information representation for a singular storage tier.
-pub struct StorageInfo {
-    /// Remaining free storage in blocks.
-    pub free: Block<u64>,
-    /// Total storage in blocks.
-    pub total: Block<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-/// Atomic version of [StorageInfo].
-pub(crate) struct AtomicStorageInfo {
-    pub(crate) free: AtomicU64,
-    pub(crate) total: AtomicU64,
-}
-
-impl From<&AtomicStorageInfo> for StorageInfo {
-    fn from(info: &AtomicStorageInfo) -> Self {
-        Self {
-            free: Block(info.free.load(Ordering::Relaxed)),
-            total: Block(info.total.load(Ordering::Relaxed)),
-        }
-    }
-}
-
-impl From<&StorageInfo> for AtomicStorageInfo {
-    fn from(info: &StorageInfo) -> Self {
-        Self {
-            free: AtomicU64::new(info.free.as_u64()),
-            total: AtomicU64::new(info.total.as_u64()),
-        }
     }
 }
 
