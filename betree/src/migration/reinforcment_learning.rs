@@ -589,10 +589,13 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
         let os = if let Some(Some(store)) = self.object_stores.get(os_id) {
             store.clone()
         } else {
-            self.db
+            let start = std::time::Instant::now();
+            let res = self.db
                 .write()
                 .open_object_store_with_id(os_id.clone())
-                .unwrap()
+                .unwrap();
+            debug!("Opening object stoare took {} ms", start.elapsed().as_millis());
+            res
         };
         OsHandle {
             state: &self,
@@ -610,7 +613,9 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
         let os = self.get_or_open_object_store(obj_id.store_key());
         let tier_id = target.as_u8() as usize;
         let mut obj = os.act.open_object(obj_key)?.unwrap();
+        let start = std::time::Instant::now();
         obj.migrate(target)?;
+        debug!("Migrating object took {} ms", start.elapsed().as_millis());
         obj.close()?;
         debug!(
             "Migrating object: {:?} - {} - {tier_id}",
@@ -1100,10 +1105,12 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         std::thread::sleep(self.config.grace_period);
         loop {
             std::thread::sleep(self.config.update_period);
+            let start = std::time::Instant::now();
             self.update()?;
             self.timestep()?;
             self.metrics()?;
             self.cleanup();
+            debug!("Iteration took {} ms", start.elapsed().as_millis());
         }
     }
 
