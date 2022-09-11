@@ -135,9 +135,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                 .iter()
                 .tuple_windows()
                 .filter(|((_, high_info), (_, low_info))| {
-                    (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32)
-                        > (1.0 - threshold)
-                        && low_info.total != Block(0)
+                    high_info.percent_full() < threshold && low_info.total != Block(0)
                 })
             {
                 self.promote(*low_tier)?;
@@ -146,10 +144,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                 .iter()
                 .tuple_windows()
                 .filter(|((_, high_info), (_, low_info))| {
-                    (high_info.free.as_u64() as f32 / high_info.total.as_u64() as f32)
-                        < (1.0 - threshold)
-                        && (low_info.free.as_u64() as f32 / low_info.total.as_u64() as f32)
-                            > (1.0 - threshold)
+                    high_info.percent_full() > threshold && low_info.percent_full() < threshold
                 })
             {
                 // TODO: Calculate moving size, until threshold barely not fulfilled?
