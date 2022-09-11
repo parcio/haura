@@ -590,11 +590,15 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
             store.clone()
         } else {
             let start = std::time::Instant::now();
-            let res = self.db
+            let res = self
+                .db
                 .write()
                 .open_object_store_with_id(os_id.clone())
                 .unwrap();
-            debug!("Opening object stoare took {} ms", start.elapsed().as_millis());
+            debug!(
+                "Opening object stoare took {} ms",
+                start.elapsed().as_millis()
+            );
             res
         };
         OsHandle {
@@ -878,8 +882,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         let mut free_space = self.state.db.read().free_space_tier();
 
         for tier_id in 1..self.state.active_storage_classes as usize {
-            while (free_space[tier_id - 1].free.as_u64() as f32)
-                < free_space[tier_id - 1].total.as_u64() as f32 * self.config.migration_threshold
+            while free_space[tier_id - 1].percent_full() > self.config.migration_threshold
+                && free_space[tier_id].percent_full() < self.config.migration_threshold
             {
                 debug!("trying to evict full layer");
                 // NOTE:
