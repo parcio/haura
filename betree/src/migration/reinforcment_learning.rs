@@ -151,14 +151,18 @@ mod learning {
             self.files.get_mut(key).map(|entry| entry.1 = Size(size));
         }
 
-        pub fn coldest(&mut self) -> Option<(ObjectKey, (Hotness, Size, u64))> {
+        pub fn coldest(
+            &mut self,
+        ) -> Option<(ObjectKey, ((Hotness, Size, u64), Option<Vec<Request>>))> {
             self.files
                 .iter()
                 .min_by(|(_, v_left), (_, v_right)| v_left.0 .0.total_cmp(&v_right.0 .0))
                 .map(|(key, val)| (key.clone(), val.clone()))
                 .and_then(|(key, val)| {
-                    self.files.remove(&key);
-                    Some((key, val))
+                    // This is already "val"
+                    let _ = self.files.remove(&key);
+                    let reqs = self.reqs.remove(&key);
+                    Some((key, (val, reqs)))
                 })
         }
 
@@ -839,7 +843,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             // if there is not enough space left migrate down
                             // get coldest file
                             if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                                if coldest.1 .1.num_bytes() > lower.free.to_bytes() {
+                                if coldest.1 .0 .1.num_bytes() > lower.free.to_bytes() {
                                     warn!("Could not get enough space for file to be migrated downwards");
                                     continue;
                                 }
@@ -848,14 +852,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 let target = StoragePreference::from_u8(tier_id as u8);
                                 let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                                 self.state.migrate(&coldest.0, obj_key, target)?;
-                                let removed =
-                                    self.tiers[tier_id - 1].tier.remove(&coldest.0).unwrap();
                                 self.tiers[tier_id]
                                     .tier
-                                    .insert_full(coldest.0.clone(), removed);
+                                    .insert_full(coldest.0.clone(), coldest.1.clone());
                                 self.delta_moved.push((
                                     coldest.0,
-                                    coldest.1 .1.num_bytes(),
+                                    coldest.1 .0 .1.num_bytes(),
                                     tier_id as u8 - 1,
                                     tier_id as u8,
                                 ));
@@ -938,16 +940,15 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 // need some kind of reporting to the objects in which storage
                 // they end up.
                 if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                    if coldest.1 .1.num_bytes() > lower.free.to_bytes() {
+                    if coldest.1 .0 .1.num_bytes() > lower.free.to_bytes() {
                         warn!("Could not get enough space for file to be migrated downwards");
                         break;
                     }
                     // We can move an object from the upper layer
                     // NOTE: Tranfer the object from one to another store.
-                    let removed = self.tiers[tier_id - 1].tier.remove(&coldest.0).unwrap();
                     self.tiers[tier_id]
                         .tier
-                        .insert_full(coldest.0.clone(), removed);
+                        .insert_full(coldest.0.clone(), coldest.1.clone());
                     let target = StoragePreference::from_u8(tier_id as u8);
                     let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                     self.state.migrate(&coldest.0, obj_key, target)?;
@@ -955,7 +956,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         StoragePreference::from_u8(tier_id as u8 - 1);
                     self.delta_moved.push((
                         coldest.0,
-                        coldest.1 .1.num_bytes(),
+                        coldest.1 .0 .1.num_bytes(),
                         tier_id as u8 - 1,
                         tier_id as u8,
                     ));
@@ -1135,14 +1136,14 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     let prev = self.objects.get_mut(&key).unwrap();
                     if pref != prev.pref {
-                        if let Some(size) = self.tiers
+                        if let Some(info) = self.tiers
                             [prev.pref.or(self.default_storage_class).as_u8() as usize]
                             .tier
                             .remove(&key)
                         {
                             self.tiers[pref.or(self.default_storage_class).as_u8() as usize]
                                 .tier
-                                .insert(key, size.0 .1.num_bytes());
+                                .insert_full(key, info);
                         }
                     }
                     prev.pref = pref;
