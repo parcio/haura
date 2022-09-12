@@ -117,7 +117,7 @@ mod learning {
             }
         }
 
-        pub(super) fn insert_with_values(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
+        fn insert_with_values(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
             self.files.insert(key, entry);
         }
 
@@ -125,8 +125,27 @@ mod learning {
             self.files.insert(key, (Hotness(0.5), Size(size), 0));
         }
 
-        pub fn remove(&mut self, key: &ObjectKey) -> Option<Size> {
-            self.files.remove(key).map(|(_, s, _)| s)
+        /// Insert the result of [remove] into a tier again.
+        pub fn insert_full(
+            &mut self,
+            key: ObjectKey,
+            content: ((Hotness, Size, u64), Option<Vec<Request>>),
+        ) {
+            self.files.insert(key.clone(), content.0);
+            if let Some(reqs) = content.1 {
+                self.reqs.insert(key, reqs);
+            }
+        }
+
+        pub fn remove(
+            &mut self,
+            key: &ObjectKey,
+        ) -> Option<((Hotness, Size, u64), Option<Vec<Request>>)> {
+            self.files.remove(key).map(|file_data| {
+                // If the files are contained this has to also
+                let reqs = self.reqs.remove(key);
+                (file_data, reqs)
+            })
         }
 
         pub fn update_size(&mut self, key: &ObjectKey, size: u64) {
@@ -818,10 +837,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 let target = StoragePreference::from_u8(tier_id as u8);
                                 let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                                 self.state.migrate(&coldest.0, obj_key, target)?;
-                                self.tiers[tier_id - 1].tier.remove(&coldest.0);
+                                let removed =
+                                    self.tiers[tier_id - 1].tier.remove(&coldest.0).unwrap();
                                 self.tiers[tier_id]
                                     .tier
-                                    .insert_with_values(coldest.0.clone(), coldest.1.clone());
+                                    .insert_full(coldest.0.clone(), removed);
                                 self.delta_moved.push((
                                     coldest.0,
                                     coldest.1 .1.num_bytes(),
@@ -839,10 +859,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         // NOTE: Migrate new object up
                         let target = StoragePreference::from_u8(tier_id as u8 - 1);
                         self.state.migrate(&active_obj, &obj_data.key, target)?;
-                        self.tiers[tier_id].tier.remove(&active_obj);
+                        let removed = self.tiers[tier_id].tier.remove(&active_obj).unwrap();
                         self.tiers[tier_id - 1]
                             .tier
-                            .insert_with_values(active_obj.clone(), file_info.clone());
+                            .insert_full(active_obj.clone(), removed);
                         self.delta_moved.push((
                             active_obj.clone(),
                             file_info.1.num_bytes(),
@@ -899,10 +919,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     }
                     // We can move an object from the upper layer
                     // NOTE: Tranfer the object from one to another store.
-                    self.tiers[tier_id - 1].tier.remove(&coldest.0);
+                    let removed = self.tiers[tier_id - 1].tier.remove(&coldest.0).unwrap();
                     self.tiers[tier_id]
                         .tier
-                        .insert_with_values(coldest.0.clone(), coldest.1.clone());
+                        .insert_full(coldest.0.clone(), removed);
                     let target = StoragePreference::from_u8(tier_id as u8);
                     let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                     self.state.migrate(&coldest.0, obj_key, target)?;
@@ -1082,7 +1102,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                         {
                             self.tiers[pref.or(self.default_storage_class).as_u8() as usize]
                                 .tier
-                                .insert(key, size.num_bytes());
+                                .insert(key, size.0 .1.num_bytes());
                         }
                     }
                     prev.pref = pref;
