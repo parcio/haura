@@ -3,8 +3,8 @@ use parking_lot::RwLock;
 
 use crate::{
     cow_bytes::CowBytes,
-    data_management::DmlWithStorageHints,
-    database::DatabaseBuilder,
+    data_management::{DmlWithHandler, DmlWithStorageHints},
+    database::{DatabaseBuilder, StorageInfo},
     object::{ObjectStore, ObjectStoreId},
     storage_pool::NUM_STORAGE_CLASSES,
     Database, StoragePreference,
@@ -815,20 +815,32 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             + c_not_t_lower * s1_not_t_lower.as_f32()
                     {
                         debug!("Found possible improvement");
-                        let free_space = self.state.db.read().free_space_tier();
+                        let upper: StorageInfo = self
+                            .state
+                            .dmu
+                            .handler()
+                            .free_space_tier
+                            .get(tier_id - 1)
+                            .unwrap()
+                            .into();
+                        let lower: StorageInfo = self
+                            .state
+                            .dmu
+                            .handler()
+                            .free_space_tier
+                            .get(tier_id)
+                            .unwrap()
+                            .into();
 
                         // NOTE: The original code simply performs an evitction
                         // of too full storage tiers as a manner of downward
                         // migration, we simply pick the lowest temperature for
                         // that.
-                        if ((free_space[tier_id - 1].total.as_u64() as f32
-                            * self.config.migration_threshold) as u64)
-                            > free_space[tier_id - 1].free.as_u64()
-                        {
+                        if upper.percent_full() < self.config.migration_threshold {
                             // if there is not enough space left migrate down
                             // get coldest file
                             if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                                if coldest.1 .1.num_bytes() > free_space[tier_id].free.to_bytes() {
+                                if coldest.1 .1.num_bytes() > lower.free.to_bytes() {
                                     warn!("Could not get enough space for file to be migrated downwards");
                                     continue;
                                 }
@@ -899,11 +911,25 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(*to as u8);
         }
 
-        let mut free_space = self.state.db.read().free_space_tier();
-
         for tier_id in 1..self.state.active_storage_classes as usize {
-            while free_space[tier_id - 1].percent_full() > self.config.migration_threshold
-                && free_space[tier_id].percent_full() < self.config.migration_threshold
+            let mut upper: StorageInfo = self
+                .state
+                .dmu
+                .handler()
+                .free_space_tier
+                .get(tier_id - 1)
+                .unwrap()
+                .into();
+            let mut lower: StorageInfo = self
+                .state
+                .dmu
+                .handler()
+                .free_space_tier
+                .get(tier_id)
+                .unwrap()
+                .into();
+            while upper.percent_full() > self.config.migration_threshold
+                && lower.percent_full() < self.config.migration_threshold
             {
                 debug!("trying to evict full layer");
                 // NOTE:
@@ -913,7 +939,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 // need some kind of reporting to the objects in which storage
                 // they end up.
                 if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                    if coldest.1 .1.num_bytes() > free_space[tier_id].free.to_bytes() {
+                    if coldest.1 .1.num_bytes() > lower.free.to_bytes() {
                         warn!("Could not get enough space for file to be migrated downwards");
                         break;
                     }
@@ -934,7 +960,22 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         tier_id as u8 - 1,
                         tier_id as u8,
                     ));
-                    free_space = self.db().read().free_space_tier();
+                    upper = self
+                        .state
+                        .dmu
+                        .handler()
+                        .free_space_tier
+                        .get(tier_id - 1)
+                        .unwrap()
+                        .into();
+                    lower = self
+                        .state
+                        .dmu
+                        .handler()
+                        .free_space_tier
+                        .get(tier_id)
+                        .unwrap()
+                        .into();
                 } else {
                     warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
                     warn!("Continuing but functionality may be inhibited.");
