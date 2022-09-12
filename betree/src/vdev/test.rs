@@ -163,7 +163,9 @@ impl VdevLeafRead for FailingLeafVdev {
         let end_offset = offset + byte_size;
         assert!(
             end_offset <= self.buffer.lock().len(),
-            format!("{} <= {}", end_offset, self.buffer.lock().len())
+            "{} <= {}",
+            end_offset,
+            self.buffer.lock().len()
         );
 
         let v = match self.fail_reads.read() {

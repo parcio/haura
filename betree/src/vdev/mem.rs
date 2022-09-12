@@ -9,7 +9,6 @@ use crate::{
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::{
-    convert::TryInto,
     io::{self, Write},
     ops::{Deref, DerefMut},
     sync::atomic::Ordering,

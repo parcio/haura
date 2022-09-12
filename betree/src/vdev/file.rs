@@ -6,7 +6,6 @@ use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
 use std::{
-    convert::TryInto,
     fs, io,
     os::unix::{
         fs::{FileExt, FileTypeExt},

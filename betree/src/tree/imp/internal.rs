@@ -9,7 +9,7 @@ use crate::{
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, collections::BTreeMap, mem::replace, sync::atomic::AtomicU8};
+use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -690,7 +690,7 @@ mod tests {
             return TestResult::discard();
         }
         let size_before = node.size();
-        let (mut right_sibling, pivot_key, size_delta) = node.split();
+        let (mut right_sibling, _pivot_key, size_delta) = node.split();
         assert_eq!(size_before as isize + size_delta, node.size() as isize);
         check_size(&mut node);
         check_size(&mut right_sibling);
@@ -704,7 +704,7 @@ mod tests {
             return TestResult::discard();
         }
         let twin = node.clone();
-        let (mut right_sibling, pivot_key, size_delta) = node.split();
+        let (mut right_sibling, pivot_key, _size_delta) = node.split();
 
         assert!(node.fanout() >= 2);
         assert!(right_sibling.fanout() >= 2);

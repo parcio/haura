@@ -11,10 +11,10 @@ use std::{
 use crate::{
     cow_bytes::CowBytes,
     data_management::DmlWithStorageHints,
-    database::{DatabaseBuilder, DatasetId, ObjectRef},
-    object::{ObjectId, ObjectStore, ObjectStoreId},
+    database::DatabaseBuilder,
+    object::{ObjectStore, ObjectStoreId},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
-    vdev::{Block, BLOCK_SIZE},
+    vdev::Block,
     Database, StoragePreference,
 };
 

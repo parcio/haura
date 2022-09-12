@@ -1,7 +1,5 @@
 use betree_storage_stack::{
     cache::{Cache, ClockCache},
-    compression::DecompressionTag,
-    database::{DatasetId, Generation},
     storage_pool::DiskOffset,
     vdev::Block,
 };

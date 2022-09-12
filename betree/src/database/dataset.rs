@@ -85,7 +85,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     pub fn open_custom_dataset<M: MessageAction + Default + 'static>(
         &mut self,
         name: &[u8],
-        storage_preference: StoragePreference,
+        _storage_preference: StoragePreference,
     ) -> Result<Dataset<Config, M>> {
         let id = self.lookup_dataset_id(name)?;
         self.open_dataset_with_id_and_name(id, name)

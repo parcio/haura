@@ -46,7 +46,7 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, DatasetId, Error, ErrorKind, ObjectRef, Result},
+    database::{DatabaseBuilder, DatasetId, Error, ErrorKind, Result},
     migration::{DatabaseMsg, ObjectKey},
     size::StaticSize,
     tree::{DefaultMessageAction, TreeBaseLayer, TreeLayer},
@@ -54,7 +54,6 @@ use crate::{
     Database, Dataset, StoragePreference,
 };
 
-use byteorder::LittleEndian;
 use crossbeam_channel::Sender;
 use speedy::{Readable, Writable};
 
@@ -318,8 +317,8 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         default_storage_preference: StoragePreference,
         report: Option<Sender<DatabaseMsg<Config>>>,
     ) -> Result<ObjectStore<Config>> {
-        let d_id = data.id();
-        let m_id = metadata.id();
+        let _d_id = data.id();
+        let _m_id = metadata.id();
         let store = ObjectStore {
             id,
             object_id_counter: {

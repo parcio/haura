@@ -1,6 +1,6 @@
 use crate::{
     cow_bytes::CowBytes,
-    database::{DatabaseBuilder, Dataset, DatasetId},
+    database::{DatabaseBuilder, DatasetId},
     object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
     vdev::Block,
