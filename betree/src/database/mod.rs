@@ -10,9 +10,7 @@ use crate::{
         DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{
-        DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicies, MigrationPolicy, ObjectKey,
-    },
+    migration::{DatabaseMsg, DmlMsg, MigrationPolicies, MigrationPolicy, ObjectKey},
     object::ObjectStoreId,
     size::StaticSize,
     storage_pool::{
@@ -28,7 +26,7 @@ use crate::{
 };
 use bincode::{deserialize, serialize_into};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;

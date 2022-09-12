@@ -5,9 +5,8 @@ use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
     database::StorageInfo,
-    migration::DmlMsg,
     size::{Size, StaticSize},
-    storage_pool::{AtomicSystemStoragePreference, DiskOffset},
+    storage_pool::DiskOffset,
     vdev::Block,
     StoragePreference,
 };

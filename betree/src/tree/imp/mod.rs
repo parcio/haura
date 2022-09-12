@@ -9,24 +9,15 @@ use super::{
 use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{
-        impls::ObjectPointer, Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef,
-    },
+    data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef},
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
-    storage_pool::DiskOffset,
     tree::MessageAction,
     StoragePreference,
 };
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
-use std::{
-    borrow::Borrow,
-    collections::VecDeque,
-    marker::PhantomData,
-    mem,
-    ops::{Deref, RangeBounds},
-};
+use std::{borrow::Borrow, collections::VecDeque, marker::PhantomData, mem, ops::RangeBounds};
 
 #[derive(Debug)]
 enum FillUpResult {

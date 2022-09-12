@@ -8,8 +8,8 @@ use crate::{
     cache::{AddSize, Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
     compression::{CompressionBuilder, DecompressionTag},
-    data_management::{CopyOnWriteReason, DmlWithReport},
-    migration::{ConstructReport, DmlMsg},
+    data_management::CopyOnWriteReason,
+    migration::ConstructReport,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
@@ -32,7 +32,6 @@ use std::{
         Arc,
     },
     thread::yield_now,
-    time::SystemTime,
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -104,7 +103,7 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
         unimplemented!()
     }
 
-    fn set_system_storage_preference(&mut self, pref: StoragePreference) {
+    fn set_system_storage_preference(&mut self, _pref: StoragePreference) {
         unimplemented!()
     }
 }
@@ -173,7 +172,7 @@ impl<D, I, G> HasStoragePreference for ObjectPointer<D, I, G> {
         unimplemented!()
     }
 
-    fn set_system_storage_preference(&mut self, pref: StoragePreference) {
+    fn set_system_storage_preference(&mut self, _pref: StoragePreference) {
         unimplemented!()
     }
 }
@@ -829,7 +828,7 @@ where
                     let mut modified_children = false;
                     object
                         .for_each_child::<(), _>(|or| loop {
-                            let (mid) = match or {
+                            let mid = match or {
                                 ObjectRef::Unmodified(..) => break Ok(()),
                                 ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => (*mid),
                             };

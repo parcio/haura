@@ -3,7 +3,6 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::Size,
-    storage_pool::AtomicSystemStoragePreference,
     tree::KeyInfo,
     StoragePreference,
 };
@@ -11,7 +10,6 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::{
     cmp,
     io::{self, Write},
-    iter::FromIterator,
     mem::size_of,
 };
 

@@ -6,7 +6,6 @@ use crate::{
     data_management::{DmlWithHandler, DmlWithStorageHints},
     database::{DatabaseBuilder, StorageInfo},
     object::{ObjectStore, ObjectStoreId},
-    storage_pool::NUM_STORAGE_CLASSES,
     Database, StoragePreference,
 };
 use serde::{Deserialize, Serialize};
@@ -42,7 +41,7 @@ mod learning {
 
     use std::{collections::HashMap, ops::Index, time::Duration};
 
-    use crate::{migration::ObjectKey, StoragePreference};
+    use crate::migration::ObjectKey;
 
     pub(super) const EULER: f32 = 2.71828;
 
@@ -166,7 +165,7 @@ mod learning {
         pub fn msg(&mut self, key: ObjectKey, dur: Duration) {
             self.reqs
                 .entry(key)
-                .and_modify(|mut tup| tup.push(Request::new(dur)))
+                .and_modify(|tup| tup.push(Request::new(dur)))
                 .or_insert(vec![Request::new(dur)]);
         }
 
@@ -1154,7 +1153,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         Ok(())
     }
 
-    fn promote(&mut self, storage_tier: u8) -> super::errors::Result<crate::vdev::Block<u32>> {
+    fn promote(&mut self, _storage_tier: u8) -> super::errors::Result<crate::vdev::Block<u32>> {
         unimplemented!()
     }
 
