@@ -908,10 +908,6 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             );
         }
 
-        for (key, _size, _from, to) in self.delta_moved.iter() {
-            self.objects.get_mut(&key).unwrap().pref = StoragePreference::from_u8(*to as u8);
-        }
-
         for tier_id in 1..self.state.active_storage_classes as usize {
             let mut upper: StorageInfo = self
                 .state
@@ -952,8 +948,6 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     let target = StoragePreference::from_u8(tier_id as u8);
                     let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                     self.state.migrate(&coldest.0, obj_key, target)?;
-                    self.objects.get_mut(&coldest.0).unwrap().pref =
-                        StoragePreference::from_u8(tier_id as u8 - 1);
                     self.delta_moved.push((
                         coldest.0,
                         coldest.1 .0 .1.num_bytes(),
@@ -983,6 +977,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     break;
                 }
             }
+        }
+
+        for (key, _size, _from, to) in self.delta_moved.iter() {
+            let obj = self.objects.get_mut(&key).unwrap();
+            obj.pref = StoragePreference::from_u8(*to as u8);
+            obj.probed_lvl = None;
         }
 
         // decreasing overall temperatures
