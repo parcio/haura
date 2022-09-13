@@ -1122,11 +1122,12 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     // This cannot happen on a read operation
                     let obj_info = self.objects.get_mut(&key).unwrap();
                     obj_info.reqs.push(learning::Request::new(dur.clone()));
-                    if obj_info.probed_lvl.is_none() {
-                        let os = self.state.get_or_open_object_store(key.store_key());
-                        let obj = os.act.open_object(&obj_info.key)?.unwrap();
-                        obj_info.probed_lvl = Some(obj.probe_storage_level(0)?);
-                    }
+                    // NOTE: Ignore probing for now this has proven to be too erroneous and unreliable
+                    // if obj_info.probed_lvl.is_none() {
+                    //     let os = self.state.get_or_open_object_store(key.store_key());
+                    //     let obj = os.act.open_object(&obj_info.key)?.unwrap();
+                    //     obj_info.probed_lvl = Some(obj.probe_storage_level(0)?);
+                    // }
                     let pref = obj_info.storage_lvl().or(self.default_storage_class);
                     self.tiers[pref.as_u8() as usize]
                         .tier
