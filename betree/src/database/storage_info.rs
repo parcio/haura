@@ -19,6 +19,11 @@ impl StorageInfo {
     pub fn percent_full(&self) -> f32 {
         1.0 - self.percent_free()
     }
+
+    pub fn block_overshoot(&self, threshold: f32) -> Block<u64> {
+        let threshold = threshold.clamp(0.0, 1.0);
+        Block((self.total.0 as f32 * (1.0 - threshold) - self.free.0 as f32).ceil().clamp(0.0, f32::MAX) as u64)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
