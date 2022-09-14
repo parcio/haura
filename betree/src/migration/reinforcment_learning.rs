@@ -2,11 +2,11 @@ use crossbeam_channel::Receiver;
 use parking_lot::RwLock;
 
 use crate::{
-    vdev::Block,
     cow_bytes::CowBytes,
     data_management::{DmlWithHandler, DmlWithStorageHints},
     database::{DatabaseBuilder, StorageInfo},
     object::{ObjectStore, ObjectStoreId},
+    vdev::Block,
     Database, StoragePreference,
 };
 use serde::{Deserialize, Serialize};
@@ -843,36 +843,32 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         if upper.percent_full() < self.config.migration_threshold {
                             // if there is not enough space left migrate down
                             // get coldest file
-                            let mut to_be_moved = upper.block_overshoot(self.config.migration_threshold).as_u64();
-                            while to_be_moved > 0 {
-                                if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                                    if coldest.1 .0 .1.num_bytes() > lower.free.to_bytes() {
-                                        warn!("Could not get enough space for file to be migrated downwards");
-                                        continue;
-                                    }
-                                    // We can move an object from the upper layer
-                                    // NOTE: Tranfer the object from one to another store.
-                                    let target = StoragePreference::from_u8(tier_id as u8);
-                                    let obj_key = &self.objects.get(&coldest.0).unwrap().key;
-                                    // assume minimum size
-                                    let size = Block::from_bytes(coldest.1.0.1.num_bytes());
-                                    to_be_moved = to_be_moved.saturating_sub(size.as_u64());
-                                    self.state.migrate(&coldest.0, obj_key, target)?;
-                                    self.tiers[tier_id]
-                                        .tier
-                                        .insert_full(coldest.0.clone(), coldest.1.clone());
-                                    self.delta_moved.push((
-                                        coldest.0,
-                                        coldest.1 .0 .1.num_bytes(),
-                                        tier_id as u8 - 1,
-                                        tier_id as u8,
-                                    ));
-                                } else {
-                                    warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
-                                    warn!("Continuing but functionality may be inhibited.");
-                                    warn!("Consider using a different policy.");
+                            if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
+                                if coldest.1 .0 .1.num_bytes() > lower.free.to_bytes() {
+                                    warn!("Could not get enough space for file to be migrated downwards");
                                     continue;
                                 }
+                                // We can move an object from the upper layer
+                                // NOTE: Tranfer the object from one to another store.
+                                let target = StoragePreference::from_u8(tier_id as u8);
+                                let obj_key = &self.objects.get(&coldest.0).unwrap().key;
+                                // assume minimum size
+                                let size = Block::from_bytes(coldest.1 .0 .1.num_bytes());
+                                self.state.migrate(&coldest.0, obj_key, target)?;
+                                self.tiers[tier_id]
+                                    .tier
+                                    .insert_full(coldest.0.clone(), coldest.1.clone());
+                                self.delta_moved.push((
+                                    coldest.0,
+                                    coldest.1 .0 .1.num_bytes(),
+                                    tier_id as u8 - 1,
+                                    tier_id as u8,
+                                ));
+                            } else {
+                                warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
+                                warn!("Continuing but functionality may be inhibited.");
+                                warn!("Consider using a different policy.");
+                                continue;
                             }
                         }
 
@@ -992,7 +988,6 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 state,
             );
         }
-
 
         // decreasing overall temperatures
         for ta in self.tiers.iter_mut() {
@@ -1181,9 +1176,13 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         loop {
             std::thread::sleep(self.config.update_period);
             let start = std::time::Instant::now();
+            debug!("Update");
             self.update()?;
+            debug!("Timestep");
             self.timestep()?;
+            debug!("Metrics");
             self.metrics()?;
+            debug!("Cleanup");
             self.cleanup();
             debug!("Iteration took {} ms", start.elapsed().as_millis());
         }
