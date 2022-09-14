@@ -1089,13 +1089,12 @@ where
                                 trace!("write_back: Was Ok Some");
                                 self.handle_write_back(object, mid, false).map_err(|err| {
                                     let mut cache = self.cache.write();
-                                    cache
+                                    let _ = cache
                                         .change_key::<(), _>(
                                             &ObjectKey::InWriteback(mid),
                                             // Has to have been in the modified state before
                                             |_, _, _| Ok(ObjectKey::Modified(mid)),
-                                        )
-                                        .unwrap();
+                                        );
                                     err
                                 })?;
                             }
