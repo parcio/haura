@@ -55,8 +55,11 @@ fn convert_err(database::Error(kind, _): database::Error) -> io::Error {
     use database::ErrorKind;
     match kind {
         ErrorKind::Io(io_err) => io_err,
-        // FIXME: this may eat io::Errors hidden deeper into the result chain
-        _ => io::Error::from(io::ErrorKind::Other),
+        // FIXME: this eats io::Errors hidden deeper into the result chain
+        e => {
+            dbg!("Encountered error: {:?}", e);
+            io::Error::from(io::ErrorKind::Other)
+        }
     }
 }
 
