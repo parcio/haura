@@ -904,7 +904,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             // migration.
         }
 
-        for tier_id in 1..self.state.active_storage_classes as usize {
+        for tier_id in (1..self.state.active_storage_classes as usize).rev() {
             let mut upper: StorageInfo = self
                 .state
                 .dmu
