@@ -77,6 +77,8 @@ mod learning {
     pub struct Tier {
         files: HashMap<ObjectKey, (Hotness, Size, u64)>,
         reqs: HashMap<ObjectKey, Vec<Request>>,
+        #[serde(skip)]
+        rng: rand::rngs::ThreadRng,
         decline_step: u64,
     }
 
@@ -88,6 +90,7 @@ mod learning {
             Self {
                 files: Default::default(),
                 reqs: Default::default(),
+                rng: rand::thread_rng(),
                 // Constant taken from the original implementation
                 decline_step: 10,
             }
@@ -122,7 +125,7 @@ mod learning {
         }
 
         pub fn insert(&mut self, key: ObjectKey, size: u64) {
-            self.files.insert(key, (Hotness(0.5), Size(size), 0));
+            self.files.insert(key, (Hotness(self.rng.gen_range(0.0..1.0)), Size(size), 0));
         }
 
         /// Insert the result of [remove] into a tier again.
