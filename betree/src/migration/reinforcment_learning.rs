@@ -125,7 +125,8 @@ mod learning {
         }
 
         pub fn insert(&mut self, key: ObjectKey, size: u64) {
-            self.files.insert(key, (Hotness(self.rng.gen_range(0.0..1.0)), Size(size), 0));
+            self.files
+                .insert(key, (Hotness(self.rng.gen_range(0.0..1.0)), Size(size), 0));
         }
 
         /// Insert the result of [remove] into a tier again.
@@ -822,30 +823,33 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             + c_not_t_lower * s1_not_t_lower.as_f32()
                     {
                         debug!("Found possible improvement");
-                        let upper: StorageInfo = self
-                            .state
-                            .dmu
-                            .handler()
-                            .free_space_tier
-                            .get(tier_id - 1)
-                            .unwrap()
-                            .into();
-                        let lower: StorageInfo = self
-                            .state
-                            .dmu
-                            .handler()
-                            .free_space_tier
-                            .get(tier_id)
-                            .unwrap()
-                            .into();
 
                         // NOTE: The original code simply performs an evitction
                         // of too full storage tiers as a manner of downward
                         // migration, we simply pick the lowest temperature for
                         // that.
-                        if upper.percent_full() < self.config.migration_threshold {
-                            // if there is not enough space left migrate down
-                            // get coldest file
+                        let object_size = Block::from_bytes(self.tiers[tier_id].tier.size(&active_obj).unwrap().num_bytes()).0;
+                        loop {
+                            let upper: StorageInfo = self
+                                .state
+                                .dmu
+                                .handler()
+                                .free_space_tier
+                                .get(tier_id - 1)
+                                .unwrap()
+                                .into();
+                            let lower: StorageInfo = self
+                                .state
+                                .dmu
+                                .handler()
+                                .free_space_tier
+                                .get(tier_id)
+                                .unwrap()
+                                .into();
+
+                            if 1.0 - ((upper.free.0 + object_size) as f32 / upper.total.0 as f32) <= self.config.migration_threshold {
+                                break;
+                            }
                             if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
                                 if coldest.1 .0 .1.num_bytes() > lower.free.to_bytes() {
                                     warn!("Could not get enough space for file to be migrated downwards");
@@ -871,7 +875,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 warn!("Migration Daemon could not migrate from full layer as no object was found which inhabits this layer.");
                                 warn!("Continuing but functionality may be inhibited.");
                                 warn!("Consider using a different policy.");
-                                continue;
+                                break;
                             }
                         }
 
@@ -949,7 +953,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         tier_id as u8 - 1,
                         tier_id as u8,
                     ));
-                    // self.db().write().sync();
+                    // self.db().write().sync()?;
                     upper = self
                         .state
                         .dmu
