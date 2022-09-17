@@ -1,9 +1,9 @@
 //! A naive metrics system, logging newline-delimited JSON to a configurable file.
 
 use crate::{
-    data_management::{DmlWithCache, DmlWithSpl},
-    database::DatabaseBuilder,
-    storage_pool::StoragePoolLayer,
+    data_management::{DmlWithCache, DmlWithHandler, DmlWithSpl, Handler},
+    database::{DatabaseBuilder, StorageInfo},
+    storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -51,6 +51,7 @@ struct Metrics<Config: DatabaseBuilder> {
     epoch_ms: u128,
     cache: <Config::Dmu as DmlWithCache>::CacheStats,
     storage: <Config::Spu as StoragePoolLayer>::Metrics,
+    usage: Vec<StorageInfo>,
 }
 
 fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<Config::Dmu>)
@@ -72,6 +73,10 @@ where
                 .unwrap_or(u128::MAX),
             cache: dmu.cache_stats(),
             storage: spu.metrics(),
+            // We can be sure that the following is always correct
+            usage: (0..NUM_STORAGE_CLASSES as u8)
+                .map(|tier| dmu.handler().get_free_space_tier(tier).unwrap().into())
+                .collect(),
         };
 
         let mut res = || -> io::Result<()> {
