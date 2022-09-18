@@ -422,8 +422,8 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
         let mut moved = Block(0_u64);
         for bucket in 0..NUM_SIZE_BUCKETS {
             let mut foo = vec![];
-            while let Some((objectkey, name)) =
-                self.object_buckets.0[storage_tier as usize][bucket].pop_mfu_key_value()
+            while let Some((objectkey, name, freq)) =
+                self.object_buckets.0[storage_tier as usize][bucket].pop_mfu_key_value_frequency()
             {
                 if let (Some(store_result), Some(lifted)) = (
                     self.object_stores.get(objectkey.store_key()),
@@ -439,10 +439,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                         let new_location = ObjectLocation(lifted, size);
                         Self::insert_object(
                             &mut self.object_buckets,
-                            new_location,
-                            objectkey,
+                            new_location.clone(),
+                            objectkey.clone(),
                             name,
                         );
+                        for _ in 0..freq {
+                            let _ = Self::get_object(&mut self.object_buckets, &new_location, &objectkey);
+                        }
                         moved += Block::from_bytes(size);
                     } else {
                         // NOTE: If not active we may try to open the store.
@@ -460,10 +463,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 let new_location = ObjectLocation(lifted, size);
                                 Self::insert_object(
                                     &mut self.object_buckets,
-                                    new_location,
-                                    objectkey,
+                                    new_location.clone(),
+                                    objectkey.clone(),
                                     name,
                                 );
+                                for _ in 0..freq {
+                                    let _ = Self::get_object(&mut self.object_buckets, &new_location, &objectkey);
+                                }
                                 moved += Block::from_bytes(size);
                             }
                             db.close_object_store(os);
@@ -485,22 +491,6 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                 break;
             }
         }
-        // NOTE: This has been removed as demotion on node basis is too unreliable to bring proper advantages.
-        // while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
-        //     if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
-        //         if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
-        //             debug!("Moving {:?}", entry.offset);
-        //             debug!("Was on storage tier: {:?}", storage_tier);
-        //             self.storage_hint_dml.lock().insert(entry.offset, lowered);
-        //             moved += Block(entry.size.as_u64());
-        //             debug!("New storage preference: {:?}", lowered);
-        //         }
-        //     } else {
-        //         // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
-        //         // See https://github.com/jwuensche/lfu-cache
-        //         warn!("Cache indicated that it is not empty but no value could be fetched.");
-        //     }
-        // }
         Ok(moved)
     }
 
@@ -516,8 +506,8 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
             // also to reduce it's complexity. If you are reading this "we"
             // might be even you :D
             let mut foo = vec![];
-            while let Some((objectkey, name)) =
-                self.object_buckets.0[storage_tier as usize][bucket].pop_lfu_key_value()
+            while let Some((objectkey, name, freq)) =
+                self.object_buckets.0[storage_tier as usize][bucket].pop_lfu_key_value_frequency()
             {
                 if let (Some(store_result), Some(lowered)) = (
                     self.object_stores.get(objectkey.store_key()),
@@ -533,10 +523,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                         let new_location = ObjectLocation(lowered, size);
                         Self::insert_object(
                             &mut self.object_buckets,
-                            new_location,
-                            objectkey,
+                            new_location.clone(),
+                            objectkey.clone(),
                             name,
                         );
+                        for _ in 0..freq {
+                            let _ = Self::get_object(&mut self.object_buckets, &new_location, &objectkey);
+                        }
                         moved += Block::from_bytes(size);
                     } else {
                         // NOTE: If not active we may try to open the store.
@@ -554,10 +547,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 let new_location = ObjectLocation(lowered, size);
                                 Self::insert_object(
                                     &mut self.object_buckets,
-                                    new_location,
-                                    objectkey,
+                                    new_location.clone(),
+                                    objectkey.clone(),
                                     name,
                                 );
+                                for _ in 0..freq {
+                                    let _ = Self::get_object(&mut self.object_buckets, &new_location, &objectkey);
+                                }
                                 moved += Block::from_bytes(size);
                             }
                             db.close_object_store(os);
