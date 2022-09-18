@@ -100,7 +100,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
     // status for all afflicted objects
     fn update(&mut self) -> Result<()>;
 
-    fn promote(&mut self, storage_tier: u8) -> Result<Block<u32>>;
+    fn promote(&mut self, storage_tier: u8) -> Result<Block<u64>>;
     fn demote(&mut self, storage_tier: u8, desired: Block<u64>) -> Result<Block<u64>>;
 
     // Getters
@@ -140,6 +140,17 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
             {
                 self.promote(*low_tier)?;
             }
+
+            // Update after iteration
+            let infos: Vec<(u8, StorageInfo)> = (0u8..NUM_STORAGE_CLASSES as u8)
+                .filter_map(|class| {
+                    self.dmu()
+                        .handler()
+                        .get_free_space_tier(class)
+                        .map(|blocks| (class, blocks))
+                })
+                .collect();
+
             for ((high_tier, high_info), (_low_tier, _low_info)) in infos
                 .iter()
                 .tuple_windows()

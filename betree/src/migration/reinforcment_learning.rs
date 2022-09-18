@@ -828,7 +828,14 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         // of too full storage tiers as a manner of downward
                         // migration, we simply pick the lowest temperature for
                         // that.
-                        let object_size = Block::from_bytes(self.tiers[tier_id].tier.size(&active_obj).unwrap().num_bytes()).0;
+                        let object_size = Block::from_bytes(
+                            self.tiers[tier_id]
+                                .tier
+                                .size(&active_obj)
+                                .unwrap()
+                                .num_bytes(),
+                        )
+                        .0;
                         loop {
                             let upper: StorageInfo = self
                                 .state
@@ -847,7 +854,9 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 .unwrap()
                                 .into();
 
-                            if 1.0 - ((upper.free.0 + object_size) as f32 / upper.total.0 as f32) <= self.config.migration_threshold {
+                            if 1.0 - ((upper.free.0 + object_size) as f32 / upper.total.0 as f32)
+                                <= self.config.migration_threshold
+                            {
                                 break;
                             }
                             if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
@@ -1166,7 +1175,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         Ok(())
     }
 
-    fn promote(&mut self, _storage_tier: u8) -> super::errors::Result<crate::vdev::Block<u32>> {
+    fn promote(&mut self, _storage_tier: u8) -> super::errors::Result<crate::vdev::Block<u64>> {
         unimplemented!()
     }
 
