@@ -481,7 +481,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
         // DEMOTION OF OBJECTS - Use active object stores?
         // Try to demote smallest objects first migrating as many as possible to
         // the next lower storage class.
-        for bucket in 0..NUM_SIZE_BUCKETS {
+        for bucket in (0..NUM_SIZE_BUCKETS).skip(3).chain(0..2) {
             // NOTE: This function turned out to have a quite high code width
             // with a maximum of 8 indentation.. this is too high. It would be
             // good to to refactor this code as we continue to work on haura
