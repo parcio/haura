@@ -382,37 +382,103 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
 }
 
 impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
-    fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u32>> {
+    fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u64>> {
         // PROMOTE OF NODES
-        let mut moved = Block(0_u32);
-        let mut num_moved = 0;
-        while moved < self.config.policy_config.promote_size
-            && num_moved < self.config.policy_config.promote_num
-            && !self.leafs[storage_tier as usize].is_empty()
-        {
-            if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
-                if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
-                    debug!("Moving {:?}", entry.offset);
-                    debug!("Was on storage tier: {:?}", storage_tier);
-                    self.storage_hint_dml.lock().insert(entry.offset, lifted);
-                    debug!("New storage preference: {:?}", lifted);
-                    moved += entry.size;
-                    num_moved += 1;
+        // let mut moved = Block(0_u32);
+        // let mut num_moved = 0;
+        // while moved < self.config.policy_config.promote_size
+        //     && num_moved < self.config.policy_config.promote_num
+        //     && !self.leafs[storage_tier as usize].is_empty()
+        // {
+        //     if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
+        //         if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
+        //             debug!("Moving {:?}", entry.offset);
+        //             debug!("Was on storage tier: {:?}", storage_tier);
+        //             self.storage_hint_dml.lock().insert(entry.offset, lifted);
+        //             debug!("New storage preference: {:?}", lifted);
+        //             moved += entry.size;
+        //             num_moved += 1;
+        //         }
+        //     } else {
+        //         // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
+        //         // See https://github.com/jwuensche/lfu-cache
+        //         warn!("Cache indicated that it is not empty but no value could be fetched.");
+        //     }
+        // }
+        // return Ok(moved);
+
+        let desired = Block(self.config.policy_config.promote_size.as_u64());
+
+        let mut moved = Block(0_u64);
+        for bucket in 0..NUM_SIZE_BUCKETS {
+            let mut foo = vec![];
+            while let Some((objectkey, name)) =
+                self.object_buckets.0[storage_tier as usize][bucket].pop_mfu_key_value()
+            {
+                if let (Some(store_result), Some(lifted)) = (
+                    self.object_stores.get(objectkey.store_key()),
+                    StoragePreference::from_u8(storage_tier).lift(),
+                ) {
+                    // NOTE: Object store can either be unused or active.
+                    if let Some(active_store) = store_result.as_ref() {
+                        let mut obj = active_store.open_object(&name).unwrap().unwrap();
+                        obj.migrate(lifted).expect("Could not migrate");
+                        let size = self.objects.get(&objectkey).unwrap().1;
+                        moved += Block::from_bytes(size);
+                    } else {
+                        // NOTE: If not active we may try to open the store.
+                        // This carries some implications to the actual user
+                        // using the storage stack and should be fixed.
+
+                        // Best effort to try to open an object store.
+                        if let Some(mut db) = self.db.try_write() {
+                            let os = db.open_object_store_with_id(objectkey.store_key().clone())?;
+                            if let Some(mut obj) = os.open_object(&*name)? {
+                                obj.migrate(lifted)?;
+                                let size = self.objects.get(&objectkey).unwrap().1;
+                                moved += Block::from_bytes(size);
+                            }
+                            db.close_object_store(os);
+                        }
+                    }
+
+                    if moved >= desired {
+                        break;
+                    }
+                } else {
+                    foo.push((objectkey, name))
                 }
-            } else {
-                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
-                // See https://github.com/jwuensche/lfu-cache
-                warn!("Cache indicated that it is not empty but no value could be fetched.");
+            }
+            // This more of shitty fix bc we only have active stores rn, pls FIXME
+            for (key, name) in foo.into_iter() {
+                self.object_buckets.0[storage_tier as usize][bucket].insert(key, name);
+            }
+            if moved >= desired {
+                break;
             }
         }
-        return Ok(moved);
+        // NOTE: This has been removed as demotion on node basis is too unreliable to bring proper advantages.
+        // while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
+        //     if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
+        //         if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
+        //             debug!("Moving {:?}", entry.offset);
+        //             debug!("Was on storage tier: {:?}", storage_tier);
+        //             self.storage_hint_dml.lock().insert(entry.offset, lowered);
+        //             moved += Block(entry.size.as_u64());
+        //             debug!("New storage preference: {:?}", lowered);
+        //         }
+        //     } else {
+        //         // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
+        //         // See https://github.com/jwuensche/lfu-cache
+        //         warn!("Cache indicated that it is not empty but no value could be fetched.");
+        //     }
+        // }
+        Ok(moved)
     }
 
     fn demote(&mut self, storage_tier: u8, desired: Block<u64>) -> Result<Block<u64>> {
-        // DEMOTE OF NODES
         let mut moved = Block(0_u64);
         // DEMOTION OF OBJECTS - Use active object stores?
-        // TODO: Extend to generally all object stores.
         // Try to demote smallest objects first migrating as many as possible to
         // the next lower storage class.
         for bucket in 0..NUM_SIZE_BUCKETS {
@@ -433,7 +499,6 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                     if let Some(active_store) = store_result.as_ref() {
                         let mut obj = active_store.open_object(&name).unwrap().unwrap();
                         obj.migrate(lowered).expect("Could not migrate");
-                        for _ in obj.read_all_chunks()? {}
                         let size = self.objects.get(&objectkey).unwrap().1;
                         moved += Block::from_bytes(size);
                     } else {
