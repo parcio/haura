@@ -619,6 +619,20 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
     ///
     /// Implemented for objects atm due to road blocks.
     fn metrics(&self) -> Result<()> {
+
+        #[derive(Serialize)]
+        struct Dummy {
+            files: HashMap<ObjectKey, (f32, u64, u32)>,
+        }
+
+        impl Dummy {
+            fn new() -> Self {
+                Dummy {
+                    files: HashMap::new(),
+                }
+            }
+        }
+
         // Hashmap key to
         // (Hotness, Size, pausesteps)
         if let Some(Some(mut file)) = self
@@ -629,13 +643,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
             .map(|path| open_file_buf_write(path).ok())
         {
             // Map to be compatible to the metric output from RL policy
-            let mut maps: [HashMap<ObjectKey, (f32, u64, u32)>; NUM_STORAGE_CLASSES] =
-                [0; NUM_STORAGE_CLASSES].map(|_| HashMap::new());
+            let mut maps: [Dummy; NUM_STORAGE_CLASSES] =
+                [0; NUM_STORAGE_CLASSES].map(|_| Dummy::new());
 
             let d_class = self.object_buckets.1;
             for (obj, loc) in self.objects.iter() {
                 let pref = loc.pref_id(d_class);
-                maps[pref].insert(obj.clone(), (0.0, loc.1, 0));
+                maps[pref].files.insert(obj.clone(), (0.0, loc.1, 0));
             }
             serde_json::to_writer(&mut file, &maps)?;
             file.write_all(b"\n")?;
