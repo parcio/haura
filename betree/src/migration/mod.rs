@@ -100,6 +100,8 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
     // status for all afflicted objects
     fn update(&mut self) -> Result<()>;
 
+    fn metrics(&self) -> Result<()>;
+
     fn promote(&mut self, storage_tier: u8) -> Result<Block<u64>>;
     fn demote(&mut self, storage_tier: u8, desired: Block<u64>) -> Result<Block<u64>>;
 
@@ -164,6 +166,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                         - high_info.free.as_u64();
                 self.demote(*high_tier, desired)?;
             }
+            self.metrics()?;
         }
     }
 }
