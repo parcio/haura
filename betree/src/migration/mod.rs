@@ -133,14 +133,14 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                 })
                 .collect();
 
-            for ((_high_tier, _high_info), (low_tier, _low_info)) in infos
+            for ((high_tier, _high_info)) in infos
                 .iter()
-                .tuple_windows()
-                .filter(|((_, high_info), (_, low_info))| {
-                    high_info.percent_full() < threshold && low_info.total != Block(0)
+                .skip(1)
+                .filter(|((_, high_info))| {
+                    high_info.total != Block(0)
                 })
             {
-                self.promote(*low_tier)?;
+                self.promote(*high_tier)?;
             }
 
             // Update after iteration
