@@ -446,7 +446,6 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                             let os = db.open_object_store_with_id(objectkey.store_key().clone())?;
                             if let Some(mut obj) = os.open_object(&*name)? {
                                 obj.migrate(lowered)?;
-                                for _ in obj.read_all_chunks()? {}
                                 let size = self.objects.get(&objectkey).unwrap().1;
                                 moved += Block::from_bytes(size);
                             }
@@ -469,22 +468,22 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                 break;
             }
         }
-
-        while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
-            if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
-                if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
-                    debug!("Moving {:?}", entry.offset);
-                    debug!("Was on storage tier: {:?}", storage_tier);
-                    self.storage_hint_dml.lock().insert(entry.offset, lowered);
-                    moved += Block(entry.size.as_u64());
-                    debug!("New storage preference: {:?}", lowered);
-                }
-            } else {
-                // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
-                // See https://github.com/jwuensche/lfu-cache
-                warn!("Cache indicated that it is not empty but no value could be fetched.");
-            }
-        }
+        // NOTE: This has been removed as demotion on node basis is too unreliable to bring proper advantages.
+        // while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
+        //     if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
+        //         if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
+        //             debug!("Moving {:?}", entry.offset);
+        //             debug!("Was on storage tier: {:?}", storage_tier);
+        //             self.storage_hint_dml.lock().insert(entry.offset, lowered);
+        //             moved += Block(entry.size.as_u64());
+        //             debug!("New storage preference: {:?}", lowered);
+        //         }
+        //     } else {
+        //         // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
+        //         // See https://github.com/jwuensche/lfu-cache
+        //         warn!("Cache indicated that it is not empty but no value could be fetched.");
+        //     }
+        // }
         Ok(moved)
     }
 
