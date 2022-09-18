@@ -6,6 +6,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Display,
     sync::Arc,
+    io::Write,
 };
 
 use crate::{
@@ -18,7 +19,10 @@ use crate::{
     Database, StoragePreference,
 };
 
-use super::{errors::Result, DatabaseMsg, DmlMsg, MigrationConfig, ObjectKey};
+use super::{
+    errors::Result, reinforcment_learning::open_file_buf_write, DatabaseMsg, DmlMsg,
+    MigrationConfig, ObjectKey,
+};
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 /// Internal Object Representation to locate objects on changing buckets and tiers
@@ -79,7 +83,7 @@ impl ObjectLocation {
 }
 
 /// Lfu specific configuration details.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct LfuConfig {
     /// Maximum number of nodes to be promoted at once. An object size is
     /// maximum 4 MiB.
@@ -87,6 +91,10 @@ pub struct LfuConfig {
     /// Maximum amount of blocks to promote at once. An object size is maximum 4
     /// MiB.
     promote_size: Block<u32>,
+    // Print post-timestep "known" timestep
+    path_state: Option<std::path::PathBuf>,
+    // Migration decisions
+    path_delta: Option<std::path::PathBuf>,
 }
 
 impl Default for LfuConfig {
@@ -94,6 +102,8 @@ impl Default for LfuConfig {
         Self {
             promote_num: u32::MAX,
             promote_size: Block(128),
+            path_state: None,
+            path_delta: None,
         }
     }
 }
@@ -423,7 +433,16 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                     if let Some(active_store) = store_result.as_ref() {
                         let mut obj = active_store.open_object(&name).unwrap().unwrap();
                         obj.migrate(lifted).expect("Could not migrate");
-                        let size = self.objects.get(&objectkey).unwrap().1;
+                        let entry = self.objects.get_mut(&objectkey).unwrap();
+                        let size = entry.1;
+                        entry.0 = lifted;
+                        let new_location = ObjectLocation(lifted, size);
+                        Self::insert_object(
+                            &mut self.object_buckets,
+                            new_location,
+                            objectkey,
+                            name,
+                        );
                         moved += Block::from_bytes(size);
                     } else {
                         // NOTE: If not active we may try to open the store.
@@ -435,7 +454,16 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                             let os = db.open_object_store_with_id(objectkey.store_key().clone())?;
                             if let Some(mut obj) = os.open_object(&*name)? {
                                 obj.migrate(lifted)?;
-                                let size = self.objects.get(&objectkey).unwrap().1;
+                                let entry = self.objects.get_mut(&objectkey).unwrap();
+                                let size = entry.1;
+                                entry.0 = lifted;
+                                let new_location = ObjectLocation(lifted, size);
+                                Self::insert_object(
+                                    &mut self.object_buckets,
+                                    new_location,
+                                    objectkey,
+                                    name,
+                                );
                                 moved += Block::from_bytes(size);
                             }
                             db.close_object_store(os);
@@ -499,7 +527,16 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                     if let Some(active_store) = store_result.as_ref() {
                         let mut obj = active_store.open_object(&name).unwrap().unwrap();
                         obj.migrate(lowered).expect("Could not migrate");
-                        let size = self.objects.get(&objectkey).unwrap().1;
+                        let entry = self.objects.get_mut(&objectkey).unwrap();
+                        let size = entry.1;
+                        entry.0 = lowered;
+                        let new_location = ObjectLocation(lowered, size);
+                        Self::insert_object(
+                            &mut self.object_buckets,
+                            new_location,
+                            objectkey,
+                            name,
+                        );
                         moved += Block::from_bytes(size);
                     } else {
                         // NOTE: If not active we may try to open the store.
@@ -511,7 +548,16 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                             let os = db.open_object_store_with_id(objectkey.store_key().clone())?;
                             if let Some(mut obj) = os.open_object(&*name)? {
                                 obj.migrate(lowered)?;
-                                let size = self.objects.get(&objectkey).unwrap().1;
+                                let entry = self.objects.get_mut(&objectkey).unwrap();
+                                let size = entry.1;
+                                entry.0 = lowered;
+                                let new_location = ObjectLocation(lowered, size);
+                                Self::insert_object(
+                                    &mut self.object_buckets,
+                                    new_location,
+                                    objectkey,
+                                    name,
+                                );
                                 moved += Block::from_bytes(size);
                             }
                             db.close_object_store(os);
@@ -557,7 +603,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
     }
 
     fn config(&self) -> MigrationConfig<()> {
-        self.config.erased()
+        self.config.clone().erased()
     }
 
     fn update(&mut self) -> Result<()> {
@@ -567,5 +613,35 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
 
     fn dmu(&self) -> &Arc<<C as DatabaseBuilder>::Dmu> {
         &self.dmu
+    }
+
+    /// Write metrics about current timestep
+    ///
+    /// Implemented for objects atm due to road blocks.
+    fn metrics(&self) -> Result<()> {
+        // Hashmap key to
+        // (Hotness, Size, pausesteps)
+        if let Some(Some(mut file)) = self
+            .config
+            .policy_config
+            .path_state
+            .as_ref()
+            .map(|path| open_file_buf_write(path).ok())
+        {
+            // Map to be compatible to the metric output from RL policy
+            let mut maps: [HashMap<ObjectKey, (f32, u64, u32)>; NUM_STORAGE_CLASSES] =
+                [0; NUM_STORAGE_CLASSES].map(|_| HashMap::new());
+
+            let d_class = self.object_buckets.1;
+            for (obj, loc) in self.objects.iter() {
+                let pref = loc.pref_id(d_class);
+                maps[pref].insert(obj.clone(), (0.0, loc.1, 0));
+            }
+            serde_json::to_writer(&mut file, &maps)?;
+            file.write_all(b"\n")?;
+            file.flush()?;
+        }
+
+        Ok(())
     }
 }

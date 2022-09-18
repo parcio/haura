@@ -696,7 +696,7 @@ const DEFAULT_LAMBDA: f32 = 0.8;
 
 use std::io::BufWriter;
 
-fn open_file_buf_write(
+pub(super) fn open_file_buf_write(
     path: &std::path::PathBuf,
 ) -> super::errors::Result<BufWriter<std::fs::File>> {
     Ok(BufWriter::new(
@@ -709,42 +709,6 @@ fn open_file_buf_write(
 }
 
 impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
-    fn metrics(&mut self) -> super::errors::Result<()> {
-        if let Some(p_config) = &self.config.policy_config {
-            // Open files
-            //
-            let mut total_file = open_file_buf_write(&p_config.path_state)?;
-            let mut delta_file = open_file_buf_write(&p_config.path_delta)?;
-
-            // Write out state
-            //
-            // State is new-line delimited json as the rest of the relevant files
-            serde_json::to_writer(
-                &mut total_file,
-                &self
-                    .tiers
-                    .iter()
-                    .map(|lvl| &lvl.tier)
-                    .collect::<Vec<&learning::Tier>>(),
-            )?;
-            total_file.write_all(b"\n")?;
-            // Write delta
-            //
-            let time = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            for event in self.delta_moved.iter() {
-                delta_file.write_fmt(format_args!(
-                    "{},{},{time},{},{}\n",
-                    event.0, event.1, event.2, event.3
-                ))?;
-            }
-            delta_file.flush()?;
-        }
-        Ok(())
-    }
-
     fn timestep(&mut self) -> super::errors::Result<()> {
         // length of tiers
         // saves for each tier the list of possible states?
@@ -1214,5 +1178,41 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
 
     fn config(&self) -> super::MigrationConfig<()> {
         self.config.clone().erased()
+    }
+
+    fn metrics(&self) -> super::errors::Result<()> {
+        if let Some(p_config) = &self.config.policy_config {
+            // Open files
+            //
+            let mut total_file = open_file_buf_write(&p_config.path_state)?;
+            let mut delta_file = open_file_buf_write(&p_config.path_delta)?;
+
+            // Write out state
+            //
+            // State is new-line delimited json as the rest of the relevant files
+            serde_json::to_writer(
+                &mut total_file,
+                &self
+                    .tiers
+                    .iter()
+                    .map(|lvl| &lvl.tier)
+                    .collect::<Vec<&learning::Tier>>(),
+            )?;
+            total_file.write_all(b"\n")?;
+            // Write delta
+            //
+            let time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            for event in self.delta_moved.iter() {
+                delta_file.write_fmt(format_args!(
+                    "{},{},{time},{},{}\n",
+                    event.0, event.1, event.2, event.3
+                ))?;
+            }
+            delta_file.flush()?;
+        }
+        Ok(())
     }
 }
