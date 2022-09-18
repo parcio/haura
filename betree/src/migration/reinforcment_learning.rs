@@ -92,7 +92,7 @@ mod learning {
                 reqs: Default::default(),
                 rng: rand::thread_rng(),
                 // Constant taken from the original implementation
-                decline_step: 10,
+                decline_step: 5,
             }
         }
 
