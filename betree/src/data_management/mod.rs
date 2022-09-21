@@ -177,6 +177,10 @@ pub trait HandlerDml: DmlBase {
     /// Evicts excessive cache entries.
     fn evict(&self) -> Result<(), Error>;
 
+    #[cfg(feature = "experimental-api")]
+    /// Clear the entire cache of evictable objects
+    fn clear_cache(&self) -> Result<(), Error>;
+
     /// Turns an ObjectPointer into an ObjectReference.
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
 
