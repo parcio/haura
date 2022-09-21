@@ -20,8 +20,7 @@ where
     type CacheValueRef = <T::Target as HandlerDml>::CacheValueRef;
     type CacheValueRefMut = <T::Target as HandlerDml>::CacheValueRefMut;
 
-    fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
-        (**self).try_get(or)
+    fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {(**self).try_get(or)
     }
 
     fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, Error> {
@@ -62,6 +61,11 @@ where
 
     fn evict(&self) -> Result<(), Error> {
         (**self).evict()
+    }
+
+    #[cfg(feature = "experimental-api")]
+    fn clear_cache(&self) -> Result<(), Error> {
+        (**self).clear_cache()
     }
 
     fn verify_cache(&self) {

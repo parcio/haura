@@ -74,3 +74,5 @@ figment_config = ["figment"]
 # leaf vdev. This requires additional system calls due to time measuring and is
 # therefore safeguarded into it's own feature
 latency_metrics = []
+
+experimental-api = []

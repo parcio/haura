@@ -639,6 +639,12 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         Ok(())
     }
 
+    #[cfg(feature = "experimental-api")]
+    pub fn clear_cache(&self) -> Result<()> {
+        self.root_tree.dmu().clear_cache();
+        Ok(())
+    }
+
     /// Storage tier information for all available tiers. These are in order as in `storage_prefernce.as_u8()`
     pub fn free_space_tier(&self) -> Vec<StorageInfo> {
         (0..self.root_tree.dmu().spl().storage_class_count())
