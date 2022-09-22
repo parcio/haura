@@ -41,6 +41,7 @@ mod learning {
     //! implementation found here https://github.com/JSFRi/HSM-RL
 
     use std::{collections::HashMap, ops::Index, time::Duration};
+    use rand::SeedableRng;
 
     use crate::migration::ObjectKey;
 
@@ -78,9 +79,11 @@ mod learning {
         files: HashMap<ObjectKey, (Hotness, Size, u64)>,
         reqs: HashMap<ObjectKey, Vec<Request>>,
         #[serde(skip)]
-        rng: rand::rngs::ThreadRng,
+        rng: rand::rngs::StdRng,
         decline_step: u64,
     }
+
+    const SEED: [u8; 32] = [45,12,6,2,4,199,6,8,9,56,241,200,23,92,14,3,95,123,55,12,89,156,3,231,67,20,0,10,15,4,9,204];
 
     impl Tier {
         const HOT_CHANCE: f64 = 0.2;
@@ -90,7 +93,7 @@ mod learning {
             Self {
                 files: Default::default(),
                 reqs: Default::default(),
-                rng: rand::thread_rng(),
+                rng: rand::rngs::StdRng::from_seed(SEED),
                 // Constant taken from the original implementation
                 decline_step: 5,
             }
