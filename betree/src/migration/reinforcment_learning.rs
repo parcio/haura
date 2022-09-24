@@ -40,7 +40,7 @@ mod learning {
     //! Most of this module has been translated from the original python
     //! implementation found here https://github.com/JSFRi/HSM-RL
 
-    use std::{collections::HashMap, ops::Index, time::Duration};
+    use std::{collections::HashMap, ops::Index, time::{Duration, Instant}};
     use rand::SeedableRng;
 
     use crate::migration::ObjectKey;
@@ -76,14 +76,20 @@ mod learning {
 
     #[derive(Serialize)]
     pub struct Tier {
-        files: HashMap<ObjectKey, (Hotness, Size, u64)>,
+        alpha: f32,
+        files: HashMap<ObjectKey, FileProperties>,
         reqs: HashMap<ObjectKey, Vec<Request>>,
         #[serde(skip)]
         rng: rand::rngs::StdRng,
-        decline_step: u64,
     }
 
-    const SEED: [u8; 32] = [45,12,6,2,4,199,6,8,9,56,241,200,23,92,14,3,95,123,55,12,89,156,3,231,67,20,0,10,15,4,9,204];
+    #[derive(Clone, Serialize)]
+    pub struct FileProperties {
+        pub hotness: Hotness,
+        pub size: Size,
+        #[serde(skip)]
+        pub last_access: Instant,
+    }
 
     impl Tier {
         const HOT_CHANCE: f64 = 0.2;
@@ -91,16 +97,16 @@ mod learning {
 
         pub fn new() -> Self {
             Self {
+                alpha: 0.8,
                 files: Default::default(),
                 reqs: Default::default(),
-                rng: rand::rngs::StdRng::from_seed(SEED),
+                rng: rand::rngs::StdRng::seed_from_u64(42),
                 // Constant taken from the original implementation
-                decline_step: 5,
             }
         }
 
         pub fn size(&self, obj: &ObjectKey) -> Option<Size> {
-            self.files.get(obj).map(|n| n.1.clone())
+            self.files.get(obj).map(|n| n.size.clone())
         }
 
         pub fn wipe_requests(&mut self) {
@@ -111,11 +117,11 @@ mod learning {
             self.files.contains_key(key)
         }
 
-        pub fn file_info(&self, key: &ObjectKey) -> Option<&(Hotness, Size, u64)> {
+        pub fn file_info(&self, key: &ObjectKey) -> Option<&FileProperties> {
             self.files.get(key)
         }
 
-        pub fn update_or_not(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
+        pub fn update_or_not(&mut self, key: ObjectKey, entry: FileProperties) {
             if self.files.contains_key(&key) {
                 self.remove(&key);
             } else {
@@ -123,20 +129,25 @@ mod learning {
             }
         }
 
-        fn insert_with_values(&mut self, key: ObjectKey, entry: (Hotness, Size, u64)) {
+        fn insert_with_values(&mut self, key: ObjectKey, entry: FileProperties) {
             self.files.insert(key, entry);
         }
 
         pub fn insert(&mut self, key: ObjectKey, size: u64) {
             self.files
-                .insert(key, (Hotness(self.rng.gen_range(0.0..1.0)), Size(size), 0));
+                .insert(key,
+                        FileProperties {
+                            hotness: Hotness(self.rng.gen_range(0.0..1.0)),
+                            size: Size(size),
+                            last_access: Instant::now(),
+                        });
         }
 
         /// Insert the result of [remove] into a tier again.
         pub fn insert_full(
             &mut self,
             key: ObjectKey,
-            content: ((Hotness, Size, u64), Option<Vec<Request>>),
+            content: (FileProperties, Option<Vec<Request>>),
         ) {
             self.files.insert(key.clone(), content.0);
             if let Some(reqs) = content.1 {
@@ -147,7 +158,7 @@ mod learning {
         pub fn remove(
             &mut self,
             key: &ObjectKey,
-        ) -> Option<((Hotness, Size, u64), Option<Vec<Request>>)> {
+        ) -> Option<(FileProperties, Option<Vec<Request>>)> {
             self.files.remove(key).map(|file_data| {
                 // If the files are contained this has to also
                 let reqs = self.reqs.remove(key);
@@ -156,15 +167,15 @@ mod learning {
         }
 
         pub fn update_size(&mut self, key: &ObjectKey, size: u64) {
-            self.files.get_mut(key).map(|entry| entry.1 = Size(size));
+            self.files.get_mut(key).map(|entry| entry.size = Size(size));
         }
 
         pub fn coldest(
             &mut self,
-        ) -> Option<(ObjectKey, ((Hotness, Size, u64), Option<Vec<Request>>))> {
+        ) -> Option<(ObjectKey, (FileProperties, Option<Vec<Request>>))> {
             self.files
                 .iter()
-                .min_by(|(_, v_left), (_, v_right)| v_left.0 .0.total_cmp(&v_right.0 .0))
+                .min_by(|(_, v_left), (_, v_right)| v_left.hotness.0.total_cmp(&v_right.hotness.0))
                 .map(|(key, val)| (key.clone(), val.clone()))
                 .and_then(|(key, val)| {
                     // This is already "val"
@@ -175,6 +186,8 @@ mod learning {
         }
 
         pub fn msg(&mut self, key: ObjectKey, dur: Duration) {
+            let time = Instant::now();
+            self.files.get_mut(&key).map(|elem| elem.last_access = time);
             self.reqs
                 .entry(key)
                 .and_modify(|tup| tup.push(Request::new(dur)))
@@ -210,7 +223,7 @@ mod learning {
                 s1 = Hotness(0.0);
             } else {
                 s1 = Hotness(
-                    self.files.iter().map(|(_, v)| v.0 .0).sum::<f32>() / self.files.len() as f32,
+                    self.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>() / self.files.len() as f32,
                 );
             }
 
@@ -221,7 +234,7 @@ mod learning {
                 s2 = Hotness(
                     self.files
                         .iter()
-                        .map(|(_, v)| v.0 .0 * v.1.num_bytes() as f32)
+                        .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
                         .sum::<f32>()
                         / self.files.len() as f32,
                 );
@@ -230,36 +243,43 @@ mod learning {
             return (State(s1, s2, s3), Reward(rewards));
         }
 
-        /// There is a random chance that a file will become hot or cool. This functions provides this chance
-        pub fn hot_cold(&mut self, obj: &ObjectKey) {
-            if let Some((hotness, _, _)) = self.files.get_mut(obj) {
-                let mut rng = rand::thread_rng();
-                if hotness.is_hot() {
-                    if rng.gen_bool(Self::COLD_CHANCE) {
-                        // Downgrade to cool file
-                        hotness.0 = rng.gen_range(0..5) as f32 / 10.0;
-                    }
-                } else {
-                    if rng.gen_bool(Self::HOT_CHANCE) {
-                        // Upgrade to hot file
-                        hotness.0 = rng.gen_range(6..=10) as f32 / 10.0;
-                    }
-                }
-            }
-        }
+        // /// There is a random chance that a file will become hot or cool. This functions provides this chance
+        // pub fn hot_cold(&mut self, obj: &ObjectKey) {
+        //     if let Some((hotness, _, _, _)) = self.files.get_mut(obj) {
+        //         let mut rng = rand::thread_rng();
+        //         if hotness.is_hot() {
+        //             if rng.gen_bool(Self::COLD_CHANCE) {
+        //                 // Downgrade to cool file
+        //                 hotness.0 = rng.gen_range(0..5) as f32 / 10.0;
+        //             }
+        //         } else {
+        //             if rng.gen_bool(Self::HOT_CHANCE) {
+        //                 // Upgrade to hot file
+        //                 hotness.0 = rng.gen_range(6..=10) as f32 / 10.0;
+        //             }
+        //         }
+        //     }
+        // }
 
-        /// Naturally declining temperatures
-        pub fn temp_decrease(&mut self) {
+        // /// Naturally declining temperatures
+        // pub fn temp_decrease(&mut self) {
+        //     for (key, tup) in self.files.iter_mut() {
+        //         if let Some(_) = self.reqs.get(&key) {
+        //             tup.2 = 0;
+        //         } else {
+        //             tup.2 += 1;
+        //             if tup.2 % self.decline_step == 0 {
+        //                 tup.0 .0 -= 0.1;
+        //             }
+        //             tup.0.clamp_valid()
+        //         }
+        //     }
+        // }
+
+        pub fn temp_update(&mut self) {
+            let time = Instant::now();
             for (key, tup) in self.files.iter_mut() {
-                if let Some(_) = self.reqs.get(&key) {
-                    tup.2 = 0;
-                } else {
-                    tup.2 += 1;
-                    if tup.2 % self.decline_step == 0 {
-                        tup.0 .0 -= 0.1;
-                    }
-                    tup.0.clamp_valid()
-                }
+                tup.hotness = Hotness(self.alpha * tup.hotness.0 + (1.0 - self.alpha) * (tup.last_access - time).as_secs_f32());
             }
         }
     }
@@ -428,7 +448,7 @@ mod learning {
             &self,
             tier: &mut Tier,
             obj: ObjectKey,
-            temp: (Hotness, Size, u64),
+            temp: FileProperties,
             obj_reqs: &Vec<Request>,
         ) -> (f32, Hotness, f32, Hotness) {
             // This method branches into two main flows in the original one handling if the file is contained in the tier and one if it is not
@@ -444,12 +464,12 @@ mod learning {
                 num_reqs = 0;
             } else {
                 s1_not = Hotness(
-                    tier.files.iter().map(|(_, v)| v.0 .0).sum::<f32>() / tier.files.len() as f32,
+                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>() / tier.files.len() as f32,
                 );
                 s2_not = Hotness(
                     tier.files
                         .iter()
-                        .map(|(_, v)| v.0 .0 * v.1.num_bytes() as f32)
+                        .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
                         .sum::<f32>()
                         / tier.files.len() as f32,
                 );
@@ -487,13 +507,13 @@ mod learning {
                         s2_up = Hotness(100000.0);
                     } else {
                         s1_up = Hotness(
-                            tier.files.iter().map(|(_, v)| v.0 .0).sum::<f32>()
+                            tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
                                 / tier.files.len() as f32,
                         );
                         s2_up = Hotness(
                             tier.files
                                 .iter()
-                                .map(|(_, v)| v.0 .0 * v.1.num_bytes() as f32)
+                                .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
                                 .sum::<f32>()
                                 / tier.files.len() as f32,
                         );
@@ -543,12 +563,12 @@ mod learning {
                 // TIER does not contain the file, how will it fair if we add it?
                 tier.files.insert(obj.clone(), temp);
                 let s1_up = Hotness(
-                    tier.files.iter().map(|(_, v)| v.0 .0).sum::<f32>() / tier.files.len() as f32,
+                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>() / tier.files.len() as f32,
                 );
                 let s2_up = Hotness(
                     tier.files
                         .iter()
-                        .map(|(_, v)| v.0 .0 * v.1.num_bytes() as f32)
+                        .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
                         .sum::<f32>()
                         / tier.files.len() as f32,
                 );
@@ -727,6 +747,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         let mut request_weight = 0;
         let mut request_large = 0;
 
+        for ta in self.tiers.iter_mut() {
+            ta.tier.temp_update();
+        }
+
         let active_objects_iter = self
             .objects
             .iter()
@@ -736,12 +760,12 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             // one tier must exist
             if self.tiers[0].tier.contains(active_obj) {
                 // file in fastest tier
-                self.tiers[0].tier.hot_cold(active_obj);
+                // self.tiers[0].tier.hot_cold(active_obj);
                 let file_info = self.tiers[0].tier.file_info(active_obj).unwrap();
 
-                request_weight += file_info.1.num_bytes();
+                request_weight += file_info.size.num_bytes();
                 // magic 5000
-                if file_info.1.num_bytes() > 5000 {
+                if file_info.size.num_bytes() > 5000 {
                     request_large += 1
                 }
                 continue;
@@ -752,15 +776,15 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             for tier_id in 1..(self.state.active_storage_classes) as usize {
                 if self.tiers[tier_id].tier.contains(active_obj) {
                     // file can be updated or downgraded
-                    self.tiers[tier_id].tier.hot_cold(active_obj);
+                    // self.tiers[tier_id].tier.hot_cold(active_obj);
                     let file_info = self.tiers[tier_id]
                         .tier
                         .file_info(active_obj)
                         .unwrap()
                         .clone();
-                    request_weight += file_info.1.num_bytes();
+                    request_weight += file_info.size.num_bytes();
                     // magic 5000
-                    if file_info.1.num_bytes() > 5000 {
+                    if file_info.size.num_bytes() > 5000 {
                         request_large += 1
                     }
 
@@ -827,7 +851,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 break;
                             }
                             if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                                if coldest.1 .0 .1.num_bytes() > lower.free.to_bytes() {
+                                if coldest.1 .0 .size.num_bytes() > lower.free.to_bytes() {
                                     warn!("Could not get enough space for file to be migrated downwards");
                                     continue;
                                 }
@@ -836,14 +860,14 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 let target = StoragePreference::from_u8(tier_id as u8);
                                 let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                                 // assume minimum size
-                                let size = Block::from_bytes(coldest.1 .0 .1.num_bytes());
+                                let size = Block::from_bytes(coldest.1 .0 .size.num_bytes());
                                 self.state.migrate(&coldest.0, obj_key, target)?;
                                 self.tiers[tier_id]
                                     .tier
                                     .insert_full(coldest.0.clone(), coldest.1.clone());
                                 self.delta_moved.push((
                                     coldest.0,
-                                    coldest.1 .0 .1.num_bytes(),
+                                    coldest.1 .0 .size.num_bytes(),
                                     tier_id as u8 - 1,
                                     tier_id as u8,
                                 ));
@@ -864,7 +888,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                             .insert_full(active_obj.clone(), removed);
                         self.delta_moved.push((
                             active_obj.clone(),
-                            file_info.1.num_bytes(),
+                            file_info.size.num_bytes(),
                             tier_id as u8,
                             tier_id as u8 - 1,
                         ));
@@ -911,7 +935,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 // need some kind of reporting to the objects in which storage
                 // they end up.
                 if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                    if coldest.1 .0 .1.num_bytes() > lower.free.to_bytes() {
+                    if coldest.1 .0 .size.num_bytes() > lower.free.to_bytes() {
                         warn!("Could not get enough space for file to be migrated downwards");
                         break;
                     }
@@ -925,7 +949,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     self.state.migrate(&coldest.0, obj_key, target)?;
                     self.delta_moved.push((
                         coldest.0,
-                        coldest.1 .0 .1.num_bytes(),
+                        coldest.1 .0 .size.num_bytes(),
                         tier_id as u8 - 1,
                         tier_id as u8,
                     ));
@@ -972,10 +996,10 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             );
         }
 
-        // decreasing overall temperatures
-        for ta in self.tiers.iter_mut() {
-            ta.tier.temp_decrease();
-        }
+        // // decreasing overall temperatures
+        // for ta in self.tiers.iter_mut() {
+        //     ta.tier.temp_decrease();
+        // }
         Ok(())
     }
 
