@@ -136,9 +136,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
             for ((high_tier, _high_info)) in infos
                 .iter()
                 .skip(1)
-                .filter(|((_, high_info))| {
-                    high_info.total != Block(0)
-                })
+                .filter(|((_, high_info))| high_info.total != Block(0))
             {
                 self.promote(*high_tier)?;
             }

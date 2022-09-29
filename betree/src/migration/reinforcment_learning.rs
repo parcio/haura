@@ -40,8 +40,12 @@ mod learning {
     //! Most of this module has been translated from the original python
     //! implementation found here https://github.com/JSFRi/HSM-RL
 
-    use std::{collections::HashMap, ops::Index, time::{Duration, Instant}};
     use rand::SeedableRng;
+    use std::{
+        collections::HashMap,
+        ops::Index,
+        time::{Duration, Instant},
+    };
 
     use crate::migration::ObjectKey;
 
@@ -134,13 +138,14 @@ mod learning {
         }
 
         pub fn insert(&mut self, key: ObjectKey, size: u64) {
-            self.files
-                .insert(key,
-                        FileProperties {
-                            hotness: Hotness(self.rng.gen_range(0.0..1.0)),
-                            size: Size(size),
-                            last_access: Instant::now(),
-                        });
+            self.files.insert(
+                key,
+                FileProperties {
+                    hotness: Hotness(self.rng.gen_range(0.0..1.0)),
+                    size: Size(size),
+                    last_access: Instant::now(),
+                },
+            );
         }
 
         /// Insert the result of [remove] into a tier again.
@@ -170,9 +175,7 @@ mod learning {
             self.files.get_mut(key).map(|entry| entry.size = Size(size));
         }
 
-        pub fn coldest(
-            &mut self,
-        ) -> Option<(ObjectKey, (FileProperties, Option<Vec<Request>>))> {
+        pub fn coldest(&mut self) -> Option<(ObjectKey, (FileProperties, Option<Vec<Request>>))> {
             self.files
                 .iter()
                 .min_by(|(_, v_left), (_, v_right)| v_left.hotness.0.total_cmp(&v_right.hotness.0))
@@ -223,7 +226,8 @@ mod learning {
                 s1 = Hotness(0.0);
             } else {
                 s1 = Hotness(
-                    self.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>() / self.files.len() as f32,
+                    self.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
+                        / self.files.len() as f32,
                 );
             }
 
@@ -279,7 +283,10 @@ mod learning {
         pub fn temp_update(&mut self) {
             let time = Instant::now();
             for (key, tup) in self.files.iter_mut() {
-                tup.hotness = Hotness(self.alpha * tup.hotness.0 + (1.0 - self.alpha) * (tup.last_access - time).as_secs_f32());
+                tup.hotness = Hotness(
+                    self.alpha * tup.hotness.0
+                        + (1.0 - self.alpha) * (tup.last_access - time).as_secs_f32(),
+                );
             }
         }
     }
@@ -464,7 +471,8 @@ mod learning {
                 num_reqs = 0;
             } else {
                 s1_not = Hotness(
-                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>() / tier.files.len() as f32,
+                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
+                        / tier.files.len() as f32,
                 );
                 s2_not = Hotness(
                     tier.files
@@ -563,7 +571,8 @@ mod learning {
                 // TIER does not contain the file, how will it fair if we add it?
                 tier.files.insert(obj.clone(), temp);
                 let s1_up = Hotness(
-                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>() / tier.files.len() as f32,
+                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
+                        / tier.files.len() as f32,
                 );
                 let s2_up = Hotness(
                     tier.files
@@ -851,7 +860,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 break;
                             }
                             if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                                if coldest.1 .0 .size.num_bytes() > lower.free.to_bytes() {
+                                if coldest.1 .0.size.num_bytes() > lower.free.to_bytes() {
                                     warn!("Could not get enough space for file to be migrated downwards");
                                     continue;
                                 }
@@ -860,14 +869,14 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 let target = StoragePreference::from_u8(tier_id as u8);
                                 let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                                 // assume minimum size
-                                let size = Block::from_bytes(coldest.1 .0 .size.num_bytes());
+                                let size = Block::from_bytes(coldest.1 .0.size.num_bytes());
                                 self.state.migrate(&coldest.0, obj_key, target)?;
                                 self.tiers[tier_id]
                                     .tier
                                     .insert_full(coldest.0.clone(), coldest.1.clone());
                                 self.delta_moved.push((
                                     coldest.0,
-                                    coldest.1 .0 .size.num_bytes(),
+                                    coldest.1 .0.size.num_bytes(),
                                     tier_id as u8 - 1,
                                     tier_id as u8,
                                 ));
@@ -935,7 +944,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 // need some kind of reporting to the objects in which storage
                 // they end up.
                 if let Some(coldest) = self.tiers[tier_id - 1].tier.coldest() {
-                    if coldest.1 .0 .size.num_bytes() > lower.free.to_bytes() {
+                    if coldest.1 .0.size.num_bytes() > lower.free.to_bytes() {
                         warn!("Could not get enough space for file to be migrated downwards");
                         break;
                     }
@@ -949,7 +958,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                     self.state.migrate(&coldest.0, obj_key, target)?;
                     self.delta_moved.push((
                         coldest.0,
-                        coldest.1 .0 .size.num_bytes(),
+                        coldest.1 .0.size.num_bytes(),
                         tier_id as u8 - 1,
                         tier_id as u8,
                     ));
