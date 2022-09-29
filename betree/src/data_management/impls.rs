@@ -1037,7 +1037,6 @@ where
             }
             prev_cache_size = cache.size();
             self.evict(cache)?
-
         }
         Ok(())
     }

@@ -20,7 +20,8 @@ where
     type CacheValueRef = <T::Target as HandlerDml>::CacheValueRef;
     type CacheValueRefMut = <T::Target as HandlerDml>::CacheValueRefMut;
 
-    fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {(**self).try_get(or)
+    fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
+        (**self).try_get(or)
     }
 
     fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, Error> {
