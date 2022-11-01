@@ -282,7 +282,7 @@ mod learning {
 
         pub fn temp_update(&mut self) {
             let time = Instant::now();
-            for (key, tup) in self.files.iter_mut() {
+            for (_key, tup) in self.files.iter_mut() {
                 tup.hotness = Hotness(
                     self.alpha * tup.hotness.0
                         + (1.0 - self.alpha) * (tup.last_access - time).as_secs_f32(),
@@ -869,7 +869,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 let target = StoragePreference::from_u8(tier_id as u8);
                                 let obj_key = &self.objects.get(&coldest.0).unwrap().key;
                                 // assume minimum size
-                                let size = Block::from_bytes(coldest.1 .0.size.num_bytes());
+                                let _size = Block::from_bytes(coldest.1 .0.size.num_bytes());
                                 self.state.migrate(&coldest.0, obj_key, target)?;
                                 self.tiers[tier_id]
                                     .tier

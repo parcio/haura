@@ -830,7 +830,7 @@ where
                         .for_each_child::<(), _>(|or| loop {
                             let mid = match or {
                                 ObjectRef::Unmodified(..) => break Ok(()),
-                                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => (*mid),
+                                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => *mid,
                             };
                             if cache_contains_key(&or.as_key()) {
                                 modified_children = true;
@@ -1020,7 +1020,7 @@ where
 
     fn evict(&self) -> Result<(), Error> {
         // TODO shortcut without locking cache
-        let mut cache = self.cache.write();
+        let cache = self.cache.write();
         if cache.size() > cache.capacity() {
             self.evict(cache)?;
         }
