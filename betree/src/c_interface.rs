@@ -256,13 +256,13 @@ pub unsafe extern "C" fn betree_init_env_logger() {
 /// Free a configuration object.
 #[no_mangle]
 pub unsafe extern "C" fn betree_free_cfg(cfg: *mut cfg_t) {
-    Box::from_raw(cfg);
+    let _ = Box::from_raw(cfg);
 }
 
 /// Free an error object.
 #[no_mangle]
 pub unsafe extern "C" fn betree_free_err(err: *mut err_t) {
-    Box::from_raw(err);
+    let _ = Box::from_raw(err);
 }
 
 /// Free a byte slice.
@@ -274,13 +274,13 @@ pub unsafe extern "C" fn betree_free_byte_slice(x: *mut byte_slice_t) {
 /// Free a data set/snapshot name iterator.
 #[no_mangle]
 pub unsafe extern "C" fn betree_free_name_iter(name_iter: *mut name_iter_t) {
-    Box::from_raw(name_iter);
+    let _ = Box::from_raw(name_iter);
 }
 
 /// Free a range iterator.
 #[no_mangle]
 pub unsafe extern "C" fn betree_free_range_iter(range_iter: *mut range_iter_t) {
-    Box::from_raw(range_iter);
+    let _ = Box::from_raw(range_iter);
 }
 
 /// Open a database given by a storate pool configuration.
@@ -318,7 +318,7 @@ pub unsafe extern "C" fn betree_sync_db(db: *mut db_t, err: *mut *mut err_t) -> 
 /// Note that the `db_t` may not be used afterwards.
 #[no_mangle]
 pub unsafe extern "C" fn betree_close_db(db: *mut db_t) {
-    Box::from_raw(db);
+    let _ = Box::from_raw(db);
 }
 
 /// Open a data set identified by the given name.
