@@ -129,7 +129,7 @@ impl<N> ChildBuffer<N> {
     pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> Option<()> {
         self.buffer.get_mut(key).map(|(keyinfo, _bytes)| {
             keyinfo.storage_preference = pref;
-            ()
+            
         })
     }
 }
@@ -147,7 +147,7 @@ impl<N> ChildBuffer<N> {
     pub fn take(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, usize) {
         self.messages_preference.invalidate();
         (
-            replace(&mut self.buffer, BTreeMap::new()),
+            std::mem::take(&mut self.buffer),
             replace(&mut self.buffer_entries_size, 0),
         )
     }

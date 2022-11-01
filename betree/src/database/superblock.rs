@@ -75,7 +75,7 @@ impl Superblock<super::ObjectPointer> {
         } else {
             Block(1)
         };
-        pool.write_raw(Buf::from(sb_data), sb_offset)?;
+        pool.write_raw(sb_data, sb_offset)?;
         Ok(())
     }
 

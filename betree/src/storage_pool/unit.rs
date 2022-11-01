@@ -100,7 +100,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         // TODO: can move this onto pool without deadlock?
         self.inner.write_back_queue.wait(&offset)?;
         let inner = self.inner.clone();
-        Ok(Box::pin((&self.inner.pool).spawn_with_handle(
+        Ok(Box::pin(self.inner.pool.spawn_with_handle(
             async move {
                 // inner.write_back_queue.wait_async(offset).await;
                 inner
@@ -115,7 +115,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         let inner = self.inner.clone();
 
         let (enqueue_done, wait_for_enqueue) = futures::channel::oneshot::channel();
-        let write = (&self.inner.pool).spawn_with_handle(async move {
+        let write = self.inner.pool.spawn_with_handle(async move {
             wait_for_enqueue.await.unwrap();
 
             let res = inner

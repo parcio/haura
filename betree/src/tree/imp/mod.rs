@@ -54,7 +54,7 @@ impl KeyInfo {
 pub(super) const MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
 const MIN_FLUSH_SIZE: usize = 256 * 1024;
 const MIN_FANOUT: usize = 4;
-const MIN_LEAF_NODE_SIZE: usize = 1 * 1024 * 1024;
+const MIN_LEAF_NODE_SIZE: usize = 1024 * 1024;
 const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
@@ -433,11 +433,7 @@ where
 {
     fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error> {
         self.get_with_info(key).map(|res| {
-            match res {
-                None => None,
-                // Throw away info..
-                Some((_info, data)) => Some(data),
-            }
+            res.map(|(_info, data)| data)
         })
     }
 
@@ -577,20 +573,17 @@ where
                 if let Some(iter) = n.child_pointer_iter() {
                     for (node, ptr) in iter.filter_map(|elem| {
                         elem.read()
-                            .get_unmodified()
-                            .and_then(|np| Some((elem, np.clone())))
+                            .get_unmodified().map(|np| (elem, np.clone()))
                     }) {
                         if n.level() >= self.depth - 1 {
                             self.node.push_back((Some(ptr), None));
-                        } else {
-                            if let Ok(node) = self.tree.get_node(node) {
-                                self.node.push_back((Some(ptr), Some(node)));
-                            }
+                        } else if let Ok(node) = self.tree.get_node(node) {
+                            self.node.push_back((Some(ptr), Some(node)));
                         }
                     }
                 }
                 // Prevent early none (for root)
-                if let None = &objptr {
+                if objptr.is_none() {
                     return self.next();
                 }
                 objptr

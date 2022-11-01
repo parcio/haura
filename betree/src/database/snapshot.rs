@@ -21,6 +21,7 @@ where
     Config: DatabaseBuilder,
 {
     tree: DatasetTree<Config::Dmu>,
+    #[allow(dead_code)]
     name: Box<[u8]>,
 }
 

@@ -140,7 +140,7 @@ impl data_management::Handler<ObjectRef> for Handler {
         let key = segment_id_to_key(SegmentId::get(offset));
         let msg = update_allocation_bitmap_msg(offset, size, action);
         // NOTE: We perform double the amount of atomics here than necessary, but we do this for now to avoid reiteration
-        match action.clone() {
+        match action {
             Action::Deallocate => {
                 self.free_space
                     .get(&(offset.storage_class(), offset.disk_id()))

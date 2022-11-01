@@ -403,7 +403,7 @@ mod tests {
 
     fn serialized_size(leaf_node: &LeafNode) -> usize {
         let mut data = Vec::new();
-        PackedMap::pack(&leaf_node, &mut data).unwrap();
+        PackedMap::pack(leaf_node, &mut data).unwrap();
         data.len()
     }
 

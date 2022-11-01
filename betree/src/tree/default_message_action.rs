@@ -109,7 +109,7 @@ fn as_overwrite(b: SlicedCowBytes) -> Option<Option<SlicedCowBytes>> {
 }
 
 fn iter_upserts(mut b: &[u8]) -> Option<impl Iterator<Item = Upsert>> {
-    if b.get(0) != Some(&(MsgType::Upsert as u8)) {
+    if b.first() != Some(&(MsgType::Upsert as u8)) {
         return None;
     }
     b = &b[1..];

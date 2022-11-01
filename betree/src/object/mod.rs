@@ -228,7 +228,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     ) -> Result<ObjectStore<Config>> {
         let store = self
             .fetch_os_data(&os_id)?
-            .map(|x| Ok::<ObjectStoreData, crate::database::errors::Error>(x))
+            .map(Ok::<ObjectStoreData, crate::database::errors::Error>)
             .unwrap_or_else(|| bail!(crate::database::errors::ErrorKind::DoesNotExist))?;
 
         ObjectStore::with_datasets(
@@ -256,7 +256,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         let data = self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?;
         let meta = self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?;
         self.store_os_data(
-            id.clone(),
+            id,
             ObjectStoreData {
                 data: data.id(),
                 meta: meta.id(),
@@ -284,7 +284,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         let data = self.open_or_create_custom_dataset(&data_name, storage_preference)?;
         let meta = self.open_or_create_custom_dataset(&meta_name, storage_preference)?;
         self.store_os_data(
-            id.clone(),
+            id,
             ObjectStoreData {
                 data: data.id(),
                 meta: meta.id(),

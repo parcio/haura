@@ -45,7 +45,13 @@ struct AtomicStatistics {
 
 impl AtomicStatistics {
     fn as_stats(&self) -> Statistics {
-        let res = Statistics {
+        
+        #[cfg(feature = "latency_metrics")]
+        {
+            self.prev_read
+                .store(self.read.load(Ordering::Relaxed), Ordering::Relaxed)
+        }
+        Statistics {
             read: Block(self.read.load(Ordering::Relaxed)),
             written: Block(self.written.load(Ordering::Relaxed)),
             failed_reads: Block(self.failed_reads.load(Ordering::Relaxed)),
@@ -61,13 +67,7 @@ impl AtomicStatistics {
                         .saturating_sub(self.prev_read.load(Ordering::Relaxed)),
                 )
                 .unwrap_or(0),
-        };
-        #[cfg(feature = "latency_metrics")]
-        {
-            self.prev_read
-                .store(self.read.load(Ordering::Relaxed), Ordering::Relaxed)
         }
-        res
     }
 }
 

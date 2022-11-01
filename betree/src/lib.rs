@@ -1,5 +1,5 @@
 //! Storage stack with key-value store interface on top of B<sup>e</sup>-Trees.
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 
 extern crate bincode;
 extern crate byteorder;

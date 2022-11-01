@@ -108,13 +108,13 @@ impl From<Vec<u8>> for CowBytes {
 
 impl Borrow<[u8]> for CowBytes {
     fn borrow(&self) -> &[u8] {
-        &*self
+        self
     }
 }
 
 impl AsRef<[u8]> for CowBytes {
     fn as_ref(&self) -> &[u8] {
-        &*self
+        self
     }
 }
 

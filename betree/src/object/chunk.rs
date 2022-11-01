@@ -7,7 +7,7 @@ pub const CHUNK_MAX: u32 = u32::MAX - 1024;
 // pub const CHUNK_META_SIZE: u32 = CHUNK_MAX + 1;
 // pub const CHUNK_META_MODIFICATION_TIME: u32 = CHUNK_MAX + 2;
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ChunkOffset {
     pub chunk_id: u32,
     pub offset: u32,
@@ -20,7 +20,7 @@ impl ChunkOffset {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ChunkRange {
     pub start: ChunkOffset,
     pub end: ChunkOffset,
@@ -55,8 +55,8 @@ impl ChunkRange {
     }
 
     pub fn split_at_chunk_bounds(&self) -> impl Iterator<Item = ChunkRange> {
-        let mut range_start = Some(self.start.clone());
-        let end = self.end.clone();
+        let mut range_start = Some(self.start);
+        let end = self.end;
 
         iter::from_fn(move || {
             if let Some(start) = range_start {

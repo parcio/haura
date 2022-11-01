@@ -130,7 +130,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         self.open_datasets.insert(id, erased_tree);
 
         let ds: Dataset<Config, M> = DatasetInner {
-            tree: ds_tree.clone(),
+            tree: ds_tree,
             id,
             name: Box::from(name),
             open_snapshots: Default::default(),

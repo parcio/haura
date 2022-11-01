@@ -10,7 +10,7 @@ use crate::{
         DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{DatabaseMsg, DmlMsg, MigrationPolicies, MigrationPolicy, ObjectKey},
+    migration::{DatabaseMsg, DmlMsg, MigrationPolicies, ObjectKey},
     object::ObjectStoreId,
     size::StaticSize,
     storage_pool::{
@@ -34,7 +34,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     iter::FromIterator,
-    mem::replace,
     path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -139,7 +138,7 @@ where
 
 /// This enum controls whether to search for an existing database to reuse,
 /// and whether to create a new one if none could be found or.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AccessMode {
     /// Read and use an existing superblock, abort if none is found.
     OpenIfExists,
@@ -309,7 +308,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         dmu: Arc<Self::Dmu>,
     ) -> Result<(RootTree<Self::Dmu>, ObjectPointer)> {
         if let Some(cfg) = &self.metrics {
-            metrics_init::<Self>(&cfg, dmu.clone())?;
+            metrics_init::<Self>(cfg, dmu.clone())?;
         }
 
         let root_ptr = if let AccessMode::OpenIfExists | AccessMode::OpenOrCreate = self.access_mode
@@ -329,7 +328,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
             let root_ptr = sb.root_ptr;
             let tree = RootTree::open(
                 ROOT_DATASET_ID,
-                root_ptr.clone(),
+                root_ptr,
                 DefaultMessageAction,
                 dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
@@ -363,7 +362,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
             let tree = RootTree::empty_tree(
                 ROOT_DATASET_ID,
                 DefaultMessageAction,
-                dmu.clone(),
+                dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
             );
             tree.dmu()
@@ -477,7 +476,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
             root_tree: tree,
             builder,
             open_datasets: Default::default(),
-            db_tx: db_tx.clone(),
+            db_tx,
         })
     }
 
@@ -501,11 +500,11 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
                     // state of the datastore is anyway corrupt and we can
                     // escalate.
                     let id = os_id?;
-                    let os = db.write().open_object_store_with_id(id.clone())?;
+                    let os = db.write().open_object_store_with_id(id)?;
                     for (key, info) in os.iter_objects()? {
                         db_tx
                             .send(DatabaseMsg::ObjectDiscover(
-                                ObjectKey::build(id.clone(), info.object_id),
+                                ObjectKey::build(id, info.object_id),
                                 info,
                                 key,
                             ))
@@ -560,10 +559,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
 
     fn flush_delayed_messages(&self) -> Result<()> {
         loop {
-            let v = replace(
-                &mut *self.root_tree.dmu().handler().delayed_messages.lock(),
-                Vec::new(),
-            );
+            let v = std::mem::take(&mut *self.root_tree.dmu().handler().delayed_messages.lock());
             if v.is_empty() {
                 break;
             }
