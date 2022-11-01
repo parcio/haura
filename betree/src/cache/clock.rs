@@ -128,7 +128,7 @@ impl<T> Clock<T> {
                 } else {
                     // Remove element
                     let next = current.as_ref().next;
-                    Box::from_raw(current.as_ptr());
+                    let _ = Box::from_raw(current.as_ptr());
                     last.as_mut().next = next;
                     current = next;
                 }
@@ -143,7 +143,7 @@ impl<T> Clock<T> {
                     self.tail = Some(last);
                     last.as_mut().next = current.as_ref().next;
                 }
-                Box::from_raw(current.as_ptr());
+                let _ = Box::from_raw(current.as_ptr());
             }
         }
     }
