@@ -53,14 +53,14 @@ pub struct Lfu<C: DatabaseBuilder + Clone> {
 // Bucket boundaries, see comment below:
 const SMALLEST: u64 = 256 * 1024;
 const SMALLEST_: u64 = 256 * 1024 + 1;
-const SMALL: u64 = 1 * 1024 * 1024;
-const SMALL_: u64 = 1 * 1024 * 1024 + 1;
+const SMALL: u64 = 1024 * 1024;
+const SMALL_: u64 = 1024 * 1024 + 1;
 const MEDIUM: u64 = 10 * 1024 * 1024;
 const MEDIUM_: u64 = 10 * 1024 * 1024 + 1;
 const LARGE: u64 = 100 * 1024 * 1024;
 const LARGE_: u64 = 100 * 1024 * 1024 + 1;
-const LARGEST: u64 = 1 * 1024 * 1024 * 1024;
-const LARGEST_: u64 = 1 * 1024 * 1024 * 1024 + 1;
+const LARGEST: u64 = 1024 * 1024 * 1024;
+const LARGEST_: u64 = 1024 * 1024 * 1024 + 1;
 const NUM_SIZE_BUCKETS: usize = 6;
 
 impl ObjectLocation {
@@ -83,7 +83,7 @@ impl ObjectLocation {
 }
 
 /// Lfu specific configuration details.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct LfuConfig {
     /// Maximum number of nodes to be promoted at once. An object size is
     /// maximum 4 MiB.
@@ -99,7 +99,7 @@ pub struct LfuConfig {
     mode: LfuMode,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum LfuMode {
     Object,
     Node,
@@ -164,7 +164,7 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
         loc: &ObjectLocation,
         key: &ObjectKey,
     ) -> Option<(CowBytes, usize)> {
-        store.0[loc.pref_id(store.1)][loc.bucket_id()].remove(&key)
+        store.0[loc.pref_id(store.1)][loc.bucket_id()].remove(key)
     }
 
     fn update_dml(&mut self) -> Result<()> {
@@ -256,7 +256,7 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                 }
                 DatabaseMsg::ObjectOpen(key, info, name)
                 | DatabaseMsg::ObjectDiscover(key, info, name) => {
-                    if let Entry::Vacant(e) = self.object_stores.entry(key.store_key().clone()) {
+                    if let Entry::Vacant(e) = self.object_stores.entry(*key.store_key()) {
                         e.insert(None);
                     }
                     let new_location = ObjectLocation(info.pref, info.size);
@@ -320,7 +320,7 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                 }
                 DatabaseMsg::ObjectRead(key, _) => {
                     if let Some(location) = self.objects.get(&key) {
-                        Lfu::<C>::get_object(&mut self.object_buckets, &location, &key);
+                        Lfu::<C>::get_object(&mut self.object_buckets, location, &key);
                     }
                 }
                 DatabaseMsg::ObjectWrite(key, size, pref, _) => {
@@ -355,7 +355,7 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                             // Move in representation
                             let new_location = ObjectLocation(pref, location.1);
                             if let Some((name, _)) =
-                                Lfu::<C>::remove_object(&mut self.object_buckets, &location, &key)
+                                Lfu::<C>::remove_object(&mut self.object_buckets, location, &key)
                             {
                                 Lfu::<C>::insert_object(
                                     &mut self.object_buckets,
@@ -451,7 +451,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 // Best effort to try to open an object store.
                                 if let Some(mut db) = self.db.try_write() {
                                     let os = db
-                                        .open_object_store_with_id(objectkey.store_key().clone())?;
+                                        .open_object_store_with_id(*objectkey.store_key())?;
                                     if let Some(mut obj) = os.open_object(&*name)? {
                                         obj.migrate(lifted)?;
                                         let entry = self.objects.get_mut(&objectkey).unwrap();
@@ -575,7 +575,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 // Best effort to try to open an object store.
                                 if let Some(mut db) = self.db.try_write() {
                                     let os = db
-                                        .open_object_store_with_id(objectkey.store_key().clone())?;
+                                        .open_object_store_with_id(*objectkey.store_key())?;
                                     if let Some(mut obj) = os.open_object(&*name)? {
                                         obj.migrate(lowered)?;
                                         let entry = self.objects.get_mut(&objectkey).unwrap();

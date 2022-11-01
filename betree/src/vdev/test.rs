@@ -78,7 +78,7 @@ impl FailingLeafVdev {
                 Ok(b)
             }
             FailureMode::FailOperation | FailureMode::BadData => {
-                Err(Error::Read(self.id.clone()).into())
+                Err(Error::Read(self.id.clone()))
             }
             FailureMode::Panic => panic!(),
         }
@@ -96,7 +96,7 @@ impl VdevRead for FailingLeafVdev {
         let b = self.handle_read(size, offset)?;
         match checksum.verify(&b) {
             Ok(()) => Ok(Buf::from_zero_padded(b.to_vec())),
-            Err(_) => Err(Error::Read(self.id.clone()).into()),
+            Err(_) => Err(Error::Read(self.id.clone())),
         }
     }
 
@@ -209,7 +209,7 @@ impl VdevLeafWrite for FailingLeafVdev {
         let end_offset = offset + data.as_ref().len();
         let bad_data;
         let slice = match self.fail_writes.read() {
-            FailureMode::NoFail => &data.as_ref()[..],
+            FailureMode::NoFail => data.as_ref(),
             FailureMode::FailOperation => {
                 self.stats
                     .failed_writes

@@ -139,7 +139,7 @@ where
     where
         E: Deserializer<'de>,
     {
-        ObjectPointer::<D, I, G>::deserialize(deserializer).map(|p| ObjectRef::Unmodified(p))
+        ObjectPointer::<D, I, G>::deserialize(deserializer).map(ObjectRef::Unmodified)
     }
 }
 
@@ -372,7 +372,7 @@ where
             ObjectRef::InWriteback(mid) => {
                 // The object must have been written back recently.
                 debug!("{mid:?} moved to Unmodified");
-                let ptr = self.written_back.lock().remove(&mid).unwrap();
+                let ptr = self.written_back.lock().remove(mid).unwrap();
                 *or = ObjectRef::Unmodified(ptr);
             }
         }
@@ -553,7 +553,7 @@ where
         let generation = self.handler.current_generation();
         // Use storage hints if available
         if let Some(old_pos) = &mid.2 {
-            if let Some(pref) = self.storage_hints.lock().remove(&old_pos) {
+            if let Some(pref) = self.storage_hints.lock().remove(old_pos) {
                 object.set_system_storage_preference(pref);
             }
         }
@@ -643,12 +643,10 @@ where
                     .send(MSG::write(old_offset, size, mid.2))
                     .map_err(|_| warn!("Channel Receiver has been dropped."));
             }
-        } else {
-            if let Some(report_tx) = &self.report_tx {
-                let _ = report_tx
-                    .send(MSG::write(obj_ptr.offset, size, mid.2))
-                    .map_err(|_| warn!("Channel Receiver has been dropped."));
-            }
+        } else if let Some(report_tx) = &self.report_tx {
+            let _ = report_tx
+                .send(MSG::write(obj_ptr.offset, size, mid.2))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
         trace!("handle_write_back: Leaving");
@@ -1119,8 +1117,8 @@ where
             }
         };
         trace!("write_back: Leave");
-        let res = self.handle_write_back(object, mid, false);
-        res
+        
+        self.handle_write_back(object, mid, false)
     }
 
     type Prefetch = Pin<

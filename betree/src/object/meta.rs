@@ -229,7 +229,7 @@ impl MessageAction for MetaMessageAction {
                     pref,
                 } => {
                     if let Some(d) = data {
-                        let mut info = ObjectInfo::read_from_buffer_with_ctx(ENDIAN, &d).unwrap();
+                        let mut info = ObjectInfo::read_from_buffer_with_ctx(ENDIAN, d).unwrap();
 
                         if let Some(object_id) = object_id {
                             info.object_id = object_id;

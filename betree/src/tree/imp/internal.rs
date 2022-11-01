@@ -555,7 +555,7 @@ mod tests {
                 level: self.level,
                 entries_size: self.entries_size,
                 pivot: self.pivot.clone(),
-                children: self.children.iter().cloned().collect(),
+                children: self.children.to_vec(),
                 system_storage_preference: self.system_storage_preference.clone(),
             }
         }

@@ -26,7 +26,7 @@ impl CompressionConfiguration {
     pub fn to_builder(&self) -> Box<dyn CompressionBuilder> {
         match self {
             CompressionConfiguration::None => Box::new(None),
-            CompressionConfiguration::Zstd(zstd) => Box::new(zstd.clone()),
+            CompressionConfiguration::Zstd(zstd) => Box::new(*zstd),
         }
     }
 }

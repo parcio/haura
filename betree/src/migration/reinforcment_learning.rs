@@ -96,9 +96,6 @@ mod learning {
     }
 
     impl Tier {
-        const HOT_CHANCE: f64 = 0.2;
-        const COLD_CHANCE: f64 = 0.005;
-
         pub fn new() -> Self {
             Self {
                 alpha: 0.8,
@@ -123,18 +120,6 @@ mod learning {
 
         pub fn file_info(&self, key: &ObjectKey) -> Option<&FileProperties> {
             self.files.get(key)
-        }
-
-        pub fn update_or_not(&mut self, key: ObjectKey, entry: FileProperties) {
-            if self.files.contains_key(&key) {
-                self.remove(&key);
-            } else {
-                self.insert_with_values(key, entry)
-            }
-        }
-
-        fn insert_with_values(&mut self, key: ObjectKey, entry: FileProperties) {
-            self.files.insert(key, entry);
         }
 
         pub fn insert(&mut self, key: ObjectKey, size: u64) {
@@ -180,11 +165,11 @@ mod learning {
                 .iter()
                 .min_by(|(_, v_left), (_, v_right)| v_left.hotness.0.total_cmp(&v_right.hotness.0))
                 .map(|(key, val)| (key.clone(), val.clone()))
-                .and_then(|(key, val)| {
+                .map(|(key, val)| {
                     // This is already "val"
                     let _ = self.files.remove(&key);
                     let reqs = self.reqs.remove(&key);
-                    Some((key, (val, reqs)))
+                    (key, (val, reqs))
                 })
         }
 
@@ -203,13 +188,12 @@ mod learning {
 
             // 1. Calculate reward based on response times of requests
             let mut rewards = 0.0;
-            let total = self.reqs.iter().map(|(_, v)| v.iter()).flatten().count();
+            let total = self.reqs.iter().flat_map(|(_, v)| v.iter()).count();
             let mut s3 = Duration::from_secs_f32(0.0);
             for (idx, req) in self
                 .reqs
                 .iter()
-                .map(|(_, v)| v.iter())
-                .flatten()
+                .flat_map(|(_, v)| v.iter())
                 .enumerate()
             {
                 s3 += req.response_time;
@@ -244,7 +228,7 @@ mod learning {
                 );
             }
 
-            return (State(s1, s2, s3), Reward(rewards));
+            (State(s1, s2, s3), Reward(rewards))
         }
 
         // /// There is a random chance that a file will become hot or cool. This functions provides this chance
@@ -415,18 +399,17 @@ mod learning {
             }
 
             for idx in 0..self.p.len() {
-                self.p[idx] = self.p[idx]
-                    + self.alpha[idx]
+                self.p[idx] += self.alpha[idx]
                         * (reward.0 + EULER.powf(-self.beta * state.2.as_secs_f32()) * c_n_1 - c_n)
                         * self.z[idx];
             }
 
-            self.phi_list.push(phi.clone());
-            return phi;
+            self.phi_list.push(phi);
+            phi
         }
 
         fn cost_phy(&self, state: State) -> (f32, [f32; 8]) {
-            let membership = state.membership(&self);
+            let membership = state.membership(self);
             let mut w = [0.0; 8];
             let mut num = 0;
             for x in 0..2 {
@@ -447,7 +430,7 @@ mod learning {
             for idx in 0..phi.len() {
                 c += self.p[idx] * phi[idx];
             }
-            return (c, phi);
+            (c, phi)
         }
 
         // NOTE: reqs contains requests for this specific tier.
@@ -566,7 +549,7 @@ mod learning {
                 }
 
                 let (c_up, _) = self.cost_phy(State(s1_up, s2_up, s3_up));
-                return (c_not, s1_not, c_up, s1_up);
+                (c_not, s1_not, c_up, s1_up)
             } else {
                 // TIER does not contain the file, how will it fair if we add it?
                 tier.files.insert(obj.clone(), temp);
@@ -604,7 +587,7 @@ mod learning {
                 tier.files.remove(&obj);
 
                 let (c_up, _) = self.cost_phy(State(s1_up, s2_up, s3_up));
-                return (c_not, s1_not, c_up, s1_up);
+                (c_not, s1_not, c_up, s1_up)
             }
         }
     }
@@ -627,7 +610,7 @@ pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     state: DatabaseState<C>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RlConfig {
     // Print post-timestep "known" timestep
     path_state: std::path::PathBuf,
@@ -652,7 +635,7 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
             let res = self
                 .db
                 .write()
-                .open_object_store_with_id(os_id.clone())
+                .open_object_store_with_id(*os_id)
                 .unwrap();
             debug!(
                 "Opening object stoare took {} ms",
@@ -661,9 +644,9 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
             res
         };
         OsHandle {
-            state: &self,
+            state: self,
             act: os,
-            os_id: os_id.clone(),
+            os_id: *os_id,
         }
     }
 
@@ -698,7 +681,7 @@ struct OsHandle<'a, C: DatabaseBuilder + Clone> {
 impl<'a, C: DatabaseBuilder + Clone> Drop for OsHandle<'a, C> {
     fn drop(&mut self) {
         // NOTE: Object Store should not be open, close quickly..
-        if let None = self.state.object_stores.get(&self.os_id) {
+        if self.state.object_stores.get(&self.os_id).is_none() {
             self.state.db.write().close_object_store(self.act.clone());
         }
     }
@@ -753,9 +736,6 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
             tier_rewards.push(reward);
         }
 
-        let mut request_weight = 0;
-        let mut request_large = 0;
-
         for ta in self.tiers.iter_mut() {
             ta.tier.temp_update();
         }
@@ -763,20 +743,11 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         let active_objects_iter = self
             .objects
             .iter()
-            .filter(|(_, obj_info)| obj_info.reqs.len() > 0);
+            .filter(|(_, obj_info)| !obj_info.reqs.is_empty());
 
         for (active_obj, obj_data) in active_objects_iter {
             // one tier must exist
             if self.tiers[0].tier.contains(active_obj) {
-                // file in fastest tier
-                // self.tiers[0].tier.hot_cold(active_obj);
-                let file_info = self.tiers[0].tier.file_info(active_obj).unwrap();
-
-                request_weight += file_info.size.num_bytes();
-                // magic 5000
-                if file_info.size.num_bytes() > 5000 {
-                    request_large += 1
-                }
                 continue;
             }
 
@@ -791,12 +762,6 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         .file_info(active_obj)
                         .unwrap()
                         .clone();
-                    request_weight += file_info.size.num_bytes();
-                    // magic 5000
-                    if file_info.size.num_bytes() > 5000 {
-                        request_large += 1
-                    }
-
                     // Calculate changes
                     let obj_reqs = &self.objects.get(active_obj).unwrap().reqs;
                     // Please borrow checker believe me..
@@ -831,7 +796,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                         let object_size = Block::from_bytes(
                             self.tiers[tier_id]
                                 .tier
-                                .size(&active_obj)
+                                .size(active_obj)
                                 .unwrap()
                                 .num_bytes(),
                         )
@@ -890,8 +855,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
                         // NOTE: Migrate new object up
                         let target = StoragePreference::from_u8(tier_id as u8 - 1);
-                        self.state.migrate(&active_obj, &obj_data.key, target)?;
-                        let removed = self.tiers[tier_id].tier.remove(&active_obj).unwrap();
+                        self.state.migrate(active_obj, &obj_data.key, target)?;
+                        let removed = self.tiers[tier_id].tier.remove(active_obj).unwrap();
                         self.tiers[tier_id - 1]
                             .tier
                             .insert_full(active_obj.clone(), removed);
@@ -989,7 +954,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
         }
 
         for (key, _size, _from, to) in self.delta_moved.iter() {
-            let obj = self.objects.get_mut(&key).unwrap();
+            let obj = self.objects.get_mut(key).unwrap();
             obj.pref = StoragePreference::from_u8(*to as u8);
             obj.probed_lvl = None;
         }
@@ -1133,7 +1098,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                 DatabaseMsg::ObjectClose(_, _) => {}
                 DatabaseMsg::ObjectRead(key, dur) => {
                     let obj_info = self.objects.get_mut(&key).unwrap();
-                    obj_info.reqs.push(learning::Request::new(dur.clone()));
+                    obj_info.reqs.push(learning::Request::new(dur));
                     let pref = obj_info.storage_lvl().or(self.default_storage_class);
                     self.tiers[pref.as_u8() as usize].tier.msg(key, dur);
                 }
@@ -1141,7 +1106,7 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
                     // FIXME: This might again change the storage tier in which the object is stored
                     // This cannot happen on a read operation
                     let obj_info = self.objects.get_mut(&key).unwrap();
-                    obj_info.reqs.push(learning::Request::new(dur.clone()));
+                    obj_info.reqs.push(learning::Request::new(dur));
                     // NOTE: Ignore probing for now this has proven to be too erroneous and unreliable
                     // if obj_info.probed_lvl.is_none() {
                     //     let os = self.state.get_or_open_object_store(key.store_key());
