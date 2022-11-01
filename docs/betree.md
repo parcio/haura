@@ -151,6 +151,26 @@ in `betree`, we will quickly name and describe them here.
 
 > Note that traits are heavily used to allow interaction between objects of different modules, traits implemented by one module might be located in multiple other modules.
 
+# Root Tree
+
+The root tree is used in several places to store information relevant to the
+functionality of the storage stack. This is done by defining a number of
+messages with their own prefixes which we will explain shortly here.
+
+| Prefix | Format                                     | Content             | Name                    | Function                                        |
+|:-------|:-------------------------------------------|:--------------------|:------------------------|:------------------------------------------------|
+| `00`   | `00`                                       | `<DatasetId>`       | DatasetId counter       | The last DatasetId used, stack unique.          |
+| `00`   | `00 <SegementId>`                          | `<Bitmap>`          | Allocation bitmap       | The block bitmap for 1GiB storage segment.      |
+| `01`   | `01 <Data set name>`                       | `<DatasetId>`       | Dataset name lookup     | Map name to unique DatasetId.                   |
+| `02`   | `02 <DatasetId>`                           | `<DatasetData>`     | Dataset metadata        | Retrieve tree pointer and snapshot information. |
+| `03`   | `03 <DatasetId> <Snapshot name>`           | `<SnapshotId>`      | Snapshot name lookup    | Map name to unique SnapshotId.                  |
+| `04`   | `04 <DatasetId> <SnapshotId>`              | `<SnapshotData>`    | Snapshot metadata       | Retrieve tree pointer and snapshot information. |
+| `05`   | `05 <DatasetId> <Generation> <DiskOffset>` | `<DeadListData>`    | Dead list               | Information about dead blocks (size and birth)  |
+| `06`   | `06`                                       | `<ObjectStoreId>`   | ObjectStore counter     | The last used ObjectStoreId, stack unique.      |
+| `06`   | `07 <Object store name>`                   | `<ObjectStoreId>`   | ObjectStore name lookup | Map name to unique ObjectStoreId.               |
+| `07`   | `08 <ObjectStoreId>`                       | `<ObjectStoreData>` | ObjectStore metadata    | Retrieve DatsetIds of data and meta.            |
+
+
 ## Known bugs
 - On large write operations (easy to achieve with `Objectstore`) which overfill the storage can return unexpected errors, this has been reduced by the introduction of space accounting but some errors might still occur as not all checks have been implemented yet.
 - Not all tests finish successfully at the moment; both in internal and integration tests
