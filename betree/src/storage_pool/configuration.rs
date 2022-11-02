@@ -38,7 +38,10 @@ impl Default for PreferredAccessType {
 /// Configuration of a single storage class.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TierConfiguration {
+    /// The collection of virtual devices backing this tier.
     pub top_level_vdevs: Vec<Vdev>,
+    /// Which storage access is preferred to be used with this tier. See
+    /// [PreferredAccessType] for all variants.
     pub preferred_access_type: PreferredAccessType,
 }
 

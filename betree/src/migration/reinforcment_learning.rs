@@ -38,7 +38,7 @@ mod learning {
     //! reinforcement learning approach by Zhang et al.
     //!
     //! Most of this module has been translated from the original python
-    //! implementation found here https://github.com/JSFRi/HSM-RL
+    //! implementation found here <https://github.com/JSFRi/HSM-RL>
 
     use rand::SeedableRng;
     use std::{
@@ -56,14 +56,6 @@ mod learning {
     pub struct Hotness(f32);
 
     impl Hotness {
-        fn is_hot(&self) -> bool {
-            self.0 > 0.5
-        }
-
-        fn clamp_valid(&mut self) {
-            self.0 = self.0.clamp(0.1, 1.0)
-        }
-
         pub(super) fn as_f32(&self) -> f32 {
             self.0
         }
@@ -133,7 +125,7 @@ mod learning {
             );
         }
 
-        /// Insert the result of [remove] into a tier again.
+        /// Insert the result of [Self::remove] into a tier again.
         pub fn insert_full(
             &mut self,
             key: ObjectKey,
@@ -334,11 +326,6 @@ mod learning {
         beta: f32,
         lambda: f32,
         phi_list: Vec<[f32; 8]>,
-    }
-
-    enum Action {
-        Promote(),
-        Demote(),
     }
 
     #[derive(Clone, Debug, Serialize)]

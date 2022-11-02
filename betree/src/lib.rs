@@ -1,5 +1,10 @@
 //! Storage stack with key-value store interface on top of B<sup>e</sup>-Trees.
-// #![warn(missing_docs)]
+#![warn(missing_docs)]
+// We have a number of functions which are only implemented and not further
+// referenced right now.  To avoid numerous warnings on build, we allow dead
+// code as the alternative would be allowing each single method only provided on
+// a maybe needed in the future basis.
+#![allow(dead_code)]
 
 extern crate bincode;
 extern crate byteorder;

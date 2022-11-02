@@ -39,7 +39,7 @@ pub struct Lfu<C: DatabaseBuilder + Clone> {
     // Store open object stores to move inactive objects within.
     object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
     /// Object Buckets dividing them into multiple file size ranges,
-    /// taken from https://doi.org/10.1145/3489143
+    /// taken from <https://doi.org/10.1145/3489143>
     objects: HashMap<ObjectKey, ObjectLocation>,
     object_buckets: (
         [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],

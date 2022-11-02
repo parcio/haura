@@ -1,3 +1,11 @@
+//! Automated migration policies which can migrate both nodes and objects in
+//! Haura.
+//!
+//! There are multiple policies available, they can be found in the
+//! [MigrationPolicies] enum.  A short description of each is provided there.
+//!
+//! TODO: Construct example.
+//!
 mod errors;
 mod lfu;
 mod msg;
@@ -54,7 +62,7 @@ impl MigrationPolicies {
 
 use std::time::Duration;
 
-/// Configuration type for [MigrationPolicy]
+/// Configuration type for [MigrationPolicies]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MigrationConfig<Config> {
     /// Time at start where operations are _only_ recorded. This may help in avoiding incorrect early migrations by depending on a larger historical data.
