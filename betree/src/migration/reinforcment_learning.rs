@@ -377,9 +377,8 @@ mod learning {
             }
 
             for (idx, z_val) in self.z.iter_mut().enumerate() {
-                *z_val =
-                    self.lambda * EULER.powf(-self.beta * state.2.as_secs_f32()) * *z_val
-                        + phi_n[idx];
+                *z_val = self.lambda * EULER.powf(-self.beta * state.2.as_secs_f32()) * *z_val
+                    + phi_n[idx];
             }
 
             for idx in 0..self.p.len() {
