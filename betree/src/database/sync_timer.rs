@@ -2,7 +2,7 @@ use super::{Database, DatabaseBuilder};
 use parking_lot::RwLock;
 use std::{sync::Arc, thread, time::Duration};
 
-pub fn sync_timer<'b, Config: DatabaseBuilder + Clone>(
+pub fn sync_timer<Config: DatabaseBuilder + Clone>(
     timeout_ms: u64,
     db: Arc<RwLock<Database<Config>>>,
 ) {

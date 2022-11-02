@@ -49,7 +49,7 @@ mod learning {
 
     use crate::migration::ObjectKey;
 
-    pub(super) const EULER: f32 = 2.71828;
+    pub(super) const EULER: f32 = std::f32::consts::E;
 
     // How often a file is accessed in certain time range.
     #[derive(Clone, Copy, Debug, Serialize)]
@@ -149,7 +149,9 @@ mod learning {
         }
 
         pub fn update_size(&mut self, key: &ObjectKey, size: u64) {
-            self.files.get_mut(key).map(|entry| entry.size = Size(size));
+            if let Some(entry) = self.files.get_mut(key) {
+                entry.size = Size(size);
+            }
         }
 
         pub fn coldest(&mut self) -> Option<(ObjectKey, (FileProperties, Option<Vec<Request>>))> {
@@ -167,11 +169,13 @@ mod learning {
 
         pub fn msg(&mut self, key: ObjectKey, dur: Duration) {
             let time = Instant::now();
-            self.files.get_mut(&key).map(|elem| elem.last_access = time);
+            if let Some(elem) = self.files.get_mut(&key) {
+                elem.last_access = time;
+            }
             self.reqs
                 .entry(key)
                 .and_modify(|tup| tup.push(Request::new(dur)))
-                .or_insert(vec![Request::new(dur)]);
+                .or_insert_with(|| vec![Request::new(dur)]);
         }
 
         // Default beta = 0.05
@@ -192,28 +196,26 @@ mod learning {
             }
 
             // 2. Calculate current state
-            let s1;
-            if self.files.is_empty() {
-                s1 = Hotness(0.0);
+            let s1 = if self.files.is_empty() {
+                Hotness(0.0)
             } else {
-                s1 = Hotness(
+                Hotness(
                     self.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
                         / self.files.len() as f32,
-                );
-            }
+                )
+            };
 
-            let s2;
-            if self.files.is_empty() {
-                s2 = Hotness(0.0);
+            let s2 = if self.files.is_empty() {
+                Hotness(0.0)
             } else {
-                s2 = Hotness(
+                Hotness(
                     self.files
                         .iter()
                         .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
                         .sum::<f32>()
                         / self.files.len() as f32,
-                );
-            }
+                )
+            };
 
             (State(s1, s2, s3), Reward(rewards))
         }
@@ -374,9 +376,9 @@ mod learning {
                                 .sum::<f32>())
             }
 
-            for idx in 0..self.z.len() {
-                self.z[idx] =
-                    self.lambda * EULER.powf(-self.beta * state.2.as_secs_f32()) * self.z[idx]
+            for (idx, z_val) in self.z.iter_mut().enumerate() {
+                *z_val =
+                    self.lambda * EULER.powf(-self.beta * state.2.as_secs_f32()) * *z_val
                         + phi_n[idx];
             }
 
@@ -409,8 +411,8 @@ mod learning {
                 phi[idx] = w[idx] / w_sum;
             }
             let mut c = 0.0;
-            for idx in 0..phi.len() {
-                c += self.p[idx] * phi[idx];
+            for (idx, phi_val) in phi.iter().enumerate() {
+                c += self.p[idx] * phi_val;
             }
             (c, phi)
         }
@@ -546,13 +548,12 @@ mod learning {
                         .sum::<f32>()
                         / tier.files.len() as f32,
                 );
-                let s3_up;
                 let num_added_obj_reqs = obj_reqs.len();
                 tier.reqs.insert(obj.clone(), obj_reqs.clone());
-                if num_added_obj_reqs + num_reqs == 0 {
-                    s3_up = Duration::from_secs_f32(0.0);
+                let s3_up = if num_added_obj_reqs + num_reqs == 0 {
+                    Duration::from_secs_f32(0.0)
                 } else {
-                    s3_up = Duration::from_secs_f32(
+                    Duration::from_secs_f32(
                         tier.reqs
                             .iter()
                             .map(|(_, reqs)| {
@@ -562,8 +563,8 @@ mod learning {
                             })
                             .sum::<f32>()
                             / (num_reqs + num_added_obj_reqs) as f32,
-                    );
-                }
+                    )
+                };
                 // Clean-up
                 tier.reqs.remove(&obj);
                 tier.files.remove(&obj);

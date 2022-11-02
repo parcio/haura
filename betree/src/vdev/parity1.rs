@@ -122,10 +122,8 @@ impl<V: VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Parity1<V> {
             .collect();
         let result = futures.collect::<Vec<_>>().await;
         let mut v = Vec::new();
-        for r in result {
-            if let Ok(x) = r {
-                v.push(x.into_full_buf());
-            }
+        for x in result.into_iter().flatten() {
+            v.push(x.into_full_buf());
         }
         if v.is_empty() {
             Err(VdevError::Read(self.id.clone()))

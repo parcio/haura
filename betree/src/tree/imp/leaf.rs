@@ -47,7 +47,7 @@ impl HasStoragePreference for LeafNode {
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        for (_k, (keyinfo, _v)) in &self.entries {
+        for (keyinfo, _v) in self.entries.values() {
             pref.upgrade(keyinfo.storage_preference);
         }
 
@@ -101,7 +101,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for LeafNode {
 
         if needs_second_pass {
             storage_pref = StoragePreference::NONE;
-            for (_key, (keyinfo, _value)) in &entries {
+            for (keyinfo, _value) in entries.values() {
                 storage_pref.upgrade(keyinfo.storage_preference);
             }
         }

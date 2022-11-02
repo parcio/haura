@@ -527,13 +527,11 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
     {
         let mut res = Ok(());
 
-        for entry in self.tree.range(range)? {
-            if let Ok((k, _v)) = entry {
-                // keep going even on errors, return earliest Err
-                let del_res = self.delete(k);
-                if del_res.is_err() && res.is_ok() {
-                    res = del_res;
-                }
+        for (k,_v) in self.tree.range(range)?.flatten() {
+            // keep going even on errors, return earliest Err
+            let del_res = self.delete(k);
+            if del_res.is_err() && res.is_ok() {
+                res = del_res;
             }
         }
 
@@ -547,11 +545,9 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         K: Borrow<[u8]> + Into<CowBytes>,
         R: RangeBounds<K>,
     {
-        for entry in self.tree.range(range)? {
-            if let Ok((k, _v)) = entry {
-                // abort on errors, they will likely be that one layer is full
-                self.migrate(k, pref)?;
-            }
+        for (k, _v) in self.tree.range(range)?.flatten() {
+            // abort on errors, they will likely be that one layer is full
+            self.migrate(k, pref)?;
         }
         Ok(())
     }

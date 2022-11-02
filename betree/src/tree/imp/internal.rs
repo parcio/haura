@@ -131,17 +131,17 @@ impl<T> InternalNode<T> {
         }
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + 'a {
+    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         self.children.iter()
     }
 
-    pub fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &'a mut T> + 'a {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
         self.children.iter_mut()
     }
 
-    pub fn iter_with_bounds<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (Option<&'a CowBytes>, &'a T, Option<&'a CowBytes>)> + 'a {
+    pub fn iter_with_bounds(
+        &self,
+    ) -> impl Iterator<Item = (Option<&CowBytes>, &T, Option<&CowBytes>)> + '_ {
         self.children.iter().enumerate().map(move |(idx, child)| {
             let maybe_left = if idx == 0 {
                 None
@@ -253,7 +253,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
         added_size
     }
 
-    pub fn drain_children<'a>(&'a mut self) -> impl Iterator<Item = N> + 'a {
+    pub fn drain_children(&mut self) -> impl Iterator<Item = N> + '_ {
         self.entries_size = 0;
         self.children
             .drain(..)

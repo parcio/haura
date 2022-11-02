@@ -412,7 +412,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
         match self.config.policy_config.mode {
             LfuMode::Object => {
                 for bucket in 0..NUM_SIZE_BUCKETS {
-                    let mut foo = vec![];
+                    let mut falsely_removed_objs = vec![];
                     while let Some((objectkey, name, freq)) = self.object_buckets.0
                         [storage_tier as usize][bucket]
                         .pop_mfu_key_value_frequency()
@@ -481,11 +481,11 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 break;
                             }
                         } else {
-                            foo.push((objectkey, name))
+                            falsely_removed_objs.push((objectkey, name))
                         }
                     }
                     // This more of shitty fix bc we only have active stores rn, pls FIXME
-                    for (key, name) in foo.into_iter() {
+                    for (key, name) in falsely_removed_objs.into_iter() {
                         self.object_buckets.0[storage_tier as usize][bucket].insert(key, name);
                     }
                     if moved >= desired {
@@ -536,7 +536,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                     // good to to refactor this code as we continue to work on haura
                     // also to reduce it's complexity. If you are reading this "we"
                     // might be even you :D
-                    let mut foo = vec![];
+                    let mut falsely_removed_objs = vec![];
                     while let Some((objectkey, name, freq)) = self.object_buckets.0
                         [storage_tier as usize][bucket]
                         .pop_lfu_key_value_frequency()
@@ -605,11 +605,11 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 break;
                             }
                         } else {
-                            foo.push((objectkey, name))
+                            falsely_removed_objs.push((objectkey, name))
                         }
                     }
                     // This more of shitty fix bc we only have active stores rn, pls FIXME
-                    for (key, name) in foo.into_iter() {
+                    for (key, name) in falsely_removed_objs.into_iter() {
                         self.object_buckets.0[storage_tier as usize][bucket].insert(key, name);
                     }
                     if moved >= desired {

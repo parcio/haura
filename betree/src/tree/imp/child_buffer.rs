@@ -50,7 +50,7 @@ impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        for (_k, (keyinfo, _v)) in &self.buffer {
+        for (keyinfo, _v) in self.buffer.values() {
             pref.upgrade(keyinfo.storage_preference)
         }
 
@@ -135,9 +135,9 @@ impl<N> ChildBuffer<N> {
 
 impl<N> ChildBuffer<N> {
     /// Returns an iterator over all messages.
-    pub fn get_all_messages<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (&'a CowBytes, &'a (KeyInfo, SlicedCowBytes))> + 'a {
+    pub fn get_all_messages(
+        &self,
+    ) -> impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + '_ {
         self.buffer.iter().map(|(key, msg)| (key, msg))
     }
 
@@ -164,7 +164,7 @@ impl<N> ChildBuffer<N> {
     pub fn split_at(&mut self, pivot: &CowBytes, node_pointer: N) -> Self {
         let (buffer, buffer_entries_size) = self.split_off(pivot);
         ChildBuffer {
-            messages_preference: AtomicStoragePreference::UNKNOWN,
+            messages_preference: AtomicStoragePreference::unknown(),
             buffer,
             buffer_entries_size,
             node_pointer: RwLock::new(node_pointer),
@@ -314,7 +314,7 @@ mod tests {
                 })
                 .collect();
             ChildBuffer {
-                messages_preference: AtomicStoragePreference::UNKNOWN,
+                messages_preference: AtomicStoragePreference::unknown(),
                 buffer_entries_size: buffer
                     .iter()
                     .map(|(key, value)| key.size() + value.size())

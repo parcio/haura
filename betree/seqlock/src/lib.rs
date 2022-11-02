@@ -175,7 +175,7 @@ impl<T: Copy> SeqLock<T> {
         SeqLockGuard {
             _guard: guard,
             seqlock: self,
-            seq: seq,
+            seq,
         }
     }
 

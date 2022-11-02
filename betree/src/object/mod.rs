@@ -275,7 +275,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         let mut v = name.to_vec();
         v.push(0);
 
-        let id = self.get_or_create_os_id(name.clone())?;
+        let id = self.get_or_create_os_id(name)?;
 
         let mut data_name = v.clone();
         data_name.extend_from_slice(b"data");
@@ -1063,8 +1063,10 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
-        let mut meta_change = MetaMessage::default();
-        meta_change.pref = Some(pref);
+        let meta_change = MetaMessage {
+            pref: Some(pref),
+            ..MetaMessage::default()
+        };
         self.store
             .update_object_info(&self.object.key, &meta_change)
     }

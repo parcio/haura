@@ -2,7 +2,7 @@
 
 use std::{borrow::Borrow, ops::RangeBounds};
 
-pub(crate) fn is_inclusive_non_empty<'t, B: RangeBounds<T>, T: Borrow<[u8]>>(bound: &B) -> bool {
+pub(crate) fn is_inclusive_non_empty<B: RangeBounds<T>, T: Borrow<[u8]>>(bound: &B) -> bool {
     use std::ops::Bound::*;
 
     match (bound.start_bound(), bound.end_bound()) {

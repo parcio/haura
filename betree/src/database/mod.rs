@@ -11,7 +11,6 @@ use crate::{
     },
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, MigrationPolicies, ObjectKey},
-    object::ObjectStoreId,
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -494,8 +493,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
                 )?));
 
                 // Discovery Initializiation
-                let os_ids: Vec<Result<ObjectStoreId>> = db.read().iter_object_stores()?.collect();
-                for os_id in os_ids.into_iter() {
+                for os_id in db.read().iter_object_stores()? {
                     // NOTE: If any of the result resolutions here fail the
                     // state of the datastore is anyway corrupt and we can
                     // escalate.
@@ -613,12 +611,12 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
             free: Block(0),
             total: Block(0),
         }; NUM_STORAGE_CLASSES];
-        for class in 0..NUM_STORAGE_CLASSES {
-            info[class] = self
+        for (idx, info_val) in info.iter_mut().enumerate().take(NUM_STORAGE_CLASSES) {
+            *info_val = self
                 .root_tree
                 .dmu()
                 .handler()
-                .get_free_space_tier(class as u8)
+                .get_free_space_tier(idx as u8)
                 .expect("Class hat to exist");
         }
         Superblock::<ObjectPointer>::write_superblock(pool, &root_ptr, &info)?;

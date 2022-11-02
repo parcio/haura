@@ -384,7 +384,7 @@ where
             obj_ptr.offset.disk_id(),
             obj_ptr.size,
         );
-        match (
+        if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) = (
             self.handler.copy_on_write(
                 obj_ptr.offset,
                 actual_size,
@@ -394,12 +394,9 @@ where
             &self.report_tx,
             steal,
         ) {
-            (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) => {
-                let _ = tx
-                    .send(MSG::remove(obj_ptr.offset, obj_ptr.size))
-                    .map_err(|_| warn!("Channel Receiver has been dropped."));
-            }
-            _ => {}
+            let _ = tx
+                .send(MSG::remove(obj_ptr.offset, obj_ptr.size))
+                .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
     }
 
@@ -1166,11 +1163,7 @@ where
             .iter()
             .cloned()
             .filter(|&key| {
-                if let ObjectKey::Unmodified { .. } = key {
-                    true
-                } else {
-                    false
-                }
+                matches!(key, ObjectKey::Unmodified { .. })
             })
             .collect();
         for key in keys {

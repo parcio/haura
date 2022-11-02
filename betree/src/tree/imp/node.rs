@@ -426,9 +426,9 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 }
 
 impl<N: HasStoragePreference> Node<N> {
-    pub(super) fn child_pointer_iter_mut<'a>(
-        &'a mut self,
-    ) -> Option<impl Iterator<Item = &'a mut N> + 'a> {
+    pub(super) fn child_pointer_iter_mut(
+        &mut self,
+    ) -> Option<impl Iterator<Item = &mut N> + '_> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => Some(
@@ -439,16 +439,16 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn child_pointer_iter<'a>(
-        &'a self,
-    ) -> Option<impl Iterator<Item = &'a RwLock<N>> + 'a> {
+    pub(super) fn child_pointer_iter(
+        &self,
+    ) -> Option<impl Iterator<Item = &RwLock<N>> + '_> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref internal) => Some(internal.iter().map(|child| &child.node_pointer)),
         }
     }
 
-    pub(super) fn drain_children<'a>(&'a mut self) -> Option<impl Iterator<Item = N> + 'a> {
+    pub(super) fn drain_children(&mut self) -> Option<impl Iterator<Item = N> + '_> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => Some(internal.drain_children()),
