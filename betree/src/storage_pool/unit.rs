@@ -100,15 +100,13 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         // TODO: can move this onto pool without deadlock?
         self.inner.write_back_queue.wait(&offset)?;
         let inner = self.inner.clone();
-        Ok(Box::pin(self.inner.pool.spawn_with_handle(
-            async move {
-                // inner.write_back_queue.wait_async(offset).await;
-                inner
-                    .by_offset(offset)
-                    .read(size, offset.block_offset(), checksum)
-                    .await
-            },
-        )?))
+        Ok(Box::pin(self.inner.pool.spawn_with_handle(async move {
+            // inner.write_back_queue.wait_async(offset).await;
+            inner
+                .by_offset(offset)
+                .read(size, offset.block_offset(), checksum)
+                .await
+        })?))
     }
 
     fn begin_write(&self, data: Buf, offset: DiskOffset) -> Result<(), VdevError> {

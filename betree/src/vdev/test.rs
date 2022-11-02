@@ -77,9 +77,7 @@ impl FailingLeafVdev {
                     .into_boxed_slice();
                 Ok(b)
             }
-            FailureMode::FailOperation | FailureMode::BadData => {
-                Err(Error::Read(self.id.clone()))
-            }
+            FailureMode::FailOperation | FailureMode::BadData => Err(Error::Read(self.id.clone())),
             FailureMode::Panic => panic!(),
         }
     }
