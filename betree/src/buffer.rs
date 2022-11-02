@@ -391,7 +391,7 @@ impl Buf {
         &self.range
     }
 
-    /// Return the block size of this [Buf]'s [Block::range].
+    /// Return the block size of this [Buf].
     pub fn size(&self) -> Block<u32> {
         Block(self.range.end.as_u32() - self.range.start.as_u32())
     }

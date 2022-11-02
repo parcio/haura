@@ -83,7 +83,7 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     ObjectWrite(ObjectKey, u64, StoragePreference, Duration),
     /// Notification if a manual migration took place.
     ObjectMigrate(ObjectKey, StoragePreference),
-    /// Notification similar to [ObjectOpen] but with different semantics.
+    /// Notification similar to [Self::ObjectOpen] but with different semantics.
     ObjectDiscover(ObjectKey, ObjectInfo, CowBytes),
 }
 

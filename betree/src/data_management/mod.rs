@@ -79,11 +79,12 @@ pub trait HasStoragePreference {
     /// return None if it was invalidated and needs to be recalculated.
     fn current_preference(&self) -> Option<StoragePreference>;
 
-    /// Recalculate the storage preference, potentially scanning
-    /// through all data contained by this value.
+    /// Recalculate the storage preference, potentially scanning through all
+    /// data contained by this value.
     ///
-    /// Implementations are expected to cache the computed preference,
-    /// so that immediately subsequent calls to [HasStoragePreference::current_pref] return Some.
+    /// Implementations are expected to cache the computed preference, so that
+    /// immediately subsequent calls to [HasStoragePreference::current_preference]
+    /// return Some.
     fn recalculate(&self) -> StoragePreference;
 
     /// Returns a correct preference, recalculating it if needed.

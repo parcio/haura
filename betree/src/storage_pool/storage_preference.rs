@@ -197,7 +197,7 @@ impl PartialEq for AtomicStoragePreference {
 /// An upper bound reflecting the optimized choice of storage determined by the
 /// automated migration policy, in contrast to the lower bound by
 /// [StoragePreference]. Acts as a neutral element when set to
-/// [AtomicSystemStoragePreference::NONE].
+/// `None`.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct AtomicSystemStoragePreference(AtomicU8);
 
