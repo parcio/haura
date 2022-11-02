@@ -322,8 +322,8 @@ where
     /// corresponding node is moved in cache to the [ObjectKey::Modified] state.
     /// Second, the passed [ObjectRef] is moved to the [ObjectRef::Modified]
     /// state, if it has been in the [ObjectRef::Unmodified] state before
-    /// [copy_on_write] is called on the [ObjectPointer] contained, if this is
-    /// not the case the corresponding running [handle_write_back] will handle
+    /// [Self::copy_on_write] is called on the [ObjectPointer] contained, if this is
+    /// not the case the corresponding running [Self::handle_write_back] will handle
     /// deallocation on completion.
     fn steal(
         &self,

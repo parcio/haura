@@ -17,7 +17,7 @@ use crate::{
 };
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
-use std::{borrow::Borrow, collections::VecDeque, marker::PhantomData, mem, ops::RangeBounds};
+use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
 
 #[derive(Debug)]
 enum FillUpResult {
@@ -518,80 +518,6 @@ where
             .write_back(|| self.inner.borrow().root_node.write())?;
         trace!("sync: Finished write_back");
         Ok(obj_ptr)
-    }
-}
-
-impl<X, R, M, I> Tree<X, M, I>
-where
-    X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
-    M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
-{
-    /// An iterator returning all [ObjectPointer]s of a specified tree.
-    /// CAUTION: While build lazily the consumtion of this iterator implies hevay IO work on large trees as nodes up until the leaves (excluded) are read.
-    /// This can contain quite a substantial part of data but on the lesser side of the bulk of the data.
-    pub fn node_iter<'a>(&'a self) -> TreeIterator<'a, X, R, M, I> {
-        TreeIterator {
-            tree: self,
-            depth: self.depth().unwrap(),
-            node: vec![(None, Some(self.get_root_node().unwrap()))].into(),
-        }
-    }
-}
-
-pub struct TreeIterator<'a, X, R, M, I>
-where
-    X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
-    M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
-{
-    tree: &'a Tree<X, M, I>,
-    depth: u32,
-    node: VecDeque<(
-        Option<X::ObjectPointer>,
-        Option<<X as HandlerDml>::CacheValueRef>,
-    )>,
-}
-
-impl<'a, X, R, M, I> Iterator for TreeIterator<'a, X, R, M, I>
-where
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
-    X: Dml<Object = Node<R>, ObjectRef = R>,
-    M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
-{
-    type Item = X::ObjectPointer;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.node.pop_front() {
-            // valid object ptr & valid node
-            Some((objptr, Some(n))) => {
-                debug!("Level of node {}", n.level());
-                debug!("Total depth {}", self.depth);
-                if let Some(iter) = n.child_pointer_iter() {
-                    for (node, ptr) in iter.filter_map(|elem| {
-                        elem.read()
-                            .get_unmodified().map(|np| (elem, np.clone()))
-                    }) {
-                        if n.level() >= self.depth - 1 {
-                            self.node.push_back((Some(ptr), None));
-                        } else if let Ok(node) = self.tree.get_node(node) {
-                            self.node.push_back((Some(ptr), Some(node)));
-                        }
-                    }
-                }
-                // Prevent early none (for root)
-                if objptr.is_none() {
-                    return self.next();
-                }
-                objptr
-            }
-            // valid object ptr & invalid node (leaf)
-            Some((objptr, None)) => objptr,
-            _ => None,
-        }
     }
 }
 
