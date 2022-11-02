@@ -1117,7 +1117,7 @@ where
             }
         };
         trace!("write_back: Leave");
-        
+
         self.handle_write_back(object, mid, false)
     }
 

@@ -45,7 +45,6 @@ struct AtomicStatistics {
 
 impl AtomicStatistics {
     fn as_stats(&self) -> Statistics {
-        
         #[cfg(feature = "latency_metrics")]
         {
             self.prev_read

@@ -432,9 +432,8 @@ where
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
     fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error> {
-        self.get_with_info(key).map(|res| {
-            res.map(|(_info, data)| data)
-        })
+        self.get_with_info(key)
+            .map(|res| res.map(|(_info, data)| data))
     }
 
     fn insert<K>(

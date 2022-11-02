@@ -182,12 +182,7 @@ mod learning {
             let mut rewards = 0.0;
             let total = self.reqs.iter().flat_map(|(_, v)| v.iter()).count();
             let mut s3 = Duration::from_secs_f32(0.0);
-            for (idx, req) in self
-                .reqs
-                .iter()
-                .flat_map(|(_, v)| v.iter())
-                .enumerate()
-            {
+            for (idx, req) in self.reqs.iter().flat_map(|(_, v)| v.iter()).enumerate() {
                 s3 += req.response_time;
                 rewards +=
                     req.response_time.as_secs_f32() * EULER.powf(-beta * (idx / total) as f32);
@@ -387,8 +382,8 @@ mod learning {
 
             for idx in 0..self.p.len() {
                 self.p[idx] += self.alpha[idx]
-                        * (reward.0 + EULER.powf(-self.beta * state.2.as_secs_f32()) * c_n_1 - c_n)
-                        * self.z[idx];
+                    * (reward.0 + EULER.powf(-self.beta * state.2.as_secs_f32()) * c_n_1 - c_n)
+                    * self.z[idx];
             }
 
             self.phi_list.push(phi);
@@ -619,11 +614,7 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
             store.clone()
         } else {
             let start = std::time::Instant::now();
-            let res = self
-                .db
-                .write()
-                .open_object_store_with_id(*os_id)
-                .unwrap();
+            let res = self.db.write().open_object_store_with_id(*os_id).unwrap();
             debug!(
                 "Opening object stoare took {} ms",
                 start.elapsed().as_millis()
