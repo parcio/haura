@@ -1162,9 +1162,7 @@ where
         let keys: Vec<_> = cache
             .iter()
             .cloned()
-            .filter(|&key| {
-                matches!(key, ObjectKey::Unmodified { .. })
-            })
+            .filter(|&key| matches!(key, ObjectKey::Unmodified { .. }))
             .collect();
         for key in keys {
             let _ = cache.remove(&key, |obj| obj.size());

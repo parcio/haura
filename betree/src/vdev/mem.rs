@@ -46,11 +46,7 @@ impl Memory {
         self.slice(size.to_bytes() as usize, offset.to_bytes() as usize)
     }
 
-    fn slice_mut(
-        &self,
-        size: usize,
-        offset: usize,
-    ) -> Result<impl DerefMut<Target = [u8]> + '_> {
+    fn slice_mut(&self, size: usize, offset: usize) -> Result<impl DerefMut<Target = [u8]> + '_> {
         parking_lot::RwLockWriteGuard::try_map(self.mem.write(), |mem| {
             mem.get_mut(offset..offset + size)
         })

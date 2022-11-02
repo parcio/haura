@@ -527,7 +527,7 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
     {
         let mut res = Ok(());
 
-        for (k,_v) in self.tree.range(range)?.flatten() {
+        for (k, _v) in self.tree.range(range)?.flatten() {
             // keep going even on errors, return earliest Err
             let del_res = self.delete(k);
             if del_res.is_err() && res.is_ok() {
