@@ -164,14 +164,14 @@ fn iter_upserts(mut b: &[u8]) -> Option<impl Iterator<Item = Upsert>> {
 fn append_upsert(v: &mut Vec<u8>, upsert: &Upsert) {
     // Writes to a Vec can only fail with OOM, and that can't be caught with Results,
     // so the unwraps are fine™
-    match upsert {
-        &Upsert::Bytes { offset_bytes, data } => {
+    match *upsert {
+        Upsert::Bytes { offset_bytes, data } => {
             v.write_u32::<LittleEndian>(offset_bytes).unwrap();
             v.write_u32::<LittleEndian>(data.len() as u32).unwrap();
 
             v.extend_from_slice(data);
         }
-        &Upsert::Bits {
+        Upsert::Bits {
             offset_bits,
             amount_bits,
             value,

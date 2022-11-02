@@ -33,24 +33,24 @@ impl Memory {
         })
     }
 
-    fn slice<'s>(&'s self, size: usize, offset: usize) -> Result<impl Deref<Target = [u8]> + 's> {
+    fn slice(&self, size: usize, offset: usize) -> Result<impl Deref<Target = [u8]> + '_> {
         parking_lot::RwLockReadGuard::try_map(self.mem.read(), |mem| mem.get(offset..offset + size))
             .map_err(|_| VdevError::Read(self.id.clone()))
     }
 
-    fn slice_blocks<'s>(
-        &'s self,
+    fn slice_blocks(
+        &self,
         size: Block<u32>,
         offset: Block<u64>,
-    ) -> Result<impl Deref<Target = [u8]> + 's> {
+    ) -> Result<impl Deref<Target = [u8]> + '_> {
         self.slice(size.to_bytes() as usize, offset.to_bytes() as usize)
     }
 
-    fn slice_mut<'s>(
-        &'s self,
+    fn slice_mut(
+        &self,
         size: usize,
         offset: usize,
-    ) -> Result<impl DerefMut<Target = [u8]> + 's> {
+    ) -> Result<impl DerefMut<Target = [u8]> + '_> {
         parking_lot::RwLockWriteGuard::try_map(self.mem.write(), |mem| {
             mem.get_mut(offset..offset + size)
         })

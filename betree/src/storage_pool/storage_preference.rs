@@ -120,10 +120,12 @@ pub struct AtomicStoragePreference(AtomicU8);
 
 #[allow(missing_docs)]
 impl AtomicStoragePreference {
-    pub const UNKNOWN: Self = Self(AtomicU8::new(u8::MAX));
-
     pub fn known(class: StoragePreference) -> Self {
         Self(AtomicU8::new(class.0))
+    }
+
+    pub fn unknown() -> Self {
+        Self(AtomicU8::new(u8::MAX))
     }
 
     pub fn as_option(&self) -> Option<StoragePreference> {

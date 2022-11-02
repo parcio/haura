@@ -204,10 +204,7 @@ impl TierConfiguration {
 }
 
 fn is_path<S: AsRef<str> + ?Sized>(s: &S) -> bool {
-    match s.as_ref().chars().next() {
-        Some('.') | Some('/') => true,
-        _ => false,
-    }
+    matches!(s.as_ref().chars().next(), Some('.') | Some('/'))
 }
 
 impl FromIterator<Vdev> for TierConfiguration {

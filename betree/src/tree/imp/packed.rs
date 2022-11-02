@@ -182,9 +182,9 @@ impl PackedMap {
         self.get_by_index(idx)
     }
 
-    pub fn get_all<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))> + 'a {
+    pub fn get_all(
+        &self,
+    ) -> impl Iterator<Item = (&[u8], (KeyInfo, SlicedCowBytes))> + '_ {
         struct Iter<'a> {
             packed: &'a PackedMap,
             idx: u32,
