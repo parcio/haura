@@ -17,10 +17,17 @@ use std::{
 pub(crate) static ENDIAN: Endianness = Endianness::LittleEndian;
 
 #[derive(Debug, Clone, Readable, Writable)]
+/// The meta data information about a single object. For each object one of these
+/// structures is stored and updated according to ongoing operations.
 pub struct ObjectInfo {
+    /// Assigned identifier in the object store. Unique only in the context of
+    /// the belonging object store.
     pub object_id: ObjectId,
+    /// The total size of the object in bytes.
     pub size: u64,
+    /// Timestamp of the last modification to the object.
     pub mtime: SystemTime,
+    /// Most recently used storage preference. Can be used for reinitialization.
     pub pref: StoragePreference,
 }
 
