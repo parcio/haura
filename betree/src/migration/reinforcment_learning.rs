@@ -580,7 +580,7 @@ mod learning {
 ///
 /// This policy is intended to be used on "uniform" objets which do not use
 /// partial speed up, based on user made assumptions of the object.
-pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
+pub(crate) struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     tiers: Vec<TierAgent>,
     // Stores the most recently known storage location and all requests
     objects: HashMap<ObjectKey, ObjectInfo>,
@@ -593,10 +593,19 @@ pub struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Additional configuration for the reinforcement learning policy. These
+/// configuration only concern the logging of data for debugging or
+/// visualization purposes.
+///
+/// # To-do
+/// - We can also add the "cooling" of files, as in the speed new temperatures
+/// are used compared to older existing observations, to the configuration.
 pub struct RlConfig {
-    // Print post-timestep "known" timestep
+    /// Path to file which stores the complete recorded state of the storage
+    /// stack after each timestep. In a newline-delimited json format.
     path_state: std::path::PathBuf,
-    // Migration decisions
+    /// Path to file which stores all migration decisions made by the policy in
+    /// a timestep.  Stored as CSV.
     path_delta: std::path::PathBuf,
 }
 

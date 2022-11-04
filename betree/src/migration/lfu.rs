@@ -82,21 +82,30 @@ impl ObjectLocation {
     }
 }
 
-/// Lfu specific configuration details.
+/// Least frequently used (LFU) specific configuration details.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct LfuConfig {
-    /// Maximum number of nodes to be promoted at once. An object size is
-    /// maximum 4 MiB.
-    promote_num: u32,
-    /// Maximum amount of blocks to promote at once. An object size is maximum 4
-    /// MiB.
-    promote_size: Block<u32>,
-    // Print post-timestep "known" timestep
-    path_state: Option<std::path::PathBuf>,
-    // Migration decisions
-    path_delta: Option<std::path::PathBuf>,
-    // Migrate Objects, Nodes or Both
-    mode: LfuMode,
+    /// Maximum number of elements to be promoted at once. This can be added as
+    /// an additional restriction on the size limitation of promote procedures.
+    pub promote_num: u32,
+    /// Maximum amount of blocks to promote at once. The default value for this
+    /// field is 1024 which represents about 4 MiB of data. Together with the
+    /// update interval of the policy we can determine the expected base load
+    /// applied by the policy. So for example, for an update interval of 1
+    /// second we have 4 MiB per second.  Please note that you'll likely
+    /// experience better performance with LFU by choosing a greater amount of
+    /// blocks (>128 MiB) and longer update intervals due to a reduced
+    /// interference with other operations, especially on seek latency sensitive
+    /// mediums such as HDDs.
+    pub promote_size: Block<u32>,
+    /// Path to file which stores the complete recorded state of the storage
+    /// stack after each timestep. In a newline-delimited json format.
+    pub path_state: Option<std::path::PathBuf>,
+    /// Path to file which stores all migration decisions made by the policy in
+    /// a timestep.  Stored as CSV.
+    pub path_delta: Option<std::path::PathBuf>,
+    /// Migrate Objects, Nodes or Both.
+    pub mode: LfuMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -110,7 +119,7 @@ impl Default for LfuConfig {
     fn default() -> Self {
         Self {
             promote_num: u32::MAX,
-            promote_size: Block(128),
+            promote_size: Block(1024),
             path_state: None,
             path_delta: None,
             mode: LfuMode::Object,
@@ -232,8 +241,6 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     // Delete Offset
                     self.leafs[opinfo.offset.storage_class() as usize].remove(&opinfo.offset);
                 }
-                // This policy ignores all other messages.
-                _ => {}
             }
         }
         Ok(())

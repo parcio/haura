@@ -280,25 +280,31 @@ pub trait Dml: HandlerDml {
     fn drop_cache(&self);
 }
 
+/// Denotes if an implementor of the [Dml] can utilize an allocation handler.
 pub trait DmlWithHandler {
     type Handler;
 
     fn handler(&self) -> &Self::Handler;
 }
 
+/// Denotes if an implementor of the [Dml] can utilize a storage pool layer.
 pub trait DmlWithSpl {
     type Spl;
 
     fn spl(&self) -> &Self::Spl;
 }
 
+/// Denotes if an implementor of the [Dml] uses a cache.
 pub trait DmlWithCache {
     type CacheStats: serde::Serialize;
 
     fn cache_stats(&self) -> Self::CacheStats;
 }
 
+/// Denotes if an implementor of the [Dml] can also handle storage hints emitted
+/// by the migration policies.
 pub trait DmlWithStorageHints {
+    /// Returns a handle to the storage hint data structure.
     fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>;
     /// Returns the default storage class used when [StoragePreference] is `None`.
     fn default_storage_class(&self) -> StoragePreference;
@@ -308,8 +314,9 @@ pub trait DmlWithStorageHints {
 /// Implemented via channels the DMU is allowed to send any number of messages to an consuming sink.
 /// It is advised to use `unbound` channels for this purpose.
 pub trait DmlWithReport<Msg> {
-    /// Attach a reporting channel to a DMU
+    /// Attach a reporting channel to the DML
     fn with_report(self, tx: Sender<Msg>) -> Self;
+    /// Set a reporting channel to the DML
     fn set_report(&mut self, tx: Sender<Msg>);
 }
 

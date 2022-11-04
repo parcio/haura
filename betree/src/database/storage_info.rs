@@ -12,14 +12,17 @@ pub struct StorageInfo {
 }
 
 impl StorageInfo {
+    /// Returns the percentage of unclaimed storage relative to the total size of the tier.
     pub fn percent_free(&self) -> f32 {
         self.free.as_u64() as f32 / self.total.as_u64() as f32
     }
 
+    /// Returns the percentage of claimed storage relative to the total size of the tier.
     pub fn percent_full(&self) -> f32 {
         1.0 - self.percent_free()
     }
 
+    /// Returns the number of blocks which are required to be removed to fulfill a given threshold.
     pub fn block_overshoot(&self, threshold: f32) -> Block<u64> {
         let threshold = threshold.clamp(0.0, 1.0);
         Block(
