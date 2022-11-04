@@ -12,17 +12,28 @@ use std::{
 };
 
 #[derive(Clone)]
+/// Message emitted by the [betree_storage_stack::data_management::Dml] which
+/// contains storage operation information about the elements of the internal representation,
+/// the nodes of the B-epsilon tree.
+///
+/// For each message it is of great importance to observe the attached [OpInfo]
+/// as information about the transitional node identification are stored there
+/// which are not stored in any manner outside of the migration policy.
 pub enum DmlMsg {
     // The three base operations of our store.
     // Largely relevant for clearing, and frequency determination in LRU, LFU,
     // FIFO and other policies
+
+    /// A fetch operation from disk has been performed.
     Fetch(OpInfo),
+    /// A write operation to disk has been performed.
     Write(OpInfo),
+    /// A node has been completely removed from the storage stack and can no
+    /// longer be referenced.
     Remove(OpInfo),
 
-    // Initial message at the beginning of an session
-    // For effectiveness it is advised to discover all nodes in every dataset intially.
-    Discover(DiskOffset),
+    // /// Initial message at the beginning of an session.
+    // Discover(DiskOffset),
 }
 
 use serde::Serialize;
@@ -196,13 +207,22 @@ impl ConstructReport for DmlMsg {
 //  preferences of the user.
 
 #[derive(Clone)]
+/// All metadata necessary to classify an IO operation.
 pub struct OpInfo {
+    /// The temporal identifier of a node. If `previous_offset` is `Some` this
+    /// node has been rewritten to a new location due to copy on write.
     pub(crate) offset: DiskOffset,
-    // If None, new entry
+    /// The previous offset of the node written. If `None` the node has been
+    /// newly created and never been written before.
     pub(crate) previous_offset: Option<DiskOffset>,
-    // Retrieved from [ObjectPointer]
+    /// The size of the nodes in blocks. Relevant for weighting of operations
+    /// and space restrictions.
     pub(crate) size: Block<u32>,
-    // Maybe include this again?
+    // FIXME: As the dataset id is deeply burried in type definitions and
+    // generics specified in the DMU we need to extract this, from the database
+    // to be passed on to this message type. A bit annoying.
+    // /// The dataset which this node belongs to. May be used to exclude datasets from migrations.
     // pub(crate) dataset_id: DatasetId,
+    /// The time at which an operation has occurred.
     pub(crate) time: SystemTime,
 }

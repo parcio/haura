@@ -2,9 +2,69 @@
 //! Haura.
 //!
 //! There are multiple policies available, they can be found in the
-//! [MigrationPolicies] enum.  A short description of each is provided there.
+//! [MigrationPolicies] enum.
 //!
-//! TODO: Construct example.
+//! # Usage
+//!
+//! The migration policy has to be initiated with the initialization of the
+//! database itself. See the configuration options of
+//! [crate::database::DatabaseConfiguration].  Some policies may have additional
+//! configuration options which can be seen in the specific documentation of the
+//! policies.
+//!
+//! For example a simple LFU configuration which moves 1024 blocks of data at
+//! once, this configuration could look like this:
+//! ```
+//! # use betree_storage_stack::{
+//! #     database::AccessMode,
+//! #     storage_pool::{LeafVdev, TierConfiguration, Vdev},
+//! #     Database, DatabaseConfiguration, Dataset, StoragePoolConfiguration, StoragePreference, migration::{MigrationPolicies, MigrationConfig, LfuConfig}, vdev::Block,
+//! # };
+//! # fn main() {
+//! let mut db = Database::build(DatabaseConfiguration {
+//!     storage: StoragePoolConfiguration {
+//!         tiers: vec![
+//!         TierConfiguration::new(vec![Vdev::Leaf(LeafVdev::Memory {
+//!             mem: 128 * 1024 * 1024,
+//!         })]),
+//!         TierConfiguration::new(vec![Vdev::Leaf(LeafVdev::Memory {
+//!             mem: 32 * 1024 * 1024,
+//!         })]),
+//!         ],
+//!         ..StoragePoolConfiguration::default()
+//!     },
+//!     access_mode: AccessMode::AlwaysCreateNew,
+//!     migration_policy: Some(MigrationPolicies::Lfu(MigrationConfig {
+//!         policy_config: LfuConfig {
+//!             promote_size: Block(1024),
+//!             ..LfuConfig::default()
+//!         },
+//!         ..MigrationConfig::default()
+//!     })),
+//!     ..DatabaseConfiguration::default()
+//! }).unwrap();
+//! # }
+//! ```
+//!
+//! All policies implement a default configuration which can be used if no
+//! specific knowledge is known beforehand. Although, it is good practice to
+//! give some help to users for determining a fitting configuration in the
+//! policy config documentation. You can find the according documentation from
+//! [MigrationPolicies].
+//!
+//! # Types of Migrations
+//!
+//! We support two kinds of automated migrations, objects and nodes.
+//! **Object migrations** are relatively easy to apply and allow for eager data
+//! migration upwards and downwards in the stack.  **Node migration** is more
+//! tricky and is currently only implemented lazily via hints given to the DML.
+//! This makes downward migrations difficult as the lazy hints are resolved on
+//! access.  For further information about this issue and the current state of
+//! resolving look at the issue tracker.
+//!
+//! A policy can use a combination of these migration types and is not forced to
+//! use any method over the other. Policies declare in their documentation which
+//! kinds are used and how they impact the storage use.
 //!
 mod errors;
 mod lfu;
@@ -14,8 +74,10 @@ mod reinforcment_learning;
 use crossbeam_channel::Receiver;
 use errors::*;
 use itertools::Itertools;
+pub use lfu::LfuConfig;
 pub(crate) use msg::*;
 use parking_lot::{Mutex, RwLock};
+pub use reinforcment_learning::RlConfig;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
@@ -27,17 +89,42 @@ use crate::{
     Database, StoragePreference,
 };
 
-use self::{
-    lfu::{Lfu, LfuConfig},
-    reinforcment_learning::{RlConfig, ZhangHellanderToor},
-};
+use self::{lfu::Lfu, reinforcment_learning::ZhangHellanderToor};
 
 /// Available policies for auto migrations.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum MigrationPolicies {
-    /// Least frequently used, promote and demote nodes based on their usage in the current session.
+    /// Least frequently used, promote and demote nodes based on their usage in
+    /// the current session.  This policy can use either objects, nodes, or a
+    /// combination of these. Currently only objects are advised to be used.
+    ///
+    /// This policy optimistically promotes data as soon as space is available.
+    /// Also a size categorization scheme is used to promote objects based on
+    /// rough bucket sizes. This is partially due to other research in this area
+    /// as for example Ge et al. 2022, as well as performance measurements with
+    /// Haura which showed some contradictions to common assumptions due to
+    /// Write-optimization.
+    ///
+    /// # Configuration
+    ///
+    /// The configuration of this policy has been shown to be finnicky and has
+    /// to be chosen relative well to the existing storage utilization and
+    /// access patterns. For more information about this look at [LfuConfig].
     Lfu(MigrationConfig<LfuConfig>),
-    /// Reinforcment Learning based tier classfication based on Zhang et al. (2022)
+    /// Reinforcment Learning based tier classfication based on Vengerov 2008.
+    /// This policy only uses objects and allows for a dynamic fitting of
+    /// objects to current and experienced access patterns. The approach is
+    /// similar to a temperature scaling of objects in the storage stack and has
+    /// been shown to determine access frequencies well in randomized scenarios.
+    /// If you will be using Haura with both objet stores and key-value stores
+    /// this policies might perform suboptimally as it cannot gain a holistic
+    /// view of the state of the storage.
+    ///
+    /// # Configuration
+    ///
+    /// The configuration is purely informational but may be expanded in the
+    /// future to allow for some experimentation with set learning values. They
+    /// are closer described in [RlConfig].
     ReinforcementLearning(MigrationConfig<Option<RlConfig>>),
 }
 
@@ -99,28 +186,46 @@ impl<Config: Default> Default for MigrationConfig<Config> {
     }
 }
 
-// FIXME: Draft, no types are final
+/// An automated migration policy interface definition.
+///
+/// If you are adding a new policy also include a new variant in
+/// [MigrationPolicies] with a short-hand of your policy name to allow the user
+/// to create your policy from the database definition.
+///
+/// When implementing a migration policy you can use two types of messages which
+/// are produced. They are divided by user interface and internal tree
+/// representation. These messages are defined in the two message types [DmlMsg] and [DatabaseMsg]
 pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
-    // /// Perform all available operations on a preset storage tier.
-    // fn action(&mut self, storage_tier: u8) -> Result<Block<u32>>;
-
-    // Consume all present messages and update the migration selection
-    // status for all afflicted objects
+    /// Consume all present messages and update the migration selection
+    /// status for all afflicted objects
     fn update(&mut self) -> Result<()>;
 
+    /// Run any relevant metric logic such as accumulation and writing out data.
     fn metrics(&self) -> Result<()>;
 
+    /// Promote any amount of data from the given tier to the next higher one.
+    ///
+    /// This functions returns how many blocks have been migrated in total. When
+    /// using lazy node migration also specify the amount of blocks hinted to be
+    /// migrated.
     fn promote(&mut self, storage_tier: u8) -> Result<Block<u64>>;
+    /// Demote atleast `desired` many blocks from the given storage tier to any
+    /// tier lower than the given tier.
     fn demote(&mut self, storage_tier: u8, desired: Block<u64>) -> Result<Block<u64>>;
 
-    // Getters
+    /// Return a reference to the active [Database].
     fn db(&self) -> &Arc<RwLock<Database<C>>>;
 
+    /// Return a reference to the underlying DML.
     fn dmu(&self) -> &Arc<<C as DatabaseBuilder>::Dmu>;
 
+    /// Return the cleaned configuration.
     fn config(&self) -> MigrationConfig<()>;
 
-    /// The main loop of the
+    /// The main loop of the migration policy.
+    ///
+    /// We provide a basic default implementation which may be used or discarded
+    /// if desired.
     fn thread_loop(&mut self) -> Result<()> {
         std::thread::sleep(self.config().grace_period);
         loop {
@@ -166,7 +271,6 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                     high_info.percent_full() > threshold && low_info.percent_full() < threshold
                 })
             {
-                // TODO: Calculate moving size, until threshold barely not fulfilled?
                 let desired: Block<u64> =
                     Block((high_info.total.as_u64() as f32 * (1.0 - threshold)) as u64)
                         - high_info.free.as_u64();

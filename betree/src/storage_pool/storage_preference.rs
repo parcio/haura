@@ -115,7 +115,7 @@ impl PartialOrd for StoragePreference {
 
 #[derive(Debug, Serialize, Deserialize)]
 /// An atomic version of [StoragePreference], replacing a RwLock<Option<StoragePreference>> by
-/// using the additional variant [AtomicStoragePreference::UNKNOWN] in place of None.
+/// using the additional variant "Unknown" in place of None.
 pub struct AtomicStoragePreference(AtomicU8);
 
 #[allow(missing_docs)]
