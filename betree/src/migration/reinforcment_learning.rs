@@ -807,7 +807,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                                 .into();
 
                             if 1.0 - ((upper.free.0 + object_size) as f32 / upper.total.0 as f32)
-                                <= self.config.migration_threshold
+                                <= self.config.migration_threshold[tier_id - 1]
                             {
                                 break;
                             }
@@ -885,8 +885,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
                 .get(tier_id)
                 .unwrap()
                 .into();
-            while upper.percent_full() > self.config.migration_threshold
-                && lower.percent_full() < self.config.migration_threshold
+            while upper.percent_full() > self.config.migration_threshold[tier_id - 1]
+                && lower.percent_full() < self.config.migration_threshold[tier_id]
             {
                 debug!("trying to evict full layer");
                 // NOTE:
