@@ -111,7 +111,7 @@ pub enum MigrationPolicies {
     /// to be chosen relative well to the existing storage utilization and
     /// access patterns. For more information about this look at [LfuConfig].
     Lfu(MigrationConfig<LfuConfig>),
-    /// Reinforcment Learning based tier classfication based on Vengerov 2008.
+    /// Reinforcment Learning based tier classfication by Vengerov 2008.
     /// This policy only uses objects and allows for a dynamic fitting of
     /// objects to current and experienced access patterns. The approach is
     /// similar to a temperature scaling of objects in the storage stack and has
@@ -158,7 +158,7 @@ pub struct MigrationConfig<Config> {
     pub migration_threshold: f32,
     /// Duration between consumption of operational messages. Enlarging this leads to greater memory usage, but reduces ongoing computational load.
     pub update_period: Duration,
-    /// Policy dependent configuration
+    /// Policy dependent configuration.
     pub policy_config: Config,
 }
 
