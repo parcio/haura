@@ -155,7 +155,7 @@ pub struct MigrationConfig<Config> {
     /// Time at start where operations are _only_ recorded. This may help in avoiding incorrect early migrations by depending on a larger historical data.
     pub grace_period: Duration,
     /// Threshold at which downwards migrations are considered. Or at which upwards migrations are blocked. Values are on a range of 0 to 1.
-    pub migration_threshold: f32,
+    pub migration_threshold: [f32; NUM_STORAGE_CLASSES],
     /// Duration between consumption of operational messages. Enlarging this leads to greater memory usage, but reduces ongoing computational load.
     pub update_period: Duration,
     /// Policy dependent configuration.
@@ -179,7 +179,7 @@ impl<Config: Default> Default for MigrationConfig<Config> {
     fn default() -> Self {
         MigrationConfig {
             grace_period: Duration::from_secs(300),
-            migration_threshold: 0.8,
+            migration_threshold: [0.95; NUM_STORAGE_CLASSES],
             update_period: Duration::from_secs(30),
             policy_config: Default::default(),
         }
@@ -236,7 +236,7 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
 
             use crate::database::StorageInfo;
 
-            let threshold = self.config().migration_threshold.clamp(0.0, 1.0);
+            let threshold: Vec<f32> = self.config().migration_threshold.iter().map(|val| val.clamp(0.0, 1.0)).collect();
             let infos: Vec<(u8, StorageInfo)> = (0u8..NUM_STORAGE_CLASSES as u8)
                 .filter_map(|class| {
                     self.dmu()
@@ -267,12 +267,12 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
             for ((high_tier, high_info), (_low_tier, _low_info)) in infos
                 .iter()
                 .tuple_windows()
-                .filter(|((_, high_info), (_, low_info))| {
-                    high_info.percent_full() > threshold && low_info.percent_full() < threshold
+                .filter(|((high_tier, high_info), (low_tier, low_info))| {
+                    high_info.percent_full() > threshold[*high_tier as usize] && low_info.percent_full() < threshold[*low_tier as usize]
                 })
             {
                 let desired: Block<u64> =
-                    Block((high_info.total.as_u64() as f32 * (1.0 - threshold)) as u64)
+                    Block((high_info.total.as_u64() as f32 * (1.0 - threshold[*high_tier as usize])) as u64)
                         - high_info.free.as_u64();
                 self.demote(*high_tier, desired)?;
             }
