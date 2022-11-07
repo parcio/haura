@@ -602,7 +602,7 @@ pub(crate) struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
 /// are used compared to older existing observations, to the configuration.
 pub struct RlConfig {
     /// Path to file which stores the complete recorded state of the storage
-    /// stack after each timestep. In a newline-delimited json format.
+    /// stack after each timestep in a newline-delimited json format.
     pub path_state: std::path::PathBuf,
     /// Path to file which stores all migration decisions made by the policy in
     /// a timestep.  Stored as CSV.

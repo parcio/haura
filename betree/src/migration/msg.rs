@@ -12,7 +12,7 @@ use std::{
 };
 
 #[derive(Clone)]
-/// Message emitted by the [betree_storage_stack::data_management::Dml] which
+/// Message emitted by the [crate::data_management::Dml] which
 /// contains storage operation information about the elements of the internal representation,
 /// the nodes of the B-epsilon tree.
 ///

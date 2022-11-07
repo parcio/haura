@@ -99,7 +99,7 @@ pub struct LfuConfig {
     /// mediums such as HDDs.
     pub promote_size: Block<u32>,
     /// Path to file which stores the complete recorded state of the storage
-    /// stack after each timestep. In a newline-delimited json format.
+    /// stack after each timestep in a newline-delimited json format.
     pub path_state: Option<std::path::PathBuf>,
     /// Path to file which stores all migration decisions made by the policy in
     /// a timestep.  Stored as CSV.
