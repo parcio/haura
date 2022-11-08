@@ -74,7 +74,7 @@ mod reinforcment_learning;
 use crossbeam_channel::Receiver;
 use errors::*;
 use itertools::Itertools;
-pub use lfu::LfuConfig;
+pub use lfu::{LfuConfig, LfuMode};
 pub(crate) use msg::*;
 use parking_lot::{Mutex, RwLock};
 pub use reinforcment_learning::RlConfig;

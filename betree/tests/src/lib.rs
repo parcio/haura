@@ -819,48 +819,48 @@ fn space_accounting_persistence(
 
 #[fixture]
 fn file_backed_config() -> RwLockWriteGuard<'static, DatabaseConfiguration> {
-    configs::migration_config_file_backed()
+    configs::file_backed()
 }
 
-#[rstest]
-fn migration_policy_object_pointer_iterator_smoke(
-    file_backed_config: RwLockWriteGuard<'static, DatabaseConfiguration>,
-) {
-    // env_logger::init();
-    {
-        // Opening and writing a miniscule amount of data
-        let cfg = file_backed_config.clone();
-        let shared_db = Database::build_threaded(cfg).unwrap();
-        let mut db = shared_db.write();
-        let ds = db
-            .open_named_object_store(b"test", StoragePreference::NONE)
-            .unwrap();
-        let obj = ds.open_or_create_object(b"foobar").unwrap();
-        // at best the current impl takes 1.1 promille additional space for each leaf (3.2 MB size with 32 bytes metadata)
-        let buf = vec![42u8; 1024 * TO_MEBIBYTE];
-        dbg!(obj.write_at(&buf, 0).unwrap());
-        db.close_object_store(ds);
-        db.sync().unwrap();
-    }
-    log::info!("Opening Again");
-    {
-        // Trying to fetch information of previous state and reinit policies, using tree iterator
-        let mut cfg = file_backed_config.clone();
-        cfg.access_mode = AccessMode::OpenIfExists;
-        let shared_db = Database::build_threaded(cfg).unwrap();
-        let mut db = shared_db.write();
-        let ds = db
-            .open_named_object_store(b"test", StoragePreference::NONE)
-            .unwrap();
-        let obj = ds.open_object(b"foobar").unwrap().unwrap();
-        let mut buf = vec![255u8; 1 * TO_MEBIBYTE];
-        dbg!(obj.read_at(&mut buf, 0).unwrap());
-        // for chunk in obj.read_all_chunks().unwrap() {
-        //     log::debug!("{:?}", chunk);
-        // }
-        assert_eq!(buf[0], 42);
-    }
-}
+// #[rstest]
+// fn migration_policy_object_pointer_iterator_smoke(
+//     file_backed_config: RwLockWriteGuard<'static, DatabaseConfiguration>,
+// ) {
+//     // env_logger::init();
+//     {
+//         // Opening and writing a miniscule amount of data
+//         let cfg = file_backed_config.clone();
+//         let shared_db = Database::build_threaded(cfg).unwrap();
+//         let mut db = shared_db.write();
+//         let ds = db
+//             .open_named_object_store(b"test", StoragePreference::NONE)
+//             .unwrap();
+//         let obj = ds.open_or_create_object(b"foobar").unwrap();
+//         // at best the current impl takes 1.1 promille additional space for each leaf (3.2 MB size with 32 bytes metadata)
+//         let buf = vec![42u8; 1024 * TO_MEBIBYTE];
+//         dbg!(obj.write_at(&buf, 0).unwrap());
+//         db.close_object_store(ds);
+//         db.sync().unwrap();
+//     }
+//     log::info!("Opening Again");
+//     {
+//         // Trying to fetch information of previous state and reinit policies, using tree iterator
+//         let mut cfg = file_backed_config.clone();
+//         cfg.access_mode = AccessMode::OpenIfExists;
+//         let shared_db = Database::build_threaded(cfg).unwrap();
+//         let mut db = shared_db.write();
+//         let ds = db
+//             .open_named_object_store(b"test", StoragePreference::NONE)
+//             .unwrap();
+//         let obj = ds.open_object(b"foobar").unwrap().unwrap();
+//         let mut buf = vec![255u8; 1 * TO_MEBIBYTE];
+//         dbg!(obj.read_at(&mut buf, 0).unwrap());
+//         // for chunk in obj.read_all_chunks().unwrap() {
+//         //     log::debug!("{:?}", chunk);
+//         // }
+//         assert_eq!(buf[0], 42);
+//     }
+// }
 
 fn migration_policy_smoke(cfg: DatabaseConfiguration) {
     let shared_db = Database::build_threaded(cfg).unwrap();
@@ -894,13 +894,13 @@ fn migration_policy_smoke_rl() {
 #[rstest]
 fn migration_policy_smoke_lfu() {
     // env_logger::init();
-    migration_policy_smoke(configs::migration_config_lfu());
+    migration_policy_smoke(configs::migration_config_lfu_node());
 }
 
 #[rstest]
 fn migration_policy_single_node() {
     // env_logger::init();
-    let shared_db = Database::build_threaded(configs::migration_config_lfu()).unwrap();
+    let shared_db = Database::build_threaded(configs::migration_config_lfu_node()).unwrap();
     let ds;
     {
         let mut db = shared_db.write();
@@ -918,6 +918,9 @@ fn migration_policy_single_node() {
     assert_json_snapshot!("migration_policy_single_node__before_migration", json!(ds.tree_dump().unwrap()));
     std::thread::sleep(std::time::Duration::from_secs(1));
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
+    ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
+    ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
+    ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
     sync();
     std::thread::sleep(std::time::Duration::from_secs(1));
     assert_json_snapshot!("migration_policy_single_node__after_migration",json!(ds.tree_dump().unwrap()));
@@ -926,19 +929,24 @@ fn migration_policy_single_node() {
 
 #[rstest]
 fn migration_policy_single_object() {
-    let shared_db = Database::build_threaded(configs::migration_config_lfu()).unwrap();
+    // Migrate a single object upwards after it has been used
+    let shared_db = Database::build_threaded(configs::migration_config_lfu_object()).unwrap();
     let os;
     {
         let mut db = shared_db.write();
         os = db.open_object_store().unwrap();
         db.sync().unwrap();
     }
-    let obj = os.open_or_create_object_with_pref(b"foo", StoragePreference::FASTEST).unwrap().0;
-    let buf = vec![42; 1500 * TO_MEBIBYTE];
-    obj.write_at_with_pref(&buf, 0, StoragePreference::FASTEST).unwrap();
+    let obj = os.open_or_create_object_with_pref(b"foo", StoragePreference::FAST).unwrap().0;
+    let mut buf = vec![42; 200 * TO_MEBIBYTE];
+    obj.write_at_with_pref(&buf, 0, StoragePreference::FAST).unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(2));
     shared_db.write().sync().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    obj.read_at(&mut buf, 0).unwrap();
+    obj.read_at(&mut buf, 0).unwrap();
+    obj.read_at(&mut buf, 0).unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(10));
     shared_db.write().close_object_store(os);
     let free = shared_db.read().free_space_tier();
-    assert!(free[0].free > free[1].free);
+    assert!(free[1].free > free[0].free);
 }
