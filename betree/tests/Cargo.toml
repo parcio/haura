@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 betree_storage_stack = { path = "..", features = [ "internal-api" ] }
-insta = "1.7"
+insta = { version = "1.21", features = ["json"] }
 serde_json = "1"
 rstest = "0.13"
 
