@@ -1,18 +1,27 @@
-use std::{
-    os::unix::prelude::FileExt,
-    sync::{Arc, Once, RwLock, RwLockWriteGuard},
-};
+use std::sync::{Once, RwLock, RwLockWriteGuard};
 
 use betree_storage_stack::{
     database::AccessMode,
-    migration::{MigrationConfig, MigrationPolicies},
+    migration::{MigrationConfig, MigrationPolicies, LfuConfig, LfuMode},
     storage_pool::{configuration::Vdev, LeafVdev, TierConfiguration},
     DatabaseConfiguration, StoragePoolConfiguration,
 };
 
 use crate::TO_MEBIBYTE;
 
-pub(crate) fn migration_config_lfu() -> DatabaseConfiguration {
+pub fn migration_config_lfu_node() -> DatabaseConfiguration {
+    migration_config_lfu(LfuMode::Node)
+}
+
+pub fn migration_config_lfu_object() -> DatabaseConfiguration {
+    migration_config_lfu(LfuMode::Object)
+}
+
+pub fn migration_config_lfu_both() -> DatabaseConfiguration {
+    migration_config_lfu(LfuMode::Both)
+}
+
+fn migration_config_lfu(mode: LfuMode) -> DatabaseConfiguration {
     DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: vec![
@@ -38,9 +47,12 @@ pub(crate) fn migration_config_lfu() -> DatabaseConfiguration {
         access_mode: AccessMode::OpenOrCreate,
         migration_policy: Some(MigrationPolicies::Lfu(MigrationConfig {
             grace_period: std::time::Duration::from_millis(0),
-            migration_threshold: 0.7,
-            update_period: std::time::Duration::from_millis(100),
-            policy_config: Default::default(),
+            migration_threshold: [0.7; 4],
+            update_period: std::time::Duration::from_secs(1),
+            policy_config: LfuConfig {
+                mode,
+                ..LfuConfig::default()
+            },
         })),
         default_storage_class: 1,
         ..Default::default()
@@ -73,9 +85,9 @@ pub(crate) fn migration_config_rl() -> DatabaseConfiguration {
         access_mode: AccessMode::OpenOrCreate,
         migration_policy: Some(MigrationPolicies::ReinforcementLearning(MigrationConfig {
             grace_period: std::time::Duration::from_millis(0),
-            migration_threshold: 0.7,
+            migration_threshold: [0.7; 4],
             update_period: std::time::Duration::from_millis(100),
-            policy_config: (),
+            policy_config: None,
         })),
         default_storage_class: 1,
         ..Default::default()
@@ -86,10 +98,11 @@ static mut FILE_BACKED_CONFIG: Option<RwLock<DatabaseConfiguration>> = None;
 
 static FILE_BACKED_CONFIG_INIT: Once = Once::new();
 
-// NOTE: A bit hacky solution to get somehting like a singleton working for limited resources
-//       like files in this case. Arguably still error-prone with the combination of the file_backed_config
-//       as a fixture the guard is kept alive and guarantees.
-pub(crate) fn migration_config_file_backed() -> RwLockWriteGuard<'static, DatabaseConfiguration> {
+// NOTE: A bit hacky solution to get somehting like a singleton working for
+//       limited resources like files in this case. Arguably still error-prone
+//       with the combination of the file_backed_config as a fixture the guard
+//       is kept alive and guarantees.
+pub(crate) fn file_backed() -> RwLockWriteGuard<'static, DatabaseConfiguration> {
     FILE_BACKED_CONFIG_INIT.call_once(|| unsafe {
         FILE_BACKED_CONFIG = Some(RwLock::new(DatabaseConfiguration {
             storage: StoragePoolConfiguration {
@@ -101,12 +114,7 @@ pub(crate) fn migration_config_file_backed() -> RwLockWriteGuard<'static, Databa
                 }],
                 ..Default::default()
             },
-            migration_policy: Some(MigrationPolicies::Lfu(MigrationConfig {
-                grace_period: std::time::Duration::from_millis(0),
-                migration_threshold: 0.7,
-                update_period: std::time::Duration::from_millis(100),
-                policy_config: Default::default(),
-            })),
+            migration_policy: None,
             access_mode: AccessMode::AlwaysCreateNew,
             ..Default::default()
         }));
