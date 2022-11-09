@@ -31,9 +31,7 @@ pub struct Dataset<Config, Message = DefaultMessageAction>
 where
     Config: DatabaseBuilder,
 {
-    // NOTE: This lock and option is valid and readable as long as [Dataset] exists.
-    // On closing the dataset this option will be set to [Option::None].
-    inner: Arc<RwLock<Option<DatasetInner<Config, Message>>>>,
+    inner: Arc<RwLock<DatasetInner<Config, Message>>>,
 }
 
 impl<Config: DatabaseBuilder, Message> Clone for Dataset<Config, Message> {
@@ -50,7 +48,7 @@ where
 {
     fn from(inner: DatasetInner<Config, Message>) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(Some(inner))),
+            inner: Arc::new(RwLock::new(inner)),
         }
     }
 }
@@ -243,8 +241,15 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
                 .send(DatabaseMsg::DatasetClose(ds.id()))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
+        // Check if the dataset is still opened from other positions in the stack.
+        if Arc::strong_count(&ds.inner) > 1 {
+            if let Some(ds) = ds.inner.try_read() {
+                self.sync_ds(ds.id, &ds.tree)?;
+            }
+            return Ok(())
+        }
         // Deactivate the dataset for further modifications
-        let ds = ds.inner.write().take().unwrap();
+        let ds = ds.inner.write();
         log::trace!("close_dataset: Enter");
         self.sync_ds(ds.id, &ds.tree)?;
         log::trace!("synced dataset");
@@ -317,28 +322,28 @@ use super::errors::ErrorKind;
 // Member access on internal type
 impl<Message, Config: DatabaseBuilder> Dataset<Config, Message> {
     pub(crate) fn id(&self) -> DatasetId {
-        self.inner.read().as_ref().unwrap().id
+        self.inner.read().id
     }
 
     pub(super) fn call_open_snapshots<F, R>(&self, call: F) -> R
     where
         F: FnOnce(&HashSet<Generation>) -> R,
     {
-        call(&self.inner.read().as_ref().unwrap().open_snapshots)
+        call(&self.inner.read().open_snapshots)
     }
 
     pub(super) fn call_mut_open_snapshots<F, R>(&self, call: F) -> R
     where
         F: FnOnce(&mut HashSet<Generation>) -> R,
     {
-        call(&mut self.inner.write().as_mut().unwrap().open_snapshots)
+        call(&mut self.inner.write().open_snapshots)
     }
 
     pub(super) fn call_tree<F, R>(&self, call: F) -> R
     where
         F: FnOnce(&MessageTree<Config::Dmu, Message>) -> R,
     {
-        call(&self.inner.read().as_ref().unwrap().tree)
+        call(&self.inner.read().tree)
     }
 }
 
@@ -352,8 +357,6 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     ) -> Result<()> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .insert_msg(key, msg)
     }
 
@@ -367,8 +370,6 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     ) -> Result<()> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .insert_msg_with_pref(key, msg, storage_preference)
     }
 
@@ -376,8 +377,6 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     pub fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .get(key)
     }
 
@@ -392,14 +391,12 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .range(range)
     }
 
     /// Returns the name of the data set.
     pub fn name(&self) -> Box<[u8]> {
-        self.inner.read().as_ref().unwrap().name.clone()
+        self.inner.read().name.clone()
     }
 
     #[allow(missing_docs)]
@@ -407,8 +404,6 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     pub fn tree_dump(&self) -> Result<impl serde::Serialize> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .tree_dump()
     }
 }
@@ -566,8 +561,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ) -> Result<()> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .insert_with_pref(key, data, storage_preference)
     }
 
@@ -577,8 +570,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .insert(key, data)
     }
 
@@ -594,8 +585,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ) -> Result<()> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .upsert_with_pref(key, data, offset, storage_preference)
     }
 
@@ -610,8 +599,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ) -> Result<()> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .upsert(key, data, offset)
     }
 
@@ -621,8 +608,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ) -> Result<StoragePreference> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .probe_storage_location(key)
     }
 
@@ -639,8 +624,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ) -> Result<Option<()>> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .migrate(key, pref)
     }
 
@@ -648,16 +631,12 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .delete(key)
     }
 
     pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .free_space_tier(pref)
     }
 
@@ -669,8 +648,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .range_delete(range)
     }
 
@@ -683,8 +660,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     {
         self.inner
             .read()
-            .as_ref()
-            .ok_or(ErrorKind::Closed)?
             .migrate_range(range, pref)
     }
 }
