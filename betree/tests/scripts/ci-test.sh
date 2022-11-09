@@ -1,18 +1,20 @@
 #! /bin/env bash
 
-./prepare-test.sh
+set -e
 
-# num_thread=$(echo "$(cat /proc/meminfo | head -n 1 | xargs | cut -d ' ' -f 2) / 1024 / 1024 / 2" | bc)
-failed=$(cargo test -- --test-threads 1 -Z unstable-options --format json \
+./scripts/prepare-test.sh
+
+num_thread=$(echo "$(grep 'MemFree' /proc/meminfo | xargs | cut -d ' ' -f 2) / 1024 / 1024 / 5" | bc)
+failed=$(cargo test -- --test-threads "${num_thread}" -Z unstable-options --format json \
     | grep name \
     | grep failed \
     | jq '"Test: " + .name + "\n-----LOG-----\n" + .stdout + "---END LOG---\n" ' \
       )
-echo "FAILED TESTS"
-echo "############"
+echo "FAILED TESTS" > fail.log
+echo "############" > fail.log
 for tst in "${failed[@]}"
 do
-    printf '%b' "$(echo "$tst" | sed -e 's/\"//g')"
+    printf '%b' "$(echo "$tst" | sed -e 's/\"//g')" > fail.log
 done
 if [ -z "$failed" ]
 then
@@ -21,4 +23,4 @@ else
         exit 1
 fi
 
-./cleanup-test.sh
+./scripts/cleanup-test.sh
