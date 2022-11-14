@@ -31,14 +31,21 @@ fn split_range_at(
     range: &Range<Block<u32>>,
     mid: Block<u32>,
 ) -> (Range<Block<u32>>, Range<Block<u32>>) {
-    if mid < range.end {
-        if mid >= range.start {
+    // NOTE:
+    // jwuensche: I've changed the behavior off this function back to the
+    // original implementation whereas we take the relative mid from the current
+    // view.  In the redesign of some of the modules this was changed to relate
+    // to a total mid which we do not calculate in some of the vdev structs.
+    // This only became a problem when performing multiple splits as the buffer
+    // returned would contain the total position in the original buffer.
+    // To keep the performance advantage we simply offset the mid from the known
+    // total start.
+    //
+    // No further implications should be expected as the only sequentially use of
+    // this structure is in the [crate::vdev::Parity1] code.
+    if range.start + mid < range.end {
             // mid is in range
-            (range.start..mid, mid..range.end)
-        } else {
-            // mid is before range
-            (range.start..range.start, range.clone())
-        }
+            (range.start..range.start + mid, range.start + mid..range.end)
     } else {
         // mid is past range
         (range.clone(), range.end..range.end)
@@ -493,5 +500,19 @@ mod tests {
         let buf = Buf::from(b);
 
         assert_eq!(&b2[..], &buf[..]);
+    }
+
+    #[test]
+    fn sequential_splits() {
+        // This tests checks if sequential splits produce a result as expected by some of the functions.
+        let mut b = vec![0; 2 * BLOCK_SIZE];
+        b[0] = 1;
+        b[BLOCK_SIZE] = 2;
+        let buf = Buf::from(b.into_boxed_slice());
+        let (left, right) = buf.split_at(Block(1));
+        assert!(left[0] == 1);
+        let (left, right) = right.split_at(Block(1));
+        assert!(right.size() == Block(0));
+        assert!(left[0] == 2);
     }
 }
