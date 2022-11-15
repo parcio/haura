@@ -1,0 +1,6 @@
+[book]
+authors = ["Johannes Wünsche"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Haura Developer Guide"

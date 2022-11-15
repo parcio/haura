@@ -1,34 +1,53 @@
-# betree
+# B-epsilon Tree Storage Stack
+
+This crate is the main event of the repository as it contains all algorithmic logic required in the actual implementation of the B-epsilon tree storage.
+We give you a quick introduction into the structure of the repository here and give you starting points where to start your implementation.
+
 
 ## Building
+
+To build the storage stack on it's own navigate to `betree/` and execute:
 
 ```sh
 $ cargo build
 ```
 
-## Tests
+This should build the storage stack in _Debug_ after a few minutes.
 
-### Integration
+### Tests
 
-Navigate to `./tests/`
+We perform a number of tests which partially take some time to successfully
+complete on your system. 
 
-```sh
-$ cargo test -- --test-threads 4
-```
+#### Internal
 
-> It is advised to use a limited number of jobs for testing all scenarios as some use up to 2 GiB of main memory.
-> `your_main_memory_in_gb / 2 = number_of_test_jobs`
-
-
-### Internal
-
-From the `betree` directory run
+Navigate to `betree/` and execute:
 
 ```sh
 $ cargo test
 ```
 
-> Some test cases observe erroneous behavior at the moment and timeout after 60 seconds.
+> Some of the unit tests take a considerable amount of time, which is still
+> under investigation.
+
+#### Integration
+
+Due to the implementatio of tests a large amount of memory is taken up during
+the integration tests affecting the remaining system considerably, please be
+aware that the tests will consume several GiB of memory of available space
+
+Navigate to `betree/tests/` and execute:
+
+```sh
+$ ./scripts/test.sh
+```
+
+> The provided script limits the usage of test threads proportionally to the
+> available system memory with each test thread at maximum requiring 4 GiB in
+> memory.
+
+Additionally to the memory usage two files will be created with 2 GiB in size
+each. They allow us to test some persistency guarantees our storage stack gives.
 
 ## Overview
 
