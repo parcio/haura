@@ -1,7 +1,7 @@
 name: pages-haura-getting-started
 
 on:
-  workflow-dispatch:
+  workflow_dispatch:
   push:
     branches: [main]
 
