@@ -109,9 +109,19 @@ pub struct LfuConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+/// Descriptor of the kind of operation the LFU policy should perform.
 pub enum LfuMode {
+    /// Only migrates complete objects. This mode will allow migration only for
+    /// [crate::object::ObjectStore]s. Any openend [crate::database::Dataset]s
+    /// are unaffected.
     Object,
+    /// Only migrate nodes. This mode will migrate any node which has been seen
+    /// in the process of the session. Therefore this mode is well fitted to
+    /// cases in which data is likely needed to be promoted often.
     Node,
+    /// Apply both object and node operations. This is of advantage when bulk
+    /// data needs to be migrated downwards for longer term storage and ranges
+    /// of objects should be upgraded to optimize for latency.
     Both,
 }
 
