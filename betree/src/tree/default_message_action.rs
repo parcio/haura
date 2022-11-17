@@ -232,7 +232,7 @@ impl DefaultMessageAction {
                     }
 
                     data.view_bits_mut::<Lsb0>()[offset_bits as usize..end_bit as usize]
-                        .set_all(value);
+                        .fill(value);
                 }
             }
         }

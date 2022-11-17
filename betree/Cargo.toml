@@ -46,7 +46,7 @@ enum_dispatch = "0.3"
 figment = { version = "0.10", optional = true, features = ["env"] }
 
 indexmap = "1.6"
-bitvec = "0.22"
+bitvec = "1.0"
 
 serde_json = "1.0"
 crossbeam-channel = "0.5.5"

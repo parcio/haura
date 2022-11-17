@@ -14,7 +14,7 @@ const SEGMENT_SIZE_MASK: usize = SEGMENT_SIZE - 1;
 
 /// Simple first-fit bitmap allocator
 pub struct SegmentAllocator {
-    data: BitArr!(for SEGMENT_SIZE, in Lsb0, u8),
+    data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
 }
 
 impl SegmentAllocator {
@@ -99,7 +99,7 @@ impl SegmentAllocator {
             Action::Deallocate => debug_assert!(range.all()),
         }
 
-        range.set_all(action.as_bool());
+        range.fill(action.as_bool());
     }
 }
 
