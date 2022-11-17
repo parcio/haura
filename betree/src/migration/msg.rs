@@ -39,9 +39,9 @@ pub enum DmlMsg {
 use serde::Serialize;
 
 #[derive(Hash, PartialEq, Eq, Clone, Debug)]
-pub struct ObjectKey(ObjectStoreId, ObjectId);
+pub struct GlobalObjectId(ObjectStoreId, ObjectId);
 
-impl ObjectKey {
+impl GlobalObjectId {
     pub fn build(os_id: ObjectStoreId, id: ObjectId) -> Self {
         Self(os_id, id)
     }
@@ -51,7 +51,7 @@ impl ObjectKey {
     }
 }
 
-impl Serialize for ObjectKey {
+impl Serialize for GlobalObjectId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -61,7 +61,7 @@ impl Serialize for ObjectKey {
     }
 }
 
-impl Display for ObjectKey {
+impl Display for GlobalObjectId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}-{}", self.0, self.1))
     }
@@ -85,17 +85,17 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     ObjectstoreClose(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.
-    ObjectOpen(ObjectKey, ObjectInfo, CowBytes),
+    ObjectOpen(GlobalObjectId, ObjectInfo, CowBytes),
     /// Informs of closed object, adjoint with extra information for access.
-    ObjectClose(ObjectKey, ObjectInfo),
+    ObjectClose(GlobalObjectId, ObjectInfo),
     /// Frequency information about read and write operations on an object.
-    ObjectRead(ObjectKey, Duration),
+    ObjectRead(GlobalObjectId, Duration),
     /// Report the written storage class with the new size of the object.
-    ObjectWrite(ObjectKey, u64, StoragePreference, Duration),
+    ObjectWrite(GlobalObjectId, u64, StoragePreference, Duration),
     /// Notification if a manual migration took place.
-    ObjectMigrate(ObjectKey, StoragePreference),
+    ObjectMigrate(GlobalObjectId, StoragePreference),
     /// Notification similar to [Self::ObjectOpen] but with different semantics.
-    ObjectDiscover(ObjectKey, ObjectInfo, CowBytes),
+    ObjectDiscover(GlobalObjectId, ObjectInfo, CowBytes),
 }
 
 pub trait ConstructReport {

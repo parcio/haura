@@ -17,7 +17,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicy, ObjectKey};
+use super::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicy, GlobalObjectId};
 // This file contains a migration policy based on reinforcement learning.
 // We based our approach on the description of
 // https://doi.org/10.1109/TKDE.2022.3176753 and aim to use them for object
@@ -47,7 +47,7 @@ mod learning {
         time::{Duration, Instant},
     };
 
-    use crate::migration::ObjectKey;
+    use crate::migration::GlobalObjectId;
 
     pub(super) const EULER: f32 = std::f32::consts::E;
 
@@ -73,8 +73,8 @@ mod learning {
     #[derive(Serialize)]
     pub struct Tier {
         alpha: f32,
-        files: HashMap<ObjectKey, FileProperties>,
-        reqs: HashMap<ObjectKey, Vec<Request>>,
+        files: HashMap<GlobalObjectId, FileProperties>,
+        reqs: HashMap<GlobalObjectId, Vec<Request>>,
         #[serde(skip)]
         rng: rand::rngs::StdRng,
     }
@@ -98,7 +98,7 @@ mod learning {
             }
         }
 
-        pub fn size(&self, obj: &ObjectKey) -> Option<Size> {
+        pub fn size(&self, obj: &GlobalObjectId) -> Option<Size> {
             self.files.get(obj).map(|n| n.size.clone())
         }
 
@@ -106,15 +106,15 @@ mod learning {
             self.reqs = Default::default();
         }
 
-        pub fn contains(&self, key: &ObjectKey) -> bool {
+        pub fn contains(&self, key: &GlobalObjectId) -> bool {
             self.files.contains_key(key)
         }
 
-        pub fn file_info(&self, key: &ObjectKey) -> Option<&FileProperties> {
+        pub fn file_info(&self, key: &GlobalObjectId) -> Option<&FileProperties> {
             self.files.get(key)
         }
 
-        pub fn insert(&mut self, key: ObjectKey, size: u64) {
+        pub fn insert(&mut self, key: GlobalObjectId, size: u64) {
             self.files.insert(
                 key,
                 FileProperties {
@@ -128,7 +128,7 @@ mod learning {
         /// Insert the result of [Self::remove] into a tier again.
         pub fn insert_full(
             &mut self,
-            key: ObjectKey,
+            key: GlobalObjectId,
             content: (FileProperties, Option<Vec<Request>>),
         ) {
             self.files.insert(key.clone(), content.0);
@@ -139,7 +139,7 @@ mod learning {
 
         pub fn remove(
             &mut self,
-            key: &ObjectKey,
+            key: &GlobalObjectId,
         ) -> Option<(FileProperties, Option<Vec<Request>>)> {
             self.files.remove(key).map(|file_data| {
                 // If the files are contained this has to also
@@ -148,13 +148,13 @@ mod learning {
             })
         }
 
-        pub fn update_size(&mut self, key: &ObjectKey, size: u64) {
+        pub fn update_size(&mut self, key: &GlobalObjectId, size: u64) {
             if let Some(entry) = self.files.get_mut(key) {
                 entry.size = Size(size);
             }
         }
 
-        pub fn coldest(&mut self) -> Option<(ObjectKey, (FileProperties, Option<Vec<Request>>))> {
+        pub fn coldest(&mut self) -> Option<(GlobalObjectId, (FileProperties, Option<Vec<Request>>))> {
             self.files
                 .iter()
                 .min_by(|(_, v_left), (_, v_right)| v_left.hotness.0.total_cmp(&v_right.hotness.0))
@@ -167,7 +167,7 @@ mod learning {
                 })
         }
 
-        pub fn msg(&mut self, key: ObjectKey, dur: Duration) {
+        pub fn msg(&mut self, key: GlobalObjectId, dur: Duration) {
             let time = Instant::now();
             if let Some(elem) = self.files.get_mut(&key) {
                 elem.last_access = time;
@@ -420,7 +420,7 @@ mod learning {
         pub(super) fn c_up_c_not(
             &self,
             tier: &mut Tier,
-            obj: ObjectKey,
+            obj: GlobalObjectId,
             temp: FileProperties,
             obj_reqs: &Vec<Request>,
         ) -> (f32, Hotness, f32, Hotness) {
@@ -583,12 +583,12 @@ mod learning {
 pub(crate) struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
     tiers: Vec<TierAgent>,
     // Stores the most recently known storage location and all requests
-    objects: HashMap<ObjectKey, ObjectInfo>,
+    objects: HashMap<GlobalObjectId, ObjectInfo>,
     default_storage_class: StoragePreference,
     config: MigrationConfig<Option<RlConfig>>,
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg<C>>,
-    delta_moved: Vec<(ObjectKey, u64, u8, u8)>,
+    delta_moved: Vec<(GlobalObjectId, u64, u8, u8)>,
     state: DatabaseState<C>,
 }
 
@@ -639,7 +639,7 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
 
     fn migrate(
         &mut self,
-        obj_id: &ObjectKey,
+        obj_id: &GlobalObjectId,
         obj_key: &CowBytes,
         target: StoragePreference,
     ) -> super::errors::Result<()> {

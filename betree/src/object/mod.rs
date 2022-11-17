@@ -47,7 +47,7 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{DatabaseBuilder, DatasetId, Error, ErrorKind, Result},
-    migration::{DatabaseMsg, ObjectKey},
+    migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
     tree::{DefaultMessageAction, TreeBaseLayer, TreeLayer},
     vdev::Block,
@@ -398,7 +398,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         if let Some(tx) = self.report.as_ref() {
             let _ = tx
                 .send(DatabaseMsg::ObjectOpen(
-                    ObjectKey::build(self.id, info.object_id),
+                    GlobalObjectId::build(self.id, info.object_id),
                     info.clone(),
                     CowBytes::from(key),
                 ))
@@ -438,7 +438,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         if let (Some(info), Some(tx)) = (info.clone(), self.report.as_ref()) {
             let _ = tx
                 .send(DatabaseMsg::ObjectOpen(
-                    ObjectKey::build(self.id, info.object_id),
+                    GlobalObjectId::build(self.id, info.object_id),
                     info,
                     CowBytes::from(key),
                 ))
@@ -680,7 +680,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let (Ok(Some(info)), Some(tx)) = (self.info(), self.store.report.as_ref()) {
             let _ = tx
                 .send(DatabaseMsg::ObjectClose(
-                    ObjectKey::build(self.store.id, self.object.id),
+                    GlobalObjectId::build(self.store.id, self.object.id),
                     info,
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -785,7 +785,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let Some(tx) = &self.store.report {
             let _ = tx
                 .send(DatabaseMsg::ObjectRead(
-                    ObjectKey::build(self.store.id, self.object.id),
+                    GlobalObjectId::build(self.store.id, self.object.id),
                     start.elapsed(),
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -827,7 +827,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let Some(tx) = &self.store.report {
             let _ = tx
                 .send(DatabaseMsg::ObjectRead(
-                    ObjectKey::build(self.store.id, self.object.id),
+                    GlobalObjectId::build(self.store.id, self.object.id),
                     start.elapsed(),
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -895,7 +895,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let (Some(tx), Some(size)) = (&self.store.report, meta_change.size) {
             let _ = tx
                 .send(DatabaseMsg::ObjectWrite(
-                    ObjectKey::build(self.store.id, self.object.id),
+                    GlobalObjectId::build(self.store.id, self.object.id),
                     size,
                     storage_pref,
                     start.elapsed(),
@@ -1058,7 +1058,7 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         if let Some(tx) = &self.store.report {
             let _ = tx
                 .send(DatabaseMsg::ObjectMigrate(
-                    ObjectKey::build(self.store.id, self.object.id),
+                    GlobalObjectId::build(self.store.id, self.object.id),
                     pref,
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
