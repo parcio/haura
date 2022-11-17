@@ -10,7 +10,7 @@ use crate::{
         DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{DatabaseMsg, DmlMsg, MigrationPolicies, ObjectKey},
+    migration::{DatabaseMsg, DmlMsg, MigrationPolicies, GlobalObjectId},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
@@ -502,7 +502,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
                     for (key, info) in os.iter_objects()? {
                         db_tx
                             .send(DatabaseMsg::ObjectDiscover(
-                                ObjectKey::build(id, info.object_id),
+                                GlobalObjectId::build(id, info.object_id),
                                 info,
                                 key,
                             ))

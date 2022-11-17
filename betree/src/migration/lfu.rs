@@ -21,7 +21,7 @@ use crate::{
 
 use super::{
     errors::Result, reinforcment_learning::open_file_buf_write, DatabaseMsg, DmlMsg,
-    MigrationConfig, ObjectKey,
+    MigrationConfig, GlobalObjectId,
 };
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -40,9 +40,9 @@ pub struct Lfu<C: DatabaseBuilder + Clone> {
     object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
     /// Object Buckets dividing them into multiple file size ranges,
     /// taken from <https://doi.org/10.1145/3489143>
-    objects: HashMap<ObjectKey, ObjectLocation>,
+    objects: HashMap<GlobalObjectId, ObjectLocation>,
     object_buckets: (
-        [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+        [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
         StoragePreference,
     ),
     /// HashMap accessible by the DML, resolution is not guaranteed but always
@@ -144,22 +144,22 @@ impl Display for LeafInfo {
 impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
     fn get_object(
         store: &'lfu mut (
-            [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+            [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
             StoragePreference,
         ),
         loc: &ObjectLocation,
-        key: &ObjectKey,
+        key: &GlobalObjectId,
     ) -> Option<&'lfu CowBytes> {
         store.0[loc.pref_id(store.1)][loc.bucket_id()].get(key)
     }
 
     fn insert_object(
         store: &'lfu mut (
-            [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+            [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
             StoragePreference,
         ),
         loc: ObjectLocation,
-        key: ObjectKey,
+        key: GlobalObjectId,
         name: CowBytes,
     ) -> Option<CowBytes> {
         store.0[loc.pref_id(store.1)][loc.bucket_id()].insert(key, name)
@@ -167,11 +167,11 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
 
     fn remove_object(
         store: &'lfu mut (
-            [[LfuCache<ObjectKey, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
+            [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
             StoragePreference,
         ),
         loc: &ObjectLocation,
-        key: &ObjectKey,
+        key: &GlobalObjectId,
     ) -> Option<(CowBytes, usize)> {
         store.0[loc.pref_id(store.1)][loc.bucket_id()].remove(key)
     }
@@ -672,7 +672,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
     fn metrics(&self) -> Result<()> {
         #[derive(Serialize)]
         struct Dummy {
-            files: HashMap<ObjectKey, (f32, u64, u32)>,
+            files: HashMap<GlobalObjectId, (f32, u64, u32)>,
         }
 
         impl Dummy {
