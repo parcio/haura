@@ -374,7 +374,7 @@ fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
             .expect("Oh no! Could not open object!");
         obj.write_at(&buf, 0).expect_err(
             format!(
-                "Writing of {} MiB into {} MiB storage succeeded (Growth Factor 1.1)",
+                "Writing of {} MiB into {} MiB storage succeeded",
                 tier_size_mb as f32 * par_space * 1.1,
                 tier_size_mb
             )
