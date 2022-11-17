@@ -21,14 +21,14 @@ bindings.
 ### Fedora/RHEL
 
 ```sh
-# dnf install glib2-devel libbson libbson-devel clang make
+# dnf install glib2 glib2-devel libbson libbson-devel clang make pkgconf
 ```
 
 ### Ubuntu/Debian/...
 
 ```sh
 # apt update
-# apt install libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
+# apt install libglib2.0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
 ```
 
 ### Archlinux
