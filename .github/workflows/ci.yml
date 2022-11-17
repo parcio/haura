@@ -26,6 +26,12 @@ jobs:
           $HOME/.cargo
           ./target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+    - name: Build Remainder Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ./target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/*.rs') }} }}
     - name: Build
       run: |
         cd betree
@@ -47,6 +53,12 @@ jobs:
           $HOME/.cargo
           ./target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+    - name: Build Remainder Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ./target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/*.rs') }} }}
     - name: Run integration tests
       run: |
         cd betree/tests
@@ -74,6 +86,12 @@ jobs:
           $HOME/.cargo
           ./target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+    - name: Build Remainder Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ./target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/*.rs') }} }}
     - name: Run internal tests
       run: |
         cd betree
