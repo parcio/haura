@@ -31,7 +31,7 @@ jobs:
       with:
         path: |
           ./target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/*.rs') }} }}
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
     - name: Build
       run: |
         cd betree
@@ -58,7 +58,7 @@ jobs:
       with:
         path: |
           ./target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/*.rs') }} }}
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
     - name: Run integration tests
       run: |
         cd betree/tests
@@ -91,7 +91,7 @@ jobs:
       with:
         path: |
           ./target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/*.rs') }} }}
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
     - name: Run internal tests
       run: |
         cd betree
