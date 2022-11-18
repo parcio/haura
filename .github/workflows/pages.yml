@@ -32,13 +32,13 @@ jobs:
         key: ${{ runner.os }}-cargo-mdbook
     - name: Install mdbook
       run: |
-        apt update
-        apt install cargo
-        cargo install mdbook
+        cd $HOME
+        mkdir bin
+        curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.21/mdbook-v0.4.21-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=bin
     - name: Build book
       run: |
         cd docs
-        $HOME/.cargo/bin/mdbook build
+        $HOME/bin/mdbook build
     - name: Upload Book Artifact
       uses: actions/upload-pages-artifact@v1
       with:
