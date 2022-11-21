@@ -11,7 +11,7 @@ use std::{
 /// Access pattern descriptor to differentiate and optimize drive usage. Useful
 /// when working with [crate::object::ObjectStore] with a defined with access pattern. Assignable to
 /// [TierConfiguration].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PreferredAccessType {
     /// The default access pattern. No assumptions are made.
     Unknown,

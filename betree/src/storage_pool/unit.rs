@@ -6,7 +6,7 @@ use crate::{
     bounded_future_queue::BoundedFutureQueue,
     buffer::Buf,
     checksum::Checksum,
-    vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
+    vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite}, PreferredAccessType, StoragePreference,
 };
 use futures::{
     executor::{block_on, ThreadPool},
@@ -14,7 +14,7 @@ use futures::{
     stream::FuturesUnordered,
     task::SpawnExt,
 };
-use std::{convert::TryInto, marker::PhantomData, pin::Pin, sync::Arc};
+use std::{convert::TryInto, marker::PhantomData, pin::Pin, sync::Arc, ops::Index};
 
 /// Actual implementation of the `StoragePoolLayer`.
 #[derive(Clone)]
@@ -27,7 +27,43 @@ pub(super) type WriteBackQueue = BoundedFutureQueue<
     Pin<Box<dyn Future<Output = Result<(), VdevError>> + Send + Sync + 'static>>,
 >;
 
-type StorageTier = Box<[Dev]>;
+struct StorageTier {
+    devs: Box<[Dev]>,
+    preferred_access_type: PreferredAccessType,
+}
+
+impl StorageTier {
+    fn len(&self) -> usize {
+        self.devs.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Dev> {
+        self.devs.iter()
+    }
+}
+
+impl Index<usize> for StorageTier {
+    type Output = Dev;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.devs[index]
+    }
+}
+
+impl Default for StorageTier {
+    fn default() -> Self {
+        Self { devs: Box::new([]), preferred_access_type: PreferredAccessType::Unknown }
+    }
+}
+
+impl From<(Box<[Dev]>, PreferredAccessType)> for StorageTier {
+    fn from(item: (Box<[Dev]>, PreferredAccessType)) -> Self {
+        Self {
+            devs: item.0,
+            preferred_access_type: item.1,
+        }
+    }
+}
 
 struct Inner<C: Checksum> {
     tiers: [StorageTier; NUM_STORAGE_CLASSES],
@@ -52,11 +88,11 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
             let mut vec: Vec<StorageTier> = configuration
                 .tiers
                 .iter()
-                .map(|tier_cfg| tier_cfg.build().map(Vec::into_boxed_slice))
+                .map(|tier_cfg| tier_cfg.build().map(Vec::into_boxed_slice).map(|tier| (tier, tier_cfg.preferred_access_type).into()))
                 .collect::<Result<Vec<_>, _>>()?;
 
             assert!(vec.len() <= NUM_STORAGE_CLASSES, "too many storage classes");
-            vec.resize_with(NUM_STORAGE_CLASSES, || Box::new([]));
+            vec.resize_with(NUM_STORAGE_CLASSES, || Default::default());
             let boxed: Box<[StorageTier; NUM_STORAGE_CLASSES]> =
                 vec.into_boxed_slice().try_into().map_err(|_| ()).unwrap();
             *boxed
@@ -213,6 +249,15 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         }
 
         StoragePoolMetrics { tiers }
+    }
+
+    fn access_type_preference(&self, t: crate::PreferredAccessType) -> crate::StoragePreference {
+        for (pref, tier) in self.inner.tiers.iter().enumerate() {
+            if tier.preferred_access_type == t {
+                return StoragePreference::from_u8(pref as u8)
+            }
+        }
+        return StoragePreference::NONE
     }
 }
 
