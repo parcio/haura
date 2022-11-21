@@ -11,7 +11,6 @@ use futures::{executor::block_on, prelude::*, TryFuture};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt;
 
-pub use configuration::{LeafVdev, Vdev};
 
 pub mod errors;
 pub use self::errors::*;
@@ -95,13 +94,16 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
 
     /// Gather layer-specific metrics.
     fn metrics(&self) -> Self::Metrics;
+
+    /// Return a fitting [StoragePreference] to the given [PreferredAccessType].
+    fn access_type_preference(&self, t: PreferredAccessType) -> StoragePreference;
 }
 
 mod disk_offset;
 pub use self::disk_offset::DiskOffset;
 
 pub mod configuration;
-pub use self::configuration::{StoragePoolConfiguration, TierConfiguration};
+pub use self::configuration::{StoragePoolConfiguration, TierConfiguration, LeafVdev, Vdev, PreferredAccessType};
 
 mod unit;
 pub use self::unit::StoragePoolUnit;
