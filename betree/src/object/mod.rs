@@ -51,7 +51,9 @@ use crate::{
     size::StaticSize,
     tree::{DefaultMessageAction, TreeBaseLayer, TreeLayer},
     vdev::Block,
-    Database, Dataset, StoragePreference,
+    data_management::DmlWithSpl,
+    storage_pool::StoragePoolLayer,
+    Database, Dataset, StoragePreference, PreferredAccessType,
 };
 
 use crossbeam_channel::Sender;
@@ -393,6 +395,17 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
                     ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &v).unwrap(),
                 )
             }))
+    }
+
+    /// Create a new object handle and fit storage location to expected access
+    /// pattern.
+    pub fn create_object_with_access_type(
+        &'os self,
+        key: &[u8],
+        access_type: PreferredAccessType,
+    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+        let pref = self.data.call_tree(|t| t.dmu().spl().access_type_preference(access_type));
+        self.create_object_with_pref(key, pref)
     }
 
     /// Create a new object handle.
