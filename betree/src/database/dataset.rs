@@ -339,7 +339,7 @@ impl<Message, Config: DatabaseBuilder> Dataset<Config, Message> {
         call(&mut self.inner.write().open_snapshots)
     }
 
-    pub(super) fn call_tree<F, R>(&self, call: F) -> R
+    pub(crate) fn call_tree<F, R>(&self, call: F) -> R
     where
         F: FnOnce(&MessageTree<Config::Dmu, Message>) -> R,
     {
