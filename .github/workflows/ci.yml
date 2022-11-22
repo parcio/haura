@@ -49,7 +49,7 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
     - name: Run integration tests
       env:
-        - HAURA_NUM_THREAD=1
+        HAURA_NUM_THREAD: 1
       run: |
         cd betree/tests
         ./scripts/ci-test.sh
@@ -78,7 +78,7 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
     - name: Run unit tests
       env:
-        - HAURA_NUM_THREAD=8
+        HAURA_NUM_THREAD: 8
       run: |
         cd betree
         ./tests/scripts/ci-test.sh
