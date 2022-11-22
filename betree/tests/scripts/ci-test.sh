@@ -2,6 +2,11 @@
 
 set -e
 
+if [ -e scripts/prepare-test.sh ]
+then
+    ./scripts/prepare-test.sh
+fi
+
 failed=$(cargo test -- --test-threads "${HAURA_NUM_THREAD}" -Z unstable-options --format json \
     | grep name \
     | grep failed \
@@ -20,4 +25,7 @@ else
         exit 1
 fi
 
-./scripts/cleanup-test.sh
+if [ -e scripts/cleanup-test.sh ]
+then
+    ./scripts/cleanup-test.sh
+fi
