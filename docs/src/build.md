@@ -9,7 +9,15 @@ First install the Rust compiler to actually compile the project.  Use your
 package manager or [set up in your local user home](https://rustup.rs/).
 
 ```sh
+# # For rpm based distributions (Fedora, CentOS, Rocky, ...)
 # dnf install cargo
+#
+# # For apt based distributions (Debian, Ubuntu, ...)
+# apt update
+# apt install cargo
+#
+# # For Arch Linux and its derivatives
+# pacman -Sy cargo
 ```
 
 You'll need atleast version 1.61. Most package manager should deliver this or
@@ -31,7 +39,7 @@ bindings.
 # apt install libglib2.0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
 ```
 
-### Archlinux
+### Arch Linux+
 
 ```sh
 # pacman -Sy glib2 clang make libbson pkgconf

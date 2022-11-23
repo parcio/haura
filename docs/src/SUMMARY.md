@@ -14,4 +14,4 @@
     - [Build]()
     - [Usage in JULEA]()
   - [julea-sys](./julea-sys.md)
-    - [Build]()
+    - [Build](./julea-sys/build.md)
