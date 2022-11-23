@@ -13,7 +13,7 @@ and calling `write_config_json` on the created `Database` object.
       {
         "top_level_vdevs": [
           {
-            "path": "/tmp/disk_a",
+            "path": "/home/user/.cache/haura/cache.disk",
             "direct": true
           }
         ],
@@ -53,10 +53,22 @@ Store this configuration in a convenient place for example, if defined, under
 avoid specifying this path on each access, store the location of your
 configuration in your environment as `$BETREE_CONFIG`. For example as so:
 
+
 ```sh
 # excerpt from .your_favorite_shellenv
 
 export BETREE_CONFIG=$HOME/.config/haura.json
+```
+
+We use in our example `$XDG_CACHE_HOME/haura/cache.disk` as the storage file, this
+integrates nicely with most common setups and indicates that this data is not
+essential. If `XDG_CACHE_HOME` is not set in your system you can use
+`$HOME/.cache/haura/cache.disk` instead. Create the directories if they do not
+exists.
+
+```sh
+$ mkdir -p $HOME/.cache/haura
+$ truncate -s 16G $HOME/.cache/haura/cache.disk
 ```
 
 > EDITOR NOTE: We may want to specify this as a `yaml` or `toml` in the future to ease the
