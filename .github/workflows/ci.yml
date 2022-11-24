@@ -19,18 +19,13 @@ jobs:
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs/ | sh -s -- -y
         source $HOME/.cargo/env
         rustup toolchain install --profile minimal --force stable
-    - name: Dependency Cache
+    - name: Build Cache
       uses: actions/cache@v3
       with:
         path: |
-          ~/.cargo/bin
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git
-          ~/.cargo/.crates.toml
-          ~/.cargo/.crates2.json
-          ./target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+          $HOME/.cargo
+          ./target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
     - name: Build
       run: |
         cd betree
@@ -45,22 +40,25 @@ jobs:
       uses: actions/checkout@v3
       with:
         ref: ${{ github.event.pull_request.head.sha }}
-    - name: Dependency Cache
+    - name: Build Cache
       uses: actions/cache@v3
       with:
         path: |
-          ~/.cargo/bin
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git
-          ~/.cargo/.crates.toml
-          ~/.cargo/.crates2.json
-          ./target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
+          $HOME/.cargo
+          ./target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
     - name: Run integration tests
+      env:
+        HAURA_NUM_THREAD: 1
       run: |
         cd betree/tests
         ./scripts/ci-test.sh
+    - name: Upload failure log
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: integration-failure.log
+        path: betree/tests/fail.log
   betree-internal:
     needs: [betree-build]
     runs-on: ubuntu-latest
@@ -71,20 +69,22 @@ jobs:
       uses: actions/checkout@v3
       with:
         ref: ${{ github.event.pull_request.head.sha }}
-    - name: Dependency Cache
+    - name: Build Cache
       uses: actions/cache@v3
       with:
         path: |
-          ~/.cargo/bin
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git
-          ~/.cargo/.crates.toml
-          ~/.cargo/.crates2.json
-          ./target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }} }}
-    - name: Run internal tests
+          $HOME/.cargo
+          ./target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
+    - name: Run unit tests
+      env:
+        HAURA_NUM_THREAD: 8
       run: |
         cd betree
-        ./scripts/ci-test.sh
-
+        ./tests/scripts/ci-test.sh
+    - name: Upload failure log
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: unit-failure.log
+        path: betree/fail.log
