@@ -22,6 +22,10 @@ building the documentation [`mdbook`](https://rust-lang.github.io/mdBook/) is
 required. You can find install directions in their documentation under
 https://rust-lang.github.io/mdBook/.
 
+Also you'll require [mdbook-grapviz](https://lib.rs/crates/mdbook-graphviz) to
+render graphs within the documentation. This crate also needs graphviz to be
+installed on your system.
+
 The documentation is automatically build and published on github pages - the workflow for
 which you can find under `.github/workflows/pages.yml`.
 

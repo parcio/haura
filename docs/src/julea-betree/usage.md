@@ -28,9 +28,7 @@ julea-config --user \
 
 JULEA can't find the library in its current position as it is located in the
 build directory of *Haura*. For debugging purposes we can simply copy the
-produced `libobject_haura.so we can simply copy the produced `libobject_haura.so
-we can simply copy the produced `libobject_haura.so` to the JULEA backend
-directory.
+produced `libobject_haura.so` to the JULEA backend directory.
 
 > TODO
 > 

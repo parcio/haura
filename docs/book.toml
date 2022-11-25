@@ -7,3 +7,8 @@ title = "Haura Developer Guide"
 
 [output.html]
 site-url = "/haura/"
+
+[preprocessor.graphviz]
+command = "mdbook-graphviz"
+output-to-file = false
+
