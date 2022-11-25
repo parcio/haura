@@ -43,7 +43,36 @@ might differentiate two `ObjectRef`s by, as its simply denoting if the data has
 to be read or is already present in the `Cache`.
 
 
-![Constructed trees in an example of 3 open datasets](./assets/trees.svg)
+```dot process
+digraph {
+    bgcolor="transparent"
+    rankdir="BT"
+    
+    "DMU" [shape="box" label="Data Management Unit"]
+    "root" [label="Root Tree" shape="circle" fillcolor="#00FF0099" style="filled"]
+    
+    subgraph userdata {
+        cluster="True"
+        label="User Data"
+
+        "ds1" [label="Dataset 1\nTree" shape="circle"]
+        "ds2" [label="Dataset 2\nTree" shape="circle"]
+        "ds3" [label="Dataset 3\nTree" shape="circle"]
+    }
+    
+    "root" -> "DMU"
+    "root" -> "ds1" [style="dashed" label="Object Pointer"]
+    "root" -> "ds2" [style="dashed" label="Object Pointer"]
+    "root" -> "ds3" [style="dashed" label="Object Pointer"]
+    "ds1" -> "DMU"
+    "ds2" -> "DMU"
+    "ds3" -> "DMU"
+    
+    {rank=same; "root"; "ds1"}
+    {rank=same; "root"; "ds2"}
+    {rank=same; "root"; "ds3"}
+}
+```
 
 Adjacent to the internals and construction of Bε-trees are the commonalities
 between existing trees in an open database.  Mainly non-transparent to the user
