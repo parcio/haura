@@ -28,7 +28,7 @@ lock_api = { version = "0.4", features = ["owning_ref", "serde"] }
 owning_ref = "0.4"
 log = { version = "0.4", features = ["release_max_level_info"] }
 byteorder = "1.0"
-seqlock = { path = "seqlock/" }
+seqlock = "0.1.2"
 twox-hash = { version = "1.6", features = [ "serde", "serialize" ] }
 stable_deref_trait = "1.1"
 itertools = "0.10"
