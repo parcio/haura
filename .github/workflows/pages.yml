@@ -24,21 +24,27 @@ jobs:
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Configure Pages
       uses: actions/configure-pages@v2
-    - name: Dependency Cache
+    - name: Binary Cache
       uses: actions/cache@v3
       with:
         path: |
-          $HOME/.cargo
+          bin
         key: ${{ runner.os }}-cargo-mdbook
     - name: Install mdbook
       run: |
-        cd $HOME
         mkdir bin
         curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.21/mdbook-v0.4.21-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=bin
+        curl -sSL https://github.com/dylanowen/mdbook-graphviz/releases/download/v0.1.5/mdbook-graphviz_v0.1.5_x86_64-unknown-linux-musl.zip > mdviz.zip
+        unzip mdviz.zip -d bin
+    - name: Install graphviz
+      run: |
+        sudo apt update
+        sudo apt install -y graphviz
     - name: Build book
       run: |
+        PATH=$PATH:$PWD/bin
         cd docs
-        $HOME/bin/mdbook build
+        ../bin/mdbook build
     - name: Upload Book Artifact
       uses: actions/upload-pages-artifact@v1
       with:
