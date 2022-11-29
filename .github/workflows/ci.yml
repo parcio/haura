@@ -128,3 +128,33 @@ jobs:
         with:
           name: unit-failure.log
           path: betree/fail.log
+  betree-msrv:
+    name: MSRV Check
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          rustup toolchain install stable --profile minimal --force
+      - name: Cargo MSRV Cache
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+          # This is only supposed to cache the cargo-msrv binary, for this the
+          # rust version and other infos are irrelevant.
+          key: ubuntu-22.04-rustc
+      - name: Install cargo-msrv
+        run: |
+          cargo install cargo-msrv
+      - name: Verify betree MSRV
+        run: |
+          cd betree
+          cargo msrv verify
