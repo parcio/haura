@@ -5,7 +5,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     object::ObjectId,
     tree::MessageAction,
-    StoragePreference,
+    StoragePreference, PreferredAccessType,
 };
 
 use std::{
@@ -29,6 +29,8 @@ pub struct ObjectInfo {
     pub mtime: SystemTime,
     /// Most recently used storage preference. Can be used for reinitialization.
     pub pref: StoragePreference,
+    /// The specified access pattern hint.
+    pub access_pattern: PreferredAccessType,
 }
 
 /// Every message represents an overwrite or merge of a set of [ObjectInfo] properties.
@@ -42,6 +44,7 @@ pub(super) struct MetaMessage {
     pub(super) size: Option<u64>,
     pub(super) mtime: Option<SystemTime>,
     pub(super) pref: Option<StoragePreference>,
+    pub(super) access_pattern: Option<PreferredAccessType>,
 }
 
 const CONTENT_FLAG_NONE: u8 = MetaMessage::delete().to_content_flags();
@@ -50,6 +53,7 @@ const CONTENT_FLAG_ALL: u8 = (MetaMessage {
     size: Some(0),
     mtime: Some(UNIX_EPOCH),
     pref: Some(StoragePreference::NONE),
+    access_pattern: Some(PreferredAccessType::Unknown),
 })
 .to_content_flags();
 
@@ -61,17 +65,19 @@ impl MetaMessage {
         size: Option<u64>,
         mtime: Option<SystemTime>,
         pref: Option<StoragePreference>,
+        access_pattern: Option<PreferredAccessType>,
     ) -> Self {
         MetaMessage {
             object_id,
             size,
             mtime,
             pref,
+            access_pattern,
         }
     }
 
     pub const fn delete() -> MetaMessage {
-        MetaMessage::new(None, None, None, None)
+        MetaMessage::new(None, None, None, None, None)
     }
 
     pub fn set_info(info: &ObjectInfo) -> MetaMessage {
@@ -80,6 +86,7 @@ impl MetaMessage {
             Some(info.size),
             Some(info.mtime),
             Some(info.pref),
+            Some(info.access_pattern),
         )
     }
 
@@ -209,6 +216,7 @@ impl MessageAction for MetaMessageAction {
                     size: Some(size),
                     mtime: Some(mtime),
                     pref: Some(pref),
+                    access_pattern: Some(access_pattern),
                 } => {
                     // message overwrites entirely, don't bother unpacking existing data
                     let info = ObjectInfo {
@@ -216,6 +224,7 @@ impl MessageAction for MetaMessageAction {
                         size,
                         mtime,
                         pref,
+                        access_pattern,
                     };
                     *data =
                         Some(CowBytes::from(info.write_to_vec_with_ctx(ENDIAN).unwrap()).into());
@@ -225,6 +234,7 @@ impl MessageAction for MetaMessageAction {
                     size: None,
                     mtime: None,
                     pref: None,
+                    access_pattern: None,
                 } => {
                     // message deletes entirely
                     *data = None;
@@ -234,6 +244,7 @@ impl MessageAction for MetaMessageAction {
                     size,
                     mtime,
                     pref,
+                    access_pattern,
                 } => {
                     if let Some(d) = data {
                         let mut info = ObjectInfo::read_from_buffer_with_ctx(ENDIAN, d).unwrap();
@@ -249,6 +260,9 @@ impl MessageAction for MetaMessageAction {
                         }
                         if let Some(pref) = pref {
                             info.pref = pref;
+                        }
+                        if let Some(access_pattern) = access_pattern {
+                            info.access_pattern = access_pattern;
                         }
 
                         *data = Some(
@@ -298,6 +312,7 @@ impl MessageAction for MetaMessageAction {
                         mtime: or_max(upper.mtime, lower.mtime),
                         // Prefer newer if set
                         pref: upper.pref.or(lower.pref),
+                        access_pattern: upper.access_pattern.or(lower.access_pattern),
                     };
                     new.pack().into()
                 }

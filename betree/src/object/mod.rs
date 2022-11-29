@@ -405,14 +405,26 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         access_type: PreferredAccessType,
     ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
         let pref = self.data.call_tree(|t| t.dmu().spl().access_type_preference(access_type));
-        self.create_object_with_pref(key, pref)
+        self.init_object_with_pref_and_access_type(key, pref, access_type)
     }
+
 
     /// Create a new object handle.
     pub fn create_object_with_pref(
         &'os self,
         key: &[u8],
         storage_preference: StoragePreference,
+    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+        self.init_object_with_pref_and_access_type(key, storage_preference, PreferredAccessType::Unknown)
+    }
+
+
+    /// Create a new object handle.
+    fn init_object_with_pref_and_access_type(
+        &'os self,
+        key: &[u8],
+        storage_preference: StoragePreference,
+        access_type: PreferredAccessType,
     ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
         if key.contains(&0) {
             bail!(ErrorKind::KeyContainsNullByte)
@@ -434,6 +446,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
             size: 0,
             mtime: SystemTime::now(),
             pref: storage_preference,
+            access_pattern: access_type,
         };
 
         self.update_object_info(key, &MetaMessage::set_info(&info))?;

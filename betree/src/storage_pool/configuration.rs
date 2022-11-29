@@ -3,6 +3,7 @@ use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
 use libc;
 use serde::{Deserialize, Serialize};
+use speedy::{Writable, Readable};
 use std::{
     fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
     slice,
@@ -11,7 +12,7 @@ use std::{
 /// Access pattern descriptor to differentiate and optimize drive usage. Useful
 /// when working with [crate::object::ObjectStore] with a defined with access pattern. Assignable to
 /// [TierConfiguration].
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Writable, Readable)]
 pub enum PreferredAccessType {
     /// The default access pattern. No assumptions are made.
     Unknown,
