@@ -1,5 +1,12 @@
 # Design Overview
 
+In this section we want to give you an initial overview of all the present
+structures in *Haura* and how they relate to another. If you want to understand
+how the database works in detail it is best to gain a general idea of how each
+individual parts interact with another.
+
+## Haura Structure
+
 ![An overview of the different layers defined in the betree architecture](./assets/concept.svg)
 
 ### Database, Dataset and Object store
@@ -16,7 +23,67 @@ ids and the value is there chunk content.
 
 ### B-epsilon-tree
 
-![Example Representation of an Bε-tree showing relevant structures and their functions](./assets/tree_semantics.svg)
+```dot process
+digraph {
+    bgcolor="transparent"
+    rankdir="TB"
+    
+    "in1" [label="Internal Node", style="filled", fillcolor="#FF000077"]
+    "in2" [label="Internal Node", style="filled", fillcolor="#FF000077"]
+    
+    subgraph tbl {
+        label="TreeLayer"
+        cluster="True"
+
+        "root" [style="filled" fillcolor="#FF000077"]
+    }
+    
+    "c1" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "c2" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    
+    "cb1" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "cb2" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "cb3" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "cb4" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "cb6" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "cb7" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "cb8" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    "cb9" [label="CB" shape="box" style="filled" fillcolor="#33333333"]
+    
+    "l1" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    "l2" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    "l3" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    "l4" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    "l6" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    "l7" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    "l8" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    "l9" [label="Leaf" style="filled" fillcolor="#0000FF55"]
+    
+    "root" -> "c1"
+    "root" -> "c2"
+    
+    "c1" -> "in1"
+    "c2" -> "in2"
+    
+    "in1" -> "cb1"
+    "in1" -> "cb2"
+    "in1" -> "cb3"
+    "in1" -> "cb4"
+    "in2" -> "cb6"
+    "in2" -> "cb7"
+    "in2" -> "cb8"
+    "in2" -> "cb9"
+    
+    "cb1" -> "l1"
+    "cb2" -> "l2"
+    "cb3" -> "l3"
+    "cb4" -> "l4"
+    "cb6" -> "l6"
+    "cb7" -> "l7"
+    "cb8" -> "l8"
+    "cb9" -> "l9"
+}
+```
 
 The `Dataset` interacts mainly with the actual Bε-tree, which
 receives through its root node messages from the `Dataset`. By default these
@@ -24,6 +91,14 @@ implement _insert_, _remove_ and _upsert_, although this can be exchanged if
 required. Solely the `MessageAction` trait is required to be implemented on the
 chosen type to allow for its use in the tree. An example for this can be seen in
 the `MetaMessage` of the `Objectstore`.
+
+In the figure above we show how this tree is structured. We differentiate
+between three different kinds of nodes in it, first `Leaves` shown in blue,
+`Internal Nodes` shown in red, and `Child Buffers` (abbr. "CB") shown in grey.
+The `root` node of the tree is highlighted with `TreeLayer` to indicate that
+this is the node providing the interface for Datasets to attach to. From the
+`root` node messages are received.
+
 Once passed, the tree propagates the message down the tree until it reaches a
 leaf node where the message will be applied. Though this, might not happen
 instantaneously and multiple buffers (`ChildBuffer`s) might be encountered which
@@ -37,11 +112,16 @@ and in more detail in the following figure.
 
 ![State Diagram of the object lifecycle](./assets/object_lifecycle.svg)
 
-Notable, is the additional state here labeled "On Disk", this is _strictly_
-speaking not a state in the implementation of `ObjectRef` as-is but a state one
-might differentiate two `ObjectRef`s by, as its simply denoting if the data has
-to be read or is already present in the `Cache`.
-
+Adjacent to the internals and construction of Bε-trees are the commonalities
+between existing trees in an open database. Hidden to the user, the root tree is
+used to store internal information concerning the created datasets (their
+`DatasetId`s and `ObjectPointer`s) and `Segment`s information.  `Segment`s are
+previously not mentioned here as they are considered in the Data Management
+Layer, but can be thought of as containers organizing the allocation bitmap for
+a range of blocks.  Additionally to avoid conflicts with another, all trees
+share the same Data Management Unit to assure that no irregular state is reached
+in handling critical on-disk management such as allocation of blocks and
+updating of bitmaps.
 
 ```dot process
 digraph {
@@ -74,26 +154,12 @@ digraph {
 }
 ```
 
-Adjacent to the internals and construction of Bε-trees are the commonalities
-between existing trees in an open database.  Mainly non-transparent to the user
-another tree is opened to store internal information concerning the created
-datasets (their `DatasetId`s and `ObjectPointer`s) and `Segment`s information.
-`Segment`s are previously not mentioned here as they are considered in the Data
-Management Layer, but can be thought of as containers organizing the allocation
-bitmap for a range of blocks.  Additionally to avoid conflicts with another, all
-trees share the same Data Management Unit to assure that no irregular state is
-reached in handling critical on-disk management such as allocation of blocks and
-updating of bitmaps.
 
 ### Data Management
 
 On-disk operations and storage allocation are handled by the Data Management
 layer. This layer also implements the copy-on-write semantics required for
 snapshots, done in delayed deallocation and accounting of a dead-list of blocks.
-
-Most important here is the `Dml` traits (`Dml`, `DmlBase`, `DmlWithHandler`,
-`DmlWithCache`, `DmlWithSpl`) and the `Handler` trait. (`Cache` and `Spl` are
-part of different modules and layers).
 
 The `Handler` manages the actual bitmap handling for all allocations and
 deallocations and is also responsible for tracking the number of blocks
