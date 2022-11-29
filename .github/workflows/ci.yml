@@ -153,8 +153,17 @@ jobs:
           key: ubuntu-22.04-rustc
       - name: Install cargo-msrv
         run: |
+          # Will skip compilation if already present
           cargo install cargo-msrv
       - name: Verify betree MSRV
         run: |
           cd betree
+          cargo msrv verify
+      - name: Verify bectl MSRV
+        run: |
+          cd bectl
+          cargo msrv verify
+      - name: Verify julea-betree MSRV
+        run: |
+          cd julea-betree
           cargo msrv verify
