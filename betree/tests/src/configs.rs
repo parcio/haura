@@ -9,6 +9,30 @@ use betree_storage_stack::{
 
 use crate::TO_MEBIBYTE;
 
+pub fn access_specific_config() -> DatabaseConfiguration {
+    DatabaseConfiguration {
+        storage: StoragePoolConfiguration {
+            tiers: vec![
+                TierConfiguration {
+                    top_level_vdevs: vec![
+                        Vdev::Leaf(LeafVdev::Memory { mem: 2048 * TO_MEBIBYTE })
+                    ],
+                    preferred_access_type: betree_storage_stack::PreferredAccessType::RandomReadWrite
+                },
+                TierConfiguration {
+                    top_level_vdevs: vec![
+                        Vdev::Leaf(LeafVdev::Memory { mem: 2048 * TO_MEBIBYTE })
+                    ],
+                    preferred_access_type: betree_storage_stack::PreferredAccessType::SequentialReadWrite
+                },
+            ],
+            ..Default::default()
+        },
+        access_mode: AccessMode::OpenOrCreate,
+        ..Default::default()
+    }
+}
+
 pub fn migration_config_lfu_node() -> DatabaseConfiguration {
     migration_config_lfu(LfuMode::Node)
 }
