@@ -36,7 +36,7 @@ bindings.
 
 ```sh
 # apt update
-# apt install libglib2.0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
+# apt install libglib2.0-0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
 ```
 
 ### Arch Linux+
