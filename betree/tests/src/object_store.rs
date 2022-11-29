@@ -1,4 +1,6 @@
-use betree_storage_stack::StoragePreference;
+use betree_storage_stack::{StoragePreference, Database};
+
+use crate::{configs, TO_MEBIBYTE};
 
 use super::test_db;
 
@@ -79,4 +81,23 @@ fn object_store_reinit_from_iterator() {
     for name in db.iter_object_store_names().unwrap() {
         let _ = db.open_named_object_store(&name, StoragePreference::NONE).unwrap();
     }
+}
+
+#[test]
+fn object_store_access_pattern() {
+    // Any objects with a certain access pattern should be stored on the fitting
+    // tier initially.
+    // 0 - RandomRW
+    // 1 - SeqRW
+    let mut db = Database::build(configs::access_specific_config()).unwrap();
+    let os = db.open_object_store().unwrap();
+    let (obj, _) = os.create_object_with_access_type(b"foo", betree_storage_stack::PreferredAccessType::SequentialReadWrite).unwrap();
+    let dat = vec![42; 32 * TO_MEBIBYTE];
+    obj.write_at(&dat[..16*TO_MEBIBYTE], 0).unwrap();
+    db.sync().unwrap();
+    assert!(db.free_space_tier()[0].free > db.free_space_tier()[1].free);
+    let (obj, _) = os.create_object_with_access_type(b"foo", betree_storage_stack::PreferredAccessType::RandomReadWrite).unwrap();
+    obj.write_at(&dat, 0).unwrap();
+    db.sync().unwrap();
+    assert!(db.free_space_tier()[0].free < db.free_space_tier()[1].free);
 }
