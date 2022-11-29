@@ -93,7 +93,7 @@ unsafe extern "C" fn backend_init(path: *const gchar, backend_data: *mut gpointe
         let file = File::open(&path)?;
         let config: DatabaseConfiguration = serde_json::from_reader(&file)?;
 
-        let db = Database::build(config)?.with_sync();
+        let db = Database::build_threaded(config)?;
 
         Ok(Backend {
             database: db,
