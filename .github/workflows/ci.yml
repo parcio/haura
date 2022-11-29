@@ -148,9 +148,17 @@ jobs:
         with:
           path: |
             ~/.cargo
+            ~/julea
           # This is only supposed to cache the cargo-msrv binary, for this the
           # rust version and other infos are irrelevant.
           key: ubuntu-22.04-rustc
+      - name: Prepare JULEA
+        run: |
+          sudo apt update
+          sudo apt install libglib2.0-0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
+          # use forked version
+          cd ~
+          git clone -b modules-conditional-unload https://github.com/tilpner/julea.git
       - name: Install cargo-msrv
         run: |
           # Will skip compilation if already present
@@ -166,4 +174,6 @@ jobs:
       - name: Verify julea-betree MSRV
         run: |
           cd julea-betree
+          export JULEA_INCLUDE=~/julea/include
+          export BINDGEN_EXTRA_CLANG_ARGS="$(pkg-config --cflags glib-2.0) $(pkg-config --cflags libbson-1.0)"
           cargo msrv verify
