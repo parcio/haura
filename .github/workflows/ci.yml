@@ -1,90 +1,130 @@
-name: ci-pr
-
+name: CI
 on:
-  pull_request:
-  workflow_dispatch:
   push:
-    branches: [main]
-
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 jobs:
-  betree-build:
-    runs-on: ubuntu-latest
+  dependencies:
+    name: Dependencies
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-    - name: Install Rust
-      run: |
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs/ | sh -s -- -y
-        source $HOME/.cargo/env
-        rustup toolchain install --profile minimal --force stable
-    - name: Build Cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          $HOME/.cargo
-          ./target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
-    - name: Build
-      run: |
-        cd betree
-        cargo build
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          rustup toolchain install stable --profile minimal --force
+          echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
+      - name: Cache dependencies
+        id: cache
+        uses: actions/cache@v3
+        # Environment variables do not seem to work, use ~ instead.
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}
+      - name: Build dependencies
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        # We need to manually clean Haura until there is a way to build only dependencies.
+        # https://github.com/rust-lang/cargo/issues/2644
+        run: |
+          cd betree/tests
+          cargo build --tests
+          cargo clean --package betree-tests
+          cd ..
+          cargo build --tests
+          cargo clean --package betree_storage_stack
   betree-integration:
-    needs: [betree-build]
-    runs-on: ubuntu-latest
+    name: Integration Tests
+    needs: dependencies
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
     env:
       RUST_BACKTRACE: 1
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-    - name: Build Cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          $HOME/.cargo
-          ./target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
-    - name: Run integration tests
-      env:
-        HAURA_NUM_THREAD: 1
-      run: |
-        cd betree/tests
-        ./scripts/ci-test.sh
-    - name: Upload failure log
-      if: failure()
-      uses: actions/upload-artifact@v3
-      with:
-        name: integration-failure.log
-        path: betree/tests/fail.log
-  betree-internal:
-    needs: [betree-build]
-    runs-on: ubuntu-latest
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          rustup toolchain install stable --profile minimal --force
+          echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
+      - name: Cache dependencies
+        id: cache
+        uses: actions/cache@v3
+        # Environment variables do not seem to work, use ~ instead.
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}
+      - name: Check dependencies
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          exit 1
+      - name: Run integration tests
+        env:
+          HAURA_NUM_THREAD: 1
+        run: |
+          cd betree/tests
+          ./scripts/ci-test.sh
+      - name: Upload failure log
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-failure.log
+          path: betree/tests/fail.log
+  betree-unit:
+    name: Unit Tests
+    needs: dependencies
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
     env:
       RUST_BACKTRACE: 1
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-    - name: Build Cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          $HOME/.cargo
-          ./target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('betree/**/*.rs', 'bectl/**/*.rs', 'julea-sys/**/*.rs', 'julea-betree/**/*.rs') }} }}
-    - name: Run unit tests
-      env:
-        HAURA_NUM_THREAD: 8
-      run: |
-        cd betree
-        ./tests/scripts/ci-test.sh
-    - name: Upload failure log
-      if: failure()
-      uses: actions/upload-artifact@v3
-      with:
-        name: unit-failure.log
-        path: betree/fail.log
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          rustup toolchain install stable --profile minimal --force
+          echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
+      - name: Cache dependencies
+        id: cache
+        uses: actions/cache@v3
+        # Environment variables do not seem to work, use ~ instead.
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}
+      - name: Check dependencies
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          exit 1
+      - name: Run unit tests
+        env:
+          HAURA_NUM_THREAD: 8
+        run: |
+          cd betree
+          ./tests/scripts/ci-test.sh
+      - name: Upload failure log
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: unit-failure.log
+          path: betree/fail.log
