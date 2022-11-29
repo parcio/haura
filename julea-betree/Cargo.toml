@@ -3,6 +3,7 @@ name = "julea-betree"
 version = "0.1.0"
 authors = ["tilpner <betree@tilpner.com>"]
 edition = "2018"
+rust-version = "1.62"
 
 [lib]
 name = "object_betree"
