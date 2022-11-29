@@ -6,14 +6,14 @@ A storage library offering key-value and object interfaces by managing B^ε-tree
 
 ## Dependencies
 
-You'll need at least Rust 1.53.0 (for saturating Duration operations).
+We advise you to use always the latest version of Rust *Stable*. For compatability we provide the minimum rust version also in the Cargo.toml of each crate in this project.
 
 ```
-git clone https://github.com/tilpner/betree
-cd betree/betree
+git clone https://github.com/julea-io/haura
+cd haura/betree
 cargo build
 cd tests
-cargo test
+./scripts/test.sh
 ```
 
 ### julea-sys
