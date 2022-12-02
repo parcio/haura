@@ -7,7 +7,7 @@ use betree_storage_stack::{
     compression::CompressionConfiguration,
     database::AccessMode,
     object::{ObjectHandle, ObjectStore},
-    storage_pool::{configuration, LeafVdev, TierConfiguration, Vdev},
+    storage_pool::{LeafVdev, TierConfiguration, Vdev},
     Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference,
 };
 use std::{
@@ -351,13 +351,11 @@ fn write_full(#[case] tier_size_mb: u32, #[case] par_space: f32) {
 }
 
 #[rstest]
-// Fullness if buffer growth atleast x1.1
-#[case::a(1024, 0.93)]
-#[case::b(1024, 0.95)]
-#[case::c(1024, 0.97)]
-#[case::d(1024, 0.99)]
+#[case::a(1024, 1.05)]
+#[case::b(1024, 1.1)]
 #[timeout(std::time::Duration::from_secs(60))]
-#[should_panic]
+// This test shows how the storage stack handles situation of tight requirements
+// on available storage space.
 fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
     // env_logger::init();
     let mut db = test_db(1, tier_size_mb);
@@ -369,41 +367,24 @@ fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
         let obj = os
             .open_or_create_object(b"hewo")
             .expect("Oh no! Could not open object!");
-        obj.write_at(&buf, 0).expect_err(
+        // This indicates an OK as data can still be cached.
+        let _ = obj.write_at(&buf, 0);
+    }
+    db.close_object_store(os);
+    // NOTE: Test multiple times if the error persist as it should in this case.
+    // In practice this allos us to treat errors by removing some data if necessary.
+    let mut sync = || {
+        db.sync().expect_err(
             format!(
-                "Writing of {} MiB into {} MiB storage succeeded",
-                tier_size_mb as f32 * par_space * 1.1,
+                "Sync succeeded ({}MB of {}MB)",
+                tier_size_mb as f32 * par_space,
                 tier_size_mb
             )
             .as_str(),
         );
-    }
-    db.close_object_store(os);
-    // NOTE: Test multiple times if the error persist as it should in this case
-    db.sync().expect_err(
-        format!(
-            "Sync succeeded ({}MB of {}MB)",
-            tier_size_mb as f32 * par_space * 1.1,
-            tier_size_mb
-        )
-        .as_str(),
-    );
-    db.sync().expect_err(
-        format!(
-            "Sync succeeded ({}MB of {}MB)",
-            tier_size_mb as f32 * par_space * 1.1,
-            tier_size_mb
-        )
-        .as_str(),
-    );
-    db.sync().expect_err(
-        format!(
-            "Sync succeeded ({}MB of {}MB)",
-            tier_size_mb as f32 * par_space * 1.1,
-            tier_size_mb
-        )
-        .as_str(),
-    );
+    };
+    sync();
+    sync();
     // NOTE: If the sync errors are not corrected this will deadlock here on the final drop. Test with timeout.
 }
 
@@ -872,7 +853,6 @@ fn migration_policy_smoke(cfg: DatabaseConfiguration) {
         db.sync().unwrap();
     }
     let obj = ds.open_or_create_object(b"foobar").unwrap();
-    // at best the current impl takes 1.1 promille additional space for each leaf (3.2 MB size with 32 bytes metadata)
     let buf = vec![42u8; 1024 * TO_MEBIBYTE];
     dbg!(obj.write_at(&buf, 0).unwrap());
     {
