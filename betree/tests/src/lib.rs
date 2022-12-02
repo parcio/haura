@@ -356,11 +356,8 @@ fn write_full(#[case] tier_size_mb: u32, #[case] par_space: f32) {
 #[case::b(1024, 0.95)]
 #[case::c(1024, 0.97)]
 #[case::d(1024, 0.99)]
-// Over-over fill
-#[case::e(1024, 1.1)]
-#[case::f(1024, 1.2)]
-#[case::g(1024, 1.5)]
 #[timeout(std::time::Duration::from_secs(60))]
+#[should_panic]
 fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
     // env_logger::init();
     let mut db = test_db(1, tier_size_mb);
@@ -499,6 +496,7 @@ fn write_delete_sequence(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
 #[case::d(2048, 800)]
 #[case::e(2048, 900)]
 #[case::f(2048, 1000)]
+#[should_panic]
 // @jwuensche
 // The size s_1 of the tier should be in relation to the buffer size s_2
 // s_1 < 3*s_2 && s_1 > 2*s_2
@@ -558,8 +556,9 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
 }
 
 #[rstest]
-#[case::a(2048, 600)]
-#[case::b(2048, 700)]
+#[case::a(2048, 700)]
+#[case::b(2048, 800)]
+#[should_panic]
 // @jwuensche:
 // This test really provides a measure of convenience.
 // It will not be logical to any application that writing over the same buffer space runs out of space.
