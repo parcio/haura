@@ -13,7 +13,9 @@ $ cargo build
 
 from the `bectl` directory to build `bectl` on its own.
 
-To avoid path specification on each invocation of the application you may also install the app via `cargo` to your local user.
+To avoid specifiyng the location of the binary or running `bectl` with `cargo
+run` on each invocation you can also install the app via `cargo` to your local
+user.
 
 ```sh
 $ cargo install --path .
@@ -23,4 +25,5 @@ $ cargo install --path .
 
 There are not yet any tests provided for the `bectl` as the functionality is a
 rather simple mapping to `betree_storage_stack` functions. If we want to expand
-this in the future we might want to ensure that.
+this in the future we might want to ensure that `bectl` behaves correctly
+internally too.

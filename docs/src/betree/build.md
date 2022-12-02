@@ -6,14 +6,19 @@ To build the storage stack on its own navigate to `betree/` and execute:
 $ cargo build
 ```
 
-This should build the storage stack in _Debug_ after a few minutes.
+This should build the storage stack after a few minutes.
+
+> When executing `cargo build` normally the library will be built without any
+> optimizations in debug mode. This is helpful when developing as you get
+> information such as backtraces with understandable names. If you are planning
+> to test for performance or need fast execution always use `cargo build
+> --release`.
 
 ### Tests
 
-We perform a number of tests which partially take some time to successfully
-complete on your system. 
+We perform a number of tests as *unit* and *intergration* tests. Some of them require a considerable amount of time as they are run multiple times with different input values.
 
-#### Internal
+#### Unit
 
 Navigate to `betree/` and execute:
 
