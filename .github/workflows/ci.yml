@@ -76,6 +76,7 @@ jobs:
       - name: Run integration tests
         env:
           HAURA_NUM_THREAD: 1
+          QUICKCHECK_TESTS: 20
         run: |
           cd betree/tests
           ./scripts/ci-test.sh
@@ -119,6 +120,7 @@ jobs:
       - name: Run unit tests
         env:
           HAURA_NUM_THREAD: 8
+          QUICKCHECK_TESTS: 20
         run: |
           cd betree
           ./tests/scripts/ci-test.sh
