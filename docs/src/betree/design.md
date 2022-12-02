@@ -85,7 +85,7 @@ digraph {
 }
 ```
 
-The `Dataset` interacts mainly with the actual Bε-tree, which
+The `Dataset` interacts mainly with the actual B-epsilon-tree, which
 receives through its root node messages from the `Dataset`. By default these
 implement _insert_, _remove_ and _upsert_, although this can be exchanged if
 required. Solely the `MessageAction` trait is required to be implemented on the
@@ -100,8 +100,8 @@ this is the node providing the interface for Datasets to attach to. From the
 `root` node messages are received.
 
 Once passed, the tree propagates the message down the tree until it reaches a
-leaf node where the message will be applied. Though this, might not happen
-instantaneously and multiple buffers (`ChildBuffer`s) might be encountered which
+leaf node where the message will be applied. This might not happen
+instantaneously, though, and multiple buffers (`ChildBuffer`s) might be encountered which
 momentarily hold the message at internal nodes. This way we avoid additional
 deep traversals and might be able to flush multiple messages at once from one
 buffer node.
@@ -112,7 +112,7 @@ and in more detail in the following figure.
 
 ![State Diagram of the object lifecycle](./assets/object_lifecycle.svg)
 
-Adjacent to the internals and construction of Bε-trees are the commonalities
+Adjacent to the internals and construction of B-epsilon-trees are the commonalities
 between existing trees in an open database. Hidden to the user, the root tree is
 used to store internal information concerning the created datasets (their
 `DatasetId`s and `ObjectPointer`s) and `Segment`s information.  `Segment`s are
@@ -175,7 +175,7 @@ the Id is unique over all storage tiers.
 
 #### Copy on Write
 
-The Data Management Layer is also responsible to handle copy on write
+The Data Management Layer is also responsible to handle copy-on-write
 preservation.  This is handle by checking if any snapshots of the dataset
 contain the afflicted node (via `Generation`), if this is the case the
 `dead_list` contained in the root tree is updated, to contain the storage
@@ -183,8 +183,8 @@ location of the old version of the node on the next sync.
 
 ### Storage Pool
 
-As the abstraction over specific hardware types and raid configurations the data
-management unit interacts for all IO operation with the storage pool layer.
+As the abstraction over specific hardware types and RAID configurations the data
+management unit interacts for all I/O operation with the storage pool layer.
 Notable here is the division of the layer into (of course) storage tiers, `Vdev`
 and `LeafVdevs`.  There are 4 storage tiers available
 (`FASTEST`,`FAST`,`SLOW`,`SLOWEST`) with each at maximum 1024 `Vdev`s.  Each

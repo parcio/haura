@@ -11,7 +11,7 @@ Given all prerequisites are fulfilled simply run
 $ cargo build
 ```
 
-from the `bectl` directory to build bectl on its own.
+from the `bectl` directory to build `bectl` on its own.
 
 To avoid path specification on each invocation of the application you may also install the app via `cargo` to your local user.
 

@@ -1,6 +1,6 @@
 # Build & Test
 
-To build the storage stack on it's own navigate to `betree/` and execute:
+To build the storage stack on its own navigate to `betree/` and execute:
 
 ```sh
 $ cargo build
@@ -26,7 +26,7 @@ $ cargo test
 
 #### Integration
 
-Due to the implementatio of tests a large amount of memory is taken up during
+Due to the implementation of tests a large amount of memory is taken up during
 the integration tests affecting the remaining system considerably, please be
 aware that the tests will consume several GiB of memory of available space
 

@@ -16,7 +16,7 @@ cargo test
 
 ## Documentation
 
-You can find a in-depth documentation and developer guide under
+You can find an in-depth documentation and developer guide under
 https://julea-io.github.io/haura or you may build it yourself locally.  For
 building the documentation [`mdbook`](https://rust-lang.github.io/mdBook/) is
 required. You can find install directions in their documentation under
@@ -26,7 +26,7 @@ Also you'll require [mdbook-grapviz](https://lib.rs/crates/mdbook-graphviz) to
 render graphs within the documentation. This crate also needs graphviz to be
 installed on your system.
 
-The documentation is automatically build and published on github pages - the workflow for
+The documentation is automatically built and published on GitHub Pages - the workflow for
 which you can find under `.github/workflows/pages.yml`.
 
 ### julea-sys
