@@ -21,17 +21,14 @@ Navigate to `betree/` and execute:
 $ cargo test
 ```
 
-> Some of the unit tests take a considerable amount of time, which is still
-> under investigation.
-
 #### Integration
 
 Due to the implementation of tests a large amount of memory is taken up during
 the integration tests affecting the remaining system considerably, please be
-aware that the tests will consume several GiB of memory of available space
+aware that the tests will consume several GiB of memory and 4 GiB of storage space as some temporary files will be created in the `betree/tests` directory.
 
 Navigate to `betree/tests/` and execute:
-
+    
 ```sh
 $ ./scripts/test.sh
 ```

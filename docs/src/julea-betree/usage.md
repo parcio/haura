@@ -41,8 +41,8 @@ produced `libobject_haura.so` to the JULEA backend directory.
 To copy the library to JULEA with the loaded JULEA environment run:
 
 ```sh
-$ # The change between underscore and hyphen is not a typo but a mismatch
-$ # between allowed names in cargo and expected names in JULEA.
+# The change between underscore and hyphen is not a typo but a mismatch
+# between allowed names in cargo and expected names in JULEA.
 $ cp target/debug/libobject_betree.so $JULEA_BACKEND_PATH/libobject-betree.so
 ```
 
