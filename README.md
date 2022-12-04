@@ -16,6 +16,21 @@ cd tests
 cargo test
 ```
 
+## Documentation
+
+You can find an in-depth documentation and developer guide under
+https://julea-io.github.io/haura or you may build it yourself locally.  For
+building the documentation [`mdbook`](https://rust-lang.github.io/mdBook/) is
+required. You can find install directions in their documentation under
+https://rust-lang.github.io/mdBook/.
+
+Also you'll require [mdbook-grapviz](https://lib.rs/crates/mdbook-graphviz) to
+render graphs within the documentation. This crate also needs graphviz to be
+installed on your system.
+
+The documentation is automatically built and published on GitHub Pages - the workflow for
+which you can find under `.github/workflows/pages.yml`.
+
 ### julea-sys
 
 `julea-sys` generates limited Rust bindings from the JULEA headers, by using rust-bindgen, which uses libclang.
