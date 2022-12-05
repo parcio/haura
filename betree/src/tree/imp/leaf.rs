@@ -143,6 +143,9 @@ impl LeafNode {
         self.entries.get_mut(key).map(|e| &mut e.0)
     }
 
+    /// Split the node and transfer entries to a given other node `right_sibling`.
+    /// Use entries which are, when summed up in-order, above the `min_size` limit.
+    /// Returns new pivot key and size delta to the left sibling.
     fn do_split_off(
         &mut self,
         right_sibling: &mut Self,
@@ -284,6 +287,9 @@ impl LeafNode {
         (sibling, pivot_key, size_delta)
     }
 
+    /// Merge all entries from the *right* node into the *left* node.  Returns
+    /// the size change, positive for the left node, negative for the right
+    /// node.
     pub fn merge(&mut self, right_sibling: &mut Self) -> isize {
         self.entries.append(&mut right_sibling.entries);
         let size_delta = right_sibling.entries_size;
@@ -310,13 +316,17 @@ impl LeafNode {
         min_size: usize,
         max_size: usize,
     ) -> FillUpResult {
-        // TODO size delta
-        self.merge(right_sibling);
+        let size_delta = self.merge(right_sibling);
         if self.size() <= max_size {
-            FillUpResult::Merged
+            FillUpResult::Merged { size_delta }
         } else {
-            let (pivot_key, _) = self.do_split_off(right_sibling, min_size, max_size);
-            FillUpResult::Rebalanced(pivot_key)
+            // First size_delta is from the merge operation where we split
+            let (pivot_key, split_size_delta) =
+                self.do_split_off(right_sibling, min_size, max_size);
+            FillUpResult::Rebalanced {
+                pivot_key,
+                size_delta: size_delta + split_size_delta,
+            }
         }
     }
 
