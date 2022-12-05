@@ -21,8 +21,13 @@ use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
 
 #[derive(Debug)]
 enum FillUpResult {
-    Rebalanced(CowBytes),
-    Merged,
+    Rebalanced {
+        pivot_key: CowBytes,
+        size_delta: isize,
+    },
+    Merged {
+        size_delta: isize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

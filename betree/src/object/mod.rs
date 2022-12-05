@@ -433,6 +433,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         let oid = loop {
             let oid = ObjectId(self.object_id_counter.fetch_add(1, Ordering::SeqCst));
 
+            // FIXME: Ensure that OID is valid without disk sanity checks.
             // check for existing object with this oid
             if let Some(_existing_chunk) = self.data.get(object_chunk_key(oid, 0))? {
                 warn!("oid collision: {:?}", oid);

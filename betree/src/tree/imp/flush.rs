@@ -5,7 +5,7 @@ use crate::{
     cache::AddSize,
     data_management::{HandlerDml, HasStoragePreference, ObjectRef},
     size::Size,
-    tree::{errors::*, MessageAction, imp::internal::MergeChildResult},
+    tree::{errors::*, imp::internal::MergeChildResult, MessageAction},
 };
 use stable_deref_trait::StableDeref;
 use std::{
@@ -64,7 +64,8 @@ where
                 node.actual_size()
             );
             // 1. Select the largest child buffer which can be flushed.
-            let mut child_buffer = match Ref::try_new(node, |node| node.try_find_flush_candidate()) {
+            let mut child_buffer = match Ref::try_new(node, |node| node.try_find_flush_candidate())
+            {
                 // 1.1. If there is none we have to split the node.
                 Err(_node) => match parent {
                     None => {
@@ -95,7 +96,11 @@ where
                     let mut m = child_buffer.prepare_merge();
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
                     let is_right_sibling = m.is_right_sibling();
-                    let MergeChildResult { pivot_key, old_np, size_delta } = m.merge_children();
+                    let MergeChildResult {
+                        pivot_key,
+                        old_np,
+                        size_delta,
+                    } = m.merge_children();
                     if is_right_sibling {
                         let size_delta = child.merge(&mut sibling, pivot_key);
                         child.add_size(size_delta);
@@ -123,16 +128,30 @@ where
                 let size_delta = {
                     let mut m = child_buffer.prepare_merge();
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
-                    // TODO size delta for child/sibling
+                    let left;
+                    let right;
                     // TODO deallocation
-                    let result = if m.is_right_sibling() {
-                        child.leaf_rebalance(&mut sibling)
+                    if m.is_right_sibling() {
+                        left = &mut child;
+                        right = &mut sibling;
                     } else {
-                        sibling.leaf_rebalance(&mut child)
+                        left = &mut sibling;
+                        right = &mut child;
                     };
-                    match result {
-                        FillUpResult::Merged => m.merge_children().size_delta,
-                        FillUpResult::Rebalanced(pivot) => m.rebalanced(pivot),
+                    match left.leaf_rebalance(right) {
+                        FillUpResult::Merged { size_delta } => {
+                            left.add_size(size_delta);
+                            right.add_size(-size_delta);
+                            m.merge_children().size_delta
+                        }
+                        FillUpResult::Rebalanced {
+                            pivot_key,
+                            size_delta,
+                        } => {
+                            left.add_size(size_delta);
+                            right.add_size(-size_delta);
+                            m.rebalanced(pivot_key)
+                        }
                     }
                 };
                 child_buffer.add_size(size_delta);
