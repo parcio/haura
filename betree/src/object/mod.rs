@@ -222,7 +222,10 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
             .map(|buf| ObjectStoreData::unpack(&buf)))
     }
 
-    pub fn open_object_store_with_id(
+    /// Open an object store by its internal Id. This method can be used
+    /// whenever storing the actual names of object stores is too much expected
+    /// effort.
+    pub(crate) fn open_object_store_with_id(
         &mut self,
         os_id: ObjectStoreId,
     ) -> Result<ObjectStore<Config>> {
