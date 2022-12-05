@@ -367,7 +367,7 @@ where
         }
     }
 
-    pub fn try_flush(
+    pub fn try_find_flush_candidate(
         &mut self,
         min_flush_size: usize,
         max_node_size: usize,
