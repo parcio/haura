@@ -474,7 +474,7 @@ where
             unimplemented!();
         }
 
-        self.fixup_foo(node, parent)?;
+        self.rebalance_tree(node, parent)?;
 
         // TODO evict?
         // Is this really necessary here? Or is waiting until the next sync fine?
