@@ -271,7 +271,9 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         name: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<ObjectStore<Config>> {
-        assert!(!name.contains(&0));
+        if name.contains(&0) {
+            bail!(ErrorKind::KeyContainsNullByte)
+        }
         let mut v = name.to_vec();
         v.push(0);
 
@@ -368,7 +370,9 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         key: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
-        assert!(!key.contains(&0));
+        if key.contains(&0) {
+            bail!(ErrorKind::KeyContainsNullByte)
+        }
 
         let oid = loop {
             let oid = ObjectId(self.object_id_counter.fetch_add(1, Ordering::SeqCst));
@@ -431,7 +435,9 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         key: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<Option<(ObjectHandle<'os, Config>, ObjectInfo)>> {
-        assert!(!key.contains(&0));
+        if key.contains(&0) {
+            bail!(ErrorKind::KeyContainsNullByte)
+        }
 
         let info = self.read_object_info(key)?;
 
@@ -696,7 +702,9 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
     }
 
     pub fn rename(&mut self, new_key: &[u8]) -> Result<()> {
-        assert!(!new_key.contains(&0));
+        if new_key.contains(&0) {
+            bail!(ErrorKind::KeyContainsNullByte)
+        }
 
         let old_key = mem::replace(&mut self.object.key, new_key.to_vec());
         let custom_delete = SlicedCowBytes::from(meta::delete_custom());
@@ -928,13 +936,17 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
     }
 
     pub fn get_metadata(&self, name: &[u8]) -> Result<Option<SlicedCowBytes>> {
-        assert!(!name.contains(&0));
+        if name.contains(&0) {
+            bail!(ErrorKind::KeyContainsNullByte)
+        }
         let key = self.object.metadata_key(name);
         self.store.metadata.get(key)
     }
 
     pub fn set_metadata(&self, name: &[u8], value: &[u8]) -> Result<()> {
-        assert!(!name.contains(&0));
+        if name.contains(&0) {
+            bail!(ErrorKind::KeyContainsNullByte)
+        }
         let key = self.object.metadata_key(name);
         let msg = meta::set_custom(value);
         self.store
@@ -943,7 +955,9 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
     }
 
     pub fn delete_metadata(&self, name: &[u8]) -> Result<()> {
-        assert!(!name.contains(&0));
+        if name.contains(&0) {
+            bail!(ErrorKind::KeyContainsNullByte)
+        }
         let key = self.object.metadata_key(name);
         let msg = meta::delete_custom();
         self.store
