@@ -467,8 +467,15 @@ impl<'a, N> PrepareMergeChild<'a, ChildBuffer<N>> {
         self.pivot_key_idx != self.other_child_idx
     }
 }
+
+pub(super) struct MergeChildResult<NP> {
+    pub(super) pivot_key: CowBytes,
+    pub(super) old_np: NP,
+    pub(super) size_delta: isize,
+}
+
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
-    pub(super) fn merge_children(self) -> (CowBytes, N, isize) {
+    pub(super) fn merge_children(self) -> MergeChildResult<N> {
         let mut right_sibling = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.pivot.remove(self.pivot_key_idx);
         let size_delta =
@@ -481,11 +488,11 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
             .messages_preference
             .upgrade_atomic(&right_sibling.messages_preference);
 
-        (
+        MergeChildResult {
             pivot_key,
-            right_sibling.node_pointer.into_inner(),
-            -(size_delta as isize),
-        )
+            old_np: right_sibling.node_pointer.into_inner(),
+            size_delta: -(size_delta as isize),
+        }
     }
 }
 
