@@ -23,7 +23,6 @@ pub enum DmlMsg {
     // The three base operations of our store.
     // Largely relevant for clearing, and frequency determination in LRU, LFU,
     // FIFO and other policies
-
     /// A fetch operation from disk has been performed.
     Fetch(OpInfo),
     /// A write operation to disk has been performed.
@@ -31,7 +30,6 @@ pub enum DmlMsg {
     /// A node has been completely removed from the storage stack and can no
     /// longer be referenced.
     Remove(OpInfo),
-
     // /// Initial message at the beginning of an session.
     // Discover(DiskOffset),
 }

@@ -21,7 +21,7 @@ use crate::{
 
 use super::{
     errors::Result, reinforcment_learning::open_file_buf_write, DatabaseMsg, DmlMsg,
-    MigrationConfig, GlobalObjectId,
+    GlobalObjectId, MigrationConfig,
 };
 
 #[derive(Clone, Debug, Hash, PartialEq)]

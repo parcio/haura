@@ -44,8 +44,8 @@ fn split_range_at(
     // No further implications should be expected as the only sequentially use of
     // this structure is in the [crate::vdev::Parity1] code.
     if range.start + mid < range.end {
-            // mid is in range
-            (range.start..range.start + mid, range.start + mid..range.end)
+        // mid is in range
+        (range.start..range.start + mid, range.start + mid..range.end)
     } else {
         // mid is past range
         (range.clone(), range.end..range.end)

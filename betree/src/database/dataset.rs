@@ -246,7 +246,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
             if let Some(ds) = ds.inner.try_read() {
                 self.sync_ds(ds.id, &ds.tree)?;
             }
-            return Ok(())
+            return Ok(());
         }
         // Deactivate the dataset for further modifications
         let ds = ds.inner.write();
@@ -355,9 +355,7 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         key: K,
         msg: SlicedCowBytes,
     ) -> Result<()> {
-        self.inner
-            .read()
-            .insert_msg(key, msg)
+        self.inner.read().insert_msg(key, msg)
     }
 
     /// Inserts a message for the given key, allowing to override storage preference
@@ -375,9 +373,7 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
 
     /// Returns the value for the given key if existing.
     pub fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>> {
-        self.inner
-            .read()
-            .get(key)
+        self.inner.read().get(key)
     }
 
     /// Iterates over all key-value pairs in the given key range.
@@ -389,9 +385,7 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
     {
-        self.inner
-            .read()
-            .range(range)
+        self.inner.read().range(range)
     }
 
     /// Returns the name of the data set.
@@ -402,9 +396,7 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
     pub fn tree_dump(&self) -> Result<impl serde::Serialize> {
-        self.inner
-            .read()
-            .tree_dump()
+        self.inner.read().tree_dump()
     }
 }
 
@@ -568,9 +560,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
     ///
     /// Note that any existing value will be overwritten.
     pub fn insert<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K, data: &[u8]) -> Result<()> {
-        self.inner
-            .read()
-            .insert(key, data)
+        self.inner.read().insert(key, data)
     }
 
     /// Upserts the value for the given key at the given offset.
@@ -597,18 +587,14 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         data: &[u8],
         offset: u32,
     ) -> Result<()> {
-        self.inner
-            .read()
-            .upsert(key, data, offset)
+        self.inner.read().upsert(key, data, offset)
     }
 
     pub(crate) fn probe_storage_location<K: Borrow<[u8]>>(
         &self,
         key: K,
     ) -> Result<StoragePreference> {
-        self.inner
-            .read()
-            .probe_storage_location(key)
+        self.inner.read().probe_storage_location(key)
     }
 
     /// Given a key and storage preference notify for this entry to be moved to a new storage level.
@@ -622,22 +608,16 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         key: K,
         pref: StoragePreference,
     ) -> Result<Option<()>> {
-        self.inner
-            .read()
-            .migrate(key, pref)
+        self.inner.read().migrate(key, pref)
     }
 
     /// Deletes the key-value pair if existing.
     pub fn delete<K: Borrow<[u8]> + Into<CowBytes>>(&self, key: K) -> Result<()> {
-        self.inner
-            .read()
-            .delete(key)
+        self.inner.read().delete(key)
     }
 
     pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
-        self.inner
-            .read()
-            .free_space_tier(pref)
+        self.inner.read().free_space_tier(pref)
     }
 
     /// Removes all key-value pairs in the given key range.
@@ -646,9 +626,7 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
     {
-        self.inner
-            .read()
-            .range_delete(range)
+        self.inner.read().range_delete(range)
     }
 
     /// Migrate a complete range of keys to another storage preference.
@@ -658,8 +636,6 @@ impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
         K: Borrow<[u8]> + Into<CowBytes>,
         R: RangeBounds<K>,
     {
-        self.inner
-            .read()
-            .migrate_range(range, pref)
+        self.inner.read().migrate_range(range, pref)
     }
 }

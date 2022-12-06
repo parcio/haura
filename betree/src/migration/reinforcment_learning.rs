@@ -17,7 +17,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::{DatabaseMsg, DmlMsg, MigrationConfig, MigrationPolicy, GlobalObjectId};
+use super::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationConfig, MigrationPolicy};
 // This file contains a migration policy based on reinforcement learning.
 // We based our approach on the description of
 // https://doi.org/10.1109/TKDE.2022.3176753 and aim to use them for object
@@ -154,7 +154,9 @@ mod learning {
             }
         }
 
-        pub fn coldest(&mut self) -> Option<(GlobalObjectId, (FileProperties, Option<Vec<Request>>))> {
+        pub fn coldest(
+            &mut self,
+        ) -> Option<(GlobalObjectId, (FileProperties, Option<Vec<Request>>))> {
             self.files
                 .iter()
                 .min_by(|(_, v_left), (_, v_right)| v_left.hotness.0.total_cmp(&v_right.hotness.0))
