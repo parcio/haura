@@ -236,7 +236,12 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
 
             use crate::database::StorageInfo;
 
-            let threshold: Vec<f32> = self.config().migration_threshold.iter().map(|val| val.clamp(0.0, 1.0)).collect();
+            let threshold: Vec<f32> = self
+                .config()
+                .migration_threshold
+                .iter()
+                .map(|val| val.clamp(0.0, 1.0))
+                .collect();
             let infos: Vec<(u8, StorageInfo)> = (0u8..NUM_STORAGE_CLASSES as u8)
                 .filter_map(|class| {
                     self.dmu()
@@ -268,12 +273,14 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
                 .iter()
                 .tuple_windows()
                 .filter(|((high_tier, high_info), (low_tier, low_info))| {
-                    high_info.percent_full() > threshold[*high_tier as usize] && low_info.percent_full() < threshold[*low_tier as usize]
+                    high_info.percent_full() > threshold[*high_tier as usize]
+                        && low_info.percent_full() < threshold[*low_tier as usize]
                 })
             {
-                let desired: Block<u64> =
-                    Block((high_info.total.as_u64() as f32 * (1.0 - threshold[*high_tier as usize])) as u64)
-                        - high_info.free.as_u64();
+                let desired: Block<u64> = Block(
+                    (high_info.total.as_u64() as f32 * (1.0 - threshold[*high_tier as usize]))
+                        as u64,
+                ) - high_info.free.as_u64();
                 self.demote(*high_tier, desired)?;
             }
             self.metrics()?;

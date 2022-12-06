@@ -10,7 +10,7 @@ use crate::{
         DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
-    migration::{DatabaseMsg, DmlMsg, MigrationPolicies, GlobalObjectId},
+    migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
     size::StaticSize,
     storage_pool::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
