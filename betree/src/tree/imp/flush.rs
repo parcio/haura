@@ -5,7 +5,7 @@ use crate::{
     cache::AddSize,
     data_management::{HandlerDml, HasStoragePreference, ObjectRef},
     size::Size,
-    tree::{errors::*, MessageAction},
+    tree::{errors::*, MessageAction, imp::internal::MergeChildResult},
 };
 use stable_deref_trait::StableDeref;
 use std::{
@@ -95,12 +95,12 @@ where
                     let mut m = child_buffer.prepare_merge();
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
                     let is_right_sibling = m.is_right_sibling();
-                    let (pivot, old_np, size_delta) = m.merge_children();
+                    let MergeChildResult { pivot_key, old_np, size_delta } = m.merge_children();
                     if is_right_sibling {
-                        let size_delta = child.merge(&mut sibling, pivot);
+                        let size_delta = child.merge(&mut sibling, pivot_key);
                         child.add_size(size_delta);
                     } else {
-                        let size_delta = sibling.merge(&mut child, pivot);
+                        let size_delta = sibling.merge(&mut child, pivot_key);
                         child.add_size(size_delta);
                     }
                     self.dml.remove(old_np);
@@ -131,7 +131,7 @@ where
                         sibling.leaf_rebalance(&mut child)
                     };
                     match result {
-                        FillUpResult::Merged => m.merge_children().2,
+                        FillUpResult::Merged => m.merge_children().size_delta,
                         FillUpResult::Rebalanced(pivot) => m.rebalanced(pivot),
                     }
                 };
