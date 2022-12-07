@@ -497,10 +497,4 @@ mod tests {
         assert_eq!(this, leaf_node);
         TestResult::passed()
     }
-
-    // TODO
-    // check size deltas for various operations (insert, delete, rebalance,
-    // fill_up...)
-    // check insert
-    // check rebalance, fill_up
 }

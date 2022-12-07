@@ -10,9 +10,8 @@ use std::{borrow::Borrow, ops::RangeBounds};
 
 use super::errors::*;
 
-// TODO
-// - ro transaction
-// - how to do range delete with ro transaction?
+// TODO:
+// 1. Read-only transactions (We could lessen some restrictions about exclusivity)
 
 /// Basic Tree Layer interface.
 pub trait TreeBaseLayer<M: MessageAction> {
