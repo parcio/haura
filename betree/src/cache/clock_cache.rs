@@ -404,7 +404,7 @@ impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 's
 #[cfg(test)]
 mod tests {
     use super::{Cache, ClockCache};
-    use bencher::{black_box, Bencher};
+    use bencher::{black_box, Bencher, benchmark_main, benchmark_group};
 
     fn get_and_pin(b: &mut Bencher) {
         let mut c = ClockCache::new(5);

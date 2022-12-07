@@ -6,32 +6,13 @@
 // a maybe needed in the future basis.
 #![allow(dead_code)]
 
-extern crate bincode;
-extern crate byteorder;
-extern crate core;
 #[macro_use]
 extern crate error_chain;
-extern crate futures;
-extern crate itertools;
-extern crate libc;
 #[macro_use]
 extern crate log;
-extern crate owning_ref;
-extern crate parking_lot;
-#[cfg(test)]
-extern crate quickcheck;
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck_macros;
-#[cfg(test)]
-extern crate rand;
-extern crate seqlock;
-extern crate serde;
-extern crate stable_deref_trait;
-extern crate twox_hash;
-#[cfg(test)]
-#[macro_use]
-extern crate bencher;
 
 pub mod allocator;
 pub mod atomic_option;
