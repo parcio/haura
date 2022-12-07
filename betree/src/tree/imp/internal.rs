@@ -328,14 +328,14 @@ impl<T: Size> InternalNode<T> {
         let size_delta = entries_size + pivot_key.size();
         self.entries_size -= size_delta;
 
-        // Neither side is sure about its current storage preference after a split
-        // TODO: One may argue to precautiously copy the system preference of the former node here.
         let right_sibling = InternalNode {
             level: self.level,
             entries_size,
             pivot,
             children,
-            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+            // Copy the system storage preference of the other node as we cannot
+            // be sure which key was targeted by recorded accesses.
+            system_storage_preference: self.system_storage_preference.clone(),
         };
         (right_sibling, pivot_key, -(size_delta as isize))
     }
