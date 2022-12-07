@@ -125,17 +125,15 @@ where
             {
                 self.buffer.pop_back().unwrap();
             }
+            next_pivot.as_ref().map(|pivot| {
+                self.finished = &pivot[..] >= max_key
+            });
         }
 
         match next_pivot {
-            // If the pivot key is equal or greater to our max key then this was
-            // the last leaf that contains data for this range query.
-            Some(pivot) if self.max_key.as_ref().map(|mk| &pivot[..] >= &mk[..]) == Some(true) => {
-                self.finished = true;
-            }
-            // Otherwise we will update our min key for the next fill_buffer
-            // call.
-            Some(pivot) => {
+            // If we have not encountered any entry larger than max key, we will
+            // update our min key for the next fill_buffer call.
+            Some(pivot) if !self.finished => {
                 let mut last_key = pivot.to_vec();
                 // `last_key` is actually exact.
                 // There are no values on this path we have not seen.
@@ -147,6 +145,7 @@ where
             None => {
                 self.finished = true;
             }
+            _ => {}
         }
 
         Ok(())
