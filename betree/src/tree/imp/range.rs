@@ -14,7 +14,7 @@ use std::{
     ops::RangeBounds,
 };
 
-fn next(v: &mut Vec<u8>) {
+fn increment_pivot_key(v: &mut Vec<u8>) {
     v.push(0);
 }
 
@@ -80,7 +80,7 @@ where
             Bound::Included(x) => Some(x.borrow().to_vec()),
             Bound::Excluded(x) => {
                 let mut v = x.borrow().to_vec();
-                next(&mut v);
+                increment_pivot_key(&mut v);
                 Some(v)
             }
         };
@@ -96,7 +96,7 @@ where
     }
 
     fn fill_buffer(&mut self) -> Result<(), Error> {
-        let pivot_option = {
+        let next_pivot = {
             let min_key = match self.min_key {
                 MyBound::Included(ref x) | MyBound::Excluded(ref x) => x,
             };
@@ -126,24 +126,27 @@ where
                 self.buffer.pop_back().unwrap();
             }
         }
-        // TODO clean up
-        if let Some(pivot) = pivot_option {
-            if self.max_key.is_some() && Some(&pivot[..]) >= self.max_key.as_ref().map(|v| &v[..]) {
-                // If the pivot key is equal or greater to our max key then this was the last
-                // leaf
-                // that contains data for this range query.
+
+        match next_pivot {
+            // If the pivot key is equal or greater to our max key then this was
+            // the last leaf that contains data for this range query.
+            Some(pivot) if self.max_key.as_ref().map(|mk| &pivot[..] >= &mk[..]) == Some(true) => {
                 self.finished = true;
-            } else {
-                // Otherwise we will update our min key for the next fill_buffer call.
+            }
+            // Otherwise we will update our min key for the next fill_buffer
+            // call.
+            Some(pivot) => {
                 let mut last_key = pivot.to_vec();
                 // `last_key` is actually exact.
                 // There are no values on this path we have not seen.
-                next(&mut last_key);
+                increment_pivot_key(&mut last_key);
                 self.min_key = MyBound::Excluded(last_key);
             }
-        } else {
-            // If there is no pivot key then this was the right-most leaf in the tree.
-            self.finished = true;
+            // If there is no pivot key then this was the right-most leaf in the
+            // tree.
+            None => {
+                self.finished = true;
+            }
         }
 
         Ok(())
