@@ -250,7 +250,16 @@ impl<N> ChildBuffer<N> {
 
 impl<N> ChildBuffer<N> {
     pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> usize {
-        // TODO https://github.com/rust-lang/rust/issues/42849
+        // Context: Previously we mentioned the usage of a drain filter here and
+        // linked to an existing issue of how it is missing from the standard
+        // library.
+        //
+        // Adding a drain filter here would make things easier from the code
+        // perspective, but with the generic predicate, we cannot utilize the
+        // nice property of the BTreeMap that data is ordered and the traversal
+        // of the tree can be nicely restrictred with a proper range. Due to
+        // this I changed the T0D0 placed here to this very explanation you are
+        // reading.
         let mut size_delta = 0;
         let range = (
             Bound::Included(start),
