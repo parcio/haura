@@ -196,6 +196,12 @@ impl PartialEq for AtomicStoragePreference {
     }
 }
 
+impl Default for AtomicStoragePreference {
+    fn default() -> Self {
+        Self::unknown()
+    }
+}
+
 /// An upper bound reflecting the optimized choice of storage determined by the
 /// automated migration policy, in contrast to the lower bound by
 /// [StoragePreference]. Acts as a neutral element when set to
