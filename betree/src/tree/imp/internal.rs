@@ -5,7 +5,7 @@ use crate::{
     size::{Size, SizeMut, StaticSize},
     storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
     tree::{KeyInfo, MessageAction},
-    StoragePreference,
+    StoragePreference, AtomicStoragePreference,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ pub(super) struct InternalNode<T> {
     entries_size: usize,
     #[serde(skip)]
     system_storage_preference: AtomicSystemStoragePreference,
+    pref: AtomicStoragePreference,
     pub(super) pivot: Vec<CowBytes>,
     children: Vec<T>,
 }
@@ -67,10 +68,11 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     // Furthermore, have a look at the HasStoragePreference trait.
     // We might perform way more operations than really should.
     fn current_preference(&self) -> Option<StoragePreference> {
-        Some(
-            self.system_storage_preference
-                .weak_bound(&self.recalculate()),
-        )
+        self.pref.as_option().map(|pref| self.system_storage_preference.weak_bound(&pref))
+        // Some(
+        //     self.system_storage_preference
+        //         .weak_bound(&self.recalculate()),
+        // )
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -80,11 +82,12 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
             pref.upgrade(child.correct_preference())
         }
 
+        self.pref.set(pref);
         pref
     }
 
     fn correct_preference(&self) -> StoragePreference {
-        self.recalculate()
+        self.system_storage_preference.weak_bound(&self.recalculate())
     }
 
     fn system_storage_preference(&self) -> StoragePreference {
@@ -107,6 +110,7 @@ impl<T> InternalNode<T> {
             pivot: vec![pivot_key],
             children: vec![left_child, right_child],
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+            pref: AtomicStoragePreference::unknown(),
         }
     }
 
@@ -218,6 +222,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
+        self.pref.invalidate();
         let idx = self.idx(key.borrow());
         let added_size = self.children[idx].insert(key, keyinfo, msg, msg_action);
 
@@ -234,6 +239,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
     {
+        self.pref.invalidate();
         let mut added_size = 0;
         let mut buf_storage_pref = StoragePreference::NONE;
 
@@ -252,6 +258,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
     }
 
     pub fn drain_children(&mut self) -> impl Iterator<Item = N> + '_ {
+        self.pref.invalidate();
         self.entries_size = 0;
         self.children
             .drain(..)
@@ -266,6 +273,7 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
         end: Option<&[u8]>,
         dead: &mut Vec<N>,
     ) -> (usize, &mut N, Option<&mut N>) {
+        self.pref.invalidate();
         let size_before = self.entries_size;
         let start_idx = self.idx(start);
         let end_idx = end.map_or(self.children.len() - 1, |i| self.idx(i));
@@ -315,6 +323,7 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
 
 impl<T: Size> InternalNode<T> {
     pub fn split(&mut self) -> (Self, CowBytes, isize) {
+        self.pref.invalidate();
         let split_off_idx = self.fanout() / 2;
         let pivot = self.pivot.split_off(split_off_idx);
         let pivot_key = self.pivot.pop().unwrap();
@@ -334,11 +343,13 @@ impl<T: Size> InternalNode<T> {
             // Copy the system storage preference of the other node as we cannot
             // be sure which key was targeted by recorded accesses.
             system_storage_preference: self.system_storage_preference.clone(),
+            pref: AtomicStoragePreference::unknown(),
         };
         (right_sibling, pivot_key, -(size_delta as isize))
     }
 
     pub fn merge(&mut self, right_sibling: &mut Self, old_pivot_key: CowBytes) -> isize {
+        self.pref.invalidate();
         let size_delta = right_sibling.entries_size + old_pivot_key.size();
         self.entries_size += size_delta;
         self.pivot.push(old_pivot_key);
@@ -562,6 +573,7 @@ mod tests {
                 pivot: self.pivot.clone(),
                 children: self.children.to_vec(),
                 system_storage_preference: self.system_storage_preference.clone(),
+                pref: self.pref.clone(),
             }
         }
     }
@@ -594,6 +606,7 @@ mod tests {
                 system_storage_preference: AtomicSystemStoragePreference::from(
                     StoragePreference::NONE,
                 ),
+                pref: AtomicStoragePreference::unknown(),
             }
         }
     }
@@ -732,6 +745,7 @@ mod tests {
             children: vec![],
             pivot: vec![],
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+            pref: AtomicStoragePreference::unknown(),
         };
 
         assert_eq!(
