@@ -18,6 +18,7 @@ pub(super) struct InternalNode<T> {
     entries_size: usize,
     #[serde(skip)]
     system_storage_preference: AtomicSystemStoragePreference,
+    #[serde(skip)]
     pref: AtomicStoragePreference,
     pub(super) pivot: Vec<CowBytes>,
     children: Vec<T>,
