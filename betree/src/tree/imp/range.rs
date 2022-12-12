@@ -238,7 +238,6 @@ where
                 None => true,
                 Some(ref max_key) => key <= max_key,
             });
-        // TODO
         let leaf_entries = leaf_entries.map(|(k, v)| (CowBytes::from(k), v));
 
         for (key, msgs, value) in MergeByKeyIterator::new(msgs_iter, leaf_entries) {

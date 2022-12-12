@@ -274,7 +274,7 @@ where
         start: &[u8],
         end: Option<&[u8]>,
     ) -> Result<(), Error> {
-        // TODO rebalance/merge nodes
+        // T0D0 rebalance/merge nodes
         loop {
             let (size_delta, next_node) = {
                 let level = node.level();
@@ -475,14 +475,17 @@ where
         node.add_size(added_size);
 
         if parent.is_none() && node.root_needs_merge() {
-            // TODO merge
+            // TODO Merge, this is not implemented with the 'rebalance_tree'
+            // method. Since the root has a fanout of 1 at this point, merge all
+            // messages downwards and set leaf as root?
             unimplemented!();
         }
 
         self.rebalance_tree(node, parent)?;
 
-        // TODO evict?
-        // Is this really necessary here? Or is waiting until the next sync fine?
+        // All non-root trees will start the eviction process.
+        // TODO: Is the eviction on root trees harmful? Evictions started by
+        // other trees will evict root nodes anyway.
         if self.evict {
             self.dml.evict()?;
         }
