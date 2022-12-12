@@ -214,7 +214,6 @@ impl<N> ChildBuffer<N> {
 
         self.messages_preference.upgrade(keyinfo.storage_preference);
 
-        // TODO
         match self.buffer.entry(key.clone()) {
             Entry::Vacant(e) => {
                 let size_delta = key_size + msg.size() + keyinfo.size();

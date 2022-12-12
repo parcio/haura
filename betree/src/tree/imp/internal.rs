@@ -158,7 +158,6 @@ impl<T> InternalNode<T> {
 
 impl<N> InternalNode<ChildBuffer<N>> {
     pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>) {
-        // TODO Merge range messages into msg stream
         let child = &self.children[self.idx(key)];
 
         let msg = child.get(key).cloned();
@@ -185,7 +184,6 @@ impl<N> InternalNode<ChildBuffer<N>> {
         right_pivot_key: &mut Option<CowBytes>,
         all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
     ) -> &RwLock<N> {
-        // TODO Merge range messages into msg stream
         let idx = self.idx(key);
         if idx > 0 {
             *left_pivot_key = Some(self.pivot[idx - 1].clone());

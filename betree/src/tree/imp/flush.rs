@@ -130,7 +130,7 @@ where
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
                     let left;
                     let right;
-                    // TODO deallocation
+                    // TODO deallocation of the now empty leaf
                     if m.is_right_sibling() {
                         left = &mut child;
                         right = &mut sibling;
