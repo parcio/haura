@@ -34,8 +34,16 @@ pub trait TreeBaseLayer<M: MessageAction> {
 pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
     /// The range query iterator.
     type Range: Iterator<Item = Result<(Key, Value), Error>>;
-    /// Issues a range query for the given key `range`.
-    /// Returns an iterator that will iterate over the entries in that range.
+    /// Issues a range query for the given key range.
+    /// Returns an iterator over (key, value)-tuples in that range.
+    ///
+    /// ```rust,ignore
+    /// let a = [1,2,3];
+    /// let b = [2,3,4];
+    /// for (key, value) in my_tree.range(a..b) {
+    ///     todo!()
+    /// }
+    /// ```
     fn range<K, R>(&self, range: R) -> Result<Self::Range, Error>
     where
         R: RangeBounds<K>,

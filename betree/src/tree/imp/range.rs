@@ -24,7 +24,11 @@ enum Bounded<T> {
     Excluded(T),
 }
 
-/// The range iterator of a tree.
+/// The range iterator over (key,value)-tuples of a tree.
+///
+/// The iterator performs asynchronous prefetching to allow for a better
+/// utilization of underlying resources. It is advised to use [RangeIterator]
+/// and methods utilizing it in almost all cases.
 pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     buffer: VecDeque<(Key, (KeyInfo, Value))>,
     min_key: Bounded<Vec<u8>>,
