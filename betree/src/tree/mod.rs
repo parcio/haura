@@ -7,6 +7,8 @@ mod imp;
 mod layer;
 mod message_action;
 
+use crate::cow_bytes::{CowBytes, SlicedCowBytes};
+
 pub use self::{
     default_message_action::DefaultMessageAction,
     errors::{Error, ErrorKind},
@@ -15,5 +17,8 @@ pub use self::{
     message_action::MessageAction,
 };
 
-pub(in crate::tree) use self::imp::KeyInfo;
+type Key = CowBytes;
+type Value = SlicedCowBytes;
+
+use self::imp::KeyInfo;
 pub(crate) use self::{imp::MAX_MESSAGE_SIZE, layer::ErasedTreeSync};

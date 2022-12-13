@@ -1,4 +1,4 @@
-use super::MessageAction;
+use super::{MessageAction, Key, Value};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     StoragePreference,
@@ -33,7 +33,7 @@ pub trait TreeBaseLayer<M: MessageAction> {
 /// Tree Layer interface.
 pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
     /// The range query iterator.
-    type Range: Iterator<Item = Result<(CowBytes, SlicedCowBytes), Error>>;
+    type Range: Iterator<Item = Result<(Key, Value), Error>>;
     /// Issues a range query for the given key `range`.
     /// Returns an iterator that will iterate over the entries in that range.
     fn range<K, R>(&self, range: R) -> Result<Self::Range, Error>

@@ -5,7 +5,7 @@ use super::{
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, ObjectRef},
-    tree::{errors::*, KeyInfo, MessageAction},
+    tree::{errors::*, KeyInfo, MessageAction, Value, Key},
 };
 use std::{
     borrow::Borrow,
@@ -26,7 +26,7 @@ enum Bounded<T> {
 
 /// The range iterator of a tree.
 pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
-    buffer: VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
+    buffer: VecDeque<(Key, (KeyInfo, Value))>,
     min_key: Bounded<Vec<u8>>,
     /// Always inclusive
     max_key: Option<Vec<u8>>,
@@ -42,7 +42,7 @@ where
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
-    type Item = Result<(CowBytes, SlicedCowBytes), Error>;
+    type Item = Result<(Key, Value), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
