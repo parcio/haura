@@ -47,7 +47,7 @@ fn object_store_iter() {
         db.close_object_store(os);
         let os = db.open_named_object_store(b"snek", StoragePreference::NONE).unwrap();
         db.close_object_store(os);
-        let mut osl = db.iter_object_stores().unwrap();
+        let mut osl = db.iter_object_stores_pub().unwrap();
         assert_eq!(osl.next().unwrap().unwrap().as_u64(), 1);
         assert_eq!(osl.next().unwrap().unwrap().as_u64(), 2);
         assert_eq!(osl.next().unwrap().unwrap().as_u64(), 3);

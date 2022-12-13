@@ -251,8 +251,14 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         )
     }
 
+    /// Creates an iterator over all object stores by their internally used Id.
+    #[cfg(feature = "internal-api")]
+    pub fn iter_object_stores_pub(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
+        self.iter_object_stores()
+    }
+
     /// Iterates over all object stores in the database.
-    pub fn iter_object_stores(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
+    pub(crate) fn iter_object_stores(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
         let low = &[OBJECT_STORE_DATA_PREFIX] as &[_];
         let high = &[OBJECT_STORE_DATA_PREFIX + 1] as &[_];
         Ok(self.root_tree.range(low..high)?.map(move |result| {
