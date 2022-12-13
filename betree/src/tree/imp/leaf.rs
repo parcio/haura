@@ -152,8 +152,8 @@ impl LeafNode {
         min_size: usize,
         max_size: usize,
     ) -> (CowBytes, isize) {
-        assert!(self.size() > max_size);
-        assert!(right_sibling.entries_size == 0);
+        debug_assert!(self.size() > max_size);
+        debug_assert!(right_sibling.entries_size == 0);
 
         let mut sibling_size = 0;
         let mut sibling_pref = StoragePreference::NONE;

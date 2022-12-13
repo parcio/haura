@@ -465,7 +465,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
                 (Node(Leaf(node)), pivot_key, size_delta)
             }
             Internal(ref mut internal) => {
-                assert!(
+                debug_assert!(
                     internal.fanout() >= 2 * MIN_FANOUT,
                     "internal split failed due to low fanout: {}, size: {}, actual_size: {:?}",
                     internal.fanout(),
