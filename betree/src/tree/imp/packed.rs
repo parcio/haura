@@ -68,7 +68,7 @@ fn prefix_size(entry_count: u32) -> usize {
 
 impl PackedMap {
     pub fn new(data: Vec<u8>) -> Self {
-        assert!(data.len() >= 4);
+        debug_assert!(data.len() >= 4);
         let entry_count = LittleEndian::read_u32(&data[..4]);
         let system_preference = data[4];
 
@@ -88,7 +88,7 @@ impl PackedMap {
     // In the data segment, the value is always written directly after the key,
     // so the key length can be calculated by subtraction.
     fn key_pos(&self, idx: u32) -> (Offset, u32) {
-        assert!(idx < self.entry_count);
+        debug_assert!(idx < self.entry_count);
 
         let entry_pos = HEADER_LEN + idx as usize * ENTRY_LEN;
 
@@ -102,7 +102,7 @@ impl PackedMap {
     // In the data segment, the next key is usually written after the current value,
     // so the value length can usually be calculated by subtraction.
     fn val_pos(&self, idx: u32) -> (Offset, u32) {
-        assert!(idx < self.entry_count);
+        debug_assert!(idx < self.entry_count);
 
         let entry_pos = HEADER_LEN + idx as usize * ENTRY_LEN;
         let data_offset = self.read_offset(entry_pos + ENTRY_DATA_OFFSET);
