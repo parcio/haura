@@ -65,10 +65,18 @@ fn object_store_object_iter() {
 }
 
 #[test]
-fn object_store_reinit_from_id() {
-        let mut db = test_db(2, 64);
-        let os = db.open_object_store().unwrap();
-        db.close_object_store(os);
-        let mut osl = db.iter_object_stores().unwrap();
-        let _ = db.open_object_store_with_id(osl.next().unwrap().unwrap()).unwrap();
+fn object_store_reinit_from_iterator() {
+    // Test opening of multiple stores by their names.
+    // Test if the default store name '0' gets skipped.
+    let mut db = test_db(2, 64);
+    let os = db.open_named_object_store(b"foo", StoragePreference::NONE).unwrap();
+    db.close_object_store(os);
+    let os = db.open_named_object_store(b"bar", StoragePreference::NONE).unwrap();
+    db.close_object_store(os);
+    let os = db.open_object_store().unwrap();
+    db.close_object_store(os);
+    assert!(db.iter_object_store_names().unwrap().count() == 2);
+    for name in db.iter_object_store_names().unwrap() {
+        let _ = db.open_named_object_store(&name, StoragePreference::NONE).unwrap();
+    }
 }

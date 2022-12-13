@@ -267,6 +267,20 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         }))
     }
 
+    /// Iterates over all object stores by their given names.
+    pub fn iter_object_store_names(&self) -> Result<impl Iterator<Item = CowBytes>> {
+        let low = &[OBJECT_STORE_NAME_TO_ID_PREFIX] as &[_];
+        let high = &[OBJECT_STORE_NAME_TO_ID_PREFIX + 1] as &[_];
+        Ok(self.root_tree.range(low..high)?.filter_map(move |result| {
+            result.ok().and_then(|(b, _)| {
+                match b.contains(&0) {
+                    true => None,
+                    false => Some(b)
+                }
+            })
+        }))
+    }
+
     /// Create an object store backed by a single database.
     pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
         let id = self.get_or_create_os_id(&[0])?;
