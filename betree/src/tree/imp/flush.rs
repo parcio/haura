@@ -130,7 +130,6 @@ where
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
                     let left;
                     let right;
-                    // TODO deallocation of the now empty leaf
                     if m.is_right_sibling() {
                         left = &mut child;
                         right = &mut sibling;
@@ -142,7 +141,9 @@ where
                         FillUpResult::Merged { size_delta } => {
                             left.add_size(size_delta);
                             right.add_size(-size_delta);
-                            m.merge_children().size_delta
+                            let MergeChildResult {old_np, size_delta, ..} = m.merge_children();
+                            self.dml.remove(old_np);
+                            size_delta
                         }
                         FillUpResult::Rebalanced {
                             pivot_key,
