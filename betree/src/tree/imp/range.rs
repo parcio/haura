@@ -19,7 +19,7 @@ fn increment_pivot_key(v: &mut Vec<u8>) {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum MyBound<T> {
+enum Bounded<T> {
     Included(T),
     Excluded(T),
 }
@@ -27,7 +27,7 @@ enum MyBound<T> {
 /// The range iterator of a tree.
 pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     buffer: VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
-    min_key: MyBound<Vec<u8>>,
+    min_key: Bounded<Vec<u8>>,
     /// Always inclusive
     max_key: Option<Vec<u8>>,
     tree: Tree<X, M, I>,
@@ -71,9 +71,9 @@ where
         K: Borrow<[u8]>,
     {
         let min_key = match range.start_bound() {
-            Bound::Unbounded => MyBound::Included(Vec::new()),
-            Bound::Included(x) => MyBound::Included(x.borrow().to_vec()),
-            Bound::Excluded(x) => MyBound::Excluded(x.borrow().to_vec()),
+            Bound::Unbounded => Bounded::Included(Vec::new()),
+            Bound::Included(x) => Bounded::Included(x.borrow().to_vec()),
+            Bound::Excluded(x) => Bounded::Excluded(x.borrow().to_vec()),
         };
         let max_key = match range.end_bound() {
             Bound::Unbounded => None,
@@ -98,7 +98,7 @@ where
     fn fill_buffer(&mut self) -> Result<(), Error> {
         let next_pivot = {
             let min_key = match self.min_key {
-                MyBound::Included(ref x) | MyBound::Excluded(ref x) => x,
+                Bounded::Included(ref x) | Bounded::Excluded(ref x) => x,
             };
             self.tree
                 .leaf_range_query(min_key, &mut self.buffer, &mut self.prefetch)?
@@ -109,8 +109,8 @@ where
             .buffer
             .front()
             .map(|&(ref key, _)| match self.min_key {
-                MyBound::Included(ref min_key) => key < min_key,
-                MyBound::Excluded(ref min_key) => key <= min_key,
+                Bounded::Included(ref min_key) => key < min_key,
+                Bounded::Excluded(ref min_key) => key <= min_key,
             })
             .unwrap_or_default()
         {
@@ -138,7 +138,7 @@ where
                 // `last_key` is actually exact.
                 // There are no values on this path we have not seen.
                 increment_pivot_key(&mut last_key);
-                self.min_key = MyBound::Excluded(last_key);
+                self.min_key = Bounded::Excluded(last_key);
             }
             // If there is no pivot key then this was the right-most leaf in the
             // tree.
