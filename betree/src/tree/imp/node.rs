@@ -299,9 +299,9 @@ pub(super) enum ApplyResult<'a, N: 'a> {
     NextNode(&'a mut N),
 }
 
-pub(super) enum ProbeResult<'a, N: 'a> {
-    Leaf,
-    NextNode(&'a RwLock<N>),
+pub(super) enum PivotGetResult<N> {
+    Target(N),
+    NextNode(N),
 }
 
 pub(super) enum GetRangeResult<'a, T, N: 'a> {
@@ -355,6 +355,18 @@ impl<N: HasStoragePreference> Node<N> {
                     prefetch_option,
                     np,
                 }
+            }
+        }
+    }
+
+    pub(super) fn pivot_get(
+        &self,
+        pivot: &[u8],
+    ) -> Option<PivotGetResult<&RwLock<N>>> {
+        match self.0 {
+            PackedLeaf(_) | Leaf(_) => None,
+            Internal(ref internal) => {
+                Some(internal.pivot_get(pivot))
             }
         }
     }

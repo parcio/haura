@@ -1,5 +1,8 @@
 //! Implementation of the [InternalNode] node type.
-use super::child_buffer::ChildBuffer;
+use super::{
+    child_buffer::ChildBuffer,
+    node::PivotGetResult,
+};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
@@ -196,9 +199,20 @@ impl<N> InternalNode<ChildBuffer<N>> {
         (&child.node_pointer, msg)
     }
 
-    pub fn probe_storage_level(&self, key: &[u8]) -> &RwLock<N> {
-        let child = &self.children[self.idx(key)];
-        &child.node_pointer
+    pub fn pivot_get(&self, pivot: &[u8]) -> PivotGetResult<&RwLock<N>> {
+        // Exact pivot matches are required only
+        let pivot = CowBytes::from(pivot);
+        self.pivot.iter().enumerate().find(|(_idx, p)| **p == pivot).map_or_else(
+            || {
+                // Continue the search to the next level
+                let child = &self.children[self.idx(&pivot)];
+                PivotGetResult::NextNode(&child.node_pointer)
+            },
+            |(idx, _)| {
+                // Fetch the correct child pointer
+                let child = &self.children[idx];
+                PivotGetResult::Target(&child.node_pointer)
+        })
     }
 
     pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N {
