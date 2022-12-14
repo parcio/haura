@@ -7,6 +7,9 @@ then
     ./scripts/prepare-test.sh
 fi
 
+# execute separately to avoid swallowing return code
+cargo build --tests
+
 failed=$(cargo test -- --test-threads "${HAURA_NUM_THREAD}" -Z unstable-options --format json \
     | grep name \
     | grep failed \
