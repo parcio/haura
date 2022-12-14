@@ -16,9 +16,7 @@ pub(crate) use self::{
     message_action::MessageAction,
 };
 
-pub use self::{
-    errors::TreeError,
-};
+pub use self::errors::TreeError;
 
 type Key = CowBytes;
 type Value = SlicedCowBytes;

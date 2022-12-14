@@ -373,12 +373,13 @@ mod tests {
                 MsgType::Upsert => {
                     let offsets = (0..10).map(|_| rng.gen_range(0..10)).collect::<Vec<u32>>();
                     let data: Vec<_> = Arbitrary::arbitrary(g);
-                    let msgs = (0..10).zip(offsets).map(|(_, offset)| {
-                        Upsert::Bytes {
+                    let msgs = (0..10)
+                        .zip(offsets)
+                        .map(|(_, offset)| Upsert::Bytes {
                             offset_bytes: offset,
                             data: &data,
-                        }
-                    }).collect::<Vec<Upsert>>();
+                        })
+                        .collect::<Vec<Upsert>>();
                     DefaultMessageActionMsg(DefaultMessageAction::build_upsert_msg(&msgs))
                 }
                 MsgType::OverwriteNone => {

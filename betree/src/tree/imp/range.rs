@@ -6,7 +6,7 @@ use super::{
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, ObjectRef},
-    tree::{errors::*, KeyInfo, MessageAction, Value, Key},
+    tree::{errors::*, Key, KeyInfo, MessageAction, Value},
 };
 use std::{
     borrow::Borrow,
@@ -130,9 +130,9 @@ where
             {
                 self.buffer.pop_back().unwrap();
             }
-            next_pivot.as_ref().map(|pivot| {
-                self.finished = &pivot[..] >= max_key
-            });
+            next_pivot
+                .as_ref()
+                .map(|pivot| self.finished = &pivot[..] >= max_key);
         }
 
         match next_pivot {

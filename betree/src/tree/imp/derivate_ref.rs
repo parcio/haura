@@ -33,7 +33,6 @@ pub struct DerivateRef<T, U> {
 }
 
 impl<T: StableDeref + DerefMut, U> DerivateRef<T, TakeChildBuffer<'static, U>> {
-
     /// Unsafe conversions of a limited life-time reference in [TakeChildBuffer]
     /// to a static one. This is only ever safe in the internal context of [DerivateRef].
     pub fn try_new<F>(mut owner: T, f: F) -> Result<Self, T>

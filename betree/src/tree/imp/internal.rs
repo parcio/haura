@@ -6,7 +6,7 @@ use crate::{
     size::{Size, SizeMut, StaticSize},
     storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
     tree::{KeyInfo, MessageAction},
-    StoragePreference, AtomicStoragePreference,
+    AtomicStoragePreference, StoragePreference,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -70,7 +70,9 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     // Furthermore, have a look at the HasStoragePreference trait.
     // We might perform way more operations than really should.
     fn current_preference(&self) -> Option<StoragePreference> {
-        self.pref.as_option().map(|pref| self.system_storage_preference.weak_bound(&pref))
+        self.pref
+            .as_option()
+            .map(|pref| self.system_storage_preference.weak_bound(&pref))
         // Some(
         //     self.system_storage_preference
         //         .weak_bound(&self.recalculate()),
@@ -89,7 +91,8 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     }
 
     fn correct_preference(&self) -> StoragePreference {
-        self.system_storage_preference.weak_bound(&self.recalculate())
+        self.system_storage_preference
+            .weak_bound(&self.recalculate())
     }
 
     fn system_storage_preference(&self) -> StoragePreference {
