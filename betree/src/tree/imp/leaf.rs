@@ -1,4 +1,4 @@
-use super::FillUpResult;
+//! Implementation of the [LeafNode] node type.
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
@@ -18,6 +18,18 @@ pub(super) struct LeafNode {
     system_storage_preference: AtomicSystemStoragePreference,
     entries_size: usize,
     entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
+}
+
+/// Case-dependent outcome of a rebalance operation.
+#[derive(Debug)]
+pub(super) enum FillUpResult {
+    Rebalanced {
+        pivot_key: CowBytes,
+        size_delta: isize,
+    },
+    Merged {
+        size_delta: isize,
+    },
 }
 
 impl Size for LeafNode {

@@ -1,3 +1,4 @@
+//! Implementation of the generic node wrapper.
 use self::Inner::*;
 use super::{
     child_buffer::ChildBuffer,

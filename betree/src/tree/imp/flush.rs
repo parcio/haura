@@ -1,3 +1,8 @@
+//! Implementation of the tree-wide rebalancing and flushing logic.
+//!
+//! Calling [Tree::rebalance_tree] is not only possible with the root node but may be
+//! applied to a variety of nodes given that their parent node is correctly
+//! given. Use with caution.
 use super::{
     child_buffer::ChildBuffer, internal::TakeChildBuffer, FillUpResult, Inner, Node, Tree,
 };
@@ -181,12 +186,16 @@ where
     }
 }
 
+/// Simple owning reference handle. Internally used here.
 pub struct Ref<T, U> {
     inner: U,
     owner: T,
 }
 
 impl<T: StableDeref + DerefMut, U> Ref<T, TakeChildBuffer<'static, U>> {
+
+    /// Unsafe conversions of a limited life-time reference in [TakeChildBuffer]
+    /// to a static one. This is only ever safe in the internal context of [Ref].
     pub fn try_new<F>(mut owner: T, f: F) -> Result<Self, T>
     where
         F: for<'a> FnOnce(&'a mut T::Target) -> Option<TakeChildBuffer<'a, U>>,

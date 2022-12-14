@@ -1,3 +1,6 @@
+//! On-disk representation of a node.
+//!
+//! Can be used for read-only access to avoid deserialization.
 use super::leaf::LeafNode;
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
@@ -26,6 +29,10 @@ pub(crate) const ENTRY_KEY_OFFSET: usize = 0;
 pub(crate) const ENTRY_KEY_INFO_OFFSET: usize = ENTRY_KEY_OFFSET + OFFSET_LEN;
 pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 
+
+/// On-disk serialized leaf node. Simplified to a map contains 40 bytes of
+/// headers followed by data.
+///
 /// ```text
 /// Layout:
 ///     entry_count: u32,
@@ -53,12 +60,13 @@ pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 ///
 /// ```
 #[derive(Debug)]
-pub struct PackedMap {
+pub(crate) struct PackedMap {
     entry_count: u32,
     system_preference: u8,
     data: CowBytes,
 }
 
+/// New type for safe-handling of data offsets u32s.
 #[derive(Debug, Copy, Clone)]
 struct Offset(u32);
 

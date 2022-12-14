@@ -1,3 +1,7 @@
+//! Implementation of a message buffering node wrapper.
+//!
+//! Encapsulating common nodes like [super::internal::InternalNode] and
+//! [super::leaf::LeafNode].
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
@@ -70,6 +74,7 @@ impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
 }
 
 mod ser_np {
+    //! Serialization utilities of a node pointer type.
     use super::RwLock;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
