@@ -3,20 +3,16 @@
 //! Calling [Tree::rebalance_tree] is not only possible with the root node but may be
 //! applied to a variety of nodes given that their parent node is correctly
 //! given. Use with caution.
+use std::borrow::Borrow;
+
 use super::{
-    child_buffer::ChildBuffer, internal::TakeChildBuffer, FillUpResult, Inner, Node, Tree,
+    child_buffer::ChildBuffer, internal::TakeChildBuffer, FillUpResult, Inner, Node, Tree, derivate_ref::DerivateRef,
 };
 use crate::{
     cache::AddSize,
     data_management::{HandlerDml, HasStoragePreference, ObjectRef},
     size::Size,
     tree::{errors::*, imp::internal::MergeChildResult, MessageAction},
-};
-use stable_deref_trait::StableDeref;
-use std::{
-    borrow::Borrow,
-    mem::transmute,
-    ops::{Deref, DerefMut},
 };
 
 impl<X, R, M, I> Tree<X, M, I>
@@ -54,7 +50,7 @@ where
     pub(super) fn rebalance_tree(
         &self,
         mut node: X::CacheValueRefMut,
-        mut parent: Option<Ref<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>>,
+        mut parent: Option<DerivateRef<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>>,
     ) -> Result<(), Error> {
         loop {
             if !node.is_too_large() {
@@ -69,7 +65,7 @@ where
                 node.actual_size()
             );
             // 1. Select the largest child buffer which can be flushed.
-            let mut child_buffer = match Ref::try_new(node, |node| node.try_find_flush_candidate())
+            let mut child_buffer = match DerivateRef::try_new(node, |node| node.try_find_flush_candidate())
             {
                 // 1.1. If there is none we have to split the node.
                 Err(_node) => match parent {
@@ -183,49 +179,5 @@ where
             parent = Some(child_buffer);
             node = child;
         }
-    }
-}
-
-/// Simple owning reference handle. Internally used here.
-pub struct Ref<T, U> {
-    inner: U,
-    owner: T,
-}
-
-impl<T: StableDeref + DerefMut, U> Ref<T, TakeChildBuffer<'static, U>> {
-
-    /// Unsafe conversions of a limited life-time reference in [TakeChildBuffer]
-    /// to a static one. This is only ever safe in the internal context of [Ref].
-    pub fn try_new<F>(mut owner: T, f: F) -> Result<Self, T>
-    where
-        F: for<'a> FnOnce(&'a mut T::Target) -> Option<TakeChildBuffer<'a, U>>,
-    {
-        match unsafe { transmute(f(&mut owner)) } {
-            None => Err(owner),
-            Some(inner) => Ok(Ref { owner, inner }),
-        }
-    }
-
-    pub fn into_owner(self) -> T {
-        self.owner
-    }
-}
-
-impl<T: AddSize, U> AddSize for Ref<T, U> {
-    fn add_size(&self, size_delta: isize) {
-        self.owner.add_size(size_delta);
-    }
-}
-
-impl<T, U> Deref for Ref<T, U> {
-    type Target = U;
-    fn deref(&self) -> &U {
-        &self.inner
-    }
-}
-
-impl<T, U> DerefMut for Ref<T, U> {
-    fn deref_mut(&mut self) -> &mut U {
-        &mut self.inner
     }
 }

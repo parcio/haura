@@ -1,5 +1,5 @@
 use self::{
-    flush::Ref,
+    derivate_ref::DerivateRef,
     node::{ApplyResult, GetResult},
 };
 use super::{
@@ -447,7 +447,7 @@ where
         let mut node = {
             let mut node = self.get_mut_root_node()?;
             loop {
-                match Ref::try_new(node, |node| node.try_walk(key.borrow())) {
+                match DerivateRef::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
                         if let Some(child) = self.try_get_mut_node(child_buffer.node_pointer_mut())
                         {
@@ -547,5 +547,6 @@ mod node;
 mod packed;
 mod range;
 mod split;
+mod derivate_ref;
 
 pub use self::{node::Node, range::RangeIterator};
