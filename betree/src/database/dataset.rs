@@ -62,17 +62,17 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         Ok(DatasetId::unpack(&data))
     }
 
-    /// A convenience instantiation of [Database::open_custom_dataset] with [DefaultMessageAction].
+    /// A convenience instantiation of [Database::open_custom_dataset] with the default message set.
     pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
         self.open_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
-    /// A convenience instantiation of [Database::create_custom_dataset] with [DefaultMessageAction].
+    /// A convenience instantiation of [Database::create_custom_dataset] with the default message set.
     pub fn create_dataset(&mut self, name: &[u8]) -> Result<()> {
         self.create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
-    /// A convenience instantiation of [Database::open_or_create_custom_dataset] with [DefaultMessageAction].
+    /// A convenience instantiation of [Database::open_or_create_custom_dataset] with the default message set.
     pub fn open_or_create_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
         self.open_or_create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
