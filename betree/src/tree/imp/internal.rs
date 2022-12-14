@@ -66,17 +66,10 @@ impl<T: Size> Size for InternalNode<T> {
 }
 
 impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
-    // TODO: This should by convention really not recalculte based on this request
-    // Furthermore, have a look at the HasStoragePreference trait.
-    // We might perform way more operations than really should.
     fn current_preference(&self) -> Option<StoragePreference> {
         self.pref
             .as_option()
             .map(|pref| self.system_storage_preference.weak_bound(&pref))
-        // Some(
-        //     self.system_storage_preference
-        //         .weak_bound(&self.recalculate()),
-        // )
     }
 
     fn recalculate(&self) -> StoragePreference {
