@@ -398,14 +398,6 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             })
     }
 
-    pub(super) fn probe_storage_level(&self, key: &[u8]) -> ProbeResult<N> {
-        match self.0 {
-            PackedLeaf(_) => ProbeResult::Leaf,
-            Leaf(_) => ProbeResult::Leaf,
-            Internal(ref internal) => ProbeResult::NextNode(internal.probe_storage_level(key)),
-        }
-    }
-
     pub(super) fn apply_with_info(
         &mut self,
         key: &[u8],

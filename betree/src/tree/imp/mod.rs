@@ -372,25 +372,6 @@ where
         }
     }
 
-    pub(crate) fn probe_storage_level<K: Borrow<[u8]>>(
-        &self,
-        key: K,
-    ) -> Result<StoragePreference, TreeError> {
-        let key = key.borrow();
-        let mut node = self.get_root_node()?;
-        let mut last_pointer = node.correct_preference();
-        Ok(loop {
-            let next_node = match node.probe_storage_level(key) {
-                node::ProbeResult::Leaf => break last_pointer,
-                node::ProbeResult::NextNode(np) => {
-                    last_pointer = np.read().correct_preference();
-                    self.get_node(np)?
-                }
-            };
-            node = next_node;
-        })
-    }
-
     /// "Piercing" update, with insertion logic of a B-Tree.
     /// To keep data sanity only modification of the key information is allowed
     /// and all key infos on the paths will be updated to reflect this change.

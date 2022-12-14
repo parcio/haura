@@ -1040,15 +1040,6 @@ impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
         Ok(Box::new(iter))
     }
 
-    /// Try to probe information about the current storage level of the object.
-    /// FIXME: On sparse objects we don't know which chunk really exists, we
-    /// assume here the first, but this can be wrong.
-    pub(crate) fn probe_storage_level(&self, offset: u64) -> Result<StoragePreference> {
-        let chunk = ChunkRange::from_byte_bounds(offset, 1);
-        let key = object_chunk_key(self.object.id, chunk.start.chunk_id);
-        self.store.data.probe_storage_location(&key[..])
-    }
-
     /// Migrate the whole object to a specified storage preference and write all future accesses to the same storage
     /// tier.
     pub fn migrate(&mut self, pref: StoragePreference) -> Result<()> {
