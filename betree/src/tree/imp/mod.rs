@@ -1,3 +1,4 @@
+//! Implementation of tree structures.
 use self::{
     derivate_ref::DerivateRef,
     node::{ApplyResult, GetResult},
