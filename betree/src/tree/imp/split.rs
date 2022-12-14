@@ -45,7 +45,7 @@ where
         &self,
         mut node: X::CacheValueRefMut,
         parent: &mut TakeChildBuffer<ChildBuffer<R>>,
-    ) -> Result<(X::CacheValueRefMut, isize), Error> {
+    ) -> Result<(X::CacheValueRefMut, isize), TreeError> {
         self.dml.verify_cache();
 
         let before = node.size();

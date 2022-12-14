@@ -47,7 +47,7 @@ where
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
-    type Item = Result<(Key, Value), Error>;
+    type Item = Result<(Key, Value), TreeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -100,7 +100,7 @@ where
         }
     }
 
-    fn fill_buffer(&mut self) -> Result<(), Error> {
+    fn fill_buffer(&mut self) -> Result<(), TreeError> {
         let next_pivot = {
             let min_key = match self.min_key {
                 Bounded::Included(ref x) | Bounded::Excluded(ref x) => x,
@@ -169,7 +169,7 @@ where
         key: &[u8],
         data: &mut VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
         prefetch: &mut Option<X::Prefetch>,
-    ) -> Result<Option<CowBytes>, Error> {
+    ) -> Result<Option<CowBytes>, TreeError> {
         let result = {
             let mut left_pivot_key = None;
             let mut right_pivot_key = None;

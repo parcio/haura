@@ -22,19 +22,19 @@ pub trait TreeBaseLayer<M: MessageAction> {
         key: K,
         msg: SlicedCowBytes,
         storage_preference: StoragePreference,
-    ) -> Result<(), Error>;
+    ) -> Result<(), TreeError>;
 
     /// Gets the entry for the given `key` if it exists.
-    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error>;
+    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, TreeError>;
 
     /// Returns the depth of the tree.
-    fn depth(&self) -> Result<u32, Error>;
+    fn depth(&self) -> Result<u32, TreeError>;
 }
 
 /// Tree Layer interface.
 pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
     /// The range query iterator.
-    type Range: Iterator<Item = Result<(Key, Value), Error>>;
+    type Range: Iterator<Item = Result<(Key, Value), TreeError>>;
     /// Issues a range query for the given key range.
     /// Returns an iterator over (key, value)-tuples in that range.
     ///
@@ -45,7 +45,7 @@ pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
     ///     todo!()
     /// }
     /// ```
-    fn range<K, R>(&self, range: R) -> Result<Self::Range, Error>
+    fn range<K, R>(&self, range: R) -> Result<Self::Range, TreeError>
     where
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
@@ -55,14 +55,14 @@ pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
     type Pointer: Serialize + DeserializeOwned;
 
     /// Sync the tree to disk.
-    fn sync(&self) -> Result<Self::Pointer, Error>;
+    fn sync(&self) -> Result<Self::Pointer, TreeError>;
 }
 
 /// Special-purpose interface to allow for storing and syncing trees of different message types.
 pub(crate) trait ErasedTreeSync {
     type Pointer;
     type ObjectRef;
-    fn erased_sync(&self) -> Result<Self::Pointer, Error>;
+    fn erased_sync(&self) -> Result<Self::Pointer, TreeError>;
     // ObjectRef is not object-safe, but we only need the lock, not the value
     // FIXME: find an actual abstraction, instead of encoding implementation details into this trait
     fn erased_try_lock_root(
