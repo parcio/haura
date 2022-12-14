@@ -1,3 +1,4 @@
+//! Iterator over a range of keys in a [Tree].
 use super::{
     node::{GetRangeResult, Node},
     Inner, Tree,

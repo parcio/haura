@@ -1,3 +1,4 @@
+//! Encapsulating logic for splitting of normal and root nodes.
 use super::{child_buffer::ChildBuffer, internal::TakeChildBuffer, Inner, Node, Tree};
 use crate::{
     cache::AddSize,

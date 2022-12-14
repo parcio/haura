@@ -1,3 +1,4 @@
+//! Implementation of the [InternalNode] node type.
 use super::child_buffer::ChildBuffer;
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},

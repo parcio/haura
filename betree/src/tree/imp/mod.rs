@@ -18,18 +18,10 @@ use crate::{
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
+use leaf::FillUpResult;
 
-#[derive(Debug)]
-enum FillUpResult {
-    Rebalanced {
-        pivot_key: CowBytes,
-        size_delta: isize,
-    },
-    Merged {
-        size_delta: isize,
-    },
-}
-
+/// Additional information for a single entry. Concerns meta information like
+/// the desired storage level of a key.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct KeyInfo {
     storage_preference: StoragePreference,
