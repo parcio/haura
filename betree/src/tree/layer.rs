@@ -1,5 +1,5 @@
 //! Interface traits for the tree layer of *Haura*.
-use super::{MessageAction, Key, Value};
+use super::{Key, MessageAction, Value};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     StoragePreference,

@@ -29,7 +29,6 @@ pub(crate) const ENTRY_KEY_OFFSET: usize = 0;
 pub(crate) const ENTRY_KEY_INFO_OFFSET: usize = ENTRY_KEY_OFFSET + OFFSET_LEN;
 pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 
-
 /// On-disk serialized leaf node. Simplified to a map contains 40 bytes of
 /// headers followed by data.
 ///

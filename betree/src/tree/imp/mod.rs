@@ -16,10 +16,10 @@ use crate::{
     tree::MessageAction,
     StoragePreference,
 };
+use leaf::FillUpResult;
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
-use leaf::FillUpResult;
 
 /// Additional information for a single entry. Concerns meta information like
 /// the desired storage level of a key.
@@ -247,7 +247,10 @@ where
         self.dml.try_get_mut(np_ref.get_mut())
     }
 
-    fn get_mut_node_mut(&self, np_ref: &mut X::ObjectRef) -> Result<X::CacheValueRefMut, TreeError> {
+    fn get_mut_node_mut(
+        &self,
+        np_ref: &mut X::ObjectRef,
+    ) -> Result<X::CacheValueRefMut, TreeError> {
         if let Some(node) = self.dml.try_get_mut(np_ref) {
             return Ok(node);
         }
@@ -444,7 +447,7 @@ where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
         if key.borrow().is_empty() {
-            return Err(TreeError::EmptyKey)
+            return Err(TreeError::EmptyKey);
         }
         let mut parent = None;
         let mut node = {
@@ -510,7 +513,7 @@ where
         Self: Clone,
     {
         if !is_inclusive_non_empty(&range) {
-            return Err(TreeError::InvalidRange)
+            return Err(TreeError::InvalidRange);
         }
         Ok(RangeIterator::new(range, self.clone()))
     }
@@ -545,6 +548,7 @@ where
 }
 
 mod child_buffer;
+mod derivate_ref;
 mod flush;
 mod internal;
 mod leaf;
@@ -552,6 +556,5 @@ mod node;
 mod packed;
 mod range;
 mod split;
-mod derivate_ref;
 
 pub use self::{node::Node, range::RangeIterator};

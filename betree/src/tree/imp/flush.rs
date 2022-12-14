@@ -6,7 +6,8 @@
 use std::borrow::Borrow;
 
 use super::{
-    child_buffer::ChildBuffer, internal::TakeChildBuffer, FillUpResult, Inner, Node, Tree, derivate_ref::DerivateRef,
+    child_buffer::ChildBuffer, derivate_ref::DerivateRef, internal::TakeChildBuffer, FillUpResult,
+    Inner, Node, Tree,
 };
 use crate::{
     cache::AddSize,
@@ -50,7 +51,9 @@ where
     pub(super) fn rebalance_tree(
         &self,
         mut node: X::CacheValueRefMut,
-        mut parent: Option<DerivateRef<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>>,
+        mut parent: Option<
+            DerivateRef<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>,
+        >,
     ) -> Result<(), TreeError> {
         loop {
             if !node.is_too_large() {
@@ -65,24 +68,24 @@ where
                 node.actual_size()
             );
             // 1. Select the largest child buffer which can be flushed.
-            let mut child_buffer = match DerivateRef::try_new(node, |node| node.try_find_flush_candidate())
-            {
-                // 1.1. If there is none we have to split the node.
-                Err(_node) => match parent {
-                    None => {
-                        self.split_root_node(_node);
-                        return Ok(());
-                    }
-                    Some(ref mut parent) => {
-                        let (next_node, size_delta) = self.split_node(_node, parent)?;
-                        parent.add_size(size_delta);
-                        node = next_node;
-                        continue;
-                    }
-                },
-                // 1.2. If successful we flush in the following steps to this node.
-                Ok(selected_child_buffer) => selected_child_buffer,
-            };
+            let mut child_buffer =
+                match DerivateRef::try_new(node, |node| node.try_find_flush_candidate()) {
+                    // 1.1. If there is none we have to split the node.
+                    Err(_node) => match parent {
+                        None => {
+                            self.split_root_node(_node);
+                            return Ok(());
+                        }
+                        Some(ref mut parent) => {
+                            let (next_node, size_delta) = self.split_node(_node, parent)?;
+                            parent.add_size(size_delta);
+                            node = next_node;
+                            continue;
+                        }
+                    },
+                    // 1.2. If successful we flush in the following steps to this node.
+                    Ok(selected_child_buffer) => selected_child_buffer,
+                };
             let mut child = self.get_mut_node(child_buffer.node_pointer_mut())?;
             // 2. Iterate down to child if too large
             if !child.is_leaf() && child.is_too_large() {
@@ -142,7 +145,9 @@ where
                         FillUpResult::Merged { size_delta } => {
                             left.add_size(size_delta);
                             right.add_size(-size_delta);
-                            let MergeChildResult {old_np, size_delta, ..} = m.merge_children();
+                            let MergeChildResult {
+                                old_np, size_delta, ..
+                            } = m.merge_children();
                             self.dml.remove(old_np);
                             size_delta
                         }
