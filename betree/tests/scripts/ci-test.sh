@@ -21,14 +21,15 @@ for tst in "${failed[@]}"
 do
     printf '%b' "$(echo "$tst" | sed -e 's/\"//g')" > fail.log
 done
-if [ -z "$failed" ]
-then
-        exit 0
-else
-        exit 1
-fi
 
 if [ -e scripts/cleanup-test.sh ]
 then
     ./scripts/cleanup-test.sh
+fi
+
+if [ -z "$failed" ]
+then
+    exit 0
+else
+    exit 1
 fi
