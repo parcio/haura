@@ -51,7 +51,7 @@ where
         &self,
         mut node: X::CacheValueRefMut,
         mut parent: Option<DerivateRef<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TreeError> {
         loop {
             if !node.is_too_large() {
                 return Ok(());
