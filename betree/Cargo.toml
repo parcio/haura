@@ -17,6 +17,10 @@ harness = false
 name = "allocator"
 harness = false
 
+[[bench]]
+name = "tree"
+harness = false
+
 [dependencies]
 futures = { version = "0.3", features = ["thread-pool"] }
 serde = { version = "1.0", features = [ "derive" ] }

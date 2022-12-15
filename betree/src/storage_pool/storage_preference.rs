@@ -44,7 +44,7 @@ impl StoragePreference {
 
     /// Construct a new [StoragePreference], for a given class.
     /// Panics if `class > 3`.
-    pub fn new(class: u8) -> Self {
+    pub const fn new(class: u8) -> Self {
         assert!(class <= 3);
         Self(class)
     }
@@ -75,10 +75,10 @@ impl StoragePreference {
         }
     }
 
-    pub(crate) fn as_u8(self) -> u8 {
+    pub(crate) const fn as_u8(self) -> u8 {
         self.0
     }
-    pub(crate) fn from_u8(u: u8) -> Self {
+    pub(crate) const fn from_u8(u: u8) -> Self {
         debug_assert!(u == u8::MAX - 1 || u <= 3);
         Self(u)
     }
@@ -120,11 +120,11 @@ pub struct AtomicStoragePreference(AtomicU8);
 
 #[allow(missing_docs)]
 impl AtomicStoragePreference {
-    pub fn known(class: StoragePreference) -> Self {
+    pub const fn known(class: StoragePreference) -> Self {
         Self(AtomicU8::new(class.0))
     }
 
-    pub fn unknown() -> Self {
+    pub const fn unknown() -> Self {
         Self(AtomicU8::new(u8::MAX))
     }
 
@@ -252,6 +252,10 @@ impl From<&AtomicSystemStoragePreference> for AtomicStoragePreference {
 }
 
 impl AtomicSystemStoragePreference {
+    pub const fn none() -> Self {
+        Self(AtomicU8::new(StoragePreference::NONE.as_u8()))
+    }
+
     pub fn set(&self, pref: StoragePreference) {
         self.0.store(pref.as_u8(), Ordering::SeqCst);
     }

@@ -8,6 +8,7 @@ use crate::{
     tree::{KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
+use bincode::serialized_size;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
@@ -41,16 +42,45 @@ pub(super) struct InternalNode<T> {
 // @jwuensche:
 // Added TODO to better find this in the future.
 // Will definitely need to adjust this at some point, though this is not now.
-const BINCODE_FIXED_SIZE: usize = 28;
+// const TEST_BINCODE_FIXED_SIZE: usize = 28;
+//
+// UPDATE:
+// We removed by now the fixed constant and determine the base size of an
+// internal node with bincode provided methods based on an empty node created on
+// compile-time. We might want to store this value for future access or even
+// better determine the size on compile time directly, this requires
+// `serialized_size` to be const which it could but its not on their task list
+// yet.
+
+// NOTE: Waiting for OnceCell to be stabilized...
+// https://doc.rust-lang.org/stable/std/cell/struct.OnceCell.html
+const EMPTY_NODE: InternalNode<()> = InternalNode {
+    level: 0,
+    entries_size: 0,
+    system_storage_preference: AtomicSystemStoragePreference::none(),
+    pref: AtomicStoragePreference::unknown(),
+    pivot: vec![],
+    children: vec![],
+};
+
+#[inline]
+fn internal_node_base_size() -> usize {
+    // NOTE: The overhead introduced by using `serialized_size` is negligible
+    // and only about 3ns, but we can use OnceCell once (🥁) it is available.
+    serialized_size(&EMPTY_NODE)
+        .expect("Known node layout could not be estimated. This is an error in bincode.")
+        // We know that this is valid as the maximum size in bytes is below u32
+        as usize
+}
 
 impl<T: Size> Size for InternalNode<T> {
     fn size(&self) -> usize {
-        BINCODE_FIXED_SIZE + self.entries_size
+        internal_node_base_size() + self.entries_size
     }
 
     fn actual_size(&self) -> Option<usize> {
         Some(
-            BINCODE_FIXED_SIZE
+            internal_node_base_size()
                 + self.pivot.iter().map(Size::size).sum::<usize>()
                 + self
                     .children
@@ -735,23 +765,23 @@ mod tests {
         TestResult::passed()
     }
 
-    #[test]
-    fn check_constant() {
-        let node: InternalNode<ChildBuffer<()>> = InternalNode {
-            entries_size: 0,
-            level: 1,
-            children: vec![],
-            pivot: vec![],
-            system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
-            pref: AtomicStoragePreference::unknown(),
-        };
+    // #[test]
+    // fn check_constant() {
+    //     let node: InternalNode<ChildBuffer<()>> = InternalNode {
+    //         entries_size: 0,
+    //         level: 1,
+    //         children: vec![],
+    //         pivot: vec![],
+    //         system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+    //         pref: AtomicStoragePreference::unknown(),
+    //     };
 
-        assert_eq!(
-            serialized_size(&node).unwrap(),
-            BINCODE_FIXED_SIZE as u64,
-            "magic constants are wrong"
-        );
-    }
+    //     assert_eq!(
+    //         serialized_size(&node).unwrap(),
+    //         TEST_BINCODE_FIXED_SIZE as u64,
+    //         "magic constants are wrong"
+    //     );
+    // }
 
     // TODO tests
     // split
