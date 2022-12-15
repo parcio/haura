@@ -400,20 +400,3 @@ impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 's
     #[inline(always)]
     fn verify(&mut self) {}
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{Cache, ClockCache};
-    use bencher::{black_box, Bencher, benchmark_main, benchmark_group};
-
-    fn get_and_pin(b: &mut Bencher) {
-        let mut c = ClockCache::new(5);
-        c.insert(5, (), 1);
-        b.iter(|| {
-            black_box(c.get(&5, true));
-        });
-    }
-
-    benchmark_group!(benches, get_and_pin);
-    benchmark_main!(benches);
-}
