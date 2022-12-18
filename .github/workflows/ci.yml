@@ -118,3 +118,52 @@ jobs:
         run: |
           cd betree
           ./tests/scripts/ci-test.sh
+  betree-msrv:
+    name: MSRV Check
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          rustup toolchain install stable --profile minimal --force
+      - name: Cargo MSRV Cache
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            ~/julea
+          # This is only supposed to cache the cargo-msrv binary, for this the
+          # rust version and other infos are irrelevant.
+          key: ubuntu-22.04-rustc
+      - name: Prepare JULEA
+        run: |
+          sudo apt update
+          sudo apt install libglib2.0-0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
+          # use forked version
+          cd ~
+          git clone -b modules-conditional-unload https://github.com/tilpner/julea.git
+      - name: Install cargo-msrv
+        run: |
+          # Will skip compilation if already present
+          cargo install cargo-msrv
+      - name: Verify betree MSRV
+        run: |
+          cd betree
+          cargo msrv verify
+      - name: Verify bectl MSRV
+        run: |
+          cd bectl
+          cargo msrv verify
+      - name: Verify julea-betree MSRV
+        run: |
+          cd julea-betree
+          export JULEA_INCLUDE=~/julea/include
+          export BINDGEN_EXTRA_CLANG_ARGS="$(pkg-config --cflags glib-2.0) $(pkg-config --cflags libbson-1.0)"
+          cargo msrv verify
