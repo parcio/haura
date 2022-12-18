@@ -1,6 +1,7 @@
 # Be-Tree Storage Stack
 
 [![CI](https://github.com/julea-io/haura/workflows/CI/badge.svg)](https://github.com/julea-io/haura/actions)
+[![Pages](https://github.com/julea-io/haura/workflows/Pages/badge.svg)](https://github.com/julea-io/haura/actions)
 
 A storage library offering key-value and object interfaces by managing B^ε-trees on block storage devices.
 
