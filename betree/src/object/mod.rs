@@ -225,6 +225,14 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Open an object store by its internal Id. This method can be used
     /// whenever storing the actual names of object stores is too much expected
     /// effort.
+    #[cfg(feature = "internal-api")]
+    pub fn open_object_store_with_id_pub(
+        &mut self,
+        os_id: ObjectStoreId,
+    ) -> Result<ObjectStore<Config>> {
+        self.open_object_store_with_id(os_id)
+    }
+
     pub(crate) fn open_object_store_with_id(
         &mut self,
         os_id: ObjectStoreId,
@@ -243,13 +251,33 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         )
     }
 
+    /// Creates an iterator over all object stores by their internally used Id.
+    #[cfg(feature = "internal-api")]
+    pub fn iter_object_stores_pub(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
+        self.iter_object_stores()
+    }
+
     /// Iterates over all object stores in the database.
-    pub fn iter_object_stores(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
+    pub(crate) fn iter_object_stores(&self) -> Result<impl Iterator<Item = Result<ObjectStoreId>>> {
         let low = &[OBJECT_STORE_DATA_PREFIX] as &[_];
         let high = &[OBJECT_STORE_DATA_PREFIX + 1] as &[_];
         Ok(self.root_tree.range(low..high)?.map(move |result| {
             let (b, _) = result?;
             Ok(ObjectStoreId::unpack(&b[1..]))
+        }))
+    }
+
+    /// Iterates over all object stores by their given names.
+    pub fn iter_object_store_names(&self) -> Result<impl Iterator<Item = CowBytes>> {
+        let low = &[OBJECT_STORE_NAME_TO_ID_PREFIX] as &[_];
+        let high = &[OBJECT_STORE_NAME_TO_ID_PREFIX + 1] as &[_];
+        Ok(self.root_tree.range(low..high)?.filter_map(move |result| {
+            result.ok().and_then(|(b, _)| {
+                match b.contains(&0) {
+                    true => None,
+                    false => Some(b)
+                }
+            })
         }))
     }
 
