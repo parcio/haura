@@ -19,5 +19,6 @@ error_chain! {
         SerializeFailed
         MigrationWouldExceedStorage
         MigrationNotPossible
+        KeyContainsNullByte
     }
 }

@@ -76,15 +76,10 @@ jobs:
       - name: Run integration tests
         env:
           HAURA_NUM_THREAD: 1
+          QUICKCHECK_TESTS: 20
         run: |
           cd betree/tests
           ./scripts/ci-test.sh
-      - name: Upload failure log
-        if: failure()
-        uses: actions/upload-artifact@v3
-        with:
-          name: integration-failure.log
-          path: betree/tests/fail.log
   betree-unit:
     name: Unit Tests
     needs: dependencies
@@ -119,15 +114,10 @@ jobs:
       - name: Run unit tests
         env:
           HAURA_NUM_THREAD: 8
+          QUICKCHECK_TESTS: 20
         run: |
           cd betree
           ./tests/scripts/ci-test.sh
-      - name: Upload failure log
-        if: failure()
-        uses: actions/upload-artifact@v3
-        with:
-          name: unit-failure.log
-          path: betree/fail.log
   betree-msrv:
     name: MSRV Check
     runs-on: ubuntu-22.04

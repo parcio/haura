@@ -3,3 +3,4 @@
 **/*.swp
 heaptrack*
 Cargo.lock
+docs/book
