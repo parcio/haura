@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use speedy::{Writable, Readable};
 use std::{
     fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
-    slice,
+    slice, convert::TryFrom,
 };
 
 /// Access pattern descriptor to differentiate and optimize drive usage. Useful
@@ -15,19 +15,43 @@ use std::{
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Writable, Readable)]
 pub enum PreferredAccessType {
     /// The default access pattern. No assumptions are made.
-    Unknown,
+    Unknown = 0,
     /// Preferred access is a random read pattern, this can be for example a SSD to reduce wear-out.
-    RandomRead,
+    RandomRead = 1,
     /// Preferred access is a random write pattern, this can be for example some otherwise cached file or NVM.
-    RandomWrite,
+    RandomWrite = 2,
     /// Preferred access is a random read and write pattern, this can be for example a SSD.
-    RandomReadWrite,
+    RandomReadWrite = 3,
     /// Preferred access is a sequential write pattern, this can be for example tape storage for archival.
-    SequentialWrite,
+    SequentialWrite = 4,
     /// Preferred access is a sequential read pattern, this can be for example a HDD.
-    SequentialRead,
+    SequentialRead = 5,
     /// Preferred access is a sequential read and write pattern, this can be for example a HDD mirror1 setup.
-    SequentialReadWrite,
+    SequentialReadWrite = 6,
+}
+
+impl PreferredAccessType {
+    /// Convert to C-like enum values.
+    pub fn as_u8(&self) -> u8 {
+        *self as u8
+    }
+}
+
+impl TryFrom<u8> for PreferredAccessType {
+    type Error = ();
+
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        match value {
+            v if v == Self::Unknown as u8 => Ok(Self::Unknown),
+            v if v == Self::RandomRead as u8 => Ok(Self::RandomRead),
+            v if v == Self::RandomWrite as u8 => Ok(Self::RandomWrite),
+            v if v == Self::RandomReadWrite as u8 => Ok(Self::RandomReadWrite),
+            v if v == Self::SequentialRead as u8 => Ok(Self::SequentialRead),
+            v if v == Self::SequentialWrite as u8 => Ok(Self::SequentialWrite),
+            v if v == Self::SequentialReadWrite as u8 => Ok(Self::SequentialReadWrite),
+            _ => Err(()),
+        }
+    }
 }
 
 impl Default for PreferredAccessType {

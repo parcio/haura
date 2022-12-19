@@ -9,7 +9,7 @@ use crate::{
 };
 
 use std::{
-    convert::TryInto,
+    convert::{TryInto, TryFrom},
     io::{self, Cursor},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -98,6 +98,7 @@ impl MetaMessage {
             | (if self.size.is_some() { 2 } else { 0 })
             | (if self.mtime.is_some() { 4 } else { 0 })
             | (if self.pref.is_some() { 8 } else { 0 })
+            | (if self.access_pattern.is_some() { 16 } else { 0 })
     }
 
     const fn encoded_length(&self) -> usize {
@@ -105,6 +106,7 @@ impl MetaMessage {
             + (if self.size.is_some() { 8 } else { 0 })
             + (if self.mtime.is_some() { 8 } else { 0 })
             + (if self.pref.is_some() { 1 } else { 0 })
+            + (if self.access_pattern.is_some() { 16 } else { 0 })
     }
 
     pub(crate) fn pack(&self) -> CowBytes {
@@ -132,6 +134,10 @@ impl MetaMessage {
             let _ = v.write_u8(pref.as_u8());
         }
 
+        if let Some(ap) = self.access_pattern {
+            let _ = v.write_u8(ap.as_u8());
+        }
+
         CowBytes::from(v)
     }
 
@@ -153,6 +159,9 @@ impl MetaMessage {
         }
         if content_flags & 8 != 0 {
             message.pref = Some(StoragePreference::from_u8(cursor.read_u8()?));
+        }
+        if content_flags & 16 != 0 {
+            message.access_pattern = Some(PreferredAccessType::try_from(cursor.read_u8()?).unwrap_or_default());
         }
 
         Ok(message)
