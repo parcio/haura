@@ -321,4 +321,5 @@ mod object_ptr;
 pub use self::{
     errors::{Error, ErrorKind},
     impls::Dmu,
+    object_ptr::ObjectPointer,
 };

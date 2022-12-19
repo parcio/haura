@@ -69,9 +69,10 @@ const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 
 type Checksum = XxHash;
 
-type ObjectPointer = data_management::impls::ObjectPointer<Checksum>;
+type ObjectPointer = data_management::ObjectPointer<Checksum>;
 pub(crate) type ObjectRef = data_management::impls::ObjectRef<ObjectPointer>;
 pub(crate) type Object = Node<ObjectRef>;
+type DbHandler = Handler<ObjectRef>;
 
 pub(crate) type RootDmu = Dmu<
     ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>,
@@ -89,7 +90,7 @@ pub(crate) type DatasetTree<Dmu> = RootTree<Dmu>;
 /// Each function is called sequentially to configure the individual components
 /// of the database.
 ///
-/// Components of lower layers (Spu, Dmu) can be replaced, but the [handler::Handler] structure
+/// Components of lower layers (Spu, Dmu) can be replaced, but the [DbHandler] structure
 /// belongs to the database layer, and is necessary for the database to function.
 // TODO: Is this multi-step process unnecessarily rigid? Would fewer functions defeat the purpose?
 pub trait DatabaseBuilder: Send + Sync + 'static
@@ -98,7 +99,7 @@ where
     Self::Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>
         + Dml<Object = Object, ObjectRef = ObjectRef>
         + HandlerDml<Object = Object>
-        + DmlWithHandler<Handler = handler::Handler>
+        + DmlWithHandler<Handler = DbHandler>
         + DmlWithSpl<Spl = Self::Spu>
         + DmlWithCache
         + DmlWithStorageHints
@@ -116,11 +117,11 @@ where
     fn pre_build(&self) {}
     /// Assemble a new storage layer unit from `self`
     fn new_spu(&self) -> Result<Self::Spu>;
-    /// Assemble a new [handler::Handler] for `spu`, optionally configured from `self`
-    fn new_handler(&self, spu: &Self::Spu) -> handler::Handler;
+    /// Assemble a new [DbHandler] for `spu`, optionally configured from `self`
+    fn new_handler(&self, spu: &Self::Spu) -> DbHandler;
     /// Assemble a new data management unit for `spu` and `handler`, optionally configured from
     /// `self`
-    fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> Self::Dmu;
+    fn new_dmu(&self, spu: Self::Spu, handler: DbHandler) -> Self::Dmu;
     /// Find and return the location of the root tree root node to use.
     /// This may create a new root tree, then return the location of its new root node,
     /// or retrieve a previously written root tree.
@@ -230,7 +231,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         Ok(StoragePoolUnit::<XxHash>::new(&self.storage)?)
     }
 
-    fn new_handler(&self, spu: &Self::Spu) -> handler::Handler {
+    fn new_handler(&self, spu: &Self::Spu) -> DbHandler {
         // TODO: Update the free sizes of each used vdev here.
         // How do we recover this from the storage?
         // FIXME: Ensure this is recovered properly from storage
@@ -273,7 +274,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         }
     }
 
-    fn new_dmu(&self, spu: Self::Spu, handler: handler::Handler) -> Self::Dmu {
+    fn new_dmu(&self, spu: Self::Spu, handler: DbHandler) -> Self::Dmu {
         let mut strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES] =
             [[None; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES];
 

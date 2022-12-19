@@ -1,4 +1,4 @@
-use super::{errors::*, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object, PodType};
+use super::{errors::*, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object, PodType, ObjectRef};
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     buffer::Buf,
@@ -21,12 +21,12 @@ use serde::{
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 /// A pointer to an on-disk serialized object.
 pub struct ObjectPointer<D> {
-    decompression_tag: DecompressionTag,
-    checksum: D,
-    offset: DiskOffset,
-    size: Block<u32>,
-    info: DatasetId,
-    generation: Generation,
+    pub(super) decompression_tag: DecompressionTag,
+    pub(super) checksum: D,
+    pub(super) offset: DiskOffset,
+    pub(super) size: Block<u32>,
+    pub(super) info: DatasetId,
+    pub(super) generation: Generation,
 }
 
 impl<D> HasStoragePreference for ObjectPointer<D> {
@@ -64,13 +64,13 @@ impl<D: StaticSize> StaticSize for ObjectPointer<D> {
     }
 }
 
-impl<D> From<ObjectPointer<D>> for ObjectRef<ObjectPointer<D>> {
-    fn from(ptr: ObjectPointer<D>) -> Self {
-        ObjectRef::Unmodified(ptr)
-    }
-}
-
 impl<D> ObjectPointer<D> {
+    pub fn decompression_tag(&self) -> DecompressionTag {
+        self.decompression_tag
+    }
+    pub fn checksum(&self) -> &D {
+        &self.checksum
+    }
     pub fn offset(&self) -> DiskOffset {
         self.offset
     }

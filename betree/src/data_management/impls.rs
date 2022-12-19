@@ -6,12 +6,12 @@ use crate::{
     checksum::{Builder, Checksum, State},
     compression::{CompressionBuilder, DecompressionTag},
     data_management::CopyOnWriteReason,
-    database::{DatasetId, Generation, Handler, Object as FixObject},
+    database::{DatasetId, Generation, Handler},
     migration::ConstructReport,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
-    StoragePreference,
+    StoragePreference, tree::Node,
 };
 use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
@@ -146,7 +146,10 @@ where
 }
 
 /// The Data Management Unit.
-pub struct Dmu<E: 'static, SPL: StoragePoolLayer, MSG: 'static> {
+pub struct Dmu<E: 'static, SPL: StoragePoolLayer, MSG: 'static>
+where
+    SPL::Checksum: StaticSize,
+{
     default_compression: Box<dyn CompressionBuilder>,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
@@ -158,7 +161,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, MSG: 'static> {
     written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum>>>,
     modified_info: Mutex<HashMap<ModifiedObjectId, DatasetId>>,
     storage_hints: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
-    handler: Handler,
+    handler: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>>,
     // NOTE: The semantic structure of this looks as this
     // Storage Pool Layers:
     //      Layer Disks:
@@ -172,6 +175,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, MSG: 'static> {
 impl<E, SPL, MSG> Dmu<E, SPL, MSG>
 where
     SPL: StoragePoolLayer,
+    SPL::Checksum: StaticSize,
 {
     /// Returns a new `Dmu`.
     pub fn new(
@@ -181,7 +185,7 @@ where
         pool: SPL,
         alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
-        handler: Handler,
+        handler: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>>,
     ) -> Self {
         let allocation_data = (0..pool.storage_class_count())
             .map(|class| {
@@ -213,7 +217,7 @@ where
     }
 
     /// Returns the underlying handler.
-    pub fn handler(&self) -> &Handler {
+    pub fn handler(&self) -> &Handler<ObjectRef<ObjectPointer<SPL::Checksum>>> {
         &self.handler
     }
 
@@ -242,7 +246,7 @@ where
 
 impl<E, SPL, MSG> Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     MSG: ConstructReport,
@@ -263,7 +267,7 @@ where
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
         let old_ptr = {
             match &or {
-                ObjectRef::Unmodified(ptr) => Some(ptr.offset),
+                ObjectRef::Unmodified(ptr) => Some(ptr.offset()),
                 ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid.2,
             }
         };
@@ -309,22 +313,22 @@ where
 
     fn copy_on_write(&self, obj_ptr: ObjectPointer<SPL::Checksum>, steal: CopyOnWriteReason) {
         let actual_size = self.pool.actual_size(
-            obj_ptr.offset.storage_class(),
-            obj_ptr.offset.disk_id(),
-            obj_ptr.size,
+            obj_ptr.offset().storage_class(),
+            obj_ptr.offset().disk_id(),
+            obj_ptr.size(),
         );
         if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) = (
             self.handler.copy_on_write(
-                obj_ptr.offset,
+                obj_ptr.offset(),
                 actual_size,
-                obj_ptr.generation,
-                obj_ptr.info,
+                obj_ptr.generation(),
+                obj_ptr.info(),
             ),
             &self.report_tx,
             steal,
         ) {
             let _ = tx
-                .send(MSG::remove(obj_ptr.offset, obj_ptr.size))
+                .send(MSG::remove(obj_ptr.offset(), obj_ptr.size()))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
     }
@@ -334,15 +338,15 @@ where
     fn fetch(&self, op: &<Self as DmlBase>::ObjectPointer) -> Result<(), Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
-        let mut decompression_state = op.decompression_tag.new_decompression()?;
-        let offset = op.offset;
-        let generation = op.generation;
+        let mut decompression_state = op.decompression_tag().new_decompression()?;
+        let offset = op.offset();
+        let generation = op.generation();
 
-        let compressed_data = self.pool.read(op.size, op.offset, op.checksum.clone())?;
+        let compressed_data = self.pool.read(op.size(), op.offset(), op.checksum().clone())?;
 
-        let object: FixObject = {
+        let object: Node<ObjectRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack_at(op.offset, data).chain_err(|| ErrorKind::DeserializationError)?
+            Object::unpack_at(op.offset(), data).chain_err(|| ErrorKind::DeserializationError)?
         };
         let key = ObjectKey::Unmodified { offset, generation };
         self.insert_object_into_cache(key, RwLock::new(object));
@@ -363,7 +367,7 @@ where
 
         Ok(self
             .pool
-            .read_async(op.size, op.offset, op.checksum.clone())?
+            .read_async(op.size(), op.offset(), op.checksum().clone())?
             .map_err(Error::from)
             .and_then(move |data| ok((ptr, data))))
     }
@@ -539,8 +543,8 @@ where
                 cache.force_change_key(
                     &ObjectKey::InWriteback(mid),
                     ObjectKey::Unmodified {
-                        offset: obj_ptr.offset,
-                        generation: obj_ptr.generation,
+                        offset: obj_ptr.offset(),
+                        generation: obj_ptr.generation(),
                     },
                 )
             };
@@ -566,7 +570,7 @@ where
             }
         } else if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
-                .send(MSG::write(obj_ptr.offset, size, mid.2))
+                .send(MSG::write(obj_ptr.offset(), size, mid.2))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
@@ -788,14 +792,14 @@ where
 
 impl<E, SPL, MSG> super::HandlerDml for Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     MSG: ConstructReport,
 {
-    type Object = FixObject;
-    type CacheValueRef = CacheValueRef<E::ValueRef, RwLockReadGuard<'static, FixObject>>;
-    type CacheValueRefMut = CacheValueRef<E::ValueRef, RwLockWriteGuard<'static, FixObject>>;
+    type Object = Node<ObjectRef<ObjectPointer<SPL::Checksum>>>;
+    type CacheValueRef = CacheValueRef<E::ValueRef, RwLockReadGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>;
+    type CacheValueRefMut = CacheValueRef<E::ValueRef, RwLockWriteGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>;
 
     fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
         let result = {
@@ -831,13 +835,13 @@ where
                 self.fetch(ptr)?;
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
-                        .send(MSG::fetch(ptr.offset, ptr.size))
+                        .send(MSG::fetch(ptr.offset(), ptr.size()))
                         .map_err(|_| warn!("Channel Receiver has been dropped."));
                 }
                 // Check if any storage hints are available and update the node.
                 // This moves the object reference into the modified state.
-                if let Some(pref) = self.storage_hints.lock().remove(&ptr.offset) {
-                    if let Some(mut obj) = self.steal(or, ptr.info)? {
+                if let Some(pref) = self.storage_hints.lock().remove(&ptr.offset()) {
+                    if let Some(mut obj) = self.steal(or, ptr.info())? {
                         obj.set_system_storage_preference(pref)
                     }
                 }
@@ -913,7 +917,7 @@ where
         }
     }
 
-    fn get_and_remove(&self, mut or: Self::ObjectRef) -> Result<FixObject, Error> {
+    fn get_and_remove(&self, mut or: Self::ObjectRef) -> Result<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>, Error> {
         let obj = loop {
             self.get(&mut or)?;
             match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
@@ -963,7 +967,7 @@ where
 
 impl<E, SPL, MSG> super::Dml for Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     MSG: ConstructReport,
@@ -1053,21 +1057,21 @@ where
 
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
         let (ptr, compressed_data) = block_on(p)?;
-        let object: FixObject = {
+        let object: Node<ObjectRef<ObjectPointer<SPL::Checksum>>> = {
             let data = ptr
-                .decompression_tag
+                .decompression_tag()
                 .new_decompression()?
                 .decompress(&compressed_data)?;
-            Object::unpack_at(ptr.offset, data).chain_err(|| ErrorKind::DeserializationError)?
+            Object::unpack_at(ptr.offset(), data).chain_err(|| ErrorKind::DeserializationError)?
         };
         let key = ObjectKey::Unmodified {
-            offset: ptr.offset,
-            generation: ptr.generation,
+            offset: ptr.offset(),
+            generation: ptr.generation(),
         };
         self.insert_object_into_cache(key, RwLock::new(object));
         if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
-                .send(MSG::fetch(ptr.offset, ptr.size))
+                .send(MSG::fetch(ptr.offset(), ptr.size()))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         Ok(())
@@ -1088,11 +1092,11 @@ where
 
 impl<E, SPL, MSG> super::DmlWithHandler for Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
-    type Handler = Handler;
+    type Handler = Handler<ObjectRef<ObjectPointer<SPL::Checksum>>>;
 
     fn handler(&self) -> &Self::Handler {
         &self.handler
@@ -1101,7 +1105,7 @@ where
 
 impl<E, SPL, MSG> super::DmlWithSpl for Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
@@ -1114,7 +1118,7 @@ where
 
 impl<E, SPL, MSG> super::DmlWithCache for Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
@@ -1127,7 +1131,7 @@ where
 
 impl<E, SPL, MSG> super::DmlWithStorageHints for Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
@@ -1142,7 +1146,7 @@ where
 
 impl<E, SPL, MSG> super::DmlWithReport<MSG> for Dmu<E, SPL, MSG>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<FixObject>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
     MSG: ConstructReport,
