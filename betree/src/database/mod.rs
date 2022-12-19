@@ -69,7 +69,7 @@ const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 
 type Checksum = XxHash;
 
-type ObjectPointer = data_management::impls::ObjectPointer<Checksum, DatasetId, Generation>;
+type ObjectPointer = data_management::impls::ObjectPointer<Checksum>;
 pub(crate) type ObjectRef = data_management::impls::ObjectRef<ObjectPointer>;
 type Object = Node<ObjectRef>;
 
@@ -77,8 +77,6 @@ pub(crate) type RootDmu = Dmu<
     ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>,
     StoragePoolUnit<XxHash>,
     Handler,
-    DatasetId,
-    Generation,
     DmlMsg,
 >;
 
