@@ -1,14 +1,14 @@
 use super::{
     dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation,
-    StorageInfo, TreeInner, ObjectPointer,
+    StorageInfo, TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, CopyOnWriteEvent, HandlerDml, ObjectRef},
+    data_management::{self, CopyOnWriteEvent, HandlerDml, ObjectRef, ObjectPointer, HasStoragePreference},
     storage_pool::DiskOffset,
-    tree::{DefaultMessageAction, Tree, TreeBaseLayer},
+    tree::{DefaultMessageAction, Tree, TreeBaseLayer, Node},
     vdev::Block,
     StoragePreference,
 };
@@ -36,11 +36,11 @@ pub fn update_allocation_bitmap_msg(
 
 /// The database handler, holding management data for interactions
 /// between the database and data management layers.
-pub struct Handler<Hash> {
+pub struct Handler<OR: ObjectRef> {
     pub(crate) root_tree_inner:
-        AtomicOption<Arc<TreeInner<ObjectRef<ObjectPointer<Hash>>, DatasetId, DefaultMessageAction>>>,
+        AtomicOption<Arc<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
     pub(crate) root_tree_snapshot:
-        RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
+        RwLock<Option<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
     pub(crate) free_space: HashMap<(u8, u16), AtomicStorageInfo>,
@@ -58,16 +58,16 @@ pub struct Handler<Hash> {
 //     pub(crate) invalidated: AtomicBool,
 // }
 
-impl Handler {
+impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
     fn current_root_tree<'a, X>(
         &'a self,
         dmu: &'a X,
     ) -> impl TreeBaseLayer<DefaultMessageAction> + 'a
     where
         X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
+            Object = Node<OR>,
+            ObjectRef = OR,
+            ObjectPointer = OR::ObjectPointer,
             Info = DatasetId,
         >,
     {
@@ -85,9 +85,9 @@ impl Handler {
     ) -> Option<impl TreeBaseLayer<DefaultMessageAction> + 'a>
     where
         X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
+            Object = Node<OR>,
+            ObjectRef = OR,
+            ObjectPointer = OR::ObjectPointer,
             Info = DatasetId,
         >,
     {
@@ -108,7 +108,7 @@ pub(super) fn segment_id_to_key(segment_id: SegmentId) -> [u8; 9] {
     key
 }
 
-impl Handler {
+impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
     pub fn current_generation(&self) -> Generation {
         self.current_generation.read()
     }
@@ -122,9 +122,9 @@ impl Handler {
     ) -> Result<()>
     where
         X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
+            Object = Node<OR>,
+            ObjectRef = OR,
+            ObjectPointer = OR::ObjectPointer,
             Info = DatasetId,
         >,
     {
@@ -162,9 +162,9 @@ impl Handler {
     pub fn get_allocation_bitmap<X>(&self, id: SegmentId, dmu: &X) -> Result<SegmentAllocator>
     where
         X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
+            Object = Node<OR>,
+            ObjectRef = OR,
+            ObjectPointer = OR::ObjectPointer,
             Info = DatasetId,
         >,
     {
