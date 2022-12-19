@@ -12,6 +12,7 @@ use crate::{
     migration::ConstructReport,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
+    database::{DatasetId, Generation},
     vdev::{Block, BLOCK_SIZE},
     StoragePreference,
 };
@@ -51,15 +52,13 @@ pub enum ObjectRef<P> {
     InWriteback(ModifiedObjectId),
 }
 
-impl<D, I, G> super::ObjectRef for ObjectRef<ObjectPointer<D, I, G>>
+impl<D> super::ObjectRef for ObjectRef<ObjectPointer<D>>
 where
     D: std::fmt::Debug + 'static,
-    I: std::fmt::Debug + 'static,
-    G: std::fmt::Debug + Copy + 'static,
-    ObjectPointer<D, I, G>: Serialize + DeserializeOwned + StaticSize,
+    ObjectPointer<D>: Serialize + DeserializeOwned + StaticSize,
 {
-    type ObjectPointer = ObjectPointer<D, I, G>;
-    fn get_unmodified(&self) -> Option<&ObjectPointer<D, I, G>> {
+    type ObjectPointer = ObjectPointer<D>;
+    fn get_unmodified(&self) -> Option<&ObjectPointer<D>> {
         if let ObjectRef::Unmodified(ref p) = self {
             Some(p)
         } else {
@@ -68,8 +67,8 @@ where
     }
 }
 
-impl<D, I, G: Copy> ObjectRef<ObjectPointer<D, I, G>> {
-    fn as_key(&self) -> ObjectKey<G> {
+impl<D> ObjectRef<ObjectPointer<D>> {
+    fn as_key(&self) -> ObjectKey<Generation> {
         match *self {
             ObjectRef::Unmodified(ref ptr) => ObjectKey::Unmodified {
                 offset: ptr.offset,
@@ -131,29 +130,29 @@ impl<P: Serialize> Serialize for ObjectRef<P> {
     }
 }
 
-impl<'de, D, I, G: Copy> Deserialize<'de> for ObjectRef<ObjectPointer<D, I, G>>
+impl<'de, D> Deserialize<'de> for ObjectRef<ObjectPointer<D>>
 where
-    ObjectPointer<D, I, G>: Deserialize<'de>,
+    ObjectPointer<D>: Deserialize<'de>,
 {
     fn deserialize<E>(deserializer: E) -> Result<Self, E::Error>
     where
         E: Deserializer<'de>,
     {
-        ObjectPointer::<D, I, G>::deserialize(deserializer).map(ObjectRef::Unmodified)
+        ObjectPointer::<D>::deserialize(deserializer).map(ObjectRef::Unmodified)
     }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ObjectPointer<D, I, G> {
+pub struct ObjectPointer<D> {
     decompression_tag: DecompressionTag,
     checksum: D,
     offset: DiskOffset,
     size: Block<u32>,
-    info: I,
-    generation: G,
+    info: DatasetId,
+    generation: Generation,
 }
 
-impl<D, I, G> HasStoragePreference for ObjectPointer<D, I, G> {
+impl<D> HasStoragePreference for ObjectPointer<D> {
     fn current_preference(&self) -> Option<StoragePreference> {
         Some(self.correct_preference())
     }
@@ -177,40 +176,40 @@ impl<D, I, G> HasStoragePreference for ObjectPointer<D, I, G> {
     }
 }
 
-impl<D: StaticSize, I: StaticSize, G: StaticSize> StaticSize for ObjectPointer<D, I, G> {
+impl<D: StaticSize> StaticSize for ObjectPointer<D> {
     fn static_size() -> usize {
         <DecompressionTag as StaticSize>::static_size()
             + D::static_size()
-            + I::static_size()
-            + G::static_size()
+            + DatasetId::static_size()
+            + Generation::static_size()
             + <DiskOffset as StaticSize>::static_size()
             + 4
     }
 }
 
-impl<D, I, G: Copy> From<ObjectPointer<D, I, G>> for ObjectRef<ObjectPointer<D, I, G>> {
-    fn from(ptr: ObjectPointer<D, I, G>) -> Self {
+impl<D> From<ObjectPointer<D>> for ObjectRef<ObjectPointer<D>> {
+    fn from(ptr: ObjectPointer<D>) -> Self {
         ObjectRef::Unmodified(ptr)
     }
 }
 
-impl<D, I: Copy, G: Copy> ObjectPointer<D, I, G> {
+impl<D> ObjectPointer<D> {
     pub fn offset(&self) -> DiskOffset {
         self.offset
     }
     pub fn size(&self) -> Block<u32> {
         self.size
     }
-    pub fn generation(&self) -> G {
+    pub fn generation(&self) -> Generation {
         self.generation
     }
-    pub fn info(&self) -> I {
+    pub fn info(&self) -> DatasetId {
         self.info
     }
 }
 
 /// The Data Management Unit.
-pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'static, MSG: 'static>
+pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, MSG: 'static>
 {
     default_compression: Box<dyn CompressionBuilder>,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
@@ -220,8 +219,8 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'st
     alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
     pool: SPL,
     cache: RwLock<E>,
-    written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum, I, G>>>,
-    modified_info: Mutex<HashMap<ModifiedObjectId, I>>,
+    written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum>>>,
+    modified_info: Mutex<HashMap<ModifiedObjectId, DatasetId>>,
     storage_hints: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
     handler: H,
     // NOTE: The semantic structure of this looks as this
@@ -234,7 +233,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer, H: 'static, I: 'static, G: 'st
     report_tx: Option<Sender<MSG>>,
 }
 
-impl<E, SPL, H, MSG> Dmu<E, SPL, H, H::Info, H::Generation, MSG>
+impl<E, SPL, H, MSG> Dmu<E, SPL, H, MSG>
 where
     SPL: StoragePoolLayer,
     H: HandlerTypes,
@@ -294,7 +293,7 @@ where
     }
 }
 
-impl<E, SPL, H, MSG> DmlBase for Dmu<E, SPL, H, H::Info, H::Generation, MSG>
+impl<E, SPL, H, MSG> DmlBase for Dmu<E, SPL, H, MSG>
 where
     E: Cache<Key = ObjectKey<H::Generation>>,
     <E as Cache>::Value: SizeMut,
@@ -303,19 +302,17 @@ where
     H: HandlerTypes,
 {
     type ObjectRef = ObjectRef<Self::ObjectPointer>;
-    type ObjectPointer = ObjectPointer<SPL::Checksum, H::Info, H::Generation>;
+    type ObjectPointer = ObjectPointer<SPL::Checksum>;
     type Info = H::Info;
 }
 
-impl<E, SPL, H, I, G, MSG> Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
-    H::Object: Object<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>>,
-    I: PodType,
-    G: PodType,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>, Info = DatasetId, Generation = Generation>,
+    H::Object: Object<ObjectRef<ObjectPointer<SPL::Checksum>>>,
     MSG: ConstructReport,
 {
     /// Stealing an [ObjectRef] can have multiple effects.  First, the
@@ -378,7 +375,7 @@ where
         }
     }
 
-    fn copy_on_write(&self, obj_ptr: ObjectPointer<SPL::Checksum, I, G>, steal: CopyOnWriteReason) {
+    fn copy_on_write(&self, obj_ptr: ObjectPointer<SPL::Checksum>, steal: CopyOnWriteReason) {
         let actual_size = self.pool.actual_size(
             obj_ptr.offset.storage_class(),
             obj_ptr.offset.disk_id(),
@@ -428,7 +425,7 @@ where
     ) -> Result<
         impl TryFuture<
                 Ok = (
-                    ObjectPointer<<SPL as StoragePoolLayer>::Checksum, I, G>,
+                    ObjectPointer<<SPL as StoragePoolLayer>::Checksum>,
                     Buf,
                 ),
                 Error = Error,
@@ -862,15 +859,13 @@ where
     }
 }
 
-impl<E, SPL, H, I, G, MSG> super::HandlerDml for Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> super::HandlerDml for Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>, Info = DatasetId, Generation = Generation>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
-    I: PodType,
-    G: PodType,
     MSG: ConstructReport,
 {
     type Object = H::Object;
@@ -1041,15 +1036,13 @@ where
     }
 }
 
-impl<E, SPL, H, I, G, MSG> super::Dml for Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> super::Dml for Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum,>>, Info = DatasetId, Generation = Generation>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
-    I: PodType,
-    G: PodType,
     MSG: ConstructReport,
 {
     /// Trigger a write back of an entire subtree.  This is intended for use
@@ -1170,16 +1163,14 @@ where
     }
 }
 
-impl<E, SPL, H, I, G, MSG> super::DmlWithHandler for Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> super::DmlWithHandler for Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     H::Object: Size,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>, Info = DatasetId, Generation = Generation>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
-    I: PodType,
-    G: PodType,
 {
     type Handler = H;
 
@@ -1188,15 +1179,13 @@ where
     }
 }
 
-impl<E, SPL, H, I, G, MSG> super::DmlWithSpl for Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> super::DmlWithSpl for Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>, Info = DatasetId, Generation = Generation>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
-    I: PodType,
-    G: PodType,
 {
     type Spl = SPL;
 
@@ -1205,16 +1194,14 @@ where
     }
 }
 
-impl<E, SPL, H, I, G, MSG> super::DmlWithCache for Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> super::DmlWithCache for Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     H::Object: SizeMut,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>, Info = DatasetId, Generation = Generation>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
-    I: PodType,
-    G: PodType,
 {
     type CacheStats = E::Stats;
 
@@ -1223,16 +1210,14 @@ where
     }
 }
 
-impl<E, SPL, H, I, G, MSG> super::DmlWithStorageHints for Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> super::DmlWithStorageHints for Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     H::Object: SizeMut,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>, Info = DatasetId, Generation = Generation>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
-    I: PodType,
-    G: PodType,
 {
     fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>> {
         Arc::clone(&self.storage_hints)
@@ -1243,16 +1228,14 @@ where
     }
 }
 
-impl<E, SPL, H, I, G, MSG> super::DmlWithReport<MSG> for Dmu<E, SPL, H, I, G, MSG>
+impl<E, SPL, H, MSG> super::DmlWithReport<MSG> for Dmu<E, SPL, H, MSG>
 where
-    E: Cache<Key = ObjectKey<G>, Value = RwLock<H::Object>>,
+    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<H::Object>>,
     H::Object: SizeMut,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum, I, G>>, Info = I, Generation = G>,
+    H: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>, Info = DatasetId, Generation = Generation>,
     H::Object: Object<<Self as DmlBase>::ObjectRef>,
-    I: PodType,
-    G: PodType,
     MSG: ConstructReport,
 {
     fn with_report(mut self, tx: Sender<MSG>) -> Self {
