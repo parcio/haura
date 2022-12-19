@@ -1,65 +1,64 @@
-name: pages-haura-getting-started
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
+name: Pages
+on: [push, pull_request]
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  mdbook:
+    name: mdBook
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-    - name: Configure Pages
-      uses: actions/configure-pages@v2
-    - name: Binary Cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          bin
-        key: ${{ runner.os }}-cargo-mdbook
-    - name: Install mdbook
-      run: |
-        mkdir bin
-        curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.21/mdbook-v0.4.21-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=bin
-        curl -sSL https://github.com/dylanowen/mdbook-graphviz/releases/download/v0.1.5/mdbook-graphviz_v0.1.5_x86_64-unknown-linux-musl.zip > mdviz.zip
-        unzip mdviz.zip -d bin
-    - name: Install graphviz
-      run: |
-        sudo apt update
-        sudo apt install -y graphviz
-    - name: Build book
-      run: |
-        PATH=$PATH:$PWD/bin
-        cd docs
-        ../bin/mdbook build
-    - name: Upload Book Artifact
-      uses: actions/upload-pages-artifact@v1
-      with:
-        path: ./docs/book
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rm --recursive --force "${HOME}/.cargo" "${HOME}/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
+      - name: Install Graphviz
+        run: |
+          sudo apt update || true
+          sudo apt --yes --no-install-recommends install graphviz
+      - name: Cache mdBook
+        id: cache
+        uses: actions/cache@v3
+        # Environment variables do not seem to work, use ~ instead.
+        with:
+          path: |
+            ~/.cargo
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-mdbook
+      - name: Install mdBook
+        run: |
+          cargo install mdbook
+          cargo install mdbook-graphviz
+      - name: Configure Pages
+        uses: actions/configure-pages@v2
+      - name: Build book
+        run: |
+          cd docs
+          mdbook build
+      - name: Upload book
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: docs/book
   deploy:
-    runs-on: ubuntu-latest
-    needs: build
+    name: Deploy
+    needs: mdbook
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-    - name: Deploy Pages
-      id: deployment
-      uses: actions/deploy-pages@v1
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v1

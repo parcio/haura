@@ -1,11 +1,5 @@
 name: CI
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+on: [push, pull_request]
 jobs:
   dependencies:
     name: Dependencies
@@ -18,9 +12,9 @@ jobs:
           persist-credentials: false
       - name: Install Rust
         run: |
+          rm --recursive --force "${HOME}/.cargo" "${HOME}/.rustup"
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
-          rustup toolchain install stable --profile minimal --force
           echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
       - name: Cache dependencies
         id: cache
@@ -56,9 +50,9 @@ jobs:
           persist-credentials: false
       - name: Install Rust
         run: |
+          rm --recursive --force "${HOME}/.cargo" "${HOME}/.rustup"
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
-          rustup toolchain install stable --profile minimal --force
           echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
       - name: Cache dependencies
         id: cache
@@ -94,9 +88,9 @@ jobs:
           persist-credentials: false
       - name: Install Rust
         run: |
+          rm --recursive --force "${HOME}/.cargo" "${HOME}/.rustup"
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
-          rustup toolchain install stable --profile minimal --force
           echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
       - name: Cache dependencies
         id: cache
@@ -129,41 +123,38 @@ jobs:
           persist-credentials: false
       - name: Install Rust
         run: |
+          rm --recursive --force "${HOME}/.cargo" "${HOME}/.rustup"
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
-          rustup toolchain install stable --profile minimal --force
-      - name: Cargo MSRV Cache
+          echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
+      - name: Cache MSRV
         id: cache
         uses: actions/cache@v3
+        # Environment variables do not seem to work, use ~ instead.
         with:
           path: |
             ~/.cargo
-            ~/julea
-          # This is only supposed to cache the cargo-msrv binary, for this the
-          # rust version and other infos are irrelevant.
-          key: ubuntu-22.04-rustc
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-msrv
       - name: Prepare JULEA
         run: |
-          sudo apt update
-          sudo apt install libglib2.0-0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
-          # use forked version
-          cd ~
-          git clone -b modules-conditional-unload https://github.com/tilpner/julea.git
-      - name: Install cargo-msrv
+          sudo apt update || true
+          sudo apt --yes --no-install-recommends install pkgconf libglib2.0-dev libbson-dev
+          # FIXME use forked version
+          git clone --depth 1 --branch modules-conditional-unload https://github.com/tilpner/julea.git "${HOME}/julea"
+      - name: Install MSRV
         run: |
-          # Will skip compilation if already present
           cargo install cargo-msrv
-      - name: Verify betree MSRV
+      - name: Verify betree
         run: |
           cd betree
           cargo msrv verify
-      - name: Verify bectl MSRV
+      - name: Verify bectl
         run: |
           cd bectl
           cargo msrv verify
-      - name: Verify julea-betree MSRV
+      - name: Verify julea-betree
         run: |
           cd julea-betree
-          export JULEA_INCLUDE=~/julea/include
+          export JULEA_INCLUDE="${HOME}/julea/include"
           export BINDGEN_EXTRA_CLANG_ARGS="$(pkg-config --cflags glib-2.0) $(pkg-config --cflags libbson-1.0)"
           cargo msrv verify
