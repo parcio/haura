@@ -38,6 +38,17 @@ as they are only refreshed when the strcture of the tree changes. This might
 happen on rebalancing. Although when we consider this than any node based
 algorithm needs to reconsider decisions anyway.
 
+To make the pivot key ready to use over all datasets in a database (which can have overlapping key sets) we require an additional information to direct the pivot key to the correct dataset. This can be done by adding a `DatasetId` to the key.
+
+```
+type Pivot = CowBytes;
+
+enum PivotKey {
+    Outer(Pivot, DatasetId),
+    Left(Pivot, DatasetId),
+}
+```
+
 # Purpose
 
 We can use the Pivot Key of a tree node to perform operations on specific nodes
