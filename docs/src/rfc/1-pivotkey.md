@@ -41,9 +41,23 @@ algorithm needs to reconsider decisions anyway.
 # Purpose
 
 We can use the Pivot Key of a tree node to perform operations on specific nodes
-which fulfill certain conditions such as access frequency or access probabilty,
-first to abstracted prefetching, second to perform abstracted migrations of
-data.
+which fulfill certain conditions such as access frequency or access probabilty.
+This is helpful in a number of scenarios such as data prefetching or
+disk-to-disk migrations.
+
+Since pivots are stored in the internal nodes we are required to read a
+substantial amount of data to retrieve knowledge about all exisiting pivot keys.
+This limits the efficient usage to scenarios in which we retrieve pivot keys,
+for example from messages emitted by the DMU, and record these as they are used
+by the user. Previously a similar scheme has been done by the migration policies
+which recorded disk offsets and set hints to the DMU to which tier a node is
+advised to be written.
+This limited hints to often accessed nodes which are likely to be migrated to
+faster storage, as not often accessed nodes would not encounter the sent hints.
+With Pivot Keys we could actively migrate them downwards, which is the main
+advantage of Pivot Keys. This can be useful in scenarios with additional small
+layers like NVRAM where we are then more flexible to migrate granular amounts of
+data for better tier utilization.
 
 # Drawbacks
 
