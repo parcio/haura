@@ -7,7 +7,7 @@ use super::{
 use crate::{
     allocator::Action,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{DmlWithHandler, Handler},
+    data_management::DmlWithHandler,
     database::DatabaseBuilder,
     tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer},
     StoragePreference,

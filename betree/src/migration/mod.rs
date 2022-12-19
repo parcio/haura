@@ -82,7 +82,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    data_management::{DmlWithHandler, Handler},
+    data_management::DmlWithHandler,
     database::DatabaseBuilder,
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,

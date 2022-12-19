@@ -7,7 +7,7 @@ use crate::{
     cow_bytes::SlicedCowBytes,
     data_management::{
         self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl,
-        DmlWithStorageHints, Dmu, Handler as DmuHandler, HandlerDml,
+        DmlWithStorageHints, Dmu, HandlerDml,
     },
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
@@ -71,12 +71,11 @@ type Checksum = XxHash;
 
 type ObjectPointer = data_management::impls::ObjectPointer<Checksum>;
 pub(crate) type ObjectRef = data_management::impls::ObjectRef<ObjectPointer>;
-type Object = Node<ObjectRef>;
+pub(crate) type Object = Node<ObjectRef>;
 
 pub(crate) type RootDmu = Dmu<
     ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>,
     StoragePoolUnit<XxHash>,
-    Handler,
     DmlMsg,
 >;
 
