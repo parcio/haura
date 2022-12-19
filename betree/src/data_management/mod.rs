@@ -315,6 +315,7 @@ pub trait DmlWithReport<Msg> {
 mod delegation;
 pub(crate) mod errors;
 pub(crate) mod impls;
+mod object_ptr;
 // mod handler_test;
 
 pub use self::{
