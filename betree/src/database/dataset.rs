@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{DmlWithHandler, Handler},
+    data_management::DmlWithHandler,
     database::DatabaseBuilder,
     migration::DatabaseMsg,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},

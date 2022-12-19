@@ -64,14 +64,6 @@ pub trait DmlBase: Sized {
     type Info: PodType;
 }
 
-/// Defines some base types for a `Handler`.
-pub trait HandlerTypes: Sized {
-    /// The generation of an object.
-    type Generation: PodType;
-    /// The info tagged to an object.
-    type Info: PodType;
-}
-
 /// Implementing types have an allocation preference, which can be invalidated
 /// and recomputed as necessary.
 pub trait HasStoragePreference {
@@ -199,62 +191,62 @@ pub enum CopyOnWriteReason {
     Steal,
 }
 
-/// Handler for a `Dml`.
-pub trait Handler<R: ObjectRef>: HandlerTypes {
-    /// The object type managed by this handler.
-    type Object: Object<R>;
-    /// The error type of this handler.
-    type Error: error::Error + Send;
-
-    /// Returns the current generation.
-    fn current_generation(&self) -> Self::Generation;
-
-    /// Updates the allocation bitmap due to an allocation or deallocation.
-    fn update_allocation_bitmap<X>(
-        &self,
-        offset: DiskOffset,
-        size: Block<u32>,
-        action: Action,
-        dmu: &X,
-    ) -> Result<(), Self::Error>
-    where
-        X: HandlerDml<
-            Object = Self::Object,
-            ObjectRef = R,
-            ObjectPointer = R::ObjectPointer,
-            Info = Self::Info,
-        >,
-        R::ObjectPointer: Serialize + DeserializeOwned;
-
-    /// Retrieves the allocation bitmap for specific segment.
-    fn get_allocation_bitmap<X>(
-        &self,
-        id: SegmentId,
-        dmu: &X,
-    ) -> Result<SegmentAllocator, Self::Error>
-    where
-        X: HandlerDml<
-            Object = Self::Object,
-            ObjectRef = R,
-            ObjectPointer = R::ObjectPointer,
-            Info = Self::Info,
-        >,
-        R::ObjectPointer: Serialize + DeserializeOwned;
-
-    /// Returns the amount of free space (in blocks) for a given top-level vdev.
-    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo>;
-    /// Returns the amount of free space (in blocks) over a whole storage tier.
-    fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo>;
-    /// Will be called when an object has been made mutable.
-    /// May be used to mark the data blocks for delayed deallocation.
-    fn copy_on_write(
-        &self,
-        offset: DiskOffset,
-        size: Block<u32>,
-        generation: Self::Generation,
-        info: Self::Info,
-    ) -> CopyOnWriteEvent;
-}
+// /// Handler for a `Dml`.
+// pub trait Handler<R: ObjectRef>: Sized {
+//     /// The object type managed by this handler.
+//     type Object: Object<R>;
+//     /// The error type of this handler.
+//     type Error: error::Error + Send;
+//
+//     /// Returns the current generation.
+//     fn current_generation(&self) -> Self::Generation;
+//
+//     /// Updates the allocation bitmap due to an allocation or deallocation.
+//     fn update_allocation_bitmap<X>(
+//         &self,
+//         offset: DiskOffset,
+//         size: Block<u32>,
+//         action: Action,
+//         dmu: &X,
+//     ) -> Result<(), Self::Error>
+//     where
+//         X: HandlerDml<
+//             Object = Self::Object,
+//             ObjectRef = R,
+//             ObjectPointer = R::ObjectPointer,
+//             Info = Self::Info,
+//         >,
+//         R::ObjectPointer: Serialize + DeserializeOwned;
+//
+//     /// Retrieves the allocation bitmap for specific segment.
+//     fn get_allocation_bitmap<X>(
+//         &self,
+//         id: SegmentId,
+//         dmu: &X,
+//     ) -> Result<SegmentAllocator, Self::Error>
+//     where
+//         X: HandlerDml<
+//             Object = Self::Object,
+//             ObjectRef = R,
+//             ObjectPointer = R::ObjectPointer,
+//             Info = Self::Info,
+//         >,
+//         R::ObjectPointer: Serialize + DeserializeOwned;
+//
+//     /// Returns the amount of free space (in blocks) for a given top-level vdev.
+//     fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo>;
+//     /// Returns the amount of free space (in blocks) over a whole storage tier.
+//     fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo>;
+//     /// Will be called when an object has been made mutable.
+//     /// May be used to mark the data blocks for delayed deallocation.
+//     fn copy_on_write(
+//         &self,
+//         offset: DiskOffset,
+//         size: Block<u32>,
+//         generation: Self::Generation,
+//         info: Self::Info,
+//     ) -> CopyOnWriteEvent;
+// }
 
 /// The Data Mangement Layer
 pub trait Dml: HandlerDml {
