@@ -1,4 +1,4 @@
-use super::{errors::*, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object, PodType};
+use super::{errors::*, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object, PodType, object_ptr::ObjectPointer};
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     buffer::Buf,
@@ -68,12 +68,18 @@ impl<D> ObjectRef<ObjectPointer<D>> {
     fn as_key(&self) -> ObjectKey<Generation> {
         match *self {
             ObjectRef::Unmodified(ref ptr) => ObjectKey::Unmodified {
-                offset: ptr.offset,
-                generation: ptr.generation,
+                offset: ptr.offset(),
+                generation: ptr.generation(),
             },
             ObjectRef::Modified(mid) => ObjectKey::Modified(mid),
             ObjectRef::InWriteback(mid) => ObjectKey::InWriteback(mid),
         }
+    }
+}
+
+impl<D> From<ObjectPointer<D>> for ObjectRef<ObjectPointer<D>> {
+    fn from(ptr: ObjectPointer<D>) -> Self {
+        ObjectRef::Unmodified(ptr)
     }
 }
 
@@ -136,72 +142,6 @@ where
         E: Deserializer<'de>,
     {
         ObjectPointer::<D>::deserialize(deserializer).map(ObjectRef::Unmodified)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ObjectPointer<D> {
-    decompression_tag: DecompressionTag,
-    checksum: D,
-    offset: DiskOffset,
-    size: Block<u32>,
-    info: DatasetId,
-    generation: Generation,
-}
-
-impl<D> HasStoragePreference for ObjectPointer<D> {
-    fn current_preference(&self) -> Option<StoragePreference> {
-        Some(self.correct_preference())
-    }
-
-    fn recalculate(&self) -> StoragePreference {
-        self.correct_preference()
-    }
-
-    fn correct_preference(&self) -> StoragePreference {
-        StoragePreference::new(self.offset.storage_class())
-    }
-
-    // There is no support in encoding storage preference right now.
-
-    fn system_storage_preference(&self) -> StoragePreference {
-        unimplemented!()
-    }
-
-    fn set_system_storage_preference(&mut self, _pref: StoragePreference) {
-        unimplemented!()
-    }
-}
-
-impl<D: StaticSize> StaticSize for ObjectPointer<D> {
-    fn static_size() -> usize {
-        <DecompressionTag as StaticSize>::static_size()
-            + D::static_size()
-            + DatasetId::static_size()
-            + Generation::static_size()
-            + <DiskOffset as StaticSize>::static_size()
-            + 4
-    }
-}
-
-impl<D> From<ObjectPointer<D>> for ObjectRef<ObjectPointer<D>> {
-    fn from(ptr: ObjectPointer<D>) -> Self {
-        ObjectRef::Unmodified(ptr)
-    }
-}
-
-impl<D> ObjectPointer<D> {
-    pub fn offset(&self) -> DiskOffset {
-        self.offset
-    }
-    pub fn size(&self) -> Block<u32> {
-        self.size
-    }
-    pub fn generation(&self) -> Generation {
-        self.generation
-    }
-    pub fn info(&self) -> DatasetId {
-        self.info
     }
 }
 

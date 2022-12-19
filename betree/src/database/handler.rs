@@ -1,12 +1,12 @@
 use super::{
-    dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation, Object,
-    ObjectPointer, ObjectRef, StorageInfo, TreeInner,
+    dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation,
+    StorageInfo, TreeInner, ObjectPointer,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, CopyOnWriteEvent, HandlerDml},
+    data_management::{self, CopyOnWriteEvent, HandlerDml, ObjectRef},
     storage_pool::DiskOffset,
     tree::{DefaultMessageAction, Tree, TreeBaseLayer},
     vdev::Block,
@@ -36,9 +36,9 @@ pub fn update_allocation_bitmap_msg(
 
 /// The database handler, holding management data for interactions
 /// between the database and data management layers.
-pub struct Handler {
+pub struct Handler<Hash> {
     pub(crate) root_tree_inner:
-        AtomicOption<Arc<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
+        AtomicOption<Arc<TreeInner<ObjectRef<ObjectPointer<Hash>>, DatasetId, DefaultMessageAction>>>,
     pub(crate) root_tree_snapshot:
         RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
