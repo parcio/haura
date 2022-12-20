@@ -10,7 +10,7 @@ use super::{
 use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef},
+    data_management::{Dml, HasStoragePreference, ObjectRef},
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
     tree::MessageAction,
@@ -57,7 +57,7 @@ const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// The actual tree type.
-pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
+pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     inner: I,
     dml: X,
     evict: bool,
@@ -65,7 +65,7 @@ pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     storage_preference: StoragePreference,
 }
 
-impl<X: Clone + DmlBase, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clone
+impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clone
     for Tree<X, M, I>
 {
     fn clone(&self) -> Self {
@@ -112,7 +112,7 @@ impl<R, I, M> Inner<R, I, M> {
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>> + From<Inner<X::ObjectRef, X::Info, M>>,
@@ -164,7 +164,7 @@ where
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectRef<ObjectPointer = X::ObjectPointer>,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
@@ -207,7 +207,7 @@ where
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
@@ -396,7 +396,7 @@ where
 
 // impl<X, R, M> Tree<X, M, Arc<Inner<X::ObjectRef, X::Info, M>>>
 // where
-//     X: HandlerDml<Object = Node<Message<M>, R>, ObjectRef = R>,
+//     X: Dml<Object = Node<Message<M>, R>, ObjectRef = R>,
 //     R: ObjectRef,
 //     M: MessageAction,
 // {
@@ -408,7 +408,7 @@ where
 
 impl<X, R, M, I> TreeBaseLayer<M> for Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,

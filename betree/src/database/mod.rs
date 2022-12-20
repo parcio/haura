@@ -6,8 +6,8 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlBase, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl,
-        DmlWithStorageHints, Dmu, HandlerDml,
+        self, Dml, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl,
+        DmlWithStorageHints, Dmu,
     },
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
@@ -95,9 +95,7 @@ pub(crate) type DatasetTree<Dmu> = RootTree<Dmu>;
 pub trait DatabaseBuilder: Send + Sync + 'static
 where
     Self::Spu: StoragePoolLayer,
-    Self::Dmu: DmlBase<ObjectRef = ObjectRef, ObjectPointer = ObjectPointer, Info = DatasetId>
-        + Dml<Object = Object, ObjectRef = ObjectRef>
-        + HandlerDml<Object = Object>
+    Self::Dmu: Dml<Object = Object, ObjectRef = ObjectRef, Info = DatasetId, ObjectPointer = ObjectPointer>
         + DmlWithHandler<Handler = DbHandler>
         + DmlWithSpl<Spl = Self::Spu>
         + DmlWithCache

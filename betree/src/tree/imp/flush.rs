@@ -11,14 +11,14 @@ use super::{
 };
 use crate::{
     cache::AddSize,
-    data_management::{HandlerDml, HasStoragePreference, ObjectRef},
+    data_management::{Dml, HasStoragePreference, ObjectRef},
     size::Size,
     tree::{errors::*, imp::internal::MergeChildResult, MessageAction},
 };
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,

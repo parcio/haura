@@ -7,7 +7,7 @@ use crate::{
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, CopyOnWriteEvent, HandlerDml, HasStoragePreference, ObjectPointer, ObjectRef,
+        self, CopyOnWriteEvent, Dml, HasStoragePreference, ObjectPointer, ObjectRef,
     },
     storage_pool::DiskOffset,
     tree::{DefaultMessageAction, Node, Tree, TreeBaseLayer},
@@ -64,7 +64,7 @@ impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
         dmu: &'a X,
     ) -> impl TreeBaseLayer<DefaultMessageAction> + 'a
     where
-        X: HandlerDml<
+        X: Dml<
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
@@ -84,7 +84,7 @@ impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
         dmu: &'a X,
     ) -> Option<impl TreeBaseLayer<DefaultMessageAction> + 'a>
     where
-        X: HandlerDml<
+        X: Dml<
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
@@ -121,7 +121,7 @@ impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
         dmu: &X,
     ) -> Result<()>
     where
-        X: HandlerDml<
+        X: Dml<
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
@@ -161,7 +161,7 @@ impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
 
     pub fn get_allocation_bitmap<X>(&self, id: SegmentId, dmu: &X) -> Result<SegmentAllocator>
     where
-        X: HandlerDml<
+        X: Dml<
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
