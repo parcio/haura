@@ -630,9 +630,10 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         Ok(())
     }
 
-    #[cfg(feature = "experimental-api")]
-    pub fn clear_cache(&self) -> Result<()> {
-        self.root_tree.dmu().clear_cache();
+    /// Drops the entire cache. This is useful when considering performance
+    /// measurements regarding "cold" environments.
+    pub fn drop_cache(&self) -> Result<()> {
+        self.root_tree.dmu().drop_cache();
         Ok(())
     }
 
