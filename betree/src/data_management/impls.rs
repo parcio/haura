@@ -965,20 +965,6 @@ where
         Ok(())
     }
 
-    #[cfg(feature = "experimental-api")]
-    fn clear_cache(&self) -> Result<(), Error> {
-        let mut prev_cache_size = 0;
-        loop {
-            let mut cache = self.cache.write();
-            if cache.size() == prev_cache_size {
-                break;
-            }
-            prev_cache_size = cache.size();
-            self.evict(cache)?
-        }
-        Ok(())
-    }
-
     fn verify_cache(&self) {
         self.cache.write().verify();
     }

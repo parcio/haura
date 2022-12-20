@@ -64,11 +64,6 @@ where
         (**self).evict()
     }
 
-    #[cfg(feature = "experimental-api")]
-    fn clear_cache(&self) -> Result<(), Error> {
-        (**self).clear_cache()
-    }
-
     fn verify_cache(&self) {
         (**self).verify_cache()
     }
