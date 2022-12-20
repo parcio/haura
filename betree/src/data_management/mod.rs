@@ -55,16 +55,6 @@ pub trait ObjectRef: Serialize + DeserializeOwned + StaticSize + Debug + 'static
     fn get_unmodified(&self) -> Option<&Self::ObjectPointer>;
 }
 
-/// Defines some base types for a `Dml`.
-pub trait DmlBase: Sized {
-    /// A reference to an object managed by this `Dmu`.
-    type ObjectRef: ObjectRef<ObjectPointer = Self::ObjectPointer>;
-    /// The pointer type to an on-disk object.
-    type ObjectPointer: Serialize + DeserializeOwned + Clone;
-    /// The info type which is tagged to each object.
-    type Info: PodType;
-}
-
 /// Implementing types have an allocation preference, which can be invalidated
 /// and recomputed as necessary.
 pub trait HasStoragePreference {
@@ -119,7 +109,14 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
 }
 
 /// A `Dml` for a specific `Handler`.
-pub trait HandlerDml: DmlBase {
+pub trait Dml: Sized {
+    /// A reference to an object managed by this `Dmu`.
+    type ObjectRef: ObjectRef<ObjectPointer = Self::ObjectPointer>;
+    /// The pointer type to an on-disk object.
+    type ObjectPointer: Serialize + DeserializeOwned + Clone;
+    /// The info type which is tagged to each object.
+    type Info: PodType;
+
     /// The object type managed by this Dml.
     type Object: Object<Self::ObjectRef>;
 
@@ -175,6 +172,27 @@ pub trait HandlerDml: DmlBase {
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
 
     fn verify_cache(&self);
+
+    /// Writes back an object and all its dependencies.
+    /// `acquire_or_lock` shall return a lock guard
+    /// that provides mutable access to the object reference.
+    fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
+    where
+        F: FnMut() -> G,
+        G: DerefMut<Target = Self::ObjectRef>;
+
+    /// Prefetch session type.
+    type Prefetch;
+
+    /// Prefetches the on-disk object identified by `or`.
+    /// Will return `None` if object is in cache.
+    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, Error>;
+
+    /// Finishes the prefetching.
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error>;
+
+    /// Drops the cache entries.
+    fn drop_cache(&self);
 }
 
 pub enum CopyOnWriteEvent {
@@ -244,30 +262,6 @@ pub enum CopyOnWriteReason {
 //         info: Self::Info,
 //     ) -> CopyOnWriteEvent;
 // }
-
-/// The Data Mangement Layer
-pub trait Dml: HandlerDml {
-    /// Writes back an object and all its dependencies.
-    /// `acquire_or_lock` shall return a lock guard
-    /// that provides mutable access to the object reference.
-    fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
-    where
-        F: FnMut() -> G,
-        G: DerefMut<Target = Self::ObjectRef>;
-
-    /// Prefetch session type.
-    type Prefetch;
-
-    /// Prefetches the on-disk object identified by `or`.
-    /// Will return `None` if object is in cache.
-    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, Error>;
-
-    /// Finishes the prefetching.
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error>;
-
-    /// Drops the cache entries.
-    fn drop_cache(&self);
-}
 
 /// Denotes if an implementor of the [Dml] can utilize an allocation handler.
 pub trait DmlWithHandler {

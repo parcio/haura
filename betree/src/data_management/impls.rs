@@ -1,5 +1,5 @@
 use super::{
-    errors::*, object_ptr::ObjectPointer, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object,
+    errors::*, object_ptr::ObjectPointer, CopyOnWriteEvent, Dml, HasStoragePreference, Object,
     PodType,
 };
 use crate::{
@@ -236,18 +236,6 @@ where
     }
 }
 
-impl<E, SPL> DmlBase for Dmu<E, SPL>
-where
-    E: Cache<Key = ObjectKey<Generation>>,
-    <E as Cache>::Value: SizeMut,
-    SPL: StoragePoolLayer,
-    SPL::Checksum: StaticSize,
-{
-    type ObjectRef = ObjectRef<Self::ObjectPointer>;
-    type ObjectPointer = ObjectPointer<SPL::Checksum>;
-    type Info = DatasetId;
-}
-
 impl<E, SPL> Dmu<E, SPL>
 where
     E: Cache<
@@ -266,9 +254,9 @@ where
     /// deallocation on completion.
     fn steal(
         &self,
-        or: &mut <Self as DmlBase>::ObjectRef,
+        or: &mut <Self as Dml>::ObjectRef,
         info: DatasetId,
-    ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRefMut>, Error> {
+    ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, Error> {
         debug!("Stealing {or:?}");
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
         let old_ptr = {
@@ -301,7 +289,7 @@ where
     ///       `InWriteback(_)`.
     ///     - Previous eviction after write back (`InWriteback(_)`) Will change
     ///       `or` to `Unmodified(_)`.
-    fn fix_or(&self, or: &mut <Self as DmlBase>::ObjectRef) {
+    fn fix_or(&self, or: &mut <Self as Dml>::ObjectRef) {
         match or {
             ObjectRef::Unmodified(..) => unreachable!(),
             ObjectRef::Modified(mid) => {
@@ -341,7 +329,7 @@ where
 
     /// Fetches synchronously an object from disk and inserts it into the
     /// cache.
-    fn fetch(&self, op: &<Self as DmlBase>::ObjectPointer) -> Result<(), Error> {
+    fn fetch(&self, op: &<Self as Dml>::ObjectPointer) -> Result<(), Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
         let mut decompression_state = op.decompression_tag().new_decompression()?;
@@ -365,7 +353,7 @@ where
     /// cache.
     fn try_fetch_async(
         &self,
-        op: &<Self as DmlBase>::ObjectPointer,
+        op: &<Self as Dml>::ObjectPointer,
     ) -> Result<
         impl TryFuture<Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf), Error = Error>
             + Send,
@@ -461,10 +449,10 @@ where
 
     fn handle_write_back(
         &self,
-        mut object: <Self as super::HandlerDml>::CacheValueRefMut,
+        mut object: <Self as Dml>::CacheValueRefMut,
         mid: ModifiedObjectId,
         evict: bool,
-    ) -> Result<<Self as DmlBase>::ObjectPointer, Error> {
+    ) -> Result<<Self as Dml>::ObjectPointer, Error> {
         let object_size = {
             #[cfg(debug_assertions)]
             {
@@ -740,7 +728,7 @@ where
         &self,
         mid: ModifiedObjectId,
         dep_mids: &mut Vec<ModifiedObjectId>,
-    ) -> Result<Option<<Self as super::HandlerDml>::CacheValueRefMut>, ()> {
+    ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, ()> {
         trace!("prepare_write_back: Enter");
         loop {
             // trace!("prepare_write_back: Trying to acquire cache write lock");
@@ -798,7 +786,7 @@ where
     }
 }
 
-impl<E, SPL> super::HandlerDml for Dmu<E, SPL>
+impl<E, SPL> super::Dml for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
@@ -807,14 +795,17 @@ where
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
-    type Object = Node<ObjectRef<ObjectPointer<SPL::Checksum>>>;
+    type ObjectPointer = ObjectPointer<SPL::Checksum>;
+    type ObjectRef = ObjectRef<Self::ObjectPointer>;
+    type Info = DatasetId;
+    type Object = Node<Self::ObjectRef>;
     type CacheValueRef = CacheValueRef<
         E::ValueRef,
-        RwLockReadGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        RwLockReadGuard<'static, Self::Object>,
     >;
     type CacheValueRefMut = CacheValueRef<
         E::ValueRef,
-        RwLockWriteGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        RwLockWriteGuard<'static, Self::Object>,
     >;
 
     fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
@@ -968,17 +959,7 @@ where
     fn verify_cache(&self) {
         self.cache.write().verify();
     }
-}
 
-impl<E, SPL> super::Dml for Dmu<E, SPL>
-where
-    E: Cache<
-        Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
-    >,
-    SPL: StoragePoolLayer,
-    SPL::Checksum: StaticSize,
-{
     /// Trigger a write back of an entire subtree.  This is intended for use
     /// with a dataset root, though will function on any subtree specified if
     /// needed.  A write back on a subtree will always write the lowest modified
@@ -1047,7 +1028,7 @@ where
 
     type Prefetch = Pin<
         Box<
-            dyn Future<Output = Result<(<Self as DmlBase>::ObjectPointer, Buf), Error>>
+            dyn Future<Output = Result<(<Self as Dml>::ObjectPointer, Buf), Error>>
                 + Send
                 + 'static,
         >,

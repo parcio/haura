@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HandlerDml, HasStoragePreference, Object, ObjectRef},
+    data_management::{Dml, HasStoragePreference, Object, ObjectRef},
     size::{Size, SizeMut, StaticSize},
     storage_pool::DiskOffset,
     tree::MessageAction,
@@ -569,7 +569,7 @@ impl serde::Serialize for ByteString {
 impl<N: HasStoragePreference> Node<N> {
     pub(crate) fn node_info<D>(&self, dml: &D) -> NodeInfo
     where
-        D: HandlerDml<Object = Node<N>, ObjectRef = N>,
+        D: Dml<Object = Node<N>, ObjectRef = N>,
         N: ObjectRef<ObjectPointer = D::ObjectPointer>,
     {
         match &self.0 {
