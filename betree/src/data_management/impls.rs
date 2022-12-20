@@ -1,4 +1,7 @@
-use super::{errors::*, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object, PodType, object_ptr::ObjectPointer};
+use super::{
+    errors::*, object_ptr::ObjectPointer, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object,
+    PodType,
+};
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     buffer::Buf,
@@ -7,11 +10,12 @@ use crate::{
     compression::{CompressionBuilder, DecompressionTag},
     data_management::CopyOnWriteReason,
     database::{DatasetId, Generation, Handler},
-    migration::ConstructReport,
+    migration::DmlMsg,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
+    tree::Node,
     vdev::{Block, BLOCK_SIZE},
-    StoragePreference, tree::Node,
+    StoragePreference,
 };
 use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
@@ -146,7 +150,7 @@ where
 }
 
 /// The Data Management Unit.
-pub struct Dmu<E: 'static, SPL: StoragePoolLayer, MSG: 'static>
+pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
 where
     SPL::Checksum: StaticSize,
 {
@@ -169,10 +173,10 @@ where
     allocation_data: Box<[Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>]>,
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
-    report_tx: Option<Sender<MSG>>,
+    report_tx: Option<Sender<DmlMsg>>,
 }
 
-impl<E, SPL, MSG> Dmu<E, SPL, MSG>
+impl<E, SPL> Dmu<E, SPL>
 where
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -232,7 +236,7 @@ where
     }
 }
 
-impl<E, SPL, MSG> DmlBase for Dmu<E, SPL, MSG>
+impl<E, SPL> DmlBase for Dmu<E, SPL>
 where
     E: Cache<Key = ObjectKey<Generation>>,
     <E as Cache>::Value: SizeMut,
@@ -244,12 +248,14 @@ where
     type Info = DatasetId;
 }
 
-impl<E, SPL, MSG> Dmu<E, SPL, MSG>
+impl<E, SPL> Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    MSG: ConstructReport,
 {
     /// Stealing an [ObjectRef] can have multiple effects.  First, the
     /// corresponding node is moved in cache to the [ObjectKey::Modified] state.
@@ -328,7 +334,7 @@ where
             steal,
         ) {
             let _ = tx
-                .send(MSG::remove(obj_ptr.offset(), obj_ptr.size()))
+                .send(DmlMsg::remove(obj_ptr.offset(), obj_ptr.size()))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
     }
@@ -342,7 +348,9 @@ where
         let offset = op.offset();
         let generation = op.generation();
 
-        let compressed_data = self.pool.read(op.size(), op.offset(), op.checksum().clone())?;
+        let compressed_data = self
+            .pool
+            .read(op.size(), op.offset(), op.checksum().clone())?;
 
         let object: Node<ObjectRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(&compressed_data)?;
@@ -565,12 +573,12 @@ where
             // from the tree...  o.O
             if let (Some(report_tx), Some(old_offset)) = (&self.report_tx, mid.2) {
                 let _ = report_tx
-                    .send(MSG::write(old_offset, size, mid.2))
+                    .send(DmlMsg::write(old_offset, size, mid.2))
                     .map_err(|_| warn!("Channel Receiver has been dropped."));
             }
         } else if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
-                .send(MSG::write(obj_ptr.offset(), size, mid.2))
+                .send(DmlMsg::write(obj_ptr.offset(), size, mid.2))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
@@ -790,16 +798,24 @@ where
     }
 }
 
-impl<E, SPL, MSG> super::HandlerDml for Dmu<E, SPL, MSG>
+impl<E, SPL> super::HandlerDml for Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    MSG: ConstructReport,
 {
     type Object = Node<ObjectRef<ObjectPointer<SPL::Checksum>>>;
-    type CacheValueRef = CacheValueRef<E::ValueRef, RwLockReadGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>;
-    type CacheValueRefMut = CacheValueRef<E::ValueRef, RwLockWriteGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>;
+    type CacheValueRef = CacheValueRef<
+        E::ValueRef,
+        RwLockReadGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >;
+    type CacheValueRefMut = CacheValueRef<
+        E::ValueRef,
+        RwLockWriteGuard<'static, Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >;
 
     fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
         let result = {
@@ -835,7 +851,7 @@ where
                 self.fetch(ptr)?;
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
-                        .send(MSG::fetch(ptr.offset(), ptr.size()))
+                        .send(DmlMsg::fetch(ptr.offset(), ptr.size()))
                         .map_err(|_| warn!("Channel Receiver has been dropped."));
                 }
                 // Check if any storage hints are available and update the node.
@@ -917,7 +933,10 @@ where
         }
     }
 
-    fn get_and_remove(&self, mut or: Self::ObjectRef) -> Result<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>, Error> {
+    fn get_and_remove(
+        &self,
+        mut or: Self::ObjectRef,
+    ) -> Result<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>, Error> {
         let obj = loop {
             self.get(&mut or)?;
             match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
@@ -965,12 +984,14 @@ where
     }
 }
 
-impl<E, SPL, MSG> super::Dml for Dmu<E, SPL, MSG>
+impl<E, SPL> super::Dml for Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    MSG: ConstructReport,
 {
     /// Trigger a write back of an entire subtree.  This is intended for use
     /// with a dataset root, though will function on any subtree specified if
@@ -1071,7 +1092,7 @@ where
         self.insert_object_into_cache(key, RwLock::new(object));
         if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
-                .send(MSG::fetch(ptr.offset(), ptr.size()))
+                .send(DmlMsg::fetch(ptr.offset(), ptr.size()))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         Ok(())
@@ -1090,9 +1111,12 @@ where
     }
 }
 
-impl<E, SPL, MSG> super::DmlWithHandler for Dmu<E, SPL, MSG>
+impl<E, SPL> super::DmlWithHandler for Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
@@ -1103,9 +1127,12 @@ where
     }
 }
 
-impl<E, SPL, MSG> super::DmlWithSpl for Dmu<E, SPL, MSG>
+impl<E, SPL> super::DmlWithSpl for Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
@@ -1116,9 +1143,12 @@ where
     }
 }
 
-impl<E, SPL, MSG> super::DmlWithCache for Dmu<E, SPL, MSG>
+impl<E, SPL> super::DmlWithCache for Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
@@ -1129,9 +1159,12 @@ where
     }
 }
 
-impl<E, SPL, MSG> super::DmlWithStorageHints for Dmu<E, SPL, MSG>
+impl<E, SPL> super::DmlWithStorageHints for Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
@@ -1144,19 +1177,21 @@ where
     }
 }
 
-impl<E, SPL, MSG> super::DmlWithReport<MSG> for Dmu<E, SPL, MSG>
+impl<E, SPL> super::DmlWithReport for Dmu<E, SPL>
 where
-    E: Cache<Key = ObjectKey<Generation>, Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>>,
+    E: Cache<
+        Key = ObjectKey<Generation>,
+        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+    >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
-    MSG: ConstructReport,
 {
-    fn with_report(mut self, tx: Sender<MSG>) -> Self {
+    fn with_report(mut self, tx: Sender<DmlMsg>) -> Self {
         self.report_tx = Some(tx);
         self
     }
 
-    fn set_report(&mut self, tx: Sender<MSG>) {
+    fn set_report(&mut self, tx: Sender<DmlMsg>) {
         self.report_tx = Some(tx);
     }
 }

@@ -1,22 +1,13 @@
-use super::{errors::*, CopyOnWriteEvent, DmlBase, HasStoragePreference, Object, PodType, ObjectRef};
+use super::HasStoragePreference;
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId},
-    buffer::Buf,
-    cache::{AddSize, Cache, ChangeKeyError, RemoveError},
-    checksum::{Builder, Checksum, State},
-    compression::{CompressionBuilder, DecompressionTag},
-    data_management::CopyOnWriteReason,
-    database::{DatasetId, Generation, Handler, Object as FixObject},
-    migration::ConstructReport,
-    size::{Size, SizeMut, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
-    vdev::{Block, BLOCK_SIZE},
+    compression::DecompressionTag,
+    database::{DatasetId, Generation},
+    size::StaticSize,
+    storage_pool::DiskOffset,
+    vdev::Block,
     StoragePreference,
 };
-use serde::{
-    de::DeserializeOwned, ser::Error as SerError, Deserialize, Deserializer, Serialize, Serializer,
-};
-
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 /// A pointer to an on-disk serialized object.

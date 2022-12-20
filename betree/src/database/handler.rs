@@ -1,14 +1,16 @@
 use super::{
-    dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation,
-    StorageInfo, TreeInner,
+    dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation, StorageInfo,
+    TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, CopyOnWriteEvent, HandlerDml, ObjectRef, ObjectPointer, HasStoragePreference},
+    data_management::{
+        self, CopyOnWriteEvent, HandlerDml, HasStoragePreference, ObjectPointer, ObjectRef,
+    },
     storage_pool::DiskOffset,
-    tree::{DefaultMessageAction, Tree, TreeBaseLayer, Node},
+    tree::{DefaultMessageAction, Node, Tree, TreeBaseLayer},
     vdev::Block,
     StoragePreference,
 };
@@ -37,10 +39,8 @@ pub fn update_allocation_bitmap_msg(
 /// The database handler, holding management data for interactions
 /// between the database and data management layers.
 pub struct Handler<OR: ObjectRef> {
-    pub(crate) root_tree_inner:
-        AtomicOption<Arc<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
-    pub(crate) root_tree_snapshot:
-        RwLock<Option<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
+    pub(crate) root_tree_inner: AtomicOption<Arc<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
+    pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
     pub(crate) free_space: HashMap<(u8, u16), AtomicStorageInfo>,
