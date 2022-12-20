@@ -5,6 +5,7 @@ use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
     database::StorageInfo,
+    migration::DmlMsg,
     size::{Size, StaticSize},
     storage_pool::DiskOffset,
     vdev::Block,
@@ -305,11 +306,11 @@ pub trait DmlWithStorageHints {
 /// Extension of an DMU to signal that it supports a message based report format.
 /// Implemented via channels the DMU is allowed to send any number of messages to an consuming sink.
 /// It is advised to use `unbound` channels for this purpose.
-pub trait DmlWithReport<Msg> {
+pub trait DmlWithReport {
     /// Attach a reporting channel to the DML
-    fn with_report(self, tx: Sender<Msg>) -> Self;
+    fn with_report(self, tx: Sender<DmlMsg>) -> Self;
     /// Set a reporting channel to the DML
-    fn set_report(&mut self, tx: Sender<Msg>);
+    fn set_report(&mut self, tx: Sender<DmlMsg>);
 }
 
 mod delegation;

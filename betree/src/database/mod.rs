@@ -77,7 +77,6 @@ type DbHandler = Handler<ObjectRef>;
 pub(crate) type RootDmu = Dmu<
     ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>,
     StoragePoolUnit<XxHash>,
-    DmlMsg,
 >;
 
 pub(crate) type MessageTree<Dmu, Message> =
@@ -103,7 +102,7 @@ where
         + DmlWithSpl<Spl = Self::Spu>
         + DmlWithCache
         + DmlWithStorageHints
-        + DmlWithReport<DmlMsg>
+        + DmlWithReport
         + Send
         + Sync
         + 'static,
