@@ -1,3 +1,5 @@
+use crate::size::StaticSize;
+
 use super::BLOCK_SIZE;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,6 +12,13 @@ use std::{
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Block<T: Uint>(pub T);
+
+impl<T: Uint> StaticSize for Block<T> {
+    fn static_size() -> usize {
+        // Works for standard sizes
+        std::mem::size_of::<T>()
+    }
+}
 
 pub trait Uint:
     Copy
