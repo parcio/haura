@@ -51,7 +51,7 @@ impl<D: StaticSize> StaticSize for ObjectPointer<D> {
             + DatasetId::static_size()
             + Generation::static_size()
             + <DiskOffset as StaticSize>::static_size()
-            + 4
+            + Block::<u32>::static_size()
     }
 }
 
