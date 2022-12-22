@@ -6,8 +6,8 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl,
-        DmlWithStorageHints, Dmu,
+        self, Dml, DmlWithCache, DmlWithHandler, DmlWithReport, DmlWithSpl, DmlWithStorageHints,
+        Dmu,
     },
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
