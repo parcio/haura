@@ -232,7 +232,7 @@ impl<N> ChildBuffer<N> {
                 let lower_size = lower_msg.size();
                 let merged_msg = msg_action.merge(&key, msg, lower_msg);
                 let merged_msg_size = merged_msg.size();
-                (*e.get_mut()).1 = merged_msg;
+                e.get_mut().1 = merged_msg;
                 self.buffer_entries_size -= lower_size;
                 self.buffer_entries_size += merged_msg_size;
                 merged_msg_size as isize - lower_size as isize

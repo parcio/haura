@@ -1,23 +1,12 @@
-use super::{
-    errors::*, object_ptr::ObjectPointer, CopyOnWriteEvent, Dml, HasStoragePreference, Object,
-    PodType,
-};
+use super::{object_ptr::ObjectPointer, HasStoragePreference};
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId},
-    buffer::Buf,
-    cache::{AddSize, Cache, ChangeKeyError, RemoveError},
-    checksum::{Builder, Checksum, State},
-    compression::{CompressionBuilder, DecompressionTag},
-    data_management::CopyOnWriteReason,
-    database::{DatasetId, Generation, Handler},
-    migration::DmlMsg,
-    size::{Size, SizeMut, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
-    tree::Node,
-    vdev::{Block, BLOCK_SIZE},
+    cache::{AddSize, Cache},
+    database::Generation,
+    size::StaticSize,
+    storage_pool::{DiskOffset, StoragePoolLayer},
     StoragePreference,
 };
-use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{
     de::DeserializeOwned, ser::Error as SerError, Deserialize, Deserializer, Serialize, Serializer,
 };
@@ -194,7 +183,7 @@ unsafe impl<T, U> StableDeref for CacheValueRef<T, RwLockReadGuard<'static, U>> 
 impl<T, U> Deref for CacheValueRef<T, RwLockReadGuard<'static, U>> {
     type Target = U;
     fn deref(&self) -> &U {
-        &*self.guard
+        &self.guard
     }
 }
 
@@ -203,12 +192,12 @@ unsafe impl<T, U> StableDeref for CacheValueRef<T, RwLockWriteGuard<'static, U>>
 impl<T, U> Deref for CacheValueRef<T, RwLockWriteGuard<'static, U>> {
     type Target = U;
     fn deref(&self) -> &U {
-        &*self.guard
+        &self.guard
     }
 }
 
 impl<T, U> DerefMut for CacheValueRef<T, RwLockWriteGuard<'static, U>> {
     fn deref_mut(&mut self) -> &mut U {
-        &mut *self.guard
+        &mut self.guard
     }
 }

@@ -392,9 +392,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             + (match self.0 {
                 PackedLeaf(_) => unreachable!(),
                 Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
-                Internal(ref mut internal) => {
-                    internal.insert_msg_buffer(msg_buffer, msg_action) as isize
-                }
+                Internal(ref mut internal) => internal.insert_msg_buffer(msg_buffer, msg_action),
             })
     }
 

@@ -113,7 +113,7 @@ where
         while self
             .buffer
             .front()
-            .map(|&(ref key, _)| match self.min_key {
+            .map(|(key, _)| match self.min_key {
                 Bounded::Included(ref min_key) => key < min_key,
                 Bounded::Excluded(ref min_key) => key <= min_key,
             })
@@ -125,7 +125,7 @@ where
             while self
                 .buffer
                 .back()
-                .map(|&(ref key, _)| key > max_key)
+                .map(|(key, _)| key > max_key)
                 .unwrap_or_default()
             {
                 self.buffer.pop_back().unwrap();
@@ -235,11 +235,11 @@ where
         // left_pivot_key..right_pivot_key.
         let msgs_iter = messages
             .into_iter()
-            .skip_while(|&(ref key, _)| match *left_pivot_key {
+            .skip_while(|(key, _)| match *left_pivot_key {
                 None => false,
                 Some(ref min_key) => key < min_key,
             })
-            .take_while(|&(ref key, _)| match *right_pivot_key {
+            .take_while(|(key, _)| match *right_pivot_key {
                 None => true,
                 Some(ref max_key) => key <= max_key,
             });

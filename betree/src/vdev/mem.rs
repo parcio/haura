@@ -61,7 +61,7 @@ impl Memory {
         match self.slice_blocks(size, offset) {
             Ok(slice) => {
                 let mut buf = BufWrite::with_capacity(size);
-                buf.write_all(&*slice)?;
+                buf.write_all(&slice)?;
                 #[cfg(feature = "latency_metrics")]
                 self.stats.read_op_latency.fetch_add(
                     start

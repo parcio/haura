@@ -6,9 +6,7 @@ use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{
-        self, CopyOnWriteEvent, Dml, HasStoragePreference, ObjectPointer, ObjectReference,
-    },
+    data_management::{CopyOnWriteEvent, Dml, HasStoragePreference, ObjectReference},
     storage_pool::DiskOffset,
     tree::{DefaultMessageAction, Node, Tree, TreeBaseLayer},
     vdev::Block,

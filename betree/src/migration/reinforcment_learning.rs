@@ -202,8 +202,7 @@ mod learning {
                 Hotness(0.0)
             } else {
                 Hotness(
-                    self.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
-                        / self.files.len() as f32,
+                    self.files.values().map(|v| v.hotness.0).sum::<f32>() / self.files.len() as f32,
                 )
             };
 
@@ -212,8 +211,8 @@ mod learning {
             } else {
                 Hotness(
                     self.files
-                        .iter()
-                        .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
+                        .values()
+                        .map(|v| v.hotness.0 * v.size.num_bytes() as f32)
                         .sum::<f32>()
                         / self.files.len() as f32,
                 )
@@ -439,13 +438,12 @@ mod learning {
                 num_reqs = 0;
             } else {
                 s1_not = Hotness(
-                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
-                        / tier.files.len() as f32,
+                    tier.files.values().map(|v| v.hotness.0).sum::<f32>() / tier.files.len() as f32,
                 );
                 s2_not = Hotness(
                     tier.files
-                        .iter()
-                        .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
+                        .values()
+                        .map(|v| v.hotness.0 * v.size.num_bytes() as f32)
                         .sum::<f32>()
                         / tier.files.len() as f32,
                 );
@@ -453,11 +451,11 @@ mod learning {
                     s3_not = Duration::from_secs_f32(0.0);
                     num_reqs = 0;
                 } else {
-                    num_reqs = tier.reqs.iter().map(|(_, reqs)| reqs.len()).sum::<usize>();
+                    num_reqs = tier.reqs.values().map(|reqs| reqs.len()).sum::<usize>();
                     s3_not = Duration::from_secs_f32(
                         tier.reqs
-                            .iter()
-                            .map(|(_, reqs)| {
+                            .values()
+                            .map(|reqs| {
                                 reqs.iter()
                                     .map(|req| req.response_time.as_secs_f32())
                                     .sum::<f32>()
@@ -483,13 +481,13 @@ mod learning {
                         s2_up = Hotness(100000.0);
                     } else {
                         s1_up = Hotness(
-                            tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
+                            tier.files.values().map(|v| v.hotness.0).sum::<f32>()
                                 / tier.files.len() as f32,
                         );
                         s2_up = Hotness(
                             tier.files
-                                .iter()
-                                .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
+                                .values()
+                                .map(|v| v.hotness.0 * v.size.num_bytes() as f32)
                                 .sum::<f32>()
                                 / tier.files.len() as f32,
                         );
@@ -500,8 +498,8 @@ mod learning {
                         } else {
                             s3_up = Duration::from_secs_f32(
                                 tier.reqs
-                                    .iter()
-                                    .map(|(_, reqs)| {
+                                    .values()
+                                    .map(|reqs| {
                                         reqs.iter()
                                             .map(|req| req.response_time.as_secs_f32())
                                             .sum::<f32>()
@@ -515,8 +513,8 @@ mod learning {
                     } else {
                         s3_up = Duration::from_secs_f32(
                             tier.reqs
-                                .iter()
-                                .map(|(_, reqs)| {
+                                .values()
+                                .map(|reqs| {
                                     reqs.iter()
                                         .map(|req| req.response_time.as_secs_f32())
                                         .sum::<f32>()
@@ -539,13 +537,12 @@ mod learning {
                 // TIER does not contain the file, how will it fair if we add it?
                 tier.files.insert(obj.clone(), temp);
                 let s1_up = Hotness(
-                    tier.files.iter().map(|(_, v)| v.hotness.0).sum::<f32>()
-                        / tier.files.len() as f32,
+                    tier.files.values().map(|v| v.hotness.0).sum::<f32>() / tier.files.len() as f32,
                 );
                 let s2_up = Hotness(
                     tier.files
-                        .iter()
-                        .map(|(_, v)| v.hotness.0 * v.size.num_bytes() as f32)
+                        .values()
+                        .map(|v| v.hotness.0 * v.size.num_bytes() as f32)
                         .sum::<f32>()
                         / tier.files.len() as f32,
                 );
@@ -556,8 +553,8 @@ mod learning {
                 } else {
                     Duration::from_secs_f32(
                         tier.reqs
-                            .iter()
-                            .map(|(_, reqs)| {
+                            .values()
+                            .map(|reqs| {
                                 reqs.iter()
                                     .map(|req| req.response_time.as_secs_f32())
                                     .sum::<f32>()
@@ -944,7 +941,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
         for (key, _size, _from, to) in self.delta_moved.iter() {
             let obj = self.objects.get_mut(key).unwrap();
-            obj.pref = StoragePreference::from_u8(*to as u8);
+            obj.pref = StoragePreference::from_u8(*to);
             obj.probed_lvl = None;
         }
 

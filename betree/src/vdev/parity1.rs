@@ -580,7 +580,7 @@ mod tests {
             return Err(TestResult::discard());
         }
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(disk_size, format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(disk_size, format!("{id}")))
             .collect();
         let vdev = Parity1::new(disks.into_boxed_slice(), String::from("parity1"));
         Ok(vdev)
@@ -641,7 +641,7 @@ mod tests {
         }
         let failing_disk_idx = failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         disks[failing_disk_idx as usize].fail_writes(failure_mode);
         let vdev = Parity1::new(disks.into_boxed_slice(), String::from("parity1"));
@@ -661,7 +661,7 @@ mod tests {
         }
         let failing_disk_idx = failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         disks[failing_disk_idx as usize].fail_reads(failure_mode);
         let vdev = Parity1::new(disks.into_boxed_slice(), String::from("parity1"));
@@ -681,7 +681,7 @@ mod tests {
         }
         let failing_disk_idx = failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         disks[failing_disk_idx as usize].fail_reads(failure_mode);
         disks[failing_disk_idx as usize].fail_writes(failure_mode);
@@ -693,7 +693,7 @@ mod tests {
     #[test]
     fn writes_fail_with_two_failing_disks() {
         let disks: Vec<_> = (0..10)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         let data = vec![1; Block(1u32).to_bytes() as usize].into_boxed_slice();
 
@@ -719,7 +719,7 @@ mod tests {
         let read_failing_disk_idx = (read_failing_disk_idx % num_disks) as usize;
 
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         let vdev = Parity1::new(disks.into_boxed_slice(), String::from("parity1"));
 

@@ -596,7 +596,7 @@ pub unsafe extern "C" fn betree_dataset_upsert(
     let ds = &(*ds).0;
     let key = from_raw_parts(key as *const u8, key_len as usize);
     let data = from_raw_parts(data as *const u8, data_len as usize);
-    ds.upsert_with_pref(key, data, offset as u32, storage_pref.0)
+    ds.upsert_with_pref(key, data, offset, storage_pref.0)
         .handle_result(err)
 }
 

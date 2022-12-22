@@ -615,7 +615,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
                 Ok(v) => Some(v),
                 // FIXME: report this in a way that the caller can react to
                 Err(e) => {
-                    eprintln!("discarding object due to error: {}", e);
+                    eprintln!("discarding object due to error: {e}");
                     None
                 }
             })

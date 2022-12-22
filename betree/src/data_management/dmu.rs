@@ -9,7 +9,7 @@ use crate::{
     buffer::Buf,
     cache::{AddSize, Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
-    compression::{CompressionBuilder, DecompressionTag},
+    compression::CompressionBuilder,
     data_management::CopyOnWriteReason,
     database::{DatasetId, Generation, Handler},
     migration::DmlMsg,
@@ -388,7 +388,7 @@ where
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();
         debug!("Compressed object size is {size} bytes");
-        let size = Block(((size as usize + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
+        let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
         assert_eq!(size.to_bytes() as usize, compressed_data.len());
