@@ -2,7 +2,7 @@
 use super::{child_buffer::ChildBuffer, internal::TakeChildBuffer, Inner, Node, Tree};
 use crate::{
     cache::AddSize,
-    data_management::{Dml, HasStoragePreference, ObjectRef},
+    data_management::{Dml, HasStoragePreference, ObjectReference},
     size::Size,
     tree::{errors::*, MessageAction},
 };
@@ -11,7 +11,7 @@ use std::borrow::Borrow;
 impl<X, R, M, I> Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {

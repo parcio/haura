@@ -7,7 +7,7 @@ use crate::{
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, CopyOnWriteEvent, Dml, HasStoragePreference, ObjectPointer, ObjectRef,
+        self, CopyOnWriteEvent, Dml, HasStoragePreference, ObjectPointer, ObjectReference,
     },
     storage_pool::DiskOffset,
     tree::{DefaultMessageAction, Node, Tree, TreeBaseLayer},
@@ -38,7 +38,7 @@ pub fn update_allocation_bitmap_msg(
 
 /// The database handler, holding management data for interactions
 /// between the database and data management layers.
-pub struct Handler<OR: ObjectRef> {
+pub struct Handler<OR: ObjectReference> {
     pub(crate) root_tree_inner: AtomicOption<Arc<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
     pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
@@ -58,7 +58,7 @@ pub struct Handler<OR: ObjectRef> {
 //     pub(crate) invalidated: AtomicBool,
 // }
 
-impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
+impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     fn current_root_tree<'a, X>(
         &'a self,
         dmu: &'a X,
@@ -108,7 +108,7 @@ pub(super) fn segment_id_to_key(segment_id: SegmentId) -> [u8; 9] {
     key
 }
 
-impl<OR: ObjectRef + HasStoragePreference> Handler<OR> {
+impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     pub fn current_generation(&self) -> Generation {
         self.current_generation.read()
     }

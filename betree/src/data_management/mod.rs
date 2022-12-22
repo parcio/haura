@@ -2,13 +2,10 @@
 //! which handles user-defined objects and includes caching and write back.
 
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
-    database::StorageInfo,
     migration::DmlMsg,
     size::{Size, StaticSize},
     storage_pool::DiskOffset,
-    vdev::Block,
     StoragePreference,
 };
 use parking_lot::Mutex;
@@ -16,7 +13,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use stable_deref_trait::StableDeref;
 use std::{
     collections::HashMap,
-    error,
     fmt::Debug,
     hash::Hash,
     io::{self, Write},
@@ -47,7 +43,11 @@ impl<
 }
 
 /// A reference to an object managed by a `Dml`.
-pub trait ObjectRef: Serialize + DeserializeOwned + StaticSize + Debug + 'static {
+///
+/// While this trait only has one known implementor [impls::ObjRef], it is
+/// useful to hide away ugly types such as the ObjectPointer within the [Dml]
+/// trait.
+pub trait ObjectReference: Serialize + DeserializeOwned + StaticSize + Debug + 'static {
     /// The ObjectPointer for this ObjectRef.
     type ObjectPointer;
     /// Return a reference to an `Self::ObjectPointer`
@@ -111,18 +111,15 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
 /// A `Dml` for a specific `Handler`.
 pub trait Dml: Sized {
     /// A reference to an object managed by this `Dmu`.
-    type ObjectRef: ObjectRef<ObjectPointer = Self::ObjectPointer>;
+    type ObjectRef: ObjectReference<ObjectPointer = Self::ObjectPointer>;
     /// The pointer type to an on-disk object.
     type ObjectPointer: Serialize + DeserializeOwned + Clone;
     /// The info type which is tagged to each object.
     type Info: PodType;
-
     /// The object type managed by this Dml.
     type Object: Object<Self::ObjectRef>;
-
     /// A reference to a cached object.
     type CacheValueRef: StableDeref<Target = Self::Object> + AddSize + 'static;
-
     /// A mutable reference to a cached object.
     type CacheValueRefMut: StableDeref<Target = Self::Object> + DerefMut + AddSize + 'static;
 
@@ -171,6 +168,7 @@ pub trait Dml: Sized {
     /// Turns an ObjectPointer into an ObjectReference.
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
 
+    /// Run cache-internal self-validation.
     fn verify_cache(&self);
 
     /// Writes back an object and all its dependencies.
@@ -195,73 +193,28 @@ pub trait Dml: Sized {
     fn drop_cache(&self);
 }
 
+/// Legible result of a copy-on-write call. This describes wether the given
+/// offset has been removed or preserved depending on if existing snapshots
+/// require them.
 pub enum CopyOnWriteEvent {
+    /// The current state still pertains to the given offset.
     Preserved,
+    /// The given offset has been deallocated.
     Removed,
 }
 
 #[derive(Debug, PartialEq, Eq)]
+/// The reason as to why copy on write has been called.
+///
+/// This is mostly relevant to the reporting of activity via the reporting trait.
 pub enum CopyOnWriteReason {
+    /// The copy on write call originated from a removal operation.
     Remove,
+    /// The copy on write call originated from a stealing transition moving the
+    /// just written back object from the InWriteback state back to the modified
+    /// state.
     Steal,
 }
-
-// /// Handler for a `Dml`.
-// pub trait Handler<R: ObjectRef>: Sized {
-//     /// The object type managed by this handler.
-//     type Object: Object<R>;
-//     /// The error type of this handler.
-//     type Error: error::Error + Send;
-//
-//     /// Returns the current generation.
-//     fn current_generation(&self) -> Self::Generation;
-//
-//     /// Updates the allocation bitmap due to an allocation or deallocation.
-//     fn update_allocation_bitmap<X>(
-//         &self,
-//         offset: DiskOffset,
-//         size: Block<u32>,
-//         action: Action,
-//         dmu: &X,
-//     ) -> Result<(), Self::Error>
-//     where
-//         X: HandlerDml<
-//             Object = Self::Object,
-//             ObjectRef = R,
-//             ObjectPointer = R::ObjectPointer,
-//             Info = Self::Info,
-//         >,
-//         R::ObjectPointer: Serialize + DeserializeOwned;
-//
-//     /// Retrieves the allocation bitmap for specific segment.
-//     fn get_allocation_bitmap<X>(
-//         &self,
-//         id: SegmentId,
-//         dmu: &X,
-//     ) -> Result<SegmentAllocator, Self::Error>
-//     where
-//         X: HandlerDml<
-//             Object = Self::Object,
-//             ObjectRef = R,
-//             ObjectPointer = R::ObjectPointer,
-//             Info = Self::Info,
-//         >,
-//         R::ObjectPointer: Serialize + DeserializeOwned;
-//
-//     /// Returns the amount of free space (in blocks) for a given top-level vdev.
-//     fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo>;
-//     /// Returns the amount of free space (in blocks) over a whole storage tier.
-//     fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo>;
-//     /// Will be called when an object has been made mutable.
-//     /// May be used to mark the data blocks for delayed deallocation.
-//     fn copy_on_write(
-//         &self,
-//         offset: DiskOffset,
-//         size: Block<u32>,
-//         generation: Self::Generation,
-//         info: Self::Info,
-//     ) -> CopyOnWriteEvent;
-// }
 
 /// Denotes if an implementor of the [Dml] can utilize an allocation handler.
 pub trait DmlWithHandler {
@@ -307,7 +260,6 @@ mod delegation;
 pub(crate) mod errors;
 pub(crate) mod impls;
 mod object_ptr;
-// mod handler_test;
 
 pub use self::{
     errors::{Error, ErrorKind},
