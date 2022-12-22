@@ -1,5 +1,16 @@
 //! This module provides the Data Management Layer
 //! which handles user-defined objects and includes caching and write back.
+//!
+//! The main point of interest is the [Dmu] which provides most of the functions
+//! you are probably interested in. The [Dmu] implements the [Dml] trait, which
+//! is a convenience trait to hide away most generics form other modules by
+//! using associated types.
+//!
+//! # Name collisions
+//!
+//! Take care that in the context of the [Dml] we refer to nodes in a tree as
+//! `Object` in things like [ObjectPointer] and [ObjectReference]. These are not large
+//! data blobs as in the [crate::object] module.
 
 use crate::{
     cache::AddSize,
