@@ -257,12 +257,13 @@ pub trait DmlWithReport {
 }
 
 mod delegation;
+mod dmu;
 pub(crate) mod errors;
 pub(crate) mod impls;
 mod object_ptr;
 
 pub use self::{
+    dmu::Dmu,
     errors::{Error, ErrorKind},
-    impls::Dmu,
     object_ptr::ObjectPointer,
 };
