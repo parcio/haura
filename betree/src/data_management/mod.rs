@@ -162,14 +162,8 @@ pub trait Dml: Sized {
     /// Removes the object referenced by `or` and returns it.
     fn get_and_remove(&self, or: Self::ObjectRef) -> Result<Self::Object, Error>;
 
-    /// Evicts excessive cache entries.
-    fn evict(&self) -> Result<(), Error>;
-
     /// Turns an ObjectPointer into an ObjectReference.
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
-
-    /// Run cache-internal self-validation.
-    fn verify_cache(&self);
 
     /// Writes back an object and all its dependencies.
     /// `acquire_or_lock` shall return a lock guard
@@ -189,8 +183,16 @@ pub trait Dml: Sized {
     /// Finishes the prefetching.
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error>;
 
+    /// Which format the cache statistics are represented in. For example a simple struct.
+    type CacheStats: serde::Serialize;
+    /// Cache-dependent statistics.
+    fn cache_stats(&self) -> Self::CacheStats;
     /// Drops the cache entries.
     fn drop_cache(&self);
+    /// Run cache-internal self-validation.
+    fn verify_cache(&self);
+    /// Evicts excessive cache entries.
+    fn evict(&self) -> Result<(), Error>;
 }
 
 /// Legible result of a copy-on-write call. This describes wether the given
@@ -228,13 +230,6 @@ pub trait DmlWithSpl {
     type Spl;
 
     fn spl(&self) -> &Self::Spl;
-}
-
-/// Denotes if an implementor of the [Dml] uses a cache.
-pub trait DmlWithCache {
-    type CacheStats: serde::Serialize;
-
-    fn cache_stats(&self) -> Self::CacheStats;
 }
 
 /// Denotes if an implementor of the [Dml] can also handle storage hints emitted
