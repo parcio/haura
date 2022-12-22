@@ -12,6 +12,7 @@ where
     type Object = <T::Target as Dml>::Object;
     type CacheValueRef = <T::Target as Dml>::CacheValueRef;
     type CacheValueRefMut = <T::Target as Dml>::CacheValueRefMut;
+    type CacheStats = <T::Target as Dml>::CacheStats;
 
     fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
         (**self).try_get(or)
@@ -81,6 +82,10 @@ where
 
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
         (**self).finish_prefetch(p)
+    }
+
+    fn cache_stats(&self) -> Self::CacheStats {
+        (**self).cache_stats()
     }
 
     fn drop_cache(&self) {

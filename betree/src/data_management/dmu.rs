@@ -483,8 +483,6 @@ where
                 continue;
             }
 
-            // TODO: Consider the known free size and continue on success
-
             if self
                 .handler
                 .get_free_space_tier(class)
@@ -948,6 +946,13 @@ where
         Ok(())
     }
 
+    // Cache depending methods
+    type CacheStats = E::Stats;
+
+    fn cache_stats(&self) -> Self::CacheStats {
+        self.cache.read().stats()
+    }
+
     fn drop_cache(&self) {
         let mut cache = self.cache.write();
         let keys: Vec<_> = cache
@@ -990,22 +995,6 @@ where
 
     fn spl(&self) -> &Self::Spl {
         &self.pool
-    }
-}
-
-impl<E, SPL> super::DmlWithCache for Dmu<E, SPL>
-where
-    E: Cache<
-        Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
-    >,
-    SPL: StoragePoolLayer,
-    SPL::Checksum: StaticSize,
-{
-    type CacheStats = E::Stats;
-
-    fn cache_stats(&self) -> Self::CacheStats {
-        self.cache.read().stats()
     }
 }
 
