@@ -50,7 +50,7 @@ impl SegmentAllocator {
                 if let Some(first_alloc_idx) = self.data[start_idx..end_idx].first_one() {
                     idx = (idx + 1) + first_alloc_idx as u32 + 1;
                 } else {
-                    break idx as u32;
+                    break idx;
                 }
             }
         };

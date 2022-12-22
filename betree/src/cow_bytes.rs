@@ -240,7 +240,7 @@ impl Serialize for SlicedCowBytes {
     where
         S: Serializer,
     {
-        serializer.serialize_bytes(&**self)
+        serializer.serialize_bytes(self)
     }
 }
 

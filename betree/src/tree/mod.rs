@@ -11,7 +11,7 @@ use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
 pub use self::{
     default_message_action::DefaultMessageAction,
-    imp::{Inner, Node, RangeIterator, Tree},
+    imp::{Inner, Node, Tree},
     layer::{TreeBaseLayer, TreeLayer},
     message_action::MessageAction,
 };

@@ -469,7 +469,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 if let Some(mut db) = self.db.try_write() {
                                     let os =
                                         db.open_object_store_with_id(*objectkey.store_key())?;
-                                    if let Some(mut obj) = os.open_object(&*name)? {
+                                    if let Some(mut obj) = os.open_object(&name)? {
                                         obj.migrate(lifted)?;
                                         let entry = self.objects.get_mut(&objectkey).unwrap();
                                         let size = entry.1;
@@ -593,7 +593,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 if let Some(mut db) = self.db.try_write() {
                                     let os =
                                         db.open_object_store_with_id(*objectkey.store_key())?;
-                                    if let Some(mut obj) = os.open_object(&*name)? {
+                                    if let Some(mut obj) = os.open_object(&name)? {
                                         obj.migrate(lowered)?;
                                         let entry = self.objects.get_mut(&objectkey).unwrap();
                                         let size = entry.1;

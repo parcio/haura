@@ -216,7 +216,7 @@ impl DefaultMessageAction {
                     } else {
                         data.fill_zeros_up_to(end_offset);
 
-                        let slice = &mut data[offset_bytes as usize..end_offset as usize];
+                        let slice = &mut data[offset_bytes as usize..end_offset];
                         slice.copy_from_slice(new_data);
                     }
                 }
