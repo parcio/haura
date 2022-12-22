@@ -49,7 +49,7 @@ use crate::{
     database::{DatabaseBuilder, DatasetId, Error, ErrorKind, Result},
     migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
-    tree::{DefaultMessageAction, TreeBaseLayer, TreeLayer},
+    tree::{DefaultMessageAction, TreeLayer},
     vdev::Block,
     data_management::DmlWithSpl,
     storage_pool::StoragePoolLayer,

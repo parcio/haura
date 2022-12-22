@@ -9,7 +9,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::DmlWithHandler,
     database::DatabaseBuilder,
-    tree::{DefaultMessageAction, Tree, TreeBaseLayer, TreeLayer},
+    tree::{DefaultMessageAction, Tree, TreeLayer},
     StoragePreference,
 };
 use byteorder::{BigEndian, ByteOrder};

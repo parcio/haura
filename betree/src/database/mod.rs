@@ -17,7 +17,7 @@ use crate::{
         NUM_STORAGE_CLASSES,
     },
     tree::{
-        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeBaseLayer,
+        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree,
         TreeLayer,
     },
     vdev::Block,
@@ -720,7 +720,7 @@ fn ds_data_key(id: DatasetId) -> [u8; 9] {
 
 fn fetch_ds_data<T>(root_tree: &T, id: DatasetId) -> Result<DatasetData<ObjectPointer>>
 where
-    T: TreeBaseLayer<DefaultMessageAction>,
+    T: TreeLayer<DefaultMessageAction>,
 {
     let key = &ds_data_key(id) as &[_];
     let data = root_tree.get(key)?.ok_or(ErrorKind::DoesNotExist)?;
@@ -733,7 +733,7 @@ fn fetch_ss_data<T>(
     ss_id: Generation,
 ) -> Result<DatasetData<ObjectPointer>>
 where
-    T: TreeBaseLayer<DefaultMessageAction>,
+    T: TreeLayer<DefaultMessageAction>,
 {
     let key = ss_data_key(ds_id, ss_id);
     let data = root_tree.get(key)?.ok_or(ErrorKind::DoesNotExist)?;
