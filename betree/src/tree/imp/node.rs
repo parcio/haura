@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, Object, ObjectRef},
+    data_management::{Dml, HasStoragePreference, Object, ObjectReference},
     size::{Size, SizeMut, StaticSize},
     storage_pool::DiskOffset,
     tree::MessageAction,
@@ -77,7 +77,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
     }
 }
 
-impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
+impl<R: ObjectReference + HasStoragePreference> Object<R> for Node<R> {
     fn pack<W: Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()),
@@ -570,7 +570,7 @@ impl<N: HasStoragePreference> Node<N> {
     pub(crate) fn node_info<D>(&self, dml: &D) -> NodeInfo
     where
         D: Dml<Object = Node<N>, ObjectRef = N>,
-        N: ObjectRef<ObjectPointer = D::ObjectPointer>,
+        N: ObjectReference<ObjectPointer = D::ObjectPointer>,
     {
         match &self.0 {
             Inner::Internal(int) => NodeInfo::Internal {

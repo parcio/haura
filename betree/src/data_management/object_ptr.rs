@@ -33,8 +33,7 @@ impl<D> HasStoragePreference for ObjectPointer<D> {
         StoragePreference::new(self.offset.storage_class())
     }
 
-    // There is no support in encoding storage preference right now.
-
+    /// There is no support in encoding storage preference right now.
     fn system_storage_preference(&self) -> StoragePreference {
         unimplemented!()
     }
@@ -56,21 +55,28 @@ impl<D: StaticSize> StaticSize for ObjectPointer<D> {
 }
 
 impl<D> ObjectPointer<D> {
+    /// Get the decompression tag.
     pub fn decompression_tag(&self) -> DecompressionTag {
         self.decompression_tag
     }
+    /// Get a reference to the checksum of the target.
     pub fn checksum(&self) -> &D {
         &self.checksum
     }
+    /// Get the disk location this object is stored at.
     pub fn offset(&self) -> DiskOffset {
         self.offset
     }
+    /// Get the size in blocks of the serialized object.
     pub fn size(&self) -> Block<u32> {
         self.size
     }
+    /// Get the generation this object reference is belonging to. Relevant for
+    /// dataset snapshots.
     pub fn generation(&self) -> Generation {
         self.generation
     }
+    /// Get the id of the dataset this object is part of.
     pub fn info(&self) -> DatasetId {
         self.info
     }

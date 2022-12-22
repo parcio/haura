@@ -47,20 +47,20 @@ pub enum ObjectKey<G> {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub enum ObjectRef<P> {
+pub enum ObjRef<P> {
     Unmodified(P),
     Modified(ModifiedObjectId),
     InWriteback(ModifiedObjectId),
 }
 
-impl<D> super::ObjectRef for ObjectRef<ObjectPointer<D>>
+impl<D> super::ObjectReference for ObjRef<ObjectPointer<D>>
 where
     D: std::fmt::Debug + 'static,
     ObjectPointer<D>: Serialize + DeserializeOwned + StaticSize,
 {
     type ObjectPointer = ObjectPointer<D>;
     fn get_unmodified(&self) -> Option<&ObjectPointer<D>> {
-        if let ObjectRef::Unmodified(ref p) = self {
+        if let ObjRef::Unmodified(ref p) = self {
             Some(p)
         } else {
             None
@@ -68,26 +68,26 @@ where
     }
 }
 
-impl<D> ObjectRef<ObjectPointer<D>> {
+impl<D> ObjRef<ObjectPointer<D>> {
     fn as_key(&self) -> ObjectKey<Generation> {
         match *self {
-            ObjectRef::Unmodified(ref ptr) => ObjectKey::Unmodified {
+            ObjRef::Unmodified(ref ptr) => ObjectKey::Unmodified {
                 offset: ptr.offset(),
                 generation: ptr.generation(),
             },
-            ObjectRef::Modified(mid) => ObjectKey::Modified(mid),
-            ObjectRef::InWriteback(mid) => ObjectKey::InWriteback(mid),
+            ObjRef::Modified(mid) => ObjectKey::Modified(mid),
+            ObjRef::InWriteback(mid) => ObjectKey::InWriteback(mid),
         }
     }
 }
 
-impl<D> From<ObjectPointer<D>> for ObjectRef<ObjectPointer<D>> {
+impl<D> From<ObjectPointer<D>> for ObjRef<ObjectPointer<D>> {
     fn from(ptr: ObjectPointer<D>) -> Self {
-        ObjectRef::Unmodified(ptr)
+        ObjRef::Unmodified(ptr)
     }
 }
 
-impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
+impl<P: HasStoragePreference> HasStoragePreference for ObjRef<P> {
     fn current_preference(&self) -> Option<StoragePreference> {
         Some(self.correct_preference())
     }
@@ -98,8 +98,8 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
 
     fn correct_preference(&self) -> StoragePreference {
         match self {
-            ObjectRef::Unmodified(p) => p.correct_preference(),
-            ObjectRef::Modified(mid) | ObjectRef::InWriteback(mid) => mid.1,
+            ObjRef::Unmodified(p) => p.correct_preference(),
+            ObjRef::Modified(mid) | ObjRef::InWriteback(mid) => mid.1,
         }
     }
 
@@ -114,30 +114,30 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjectRef<P> {
     }
 }
 
-impl<P: StaticSize> StaticSize for ObjectRef<P> {
+impl<P: StaticSize> StaticSize for ObjRef<P> {
     fn static_size() -> usize {
         P::static_size()
     }
 }
 
-impl<P: Serialize> Serialize for ObjectRef<P> {
+impl<P: Serialize> Serialize for ObjRef<P> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match *self {
-            ObjectRef::Modified(..) => Err(S::Error::custom(
+            ObjRef::Modified(..) => Err(S::Error::custom(
                 "ObjectRef: Tried to serialize a modified ObjectRef",
             )),
-            ObjectRef::InWriteback(..) => Err(S::Error::custom(
+            ObjRef::InWriteback(..) => Err(S::Error::custom(
                 "ObjectRef: Tried to serialize a modified ObjectRef which is currently written back",
             )),
-            ObjectRef::Unmodified(ref ptr) => ptr.serialize(serializer),
+            ObjRef::Unmodified(ref ptr) => ptr.serialize(serializer),
         }
     }
 }
 
-impl<'de, D> Deserialize<'de> for ObjectRef<ObjectPointer<D>>
+impl<'de, D> Deserialize<'de> for ObjRef<ObjectPointer<D>>
 where
     ObjectPointer<D>: Deserialize<'de>,
 {
@@ -145,7 +145,7 @@ where
     where
         E: Deserializer<'de>,
     {
-        ObjectPointer::<D>::deserialize(deserializer).map(ObjectRef::Unmodified)
+        ObjectPointer::<D>::deserialize(deserializer).map(ObjRef::Unmodified)
     }
 }
 
@@ -165,7 +165,7 @@ where
     written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum>>>,
     modified_info: Mutex<HashMap<ModifiedObjectId, DatasetId>>,
     storage_hints: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
-    handler: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>>,
+    handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
     // NOTE: The semantic structure of this looks as this
     // Storage Pool Layers:
     //      Layer Disks:
@@ -189,7 +189,7 @@ where
         pool: SPL,
         alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
-        handler: Handler<ObjectRef<ObjectPointer<SPL::Checksum>>>,
+        handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
     ) -> Self {
         let allocation_data = (0..pool.storage_class_count())
             .map(|class| {
@@ -221,7 +221,7 @@ where
     }
 
     /// Returns the underlying handler.
-    pub fn handler(&self) -> &Handler<ObjectRef<ObjectPointer<SPL::Checksum>>> {
+    pub fn handler(&self) -> &Handler<ObjRef<ObjectPointer<SPL::Checksum>>> {
         &self.handler
     }
 
@@ -240,7 +240,7 @@ impl<E, SPL> Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -261,8 +261,8 @@ where
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
         let old_ptr = {
             match &or {
-                ObjectRef::Unmodified(ptr) => Some(ptr.offset()),
-                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => mid.2,
+                ObjRef::Unmodified(ptr) => Some(ptr.offset()),
+                ObjRef::InWriteback(mid) | ObjRef::Modified(mid) => mid.2,
             }
         };
         let mid = ModifiedObjectId(mid, or.correct_preference(), old_ptr);
@@ -277,7 +277,7 @@ where
         };
         let obj = CacheValueRef::write(entry);
 
-        if let ObjectRef::Unmodified(ptr) = replace(or, ObjectRef::Modified(mid)) {
+        if let ObjRef::Unmodified(ptr) = replace(or, ObjRef::Modified(mid)) {
             self.copy_on_write(ptr, CopyOnWriteReason::Steal);
         }
         Ok(Some(obj))
@@ -291,16 +291,16 @@ where
     ///       `or` to `Unmodified(_)`.
     fn fix_or(&self, or: &mut <Self as Dml>::ObjectRef) {
         match or {
-            ObjectRef::Unmodified(..) => unreachable!(),
-            ObjectRef::Modified(mid) => {
+            ObjRef::Unmodified(..) => unreachable!(),
+            ObjRef::Modified(mid) => {
                 debug!("{mid:?} moved to InWriteback");
-                *or = ObjectRef::InWriteback(*mid);
+                *or = ObjRef::InWriteback(*mid);
             }
-            ObjectRef::InWriteback(mid) => {
+            ObjRef::InWriteback(mid) => {
                 // The object must have been written back recently.
                 debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(mid).unwrap();
-                *or = ObjectRef::Unmodified(ptr);
+                *or = ObjRef::Unmodified(ptr);
             }
         }
     }
@@ -340,7 +340,7 @@ where
             .pool
             .read(op.size(), op.offset(), op.checksum().clone())?;
 
-        let object: Node<ObjectRef<ObjectPointer<SPL::Checksum>>> = {
+        let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(&compressed_data)?;
             Object::unpack_at(op.offset(), data).chain_err(|| ErrorKind::DeserializationError)?
         };
@@ -403,7 +403,7 @@ where
                 ObjectKey::Modified(_) => object
                     .for_each_child(|or| {
                         let is_unmodified = loop {
-                            if let ObjectRef::Unmodified(..) = *or {
+                            if let ObjRef::Unmodified(..) = *or {
                                 break true;
                             }
                             if cache_contains_key(&or.as_key()) {
@@ -748,8 +748,8 @@ where
                     object
                         .for_each_child::<(), _>(|or| loop {
                             let mid = match or {
-                                ObjectRef::Unmodified(..) => break Ok(()),
-                                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => *mid,
+                                ObjRef::Unmodified(..) => break Ok(()),
+                                ObjRef::InWriteback(mid) | ObjRef::Modified(mid) => *mid,
                             };
                             if cache_contains_key(&or.as_key()) {
                                 modified_children = true;
@@ -790,13 +790,13 @@ impl<E, SPL> super::Dml for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
     type ObjectPointer = ObjectPointer<SPL::Checksum>;
-    type ObjectRef = ObjectRef<Self::ObjectPointer>;
+    type ObjectRef = ObjRef<Self::ObjectPointer>;
     type Info = DatasetId;
     type Object = Node<Self::ObjectRef>;
     type CacheValueRef = CacheValueRef<
@@ -818,7 +818,7 @@ where
     }
 
     fn try_get_mut(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRefMut> {
-        if let ObjectRef::Modified(..) = *or {
+        if let ObjRef::Modified(..) = *or {
             let result = {
                 let cache = self.cache.read();
                 cache.get(&or.as_key(), true)
@@ -836,7 +836,7 @@ where
                 drop(cache);
                 return Ok(CacheValueRef::read(entry));
             }
-            if let ObjectRef::Unmodified(ref ptr) = *or {
+            if let ObjRef::Unmodified(ref ptr) = *or {
                 drop(cache);
 
                 self.fetch(ptr)?;
@@ -889,7 +889,7 @@ where
         let key = ObjectKey::Modified(mid);
         let size = object.size();
         self.cache.write().insert(key, RwLock::new(object), size);
-        ObjectRef::Modified(mid)
+        ObjRef::Modified(mid)
     }
 
     fn insert_and_get_mut(
@@ -910,7 +910,7 @@ where
             cache.insert(key, RwLock::new(object), size);
             cache.get(&key, false).unwrap()
         };
-        (CacheValueRef::write(entry), ObjectRef::Modified(mid))
+        (CacheValueRef::write(entry), ObjRef::Modified(mid))
     }
 
     fn remove(&self, or: Self::ObjectRef) {
@@ -919,7 +919,7 @@ where
             // TODO
             Err(RemoveError::Pinned) => unimplemented!(),
         };
-        if let ObjectRef::Unmodified(ref ptr) = or {
+        if let ObjRef::Unmodified(ref ptr) = or {
             self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove);
         }
     }
@@ -927,7 +927,7 @@ where
     fn get_and_remove(
         &self,
         mut or: Self::ObjectRef,
-    ) -> Result<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>, Error> {
+    ) -> Result<Node<ObjRef<ObjectPointer<SPL::Checksum>>>, Error> {
         let obj = loop {
             self.get(&mut or)?;
             match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
@@ -937,7 +937,7 @@ where
                 Err(RemoveError::Pinned) => unimplemented!(),
             };
         };
-        if let ObjectRef::Unmodified(ref ptr) = or {
+        if let ObjRef::Unmodified(ref ptr) = or {
             self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove);
         }
         Ok(obj.into_inner())
@@ -976,8 +976,8 @@ where
             let mut or = acquire_or_lock();
             trace!("write_back: Acquired lock");
             let mid = match &*or {
-                ObjectRef::Unmodified(ref p) => return Ok(p.clone()),
-                ObjectRef::InWriteback(mid) | ObjectRef::Modified(mid) => *mid,
+                ObjRef::Unmodified(ref p) => return Ok(p.clone()),
+                ObjRef::InWriteback(mid) | ObjRef::Modified(mid) => *mid,
             };
             let mut mids = Vec::new();
 
@@ -1038,14 +1038,14 @@ where
             return Ok(None);
         }
         Ok(match *or {
-            ObjectRef::Modified(..) | ObjectRef::InWriteback(..) => None,
-            ObjectRef::Unmodified(ref p) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
+            ObjRef::Modified(..) | ObjRef::InWriteback(..) => None,
+            ObjRef::Unmodified(ref p) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
         })
     }
 
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
         let (ptr, compressed_data) = block_on(p)?;
-        let object: Node<ObjectRef<ObjectPointer<SPL::Checksum>>> = {
+        let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = ptr
                 .decompression_tag()
                 .new_decompression()?
@@ -1082,12 +1082,12 @@ impl<E, SPL> super::DmlWithHandler for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
-    type Handler = Handler<ObjectRef<ObjectPointer<SPL::Checksum>>>;
+    type Handler = Handler<ObjRef<ObjectPointer<SPL::Checksum>>>;
 
     fn handler(&self) -> &Self::Handler {
         &self.handler
@@ -1098,7 +1098,7 @@ impl<E, SPL> super::DmlWithSpl for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -1114,7 +1114,7 @@ impl<E, SPL> super::DmlWithCache for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -1130,7 +1130,7 @@ impl<E, SPL> super::DmlWithStorageHints for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -1148,7 +1148,7 @@ impl<E, SPL> super::DmlWithReport for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjectRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,

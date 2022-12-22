@@ -70,7 +70,7 @@ const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 type Checksum = XxHash;
 
 type ObjectPointer = data_management::ObjectPointer<Checksum>;
-pub(crate) type ObjectRef = data_management::impls::ObjectRef<ObjectPointer>;
+pub(crate) type ObjectRef = data_management::impls::ObjRef<ObjectPointer>;
 pub(crate) type Object = Node<ObjectRef>;
 type DbHandler = Handler<ObjectRef>;
 
