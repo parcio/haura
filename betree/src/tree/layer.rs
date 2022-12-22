@@ -14,8 +14,8 @@ use super::errors::*;
 // TODO:
 // 1. Read-only transactions (We could lessen some restrictions about exclusivity)
 
-/// Basic Tree Layer interface.
-pub trait TreeBaseLayer<M: MessageAction> {
+/// Tree Layer interface.
+pub trait TreeLayer<M: MessageAction> {
     /// Inserts a new message with the given `key`.
     fn insert<K: Borrow<[u8]> + Into<CowBytes>>(
         &self,
@@ -29,10 +29,6 @@ pub trait TreeBaseLayer<M: MessageAction> {
 
     /// Returns the depth of the tree.
     fn depth(&self) -> Result<u32, TreeError>;
-}
-
-/// Tree Layer interface.
-pub trait TreeLayer<M: MessageAction>: TreeBaseLayer<M> {
     /// The range query iterator.
     type Range: Iterator<Item = Result<(Key, Value), TreeError>>;
     /// Issues a range query for the given key range.

@@ -8,7 +8,7 @@ use crate::{
     cow_bytes::SlicedCowBytes,
     data_management::{CopyOnWriteEvent, Dml, HasStoragePreference, ObjectReference},
     storage_pool::DiskOffset,
-    tree::{DefaultMessageAction, Node, Tree, TreeBaseLayer},
+    tree::{DefaultMessageAction, Node, Tree, TreeLayer},
     vdev::Block,
     StoragePreference,
 };
@@ -60,7 +60,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     fn current_root_tree<'a, X>(
         &'a self,
         dmu: &'a X,
-    ) -> impl TreeBaseLayer<DefaultMessageAction> + 'a
+    ) -> impl TreeLayer<DefaultMessageAction> + 'a
     where
         X: Dml<
             Object = Node<OR>,
@@ -80,7 +80,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     fn last_root_tree<'a, X>(
         &'a self,
         dmu: &'a X,
-    ) -> Option<impl TreeBaseLayer<DefaultMessageAction> + 'a>
+    ) -> Option<impl TreeLayer<DefaultMessageAction> + 'a>
     where
         X: Dml<
             Object = Node<OR>,

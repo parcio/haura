@@ -5,7 +5,7 @@ use self::{
 };
 use super::{
     errors::*,
-    layer::{ErasedTreeSync, TreeBaseLayer, TreeLayer},
+    layer::{ErasedTreeSync, TreeLayer},
 };
 use crate::{
     cache::AddSize,
@@ -406,7 +406,7 @@ where
 //     }
 // }
 
-impl<X, R, M, I> TreeBaseLayer<M> for Tree<X, M, I>
+impl<X, R, M, I> TreeLayer<M> for Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
@@ -474,15 +474,7 @@ where
     fn depth(&self) -> Result<u32, TreeError> {
         Ok(self.get_root_node()?.level() + 1)
     }
-}
 
-impl<X, R, M, I> TreeLayer<M> for Tree<X, M, I>
-where
-    X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
-    M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
-{
     type Pointer = X::ObjectPointer;
 
     type Range = RangeIterator<X, M, I>;

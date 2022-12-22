@@ -7,7 +7,7 @@ use crate::{
     data_management::DmlWithHandler,
     database::DatabaseBuilder,
     migration::DatabaseMsg,
-    tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
+    tree::{self, DefaultMessageAction, MessageAction, Tree, TreeLayer},
     StoragePreference,
 };
 use parking_lot::RwLock;
