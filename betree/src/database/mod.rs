@@ -5,10 +5,7 @@ use crate::{
     checksum::{XxHash, XxHashBuilder},
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
-    data_management::{
-        self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints,
-        Dmu,
-    },
+    data_management::{self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints, Dmu},
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
     size::StaticSize,
@@ -16,10 +13,7 @@ use crate::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
         NUM_STORAGE_CLASSES,
     },
-    tree::{
-        DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree,
-        TreeLayer,
-    },
+    tree::{DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeLayer},
     vdev::Block,
     StoragePreference,
 };
