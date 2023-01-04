@@ -6,7 +6,7 @@ use crate::{
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
-        self, Dml, DmlWithHandler, DmlWithReport, DmlWithSpl, DmlWithStorageHints,
+        self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints,
         Dmu,
     },
     metrics::{metrics_init, MetricsConfiguration},
@@ -97,7 +97,6 @@ where
     Self::Spu: StoragePoolLayer,
     Self::Dmu: Dml<Object = Object, ObjectRef = ObjectRef, Info = DatasetId, ObjectPointer = ObjectPointer>
         + DmlWithHandler<Handler = DbHandler>
-        + DmlWithSpl<Spl = Self::Spu>
         + DmlWithStorageHints
         + DmlWithReport
         + Send

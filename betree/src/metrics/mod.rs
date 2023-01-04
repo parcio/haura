@@ -1,7 +1,7 @@
 //! A naive metrics system, logging newline-delimited JSON to a configurable file.
 
 use crate::{
-    data_management::{Dml, DmlWithHandler, DmlWithSpl},
+    data_management::{Dml, DmlWithHandler},
     database::{DatabaseBuilder, StorageInfo},
     storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
 };
@@ -50,7 +50,7 @@ where
 struct Metrics<Config: DatabaseBuilder> {
     epoch_ms: u128,
     cache: <Config::Dmu as Dml>::CacheStats,
-    storage: <Config::Spu as StoragePoolLayer>::Metrics,
+    storage: <<Config::Dmu as Dml>::Spl as StoragePoolLayer>::Metrics,
     usage: Vec<StorageInfo>,
 }
 
