@@ -57,10 +57,7 @@ pub struct Handler<OR: ObjectReference> {
 // }
 
 impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
-    fn current_root_tree<'a, X>(
-        &'a self,
-        dmu: &'a X,
-    ) -> impl TreeLayer<DefaultMessageAction> + 'a
+    fn current_root_tree<'a, X>(&'a self, dmu: &'a X) -> impl TreeLayer<DefaultMessageAction> + 'a
     where
         X: Dml<
             Object = Node<OR>,
