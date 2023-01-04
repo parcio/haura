@@ -16,7 +16,7 @@ use crate::{
     cache::AddSize,
     migration::DmlMsg,
     size::{Size, StaticSize},
-    storage_pool::DiskOffset,
+    storage_pool::{DiskOffset, StoragePoolLayer},
     StoragePreference,
 };
 use parking_lot::Mutex;
@@ -53,7 +53,7 @@ impl<
 {
 }
 
-/// A reference to an object managed by a `Dml`.
+/// A reference to an object managed by a [Dml].
 ///
 /// While this trait only has one known implementor [impls::ObjRef], it is
 /// useful to hide away ugly types such as the ObjectPointer within the [Dml]
@@ -101,7 +101,7 @@ pub trait HasStoragePreference {
     // fn flood_storage_preference(&self, pref: StoragePreference);
 }
 
-/// An object managed by a `Dml`.
+/// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
     fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
@@ -119,7 +119,15 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         F: FnMut(&mut R) -> Result<(), E>;
 }
 
-/// A `Dml` for a specific `Handler`.
+/// The standard interface for the `Data Management Layer`. This layer *always*
+/// utilizes the underlying storage layer and a cache.
+///
+/// Aside from this overarching trait there are a number of traits which a [Dml]
+/// needs to implement to work with certain parts of the existing stack. They
+/// are by convention called `DmlWith...`. While it is not necesary to split
+/// them into separate traits, these additional traits make the code *more*
+/// readable in this instance and are therefore kept even though we only
+/// implement them once in the current state.
 pub trait Dml: Sized {
     /// A reference to an object managed by this `Dmu`.
     type ObjectRef: ObjectReference<ObjectPointer = Self::ObjectPointer>;
@@ -133,6 +141,11 @@ pub trait Dml: Sized {
     type CacheValueRef: StableDeref<Target = Self::Object> + AddSize + 'static;
     /// A mutable reference to a cached object.
     type CacheValueRefMut: StableDeref<Target = Self::Object> + DerefMut + AddSize + 'static;
+    /// The underlying Storage Pool.
+    type Spl: StoragePoolLayer;
+
+    /// Return a reference to the underlying storage pool manager.
+    fn spl(&self) -> &Self::Spl;
 
     /// Provides immutable access to the object identified by the given
     /// `ObjectRef`.  Fails if the object was modified and has been evicted.
@@ -234,13 +247,6 @@ pub trait DmlWithHandler {
     type Handler;
 
     fn handler(&self) -> &Self::Handler;
-}
-
-/// Denotes if an implementor of the [Dml] can utilize a storage pool layer.
-pub trait DmlWithSpl {
-    type Spl;
-
-    fn spl(&self) -> &Self::Spl;
 }
 
 /// Denotes if an implementor of the [Dml] can also handle storage hints emitted

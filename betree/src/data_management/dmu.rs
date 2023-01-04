@@ -7,7 +7,7 @@ use super::{
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     buffer::Buf,
-    cache::{AddSize, Cache, ChangeKeyError, RemoveError},
+    cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
     compression::CompressionBuilder,
     data_management::CopyOnWriteReason,
@@ -688,6 +688,11 @@ where
     type Object = Node<Self::ObjectRef>;
     type CacheValueRef = CacheValueRef<E::ValueRef, RwLockReadGuard<'static, Self::Object>>;
     type CacheValueRefMut = CacheValueRef<E::ValueRef, RwLockWriteGuard<'static, Self::Object>>;
+    type Spl = SPL;
+
+    fn spl(&self) -> &Self::Spl {
+        &self.pool
+    }
 
     fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
         let result = {
@@ -979,22 +984,6 @@ where
 
     fn handler(&self) -> &Self::Handler {
         &self.handler
-    }
-}
-
-impl<E, SPL> super::DmlWithSpl for Dmu<E, SPL>
-where
-    E: Cache<
-        Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
-    >,
-    SPL: StoragePoolLayer,
-    SPL::Checksum: StaticSize,
-{
-    type Spl = SPL;
-
-    fn spl(&self) -> &Self::Spl {
-        &self.pool
     }
 }
 

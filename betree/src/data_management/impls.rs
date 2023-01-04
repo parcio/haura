@@ -1,9 +1,9 @@
 use super::{object_ptr::ObjectPointer, HasStoragePreference};
 use crate::{
-    cache::{AddSize, Cache},
+    cache::AddSize,
     database::Generation,
     size::StaticSize,
-    storage_pool::{DiskOffset, StoragePoolLayer},
+    storage_pool::DiskOffset,
     StoragePreference,
 };
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};

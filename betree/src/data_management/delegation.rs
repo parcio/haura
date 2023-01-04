@@ -13,6 +13,11 @@ where
     type CacheValueRef = <T::Target as Dml>::CacheValueRef;
     type CacheValueRefMut = <T::Target as Dml>::CacheValueRefMut;
     type CacheStats = <T::Target as Dml>::CacheStats;
+    type Spl = <T::Target as Dml>::Spl;
+
+    fn spl(&self) -> &Self::Spl {
+        (**self).spl()
+    }
 
     fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
         (**self).try_get(or)

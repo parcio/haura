@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::DmlWithHandler,
+    data_management::{DmlWithHandler, Dml},
     database::DatabaseBuilder,
     migration::DatabaseMsg,
     tree::{self, DefaultMessageAction, MessageAction, Tree, TreeLayer},
@@ -475,7 +475,7 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         key: K,
         pref: StoragePreference,
     ) -> Result<Option<()>> {
-        use crate::{data_management::DmlWithSpl, storage_pool::StoragePoolLayer};
+        use crate::storage_pool::StoragePoolLayer;
         if self.tree.dmu().spl().disk_count(pref.as_u8()) == 0 {
             bail!(ErrorKind::DoesNotExist)
         }
