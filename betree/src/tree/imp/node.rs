@@ -6,7 +6,7 @@ use super::{
     leaf::LeafNode,
     packed::PackedMap,
     FillUpResult, KeyInfo, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT, MIN_FLUSH_SIZE,
-    MIN_LEAF_NODE_SIZE,
+    MIN_LEAF_NODE_SIZE, PivotKey,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
@@ -364,7 +364,7 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn pivot_get(&self, pivot: &[u8]) -> Option<PivotGetResult<N>> {
+    pub(super) fn pivot_get(&self, pivot: &PivotKey) -> Option<PivotGetResult<N>> {
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,
             Internal(ref internal) => {
@@ -373,7 +373,7 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn pivot_get_mut(&mut self, pivot: &[u8]) -> Option<PivotGetMutResult<N>> {
+    pub(super) fn pivot_get_mut(&mut self, pivot: &PivotKey) -> Option<PivotGetMutResult<N>> {
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,
             Internal(ref mut internal) => Some(internal.pivot_get_mut(pivot)),

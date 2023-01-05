@@ -6,7 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, DmlWithHandler},
     migration::DatabaseMsg,
-    tree::{self, DefaultMessageAction, MessageAction, Tree, TreeLayer},
+    tree::{self, DefaultMessageAction, MessageAction, Tree, TreeLayer, PivotKey},
     StoragePreference,
 };
 use parking_lot::RwLock;
@@ -283,12 +283,16 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
         Ok(self.tree.get(key)?)
     }
 
-    pub(crate) fn get_node_pivot<K: Borrow<[u8]>>(&self, pivot: K) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
-        Ok(self.tree.get_node_pivot(pivot)?)
+    /// Immutably fetch a given node by its pivot key.
+    pub(crate) fn get_node_pivot(&self, pk: &PivotKey) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+        debug_assert!(self.id == pk.d_id());
+        Ok(self.tree.get_node_pivot(pk)?)
     }
 
-    pub(crate) fn get_node_pivot_mut<K: Borrow<[u8]>>(&self, pivot: K) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
-        Ok(self.tree.get_node_pivot(pivot)?)
+    /// Mutably fetch a given node by its pivot key.
+    pub(crate) fn get_node_pivot_mut(&self, pk: &PivotKey) -> Result<Option<<Config::Dmu as Dml>::CacheValueRefMut>> {
+        debug_assert!(self.id == pk.d_id());
+        Ok(self.tree.get_mut_node_pivot(pk)?)
     }
 
     /// Iterates over all key-value pairs in the given key range.
