@@ -6,6 +6,7 @@ use self::{
 use super::{
     errors::*,
     layer::{ErasedTreeSync, TreeLayer},
+    PivotKey,
 };
 use crate::{
     cache::AddSize,
@@ -243,9 +244,9 @@ where
         Ok(self.dml.get(&mut np_ref.write())?)
     }
 
-    pub(crate) fn get_node_pivot<K: Borrow<[u8]>>(
+    pub(crate) fn get_node_pivot(
         &self,
-        pivot: K,
+        pivot: &PivotKey,
     ) -> Result<Option<X::CacheValueRef>, Error> {
         let pivot = pivot.borrow();
         let mut node = self.get_root_node()?;
@@ -262,6 +263,23 @@ where
             node = next_node;
         })
     }
+
+    pub(crate) fn get_mut_node_pivot(
+        &self,
+        pivot: &PivotKey,
+    ) -> Result<Option<X::CacheValueRefMut>, Error> {
+        let pivot = pivot.borrow();
+        let mut node = self.get_mut_root_node()?;
+        Ok(loop {
+            let next_node = match node.pivot_get_mut(pivot) {
+                Some(PivotGetMutResult::Target(np)) => break Some(self.get_mut_node_mut(np)?),
+                Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
+                None => break None,
+            };
+            node = next_node;
+        })
+    }
+
 
     fn try_get_mut_node(&self, np_ref: &mut RwLock<X::ObjectRef>) -> Option<X::CacheValueRefMut> {
         self.dml.try_get_mut(np_ref.get_mut())
@@ -282,22 +300,6 @@ where
         np_ref: &mut RwLock<X::ObjectRef>,
     ) -> Result<X::CacheValueRefMut, Error> {
         self.get_mut_node_mut(np_ref.get_mut())
-    }
-
-    pub(crate) fn get_mut_node_pivot<K: Borrow<[u8]>>(
-        &self,
-        pivot: K,
-    ) -> Result<Option<X::CacheValueRefMut>, TreeError> {
-        let pivot = pivot.borrow();
-        let mut node = self.get_mut_root_node()?;
-        Ok(loop {
-            let next_node = match node.pivot_get_mut(pivot) {
-                Some(PivotGetMutResult::Target(np)) => break Some(self.get_mut_node_mut(np)?),
-                Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
-                None => break None,
-            };
-            node = next_node;
-        })
     }
 
     /*fn walk_tree(
