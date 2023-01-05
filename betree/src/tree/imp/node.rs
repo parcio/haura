@@ -299,9 +299,14 @@ pub(super) enum ApplyResult<'a, N: 'a> {
     NextNode(&'a mut N),
 }
 
-pub(super) enum PivotGetResult<N> {
-    Target(N),
-    NextNode(N),
+pub(super) enum PivotGetResult<'a, N: 'a> {
+    Target(&'a RwLock<N>),
+    NextNode(&'a RwLock<N>),
+}
+
+pub(super) enum PivotGetMutResult<'a, N: 'a> {
+    Target(&'a mut N),
+    NextNode(&'a mut N),
 }
 
 pub(super) enum GetRangeResult<'a, T, N: 'a> {
@@ -359,15 +364,19 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn pivot_get(
-        &self,
-        pivot: &[u8],
-    ) -> Option<PivotGetResult<&RwLock<N>>> {
+    pub(super) fn pivot_get(&self, pivot: &[u8]) -> Option<PivotGetResult<N>> {
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,
             Internal(ref internal) => {
                 Some(internal.pivot_get(pivot))
             }
+        }
+    }
+
+    pub(super) fn pivot_get_mut(&mut self, pivot: &[u8]) -> Option<PivotGetMutResult<N>> {
+        match self.0 {
+            PackedLeaf(_) | Leaf(_) => None,
+            Internal(ref mut internal) => Some(internal.pivot_get_mut(pivot)),
         }
     }
 }

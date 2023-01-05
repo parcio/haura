@@ -1,8 +1,5 @@
 //! Implementation of the [InternalNode] node type.
-use super::{
-    child_buffer::ChildBuffer,
-    node::PivotGetResult,
-};
+use super::{child_buffer::ChildBuffer, node::{PivotGetResult, PivotGetMutResult}};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
@@ -199,7 +196,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
         (&child.node_pointer, msg)
     }
 
-    pub fn pivot_get(&self, pivot: &[u8]) -> PivotGetResult<&RwLock<N>> {
+    pub fn pivot_get(&self, pivot: &[u8]) -> PivotGetResult<N> {
         // Exact pivot matches are required only
         let pivot = CowBytes::from(pivot);
         self.pivot.iter().enumerate().find(|(_idx, p)| **p == pivot).map_or_else(
@@ -213,6 +210,30 @@ impl<N> InternalNode<ChildBuffer<N>> {
                 let child = &self.children[idx];
                 PivotGetResult::Target(&child.node_pointer)
         })
+    }
+
+    pub fn pivot_get_mut(&mut self, pivot: &[u8]) -> PivotGetMutResult<N> {
+        // Exact pivot matches are required only
+        let pivot = CowBytes::from(pivot);
+        let (id, is_target) = self.pivot
+            .iter()
+            .enumerate()
+            .find(|(_idx, p)| **p == pivot)
+            .map_or_else(
+                || {
+                    // Continue the search to the next level
+                    (self.idx(&pivot), false)
+                },
+                |(idx, _)| {
+                    // Fetch the correct child pointer
+                    (idx, true)
+                },
+            );
+        if is_target {
+            PivotGetMutResult::Target(self.children[id].node_pointer.get_mut())
+        } else {
+            PivotGetMutResult::NextNode(self.children[id].node_pointer.get_mut())
+        }
     }
 
     pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N {
