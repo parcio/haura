@@ -243,7 +243,10 @@ where
         Ok(self.dml.get(&mut np_ref.write())?)
     }
 
-    fn get_node_pivot<K: Borrow<[u8]>>(&self, pivot: K) -> Result<Option<X::CacheValueRef>, TreeError> {
+    pub(crate) fn get_node_pivot<K: Borrow<[u8]>>(
+        &self,
+        pivot: K,
+    ) -> Result<Option<X::CacheValueRef>, Error> {
         let pivot = pivot.borrow();
         let mut node = self.get_root_node()?;
         Ok(loop {
@@ -281,7 +284,7 @@ where
         self.get_mut_node_mut(np_ref.get_mut())
     }
 
-    fn get_mut_node_pivot<K: Borrow<[u8]>>(
+    pub(crate) fn get_mut_node_pivot<K: Borrow<[u8]>>(
         &self,
         pivot: K,
     ) -> Result<Option<X::CacheValueRefMut>, TreeError> {
