@@ -283,6 +283,14 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
         Ok(self.tree.get(key)?)
     }
 
+    pub(crate) fn get_node_pivot<K: Borrow<[u8]>>(&self, pivot: K) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+        Ok(self.tree.get_node_pivot(pivot)?)
+    }
+
+    pub(crate) fn get_node_pivot_mut<K: Borrow<[u8]>>(&self, pivot: K) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+        Ok(self.tree.get_node_pivot(pivot)?)
+    }
+
     /// Iterates over all key-value pairs in the given key range.
     pub fn range<R, K>(
         &self,
