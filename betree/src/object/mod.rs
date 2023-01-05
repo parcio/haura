@@ -51,7 +51,7 @@ use crate::{
     size::StaticSize,
     tree::{DefaultMessageAction, TreeLayer},
     vdev::Block,
-    data_management::DmlWithSpl,
+    data_management::Dml,
     storage_pool::StoragePoolLayer,
     Database, Dataset, StoragePreference, PreferredAccessType,
 };
