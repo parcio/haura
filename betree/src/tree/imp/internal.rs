@@ -1,5 +1,5 @@
 //! Implementation of the [InternalNode] node type.
-use super::{child_buffer::ChildBuffer, node::{PivotGetResult, PivotGetMutResult}};
+use super::{child_buffer::ChildBuffer, node::{PivotGetResult, PivotGetMutResult}, PivotKey};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
@@ -196,25 +196,37 @@ impl<N> InternalNode<ChildBuffer<N>> {
         (&child.node_pointer, msg)
     }
 
-    pub fn pivot_get(&self, pivot: &[u8]) -> PivotGetResult<N> {
+    pub fn pivot_get(&self, pk: &PivotKey) -> PivotGetResult<N> {
         // Exact pivot matches are required only
-        let pivot = CowBytes::from(pivot);
-        self.pivot.iter().enumerate().find(|(_idx, p)| **p == pivot).map_or_else(
-            || {
-                // Continue the search to the next level
-                let child = &self.children[self.idx(&pivot)];
-                PivotGetResult::NextNode(&child.node_pointer)
-            },
-            |(idx, _)| {
-                // Fetch the correct child pointer
-                let child = &self.children[idx];
-                PivotGetResult::Target(&child.node_pointer)
-        })
+        debug_assert!(!pk.is_root());
+        let pivot = pk.bytes().unwrap();
+        self.pivot
+            .iter()
+            .enumerate()
+            .find(|(_idx, p)| **p == pivot)
+            .map_or_else(
+                || {
+                    // Continue the search to the next level
+                    let child = &self.children[self.idx(&pivot)];
+                    PivotGetResult::NextNode(&child.node_pointer)
+                },
+                |(idx, _)| {
+                    // Fetch the correct child pointer
+                    let child;
+                    if pk.is_left() {
+                        child = &self.children[idx];
+                    } else {
+                        child = &self.children[idx + 1];
+                    }
+                    PivotGetResult::Target(&child.node_pointer)
+                },
+            )
     }
 
-    pub fn pivot_get_mut(&mut self, pivot: &[u8]) -> PivotGetMutResult<N> {
+    pub fn pivot_get_mut(&mut self, pk: &PivotKey) -> PivotGetMutResult<N> {
         // Exact pivot matches are required only
-        let pivot = CowBytes::from(pivot);
+        debug_assert!(!pk.is_root());
+        let pivot = pk.bytes().unwrap();
         let (id, is_target) = self.pivot
             .iter()
             .enumerate()
@@ -229,10 +241,10 @@ impl<N> InternalNode<ChildBuffer<N>> {
                     (idx, true)
                 },
             );
-        if is_target {
-            PivotGetMutResult::Target(self.children[id].node_pointer.get_mut())
-        } else {
-            PivotGetMutResult::NextNode(self.children[id].node_pointer.get_mut())
+        match (is_target, pk.is_left()) {
+            (true, true) => PivotGetMutResult::Target(self.children[id].node_pointer.get_mut()),
+            (true, false) => PivotGetMutResult::Target(self.children[id + 1].node_pointer.get_mut()),
+            (false, _) => PivotGetMutResult::NextNode(self.children[id].node_pointer.get_mut()),
         }
     }
 

@@ -6,6 +6,7 @@ mod errors;
 mod imp;
 mod layer;
 mod message_action;
+mod pivot_key;
 
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
@@ -14,6 +15,7 @@ pub use self::{
     imp::{Inner, Node, Tree},
     layer::TreeLayer,
     message_action::MessageAction,
+    pivot_key::PivotKey,
 };
 
 pub use self::errors::Error;
