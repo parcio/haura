@@ -1,7 +1,7 @@
 //! Implementation of tree structures.
 use self::{
     derivate_ref::DerivateRef,
-    node::{ApplyResult, GetResult, PivotGetResult},
+    node::{ApplyResult, GetResult, PivotGetResult, PivotGetMutResult},
 };
 use super::{
     errors::*,
@@ -279,6 +279,22 @@ where
         np_ref: &mut RwLock<X::ObjectRef>,
     ) -> Result<X::CacheValueRefMut, Error> {
         self.get_mut_node_mut(np_ref.get_mut())
+    }
+
+    fn get_mut_node_pivot<K: Borrow<[u8]>>(
+        &self,
+        pivot: K,
+    ) -> Result<Option<X::CacheValueRefMut>, TreeError> {
+        let pivot = pivot.borrow();
+        let mut node = self.get_mut_root_node()?;
+        Ok(loop {
+            let next_node = match node.pivot_get_mut(pivot) {
+                Some(PivotGetMutResult::Target(np)) => break Some(self.get_mut_node_mut(np)?),
+                Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
+                None => break None,
+            };
+            node = next_node;
+        })
     }
 
     /*fn walk_tree(
