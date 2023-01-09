@@ -22,9 +22,9 @@ use crate::{
 ///
 ///         p1      p2      p3
 /// ┌───────┬───────┬───────┬───────┐
-/// │       │       │       │       │
-/// │  Left │ Right │ Right │ Right │
-/// │  (p1) │ (p1)  │ (p2)  │ (p3)  │
+/// │ Left  │       │       │       │
+/// │ Outer │ Right │ Right │ Right │
+/// │ (p1)  │ (p1)  │ (p2)  │ (p3)  │
 /// └───┬───┴───┬───┴───┬───┴───┬───┘
 ///     │       │       │       │
 ///     ▼       ▼       ▼       ▼
@@ -34,7 +34,7 @@ use crate::{
 /// this relation is atleast surjective.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PivotKey {
-    Left(CowBytes, DatasetId),
+    LeftOuter(CowBytes, DatasetId),
     Right(CowBytes, DatasetId),
     Root(DatasetId),
 }
@@ -43,7 +43,7 @@ impl PivotKey {
     /// Get the dataset id of this node key.
     pub fn d_id(&self) -> DatasetId {
         match self {
-            Self::Left(_, d_id) | Self::Right(_, d_id) | Self::Root(d_id) => *d_id,
+            Self::LeftOuter(_, d_id) | Self::Right(_, d_id) | Self::Root(d_id) => *d_id,
         }
     }
 
@@ -53,7 +53,7 @@ impl PivotKey {
     pub fn bytes(&self) -> Option<CowBytes> {
         match self {
             // Cheap CowBytes clone
-            Self::Left(p, _) | Self::Right(p,_) => Some(p.clone()),
+            Self::LeftOuter(p, _) | Self::Right(p,_) => Some(p.clone()),
             Self::Root(_) => None,
         }
     }
@@ -68,7 +68,7 @@ impl PivotKey {
     /// See [PivotKey] for a more detailed instruction.
     pub fn is_left(&self) -> bool {
         match self {
-            Self::Left(..) => true,
+            Self::LeftOuter(..) => true,
             _ => false,
         }
     }

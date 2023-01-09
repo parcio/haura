@@ -252,12 +252,9 @@ where
         let mut node = self.get_root_node()?;
         Ok(loop {
             let next_node = match node.pivot_get(pivot) {
-                Some(PivotGetResult::Target(np)) => {
-                    break Some(self.get_node(np)?)
-                },
-                Some(PivotGetResult::NextNode(np)) => {
-                    self.get_node(np)?
-                },
+                Some(PivotGetResult::Target(Some(np))) => break Some(self.get_node(np)?),
+                Some(PivotGetResult::Target(None)) => break Some(node),
+                Some(PivotGetResult::NextNode(np)) => self.get_node(np)?,
                 None => break None,
             };
             node = next_node;
@@ -272,7 +269,8 @@ where
         let mut node = self.get_mut_root_node()?;
         Ok(loop {
             let next_node = match node.pivot_get_mut(pivot) {
-                Some(PivotGetMutResult::Target(np)) => break Some(self.get_mut_node_mut(np)?),
+                Some(PivotGetMutResult::Target(Some(np))) => break Some(self.get_mut_node_mut(np)?),
+                Some(PivotGetMutResult::Target(None)) => break Some(node),
                 Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
                 None => break None,
             };
