@@ -7,8 +7,8 @@
         p1      p2      p3
 ┌───────┬───────┬───────┬───────┐
 │       │       │       │       │
-│ Outer │  Left │  Left │  Left │
-│       │       │       │       │
+│ Left  │ Right │ Right │ Right │
+│ Outer │       │       │       │
 └───┬───┴───┬───┴───┬───┴───┬───┘
     │       │       │       │
     ▼       ▼       ▼       ▼
@@ -25,29 +25,37 @@ an enum indicating the position of the node based on its parent.
 type Pivot = CowBytes;
 
 enum PivotKey {
-    Outer(Pivot),
-    Left(Pivot),
+    LeftOuter(Pivot),
+    Right(Pivot),
 }
 ```
 
-The property we are piggy-backing on is that pivots are searchable and
-unique, furthermore we can structurally define Pivot Key directions which keeps
-the required memory space relatively low as only a single pivot key is required.
+The property we are piggy-backing on is that pivots are searchable and unique,
+furthermore we can structurally define Pivot Key directions which keeps the
+required memory space relatively low as only a single pivot key is required.
 Finally, the pivot keys are more persistent than normal keys in the collection,
 as they are only refreshed when the strcture of the tree changes. This might
 happen on rebalancing. Although when we consider this than any node based
 algorithm needs to reconsider decisions anyway.
 
-To make the pivot key ready to use over all datasets in a database (which can have overlapping key sets) we require an additional information to direct the pivot key to the correct dataset. This can be done by adding a `DatasetId` to the key.
+To make the pivot key ready to use over all datasets in a database (which can
+have overlapping key sets) we require an additional information to direct the
+pivot key to the correct dataset. This can be done by adding a `DatasetId` to
+the key.
 
 ```
 type Pivot = CowBytes;
 
 enum PivotKey {
-    Outer(Pivot, DatasetId),
-    Left(Pivot, DatasetId),
+    LeftOuter(Pivot, DatasetId),
+    Right(Pivot, DatasetId),
+    Root(DatasetId),
 }
 ```
+
+Also, as the root node of a tree does not have a parent which could index the
+node by it's pivot - we add another variant which simply denotes that the root
+of a given dataset is to be chosen.
 
 # Purpose
 
