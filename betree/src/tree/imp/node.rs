@@ -300,12 +300,12 @@ pub(super) enum ApplyResult<'a, N: 'a> {
 }
 
 pub(super) enum PivotGetResult<'a, N: 'a> {
-    Target(&'a RwLock<N>),
+    Target(Option<&'a RwLock<N>>),
     NextNode(&'a RwLock<N>),
 }
 
 pub(super) enum PivotGetMutResult<'a, N: 'a> {
-    Target(&'a mut N),
+    Target(Option<&'a mut N>),
     NextNode(&'a mut N),
 }
 
@@ -364,19 +364,23 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn pivot_get(&self, pivot: &PivotKey) -> Option<PivotGetResult<N>> {
+    pub(super) fn pivot_get(&self, pk: &PivotKey) -> Option<PivotGetResult<N>> {
+        if pk.is_root() {
+            return Some(PivotGetResult::Target(None))
+        }
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,
-            Internal(ref internal) => {
-                Some(internal.pivot_get(pivot))
-            }
+            Internal(ref internal) => Some(internal.pivot_get(pk)),
         }
     }
 
-    pub(super) fn pivot_get_mut(&mut self, pivot: &PivotKey) -> Option<PivotGetMutResult<N>> {
+    pub(super) fn pivot_get_mut(&mut self, pk: &PivotKey) -> Option<PivotGetMutResult<N>> {
+        if pk.is_root() {
+            return Some(PivotGetMutResult::Target(None))
+        }
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,
-            Internal(ref mut internal) => Some(internal.pivot_get_mut(pivot)),
+            Internal(ref mut internal) => Some(internal.pivot_get_mut(pk)),
         }
     }
 }
