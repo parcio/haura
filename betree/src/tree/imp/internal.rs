@@ -218,7 +218,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
                     } else {
                         child = &self.children[idx + 1];
                     }
-                    PivotGetResult::Target(&child.node_pointer)
+                    PivotGetResult::Target(Some(&child.node_pointer))
                 },
             )
     }
@@ -242,8 +242,8 @@ impl<N> InternalNode<ChildBuffer<N>> {
                 },
             );
         match (is_target, pk.is_left()) {
-            (true, true) => PivotGetMutResult::Target(self.children[id].node_pointer.get_mut()),
-            (true, false) => PivotGetMutResult::Target(self.children[id + 1].node_pointer.get_mut()),
+            (true, true) => PivotGetMutResult::Target(Some(self.children[id].node_pointer.get_mut())),
+            (true, false) => PivotGetMutResult::Target(Some(self.children[id + 1].node_pointer.get_mut())),
             (false, _) => PivotGetMutResult::NextNode(self.children[id].node_pointer.get_mut()),
         }
     }
