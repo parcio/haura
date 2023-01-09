@@ -32,6 +32,7 @@ use crate::{
 ///
 /// TODO: The key is not unique atm, multiple keys can point to same node, but
 /// this relation is atleast surjective.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PivotKey {
     Left(CowBytes, DatasetId),
     Right(CowBytes, DatasetId),
