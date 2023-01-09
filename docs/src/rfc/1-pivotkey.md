@@ -43,7 +43,7 @@ have overlapping key sets) we require an additional information to direct the
 pivot key to the correct dataset. This can be done by adding a `DatasetId` to
 the key.
 
-```
+```rust
 type Pivot = CowBytes;
 
 enum PivotKey {
