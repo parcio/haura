@@ -2,10 +2,10 @@
 use super::{child_buffer::ChildBuffer, node::{PivotGetResult, PivotGetMutResult}, PivotKey};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::HasStoragePreference,
+    data_management::{HasStoragePreference, ObjectReference},
     size::{Size, SizeMut, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
-    tree::{KeyInfo, MessageAction},
+    tree::{KeyInfo, MessageAction, pivot_key::LocalPivotKey},
     AtomicStoragePreference, StoragePreference,
 };
 use bincode::serialized_size;
@@ -396,13 +396,17 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<T: Size> InternalNode<T> {
-    pub fn split(&mut self) -> (Self, CowBytes, isize) {
+impl<N: ObjectReference> InternalNode<ChildBuffer<N>> {
+    pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.pref.invalidate();
         let split_off_idx = self.fanout() / 2;
         let pivot = self.pivot.split_off(split_off_idx);
         let pivot_key = self.pivot.pop().unwrap();
         let mut children = self.children.split_off(split_off_idx);
+
+        if let (Some(new_left_outer), Some(new_left_pivot)) = (children.first_mut(), pivot.first()) {
+            new_left_outer.update_pivot_key(LocalPivotKey::LeftOuter(new_left_pivot.clone()))
+        }
 
         let entries_size = pivot.iter().map(Size::size).sum::<usize>()
             + children.iter_mut().map(SizeMut::size).sum::<usize>();
@@ -420,7 +424,7 @@ impl<T: Size> InternalNode<T> {
             system_storage_preference: self.system_storage_preference.clone(),
             pref: AtomicStoragePreference::unknown(),
         };
-        (right_sibling, pivot_key, -(size_delta as isize))
+        (right_sibling, pivot_key, -(size_delta as isize), LocalPivotKey::Right(pivot_key))
     }
 
     pub fn merge(&mut self, right_sibling: &mut Self, old_pivot_key: CowBytes) -> isize {

@@ -73,7 +73,7 @@ pub(crate) type RootDmu =
     Dmu<ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>, RootSpu>;
 
 pub(crate) type MessageTree<Dmu, Message> =
-    Tree<Arc<Dmu>, Message, Arc<TreeInner<ObjectRef, DatasetId, Message>>>;
+    Tree<Arc<Dmu>, Message, Arc<TreeInner<ObjectRef, Message>>>;
 
 pub(crate) type RootTree<Dmu> = MessageTree<Dmu, DefaultMessageAction>;
 pub(crate) type DatasetTree<Dmu> = RootTree<Dmu>;

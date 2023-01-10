@@ -30,7 +30,7 @@ enum Bounded<T> {
 /// The iterator performs asynchronous prefetching to allow for a better
 /// utilization of underlying resources. It is advised to use [RangeIterator]
 /// and methods utilizing it in almost all cases.
-pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
+pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     buffer: VecDeque<(Key, (KeyInfo, Value))>,
     min_key: Bounded<Vec<u8>>,
     /// Always inclusive
@@ -45,7 +45,7 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     type Item = Result<(Key, Value), Error>;
 
@@ -68,7 +68,7 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     pub(super) fn new<K, T>(range: T, tree: Tree<X, M, I>) -> Self
     where
@@ -162,7 +162,7 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     fn leaf_range_query(
         &self,

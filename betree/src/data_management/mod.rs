@@ -17,7 +17,7 @@ use crate::{
     migration::DmlMsg,
     size::{Size, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
-    StoragePreference,
+    StoragePreference, tree::PivotKey, database::DatasetId,
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
@@ -64,6 +64,10 @@ pub trait ObjectReference: Serialize + DeserializeOwned + StaticSize + Debug + '
     /// Return a reference to an `Self::ObjectPointer`
     /// if this object reference is in the unmodified state.
     fn get_unmodified(&self) -> Option<&Self::ObjectPointer>;
+    /// Attach an index in the form of [PivotKey] to the [ObjectReference].
+    fn set_index(&mut self, pk: PivotKey);
+    /// Retrieve the index of this node.
+    fn index(&self) -> &PivotKey;
 }
 
 /// Implementing types have an allocation preference, which can be invalidated
@@ -85,7 +89,7 @@ pub trait HasStoragePreference {
     fn correct_preference(&self) -> StoragePreference {
         match self.current_preference() {
             Some(pref) => pref,
-            None => self.recalculate(),
+
         }
     }
 
@@ -133,8 +137,6 @@ pub trait Dml: Sized {
     type ObjectRef: ObjectReference<ObjectPointer = Self::ObjectPointer>;
     /// The pointer type to an on-disk object.
     type ObjectPointer: Serialize + DeserializeOwned + Clone;
-    /// The info type which is tagged to each object.
-    type Info: PodType;
     /// The object type managed by this Dml.
     type Object: Object<Self::ObjectRef>;
     /// A reference to a cached object.
@@ -163,7 +165,7 @@ pub trait Dml: Sized {
     fn get_mut(
         &self,
         or: &mut Self::ObjectRef,
-        info: Self::Info,
+        info: DatasetId,
     ) -> Result<Self::CacheValueRefMut, Error>;
 
     /// Provides mutable access to the object
@@ -171,13 +173,14 @@ pub trait Dml: Sized {
     fn try_get_mut(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRefMut>;
 
     /// Inserts a new mutable `object` into the cache.
-    fn insert(&self, object: Self::Object, info: Self::Info) -> Self::ObjectRef;
+    fn insert(&self, object: Self::Object, info: DatasetId, pk: PivotKey) -> Self::ObjectRef;
 
     /// Inserts a new mutable `object` into the cache.
     fn insert_and_get_mut(
         &self,
         object: Self::Object,
-        info: Self::Info,
+        info: DatasetId,
+        pk: PivotKey,
     ) -> (Self::CacheValueRefMut, Self::ObjectRef);
 
     /// Removes the object referenced by `or`.
