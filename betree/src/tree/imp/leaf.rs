@@ -4,7 +4,7 @@ use crate::{
     data_management::HasStoragePreference,
     size::Size,
     storage_pool::AtomicSystemStoragePreference,
-    tree::{imp::packed, KeyInfo, MessageAction},
+    tree::{imp::packed, KeyInfo, MessageAction, pivot_key::LocalPivotKey},
     AtomicStoragePreference, StoragePreference,
 };
 use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};
@@ -279,12 +279,12 @@ impl LeafNode {
         size_delta
     }
 
-    /// Splits this `LeafNode` into to two nodes.
-    /// Returns a new right sibling, the corresponding pivot key,
-    /// and the size delta of this node.
-    pub fn split(&mut self, min_size: usize, max_size: usize) -> (Self, CowBytes, isize) {
+    /// Splits this `LeafNode` into to two leaf nodes.
+    /// Returns a new right sibling, the corresponding pivot key, and the size
+    /// delta of this node.
+    pub fn split(&mut self, min_size: usize, max_size: usize) -> (Self, CowBytes, isize, LocalPivotKey) {
         // assert!(self.size() > S::MAX);
-        let mut sibling = LeafNode {
+        let mut right_sibling = LeafNode {
             // During a split, preference can't be inherited because the new subset of entries
             // might be a subset with a lower maximal preference.
             storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
@@ -294,9 +294,9 @@ impl LeafNode {
         };
 
         // This adjusts sibling's size and pref according to its new entries
-        let (pivot_key, size_delta) = self.do_split_off(&mut sibling, min_size, max_size);
+        let (pivot_key, size_delta) = self.do_split_off(&mut right_sibling, min_size, max_size);
 
-        (sibling, pivot_key, size_delta)
+        (right_sibling, pivot_key, size_delta, LocalPivotKey::Right(pivot_key))
     }
 
     /// Merge all entries from the *right* node into the *left* node.  Returns

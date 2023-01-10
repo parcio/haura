@@ -13,8 +13,8 @@ use crate::{
     data_management::{Dml, HasStoragePreference, Object, ObjectReference},
     size::{Size, SizeMut, StaticSize},
     storage_pool::DiskOffset,
-    tree::MessageAction,
-    StoragePreference,
+    tree::{MessageAction, pivot_key::LocalPivotKey},
+    StoragePreference, database::DatasetId,
 };
 use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
@@ -257,30 +257,31 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     }
 }
 
-impl<N: StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn split_root_mut<F>(&mut self, allocate_obj: F) -> isize
+impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
+    pub(super) fn split_root_mut<F>(&mut self, tree_id: DatasetId, allocate_obj: F) -> isize
     where
-        F: Fn(Self) -> N,
+        F: Fn(Self, LocalPivotKey) -> N,
     {
         let size_before = self.size();
         self.ensure_unpacked();
+        // FIXME: Update this PivotKey, as the index of the node is changing due to the structural change.
         let mut left_sibling = self.take();
         let (right_sibling, pivot_key, cur_level) = match left_sibling.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
-                let (right_sibling, pivot_key, _) =
+                let (right_sibling, pivot_key, _, _pk) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
                 (Node(Leaf(right_sibling)), pivot_key, 0)
             }
             Internal(ref mut internal) => {
-                let (right_sibling, pivot_key, _) = internal.split();
+                let (right_sibling, pivot_key, _, _pk) = internal.split();
                 (Node(Internal(right_sibling)), pivot_key, internal.level())
             }
         };
         debug!("Root split pivot key: {:?}", pivot_key);
         *self = Node(Internal(InternalNode::new(
-            ChildBuffer::new(allocate_obj(left_sibling)),
-            ChildBuffer::new(allocate_obj(right_sibling)),
+            ChildBuffer::new(allocate_obj(left_sibling, LocalPivotKey::LeftOuter(pivot_key))),
+            ChildBuffer::new(allocate_obj(right_sibling, LocalPivotKey::Right(pivot_key))),
             pivot_key,
             cur_level + 1,
         )));
@@ -470,15 +471,15 @@ impl<N: HasStoragePreference> Node<N> {
     }
 }
 
-impl<N: StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn split(&mut self) -> (Self, CowBytes, isize) {
+impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
+    pub(super) fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.ensure_unpacked();
         match self.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
-                let (node, pivot_key, size_delta) =
+                let (node, pivot_key, size_delta, pk) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
-                (Node(Leaf(node)), pivot_key, size_delta)
+                (Node(Leaf(node)), pivot_key, size_delta, pk)
             }
             Internal(ref mut internal) => {
                 debug_assert!(
@@ -488,8 +489,8 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
                     internal.size(),
                     internal.actual_size()
                 );
-                let (node, pivot_key, size_delta) = internal.split();
-                (Node(Internal(node)), pivot_key, size_delta)
+                let (node, pivot_key, size_delta, pk) = internal.split();
+                (Node(Internal(node)), pivot_key, size_delta, pk)
             }
         }
     }

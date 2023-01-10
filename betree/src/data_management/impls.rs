@@ -1,7 +1,7 @@
 use super::{object_ptr::ObjectPointer, HasStoragePreference};
 use crate::{
     cache::AddSize, database::Generation, size::StaticSize, storage_pool::DiskOffset,
-    StoragePreference,
+    StoragePreference, tree::PivotKey,
 };
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{
@@ -13,38 +13,67 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ModifiedObjectId {
     pub(super) id: u64,
     pub(super) pref: StoragePreference,
-    pub(super) old_location: Option<DiskOffset>,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum ObjectKey<G> {
     Unmodified { offset: DiskOffset, generation: G },
     Modified(ModifiedObjectId),
     InWriteback(ModifiedObjectId),
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+// @jwuensche: Removed Copy due to restrictions of CowBytes in the PivotKey.
+/// Definitive variant of the states an object in a tree may inhabit.
+///
+/// TODO: Fix possibility of invalid Unmodified state through proper types. The
+/// pivot key may never *actually* be None, only after serializing this field is
+/// filled. This actions is only ever needed when we deserialize from disk
+/// properly or create a new instance.
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum ObjRef<P> {
-    Unmodified(P),
-    Modified(ModifiedObjectId),
-    InWriteback(ModifiedObjectId),
+    Incomplete(P),
+    Unmodified(P, PivotKey),
+    Modified(ModifiedObjectId, PivotKey),
+    InWriteback(ModifiedObjectId, PivotKey),
 }
 
 impl<D> super::ObjectReference for ObjRef<ObjectPointer<D>>
 where
     D: std::fmt::Debug + 'static,
-    ObjectPointer<D>: Serialize + DeserializeOwned + StaticSize,
+    ObjectPointer<D>: Serialize + DeserializeOwned + StaticSize + Clone,
 {
     type ObjectPointer = ObjectPointer<D>;
     fn get_unmodified(&self) -> Option<&ObjectPointer<D>> {
-        if let ObjRef::Unmodified(ref p) = self {
+        if let ObjRef::Unmodified(ref p, ..) = self {
             Some(p)
         } else {
             None
+        }
+    }
+
+    fn set_index(&mut self, pk: PivotKey) {
+        // Transfer from an invalid object reference to a valid one.
+        // if let ObjRef::Incomplete(ref p) = self {
+        //     *self = ObjRef::Unmodified(p.clone(), pk);
+        // }
+        match self {
+            ObjRef::Incomplete(ref p) => *self = ObjRef::Unmodified(p.clone(), pk),
+            ObjRef::Unmodified(_, o_pk) | ObjRef::Modified(_,o_pk ) => *o_pk = pk,
+            // NOTE: An object reference may never need to be modified when
+            // performing a write back.
+            ObjRef::InWriteback(..) => unreachable!(),
+        }
+
+    }
+
+    fn index(&self) -> &PivotKey {
+        match self {
+            ObjRef::Incomplete(p) => unreachable!(),
+            ObjRef::Unmodified(_, pk) | ObjRef::Modified(_, pk) | ObjRef::InWriteback(_, pk) => pk,
         }
     }
 }
@@ -52,19 +81,20 @@ where
 impl<D> ObjRef<ObjectPointer<D>> {
     pub(super) fn as_key(&self) -> ObjectKey<Generation> {
         match *self {
-            ObjRef::Unmodified(ref ptr) => ObjectKey::Unmodified {
+            ObjRef::Unmodified(ref ptr, ..) => ObjectKey::Unmodified {
                 offset: ptr.offset(),
                 generation: ptr.generation(),
             },
-            ObjRef::Modified(mid) => ObjectKey::Modified(mid),
-            ObjRef::InWriteback(mid) => ObjectKey::InWriteback(mid),
+            ObjRef::Modified(mid, ..) => ObjectKey::Modified(mid),
+            ObjRef::InWriteback(mid, ..) => ObjectKey::InWriteback(mid),
+            ObjRef::Incomplete(..) => unreachable!(),
         }
     }
 }
 
 impl<D> From<ObjectPointer<D>> for ObjRef<ObjectPointer<D>> {
     fn from(ptr: ObjectPointer<D>) -> Self {
-        ObjRef::Unmodified(ptr)
+        ObjRef::Incomplete(ptr)
     }
 }
 
@@ -79,8 +109,9 @@ impl<P: HasStoragePreference> HasStoragePreference for ObjRef<P> {
 
     fn correct_preference(&self) -> StoragePreference {
         match self {
-            ObjRef::Unmodified(p) => p.correct_preference(),
-            ObjRef::Modified(mid) | ObjRef::InWriteback(mid) => mid.pref,
+            ObjRef::Unmodified(p, ..) => p.correct_preference(),
+            ObjRef::Modified(mid, ..) | ObjRef::InWriteback(mid, ..) => mid.pref,
+            ObjRef::Incomplete(..) => unreachable!(),
         }
     }
 
@@ -113,7 +144,9 @@ impl<P: Serialize> Serialize for ObjRef<P> {
             ObjRef::InWriteback(..) => Err(S::Error::custom(
                 "ObjectRef: Tried to serialize a modified ObjectRef which is currently written back",
             )),
-            ObjRef::Unmodified(ref ptr) => ptr.serialize(serializer),
+            ObjRef::Incomplete(..) => Err(S::Error::custom("ObjRef: Tried to serialize incomple reference.")),
+            // NOTE: Ignore the pivot key as this can be generated while reading a node.
+            ObjRef::Unmodified(ref ptr, ..) => ptr.serialize(serializer),
         }
     }
 }
@@ -126,7 +159,7 @@ where
     where
         E: Deserializer<'de>,
     {
-        ObjectPointer::<D>::deserialize(deserializer).map(ObjRef::Unmodified)
+        ObjectPointer::<D>::deserialize(deserializer).map(ObjRef::Incomplete)
     }
 }
 

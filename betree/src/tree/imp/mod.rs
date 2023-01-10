@@ -15,7 +15,7 @@ use crate::{
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
     tree::MessageAction,
-    StoragePreference,
+    StoragePreference, database::DatasetId,
 };
 use leaf::FillUpResult;
 use owning_ref::OwningRef;
@@ -58,7 +58,7 @@ const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// The actual tree type.
-pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
+pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     inner: I,
     dml: X,
     evict: bool,
@@ -66,7 +66,7 @@ pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     storage_preference: StoragePreference,
 }
 
-impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clone
+impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone
     for Tree<X, M, I>
 {
     fn clone(&self) -> Self {
@@ -81,14 +81,14 @@ impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clon
 }
 
 /// The inner tree type that does not contain the DML object.
-pub struct Inner<R, I, M> {
+pub struct Inner<R, M> {
     root_node: RwLock<R>,
-    tree_id: Option<I>,
+    tree_id: Option<DatasetId>,
     msg_action: M,
 }
 
-impl<R, I, M> Inner<R, I, M> {
-    fn new(tree_id: I, root_node: R, msg_action: M) -> Self {
+impl<R, M> Inner<R, M> {
+    fn new(tree_id: DatasetId, root_node: R, msg_action: M) -> Self {
         Inner {
             tree_id: Some(tree_id),
             root_node: RwLock::new(root_node),
@@ -116,22 +116,22 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>> + From<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>> + From<Inner<X::ObjectRef, M>>,
 {
     /// Returns a new, empty tree.
     pub fn empty_tree(
-        tree_id: X::Info,
+        tree_id: DatasetId,
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
     ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(), tree_id);
+        let root_node = dml.insert(Node::empty_leaf(), tree_id, PivotKey::Root(tree_id));
         Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 
     /// Opens a tree identified by the given root node.
     pub fn open(
-        tree_id: X::Info,
+        tree_id: DatasetId,
         root_node_ptr: X::ObjectPointer,
         msg_action: M,
         dml: X,
@@ -148,7 +148,7 @@ where
 
     fn new(
         root_node: R,
-        tree_id: X::Info,
+        tree_id: DatasetId,
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
@@ -168,7 +168,7 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer>,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     /// Returns the inner of the tree.
     pub fn inner(&self) -> &I {
@@ -211,9 +211,9 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
-    fn tree_id(&self) -> X::Info {
+    fn tree_id(&self) -> DatasetId {
         self.inner
             .borrow()
             .tree_id
@@ -447,7 +447,7 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error> {
         self.get_with_info(key)
@@ -542,7 +542,7 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<R, X::Info, M>>,
+    I: Borrow<Inner<R, M>>,
 {
     type Pointer = X::ObjectPointer;
     type ObjectRef = R;

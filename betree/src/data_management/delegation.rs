@@ -1,3 +1,5 @@
+use crate::{tree::PivotKey, database::DatasetId};
+
 use super::{Dml, Error};
 use std::ops::{Deref, DerefMut};
 
@@ -8,7 +10,6 @@ where
 {
     type ObjectRef = <T::Target as Dml>::ObjectRef;
     type ObjectPointer = <T::Target as Dml>::ObjectPointer;
-    type Info = <T::Target as Dml>::Info;
     type Object = <T::Target as Dml>::Object;
     type CacheValueRef = <T::Target as Dml>::CacheValueRef;
     type CacheValueRefMut = <T::Target as Dml>::CacheValueRefMut;
@@ -30,7 +31,7 @@ where
     fn get_mut(
         &self,
         or: &mut Self::ObjectRef,
-        info: Self::Info,
+        info: DatasetId,
     ) -> Result<Self::CacheValueRefMut, Error> {
         (**self).get_mut(or, info)
     }
@@ -39,16 +40,17 @@ where
         (**self).try_get_mut(or)
     }
 
-    fn insert(&self, object: Self::Object, info: Self::Info) -> Self::ObjectRef {
-        (**self).insert(object, info)
+    fn insert(&self, object: Self::Object, info: DatasetId, pk: PivotKey) -> Self::ObjectRef {
+        (**self).insert(object, info, pk)
     }
 
     fn insert_and_get_mut(
         &self,
         object: Self::Object,
-        info: Self::Info,
+        info: DatasetId,
+        pk: PivotKey,
     ) -> (Self::CacheValueRefMut, Self::ObjectRef) {
-        (**self).insert_and_get_mut(object, info)
+        (**self).insert_and_get_mut(object, info, pk)
     }
 
     fn remove(&self, or: Self::ObjectRef) {
