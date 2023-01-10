@@ -13,7 +13,7 @@ use std::{
 
 /// Copy-on-Write smart pointer which supports cheap cloning as it is
 /// reference-counted.
-#[derive(Debug, Clone, Eq, Ord, Default)]
+#[derive(Hash, Debug, Clone, Eq, Ord, Default)]
 pub struct CowBytes {
     // TODO Replace by own implementation
     pub(super) inner: Arc<Vec<u8>>,

@@ -32,7 +32,7 @@ use crate::{
 ///
 /// TODO: The key is not unique atm, multiple keys can point to same node, but
 /// this relation is atleast surjective.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Hash, Clone, Debug, PartialEq, Eq)]
 pub enum PivotKey {
     LeftOuter(CowBytes, DatasetId),
     Right(CowBytes, DatasetId),
@@ -80,6 +80,26 @@ impl PivotKey {
         match self {
             Self::Right(..) => true,
             _ => false,
+        }
+    }
+}
+
+/// A PivotKey without indication of global tree location.
+///
+/// This enum is useful to transport information from node local operations to
+/// the tree layer to avoid passing around [DatasetId]s continuously.
+pub enum LocalPivotKey {
+    LeftOuter(CowBytes),
+    Right(CowBytes),
+    Root()
+}
+
+impl LocalPivotKey {
+    pub fn to_global(self, d_id: DatasetId) -> PivotKey {
+        match self {
+            LocalPivotKey::LeftOuter(p) => PivotKey::LeftOuter(p, d_id),
+            LocalPivotKey::Right(p) => PivotKey::Right(p, d_id),
+            LocalPivotKey::Root() => PivotKey::Root(d_id),
         }
     }
 }

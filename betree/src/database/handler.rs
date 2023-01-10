@@ -37,8 +37,8 @@ pub fn update_allocation_bitmap_msg(
 /// The database handler, holding management data for interactions
 /// between the database and data management layers.
 pub struct Handler<OR: ObjectReference> {
-    pub(crate) root_tree_inner: AtomicOption<Arc<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
-    pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DatasetId, DefaultMessageAction>>>,
+    pub(crate) root_tree_inner: AtomicOption<Arc<TreeInner<OR, DefaultMessageAction>>>,
+    pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
     pub(crate) free_space: HashMap<(u8, u16), AtomicStorageInfo>,
@@ -63,7 +63,6 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
-            Info = DatasetId,
         >,
     {
         Tree::from_inner(
@@ -83,7 +82,6 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
-            Info = DatasetId,
         >,
     {
         OwningRef::new(self.root_tree_snapshot.read())
@@ -120,7 +118,6 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
-            Info = DatasetId,
         >,
     {
         self.allocations.fetch_add(1, Ordering::Release);
@@ -160,7 +157,6 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             Object = Node<OR>,
             ObjectRef = OR,
             ObjectPointer = OR::ObjectPointer,
-            Info = DatasetId,
         >,
     {
         let now = std::time::Instant::now();

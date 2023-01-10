@@ -2,7 +2,7 @@ use super::{
     errors::*,
     impls::{CacheValueRef, ModifiedObjectId, ObjRef, ObjectKey},
     object_ptr::ObjectPointer,
-    CopyOnWriteEvent, Dml, HasStoragePreference, Object,
+    CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
@@ -15,7 +15,7 @@ use crate::{
     migration::DmlMsg,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
-    tree::Node,
+    tree::{Node, PivotKey},
     vdev::{Block, BLOCK_SIZE},
     StoragePreference,
 };
@@ -144,16 +144,10 @@ where
     ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, Error> {
         debug!("Stealing {or:?}");
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
-        let old_ptr = {
-            match &or {
-                ObjRef::Unmodified(ptr) => Some(ptr.offset()),
-                ObjRef::InWriteback(mid) | ObjRef::Modified(mid) => mid.old_location,
-            }
-        };
+        let pk = or.index().clone();
         let mid = ModifiedObjectId {
             id: mid,
             pref: or.correct_preference(),
-            old_location: old_ptr,
         };
         let entry = {
             let mut cache = self.cache.write();
@@ -166,7 +160,7 @@ where
         };
         let obj = CacheValueRef::write(entry);
 
-        if let ObjRef::Unmodified(ptr) = replace(or, ObjRef::Modified(mid)) {
+        if let ObjRef::Unmodified(ptr, ..) = replace(or, ObjRef::Modified(mid, pk)) {
             self.copy_on_write(ptr, CopyOnWriteReason::Steal);
         }
         Ok(Some(obj))
@@ -181,15 +175,15 @@ where
     fn fix_or(&self, or: &mut <Self as Dml>::ObjectRef) {
         match or {
             ObjRef::Unmodified(..) => unreachable!(),
-            ObjRef::Modified(mid) => {
+            ObjRef::Modified(mid, pk) => {
                 debug!("{mid:?} moved to InWriteback");
-                *or = ObjRef::InWriteback(*mid);
+                *or = ObjRef::InWriteback(*mid, *pk);
             }
-            ObjRef::InWriteback(mid) => {
+            ObjRef::InWriteback(mid, pk) => {
                 // The object must have been written back recently.
                 debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(mid).unwrap();
-                *or = ObjRef::Unmodified(ptr);
+                *or = ObjRef::Unmodified(ptr, *pk);
             }
         }
     }
@@ -632,7 +626,7 @@ where
                         .for_each_child::<(), _>(|or| loop {
                             let mid = match or {
                                 ObjRef::Unmodified(..) => break Ok(()),
-                                ObjRef::InWriteback(mid) | ObjRef::Modified(mid) => *mid,
+                                ObjRef::InWriteback(mid, ..) | ObjRef::Modified(mid, ..) => *mid,
                             };
                             if cache_contains_key(&or.as_key()) {
                                 modified_children = true;
@@ -680,7 +674,6 @@ where
 {
     type ObjectPointer = ObjectPointer<SPL::Checksum>;
     type ObjectRef = ObjRef<Self::ObjectPointer>;
-    type Info = DatasetId;
     type Object = Node<Self::ObjectRef>;
     type CacheValueRef = CacheValueRef<E::ValueRef, RwLockReadGuard<'static, Self::Object>>;
     type CacheValueRefMut = CacheValueRef<E::ValueRef, RwLockWriteGuard<'static, Self::Object>>;
@@ -718,7 +711,7 @@ where
                 drop(cache);
                 return Ok(CacheValueRef::read(entry));
             }
-            if let ObjRef::Unmodified(ref ptr) = *or {
+            if let ObjRef::Unmodified(ref ptr, ..) = *or {
                 drop(cache);
 
                 self.fetch(ptr)?;
@@ -744,7 +737,7 @@ where
     fn get_mut(
         &self,
         or: &mut Self::ObjectRef,
-        info: Self::Info,
+        info: DatasetId,
     ) -> Result<Self::CacheValueRefMut, Error> {
         // Fast path
         if let Some(obj) = self.try_get_mut(or) {
@@ -761,28 +754,27 @@ where
         }
     }
 
-    fn insert(&self, object: Self::Object, info: DatasetId) -> Self::ObjectRef {
+    fn insert(&self, object: Self::Object, info: DatasetId, pk: PivotKey) -> Self::ObjectRef {
         let mid = ModifiedObjectId {
             id: self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
             pref: object.correct_preference(),
-            old_location: None,
         };
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
         let size = object.size();
         self.cache.write().insert(key, RwLock::new(object), size);
-        ObjRef::Modified(mid)
+        ObjRef::Modified(mid, pk)
     }
 
     fn insert_and_get_mut(
         &self,
         object: Self::Object,
-        info: Self::Info,
+        info: DatasetId,
+        pk: PivotKey,
     ) -> (Self::CacheValueRefMut, Self::ObjectRef) {
         let mid = ModifiedObjectId {
             id: self.next_modified_node_id.fetch_add(1, Ordering::Relaxed),
             pref: object.correct_preference(),
-            old_location: None,
         };
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
@@ -792,7 +784,7 @@ where
             cache.insert(key, RwLock::new(object), size);
             cache.get(&key, false).unwrap()
         };
-        (CacheValueRef::write(entry), ObjRef::Modified(mid))
+        (CacheValueRef::write(entry), ObjRef::Modified(mid, pk))
     }
 
     fn remove(&self, or: Self::ObjectRef) {
@@ -801,7 +793,7 @@ where
             // TODO
             Err(RemoveError::Pinned) => unimplemented!(),
         };
-        if let ObjRef::Unmodified(ref ptr) = or {
+        if let ObjRef::Unmodified(ref ptr, ..) = or {
             self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove);
         }
     }
@@ -819,7 +811,7 @@ where
                 Err(RemoveError::Pinned) => unimplemented!(),
             };
         };
-        if let ObjRef::Unmodified(ref ptr) = or {
+        if let ObjRef::Unmodified(ref ptr, ..) = or {
             self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove);
         }
         Ok(obj.into_inner())
@@ -858,8 +850,9 @@ where
             let mut or = acquire_or_lock();
             trace!("write_back: Acquired lock");
             let mid = match &*or {
-                ObjRef::Unmodified(ref p) => return Ok(p.clone()),
-                ObjRef::InWriteback(mid) | ObjRef::Modified(mid) => *mid,
+                ObjRef::Unmodified(ref p, ..) => return Ok(p.clone()),
+                ObjRef::InWriteback(mid, ..) | ObjRef::Modified(mid, ..) => *mid,
+                ObjRef::Incomplete(..) => unreachable!(),
             };
             let mut mids = Vec::new();
 
@@ -921,7 +914,7 @@ where
         }
         Ok(match *or {
             ObjRef::Modified(..) | ObjRef::InWriteback(..) => None,
-            ObjRef::Unmodified(ref p) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
+            ObjRef::Unmodified(ref p, ..) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
         })
     }
 

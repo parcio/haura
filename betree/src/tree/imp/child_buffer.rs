@@ -4,10 +4,10 @@
 //! [super::leaf::LeafNode].
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::HasStoragePreference,
+    data_management::{HasStoragePreference, ObjectReference},
     size::{Size, StaticSize},
-    storage_pool::AtomicSystemStoragePreference,
-    tree::{KeyInfo, MessageAction},
+    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
+    tree::{KeyInfo, MessageAction, PivotKey, pivot_key::LocalPivotKey},
     AtomicStoragePreference, StoragePreference,
 };
 use parking_lot::RwLock;
@@ -70,6 +70,16 @@ impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
 
     fn set_system_storage_preference(&mut self, pref: StoragePreference) {
         self.system_storage_preference.set(pref)
+    }
+}
+
+impl<N: ObjectReference> ChildBuffer<N> {
+    /// Access the pivot key of the underlying object reference and update it to
+    /// reflect a structural change in the tree.
+    pub fn update_pivot_key(&mut self, lpk: LocalPivotKey) {
+        let or = self.node_pointer.get_mut();
+        let d_id = or.index().d_id();
+        or.set_index(lpk.to_global(d_id));
     }
 }
 

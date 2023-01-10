@@ -21,7 +21,7 @@ where
     X: Dml<Object = Node<R>, ObjectRef = R>,
     R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     /// This method performs necessary flushing and rebalancing operations if
     /// too many entries are stored at a node. We use this method immediately
