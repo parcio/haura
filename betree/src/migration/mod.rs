@@ -86,7 +86,7 @@ use crate::{
     database::RootDmu,
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,
-    Database, StoragePreference,
+    Database, StoragePreference, tree::PivotKey,
 };
 
 use self::{lfu::Lfu, reinforcment_learning::ZhangHellanderToor};
@@ -134,7 +134,7 @@ impl MigrationPolicies {
         dml_rx: Receiver<DmlMsg>,
         db_rx: Receiver<DatabaseMsg>,
         db: Arc<RwLock<Database>>,
-        storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+        storage_hint_sink: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
     ) -> Box<dyn MigrationPolicy> {
         match self {
             MigrationPolicies::Lfu(config) => {

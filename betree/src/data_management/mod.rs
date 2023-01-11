@@ -256,7 +256,7 @@ pub trait DmlWithHandler {
 /// by the migration policies.
 pub trait DmlWithStorageHints {
     /// Returns a handle to the storage hint data structure.
-    fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>;
+    fn storage_hints(&self) -> Arc<Mutex<HashMap<PivotKey, StoragePreference>>>;
     /// Returns the default storage class used when [StoragePreference] is `None`.
     fn default_storage_class(&self) -> StoragePreference;
 }
