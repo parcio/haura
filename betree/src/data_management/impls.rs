@@ -1,6 +1,6 @@
 use super::{object_ptr::ObjectPointer, HasStoragePreference};
 use crate::{
-    cache::AddSize, database::Generation, size::StaticSize, storage_pool::DiskOffset,
+    cache::AddSize, database::Generation, size::{StaticSize, SizeMut}, storage_pool::DiskOffset,
     StoragePreference, tree::PivotKey,
 };
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -182,12 +182,12 @@ impl<T: AddSize, U> AddSize for CacheValueRef<T, U> {
     }
 }
 
-impl<T, U> CacheValueRef<T, RwLockReadGuard<'static, U>>
+impl<T, U, I> CacheValueRef<T, RwLockReadGuard<'static, U>>
 where
-    T: StableDeref<Target = RwLock<U>>,
+    T: StableDeref<Target = TaggedCacheValue<RwLock<U>, I>>,
 {
     pub(super) fn read(head: T) -> Self {
-        let guard = unsafe { transmute(RwLock::read(&head)) };
+        let guard = unsafe { transmute(RwLock::read(&head.value)) };
         CacheValueRef {
             head,
             guard: ManuallyDrop::new(guard),
@@ -195,12 +195,12 @@ where
     }
 }
 
-impl<T, U> CacheValueRef<T, RwLockWriteGuard<'static, U>>
+impl<T, U, I> CacheValueRef<T, RwLockWriteGuard<'static, U>>
 where
-    T: StableDeref<Target = RwLock<U>>,
+    T: StableDeref<Target = TaggedCacheValue<RwLock<U>, I>>,
 {
     pub(super) fn write(head: T) -> Self {
-        let guard = unsafe { transmute(RwLock::write(&head)) };
+        let guard = unsafe { transmute(RwLock::write(&head.value)) };
         CacheValueRef {
             head,
             guard: ManuallyDrop::new(guard),
@@ -237,16 +237,39 @@ pub struct TaggedCacheValue<Val, Tag> {
     tag: Tag,
 }
 
+impl<Val, Tag> TaggedCacheValue<Val, Tag> {
+    pub fn new(value: Val, tag: Tag) -> Self {
+        Self {
+            value,
+            tag,
+        }
+    }
+
+    pub fn value(&self) -> &Val {
+        &self.value
+    }
+
+    pub fn value_mut(&self) -> &mut Val {
+        &mut self.value
+    }
+
+    pub fn into_value(self) -> Val {
+        self.value
+    }
+
+    pub fn tag(&self) -> &Tag {
+        &self.tag
+    }
+}
+
 impl<Val: AddSize, Tag> AddSize for TaggedCacheValue<Val, Tag> {
     fn add_size(&self, size_delta: isize) {
         self.value.add_size(size_delta)
     }
 }
 
-impl<Val, Tag> Deref for TaggedCacheValue<Val, Tag> {
-    type Target = Val;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
+impl<Val: SizeMut, Tag> SizeMut for TaggedCacheValue<Val, Tag> {
+    fn size(&mut self) -> usize {
+        self.value.size()
     }
 }

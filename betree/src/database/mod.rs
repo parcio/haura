@@ -5,7 +5,7 @@ use crate::{
     checksum::{XxHash, XxHashBuilder},
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints, Dmu},
+    data_management::{self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints, Dmu, impls::TaggedCacheValue},
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
     size::StaticSize,
@@ -69,8 +69,11 @@ pub(crate) type Object = Node<ObjectRef>;
 type DbHandler = Handler<ObjectRef>;
 
 pub(crate) type RootSpu = StoragePoolUnit<XxHash>;
-pub(crate) type RootDmu =
-    Dmu<ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>, RootSpu>;
+
+pub(crate) type RootDmu = Dmu<
+    ClockCache<data_management::impls::ObjectKey<Generation>, TaggedCacheValue<RwLock<Object>, PivotKey>>,
+    RootSpu,
+>;
 
 pub(crate) type MessageTree<Dmu, Message> =
     Tree<Arc<Dmu>, Message, Arc<TreeInner<ObjectRef, Message>>>;
