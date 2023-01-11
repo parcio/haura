@@ -13,7 +13,7 @@ use crate::{
         DiskOffset, StoragePoolConfiguration, StoragePoolLayer, StoragePoolUnit,
         NUM_STORAGE_CLASSES,
     },
-    tree::{DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeLayer},
+    tree::{DefaultMessageAction, ErasedTreeSync, Inner as TreeInner, Node, Tree, TreeLayer, PivotKey},
     vdev::Block,
     StoragePreference,
 };

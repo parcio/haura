@@ -49,7 +49,7 @@ where
     cache: RwLock<E>,
     written_back: Mutex<HashMap<ModifiedObjectId, ObjectPointer<SPL::Checksum>>>,
     modified_info: Mutex<HashMap<ModifiedObjectId, DatasetId>>,
-    storage_hints: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+    storage_hints: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
     handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
     // NOTE: The semantic structure of this looks as this
     // Storage Pool Layers:
@@ -161,7 +161,7 @@ where
         let obj = CacheValueRef::write(entry);
 
         if let ObjRef::Unmodified(ptr, ..) = replace(or, ObjRef::Modified(mid, pk)) {
-            self.copy_on_write(ptr, CopyOnWriteReason::Steal);
+            self.copy_on_write(ptr, CopyOnWriteReason::Steal, or.index().clone());
         }
         Ok(Some(obj))
     }
@@ -188,7 +188,7 @@ where
         }
     }
 
-    fn copy_on_write(&self, obj_ptr: ObjectPointer<SPL::Checksum>, steal: CopyOnWriteReason) {
+    fn copy_on_write(&self, obj_ptr: ObjectPointer<SPL::Checksum>, steal: CopyOnWriteReason, pivot_key: PivotKey) {
         let actual_size = self.pool.actual_size(
             obj_ptr.offset().storage_class(),
             obj_ptr.offset().disk_id(),
@@ -205,7 +205,7 @@ where
             steal,
         ) {
             let _ = tx
-                .send(DmlMsg::remove(obj_ptr.offset(), obj_ptr.size()))
+                .send(DmlMsg::remove(obj_ptr.offset(), obj_ptr.size(), pivot_key))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
     }
@@ -237,11 +237,10 @@ where
     fn try_fetch_async(
         &self,
         op: &<Self as Dml>::ObjectPointer,
+        pivot_key: PivotKey,
     ) -> Result<
-        impl TryFuture<
-                Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf),
-                Error = Error,
-            > + Send,
+        impl TryFuture<Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf, PivotKey), Error = Error>
+            + Send,
         Error,
     > {
         let ptr = op.clone();
@@ -250,7 +249,7 @@ where
             .pool
             .read_async(op.size(), op.offset(), op.checksum().clone())?
             .map_err(Error::from)
-            .and_then(move |data| ok((ptr, data))))
+            .and_then(move |data| ok((ptr, data, pivot_key))))
     }
 
     fn insert_object_into_cache(&self, key: ObjectKey<Generation>, mut object: E::Value) {
@@ -337,6 +336,7 @@ where
         mut object: <Self as Dml>::CacheValueRefMut,
         mid: ModifiedObjectId,
         evict: bool,
+        pivot_key: PivotKey,
     ) -> Result<<Self as Dml>::ObjectPointer, Error> {
         let object_size = {
             #[cfg(debug_assertions)]
@@ -358,10 +358,8 @@ where
         debug!("Using compression {:?}", &self.default_compression);
         let generation = self.handler.current_generation();
         // Use storage hints if available
-        if let Some(old_pos) = &mid.old_location {
-            if let Some(pref) = self.storage_hints.lock().remove(old_pos) {
-                object.set_system_storage_preference(pref);
-            }
+        if let Some(pref) = self.storage_hints.lock().remove(&pivot_key) {
+            object.set_system_storage_preference(pref);
         }
         let storage_preference = object.correct_preference();
         let storage_class = storage_preference
@@ -435,21 +433,21 @@ where
 
         if !was_present {
             // The object has been `stolen`.  Notify the handler.
-            self.copy_on_write(obj_ptr.clone(), CopyOnWriteReason::Steal);
+            self.copy_on_write(obj_ptr.clone(), CopyOnWriteReason::Steal, pivot_key.clone());
             // NOTE: Since this position is immediately deallocated we report
             // here a write for the old position. This has to be done since we
             // can't modify the old position as the the tree ObjectRef will not
             // be updated until the next writeback when it is inserted in
             // written back. Otherwise we can't find the Cache value anymore
             // from the tree...  o.O
-            if let (Some(report_tx), Some(old_offset)) = (&self.report_tx, mid.old_location) {
+            if let Some(report_tx) = &self.report_tx {
                 let _ = report_tx
-                    .send(DmlMsg::write(old_offset, size, mid.old_location))
+                    .send(DmlMsg::write(obj_ptr.offset(), size, pivot_key))
                     .map_err(|_| warn!("Channel Receiver has been dropped."));
             }
         } else if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
-                .send(DmlMsg::write(obj_ptr.offset(), size, mid.old_location))
+                .send(DmlMsg::write(obj_ptr.offset(), size, pivot_key))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
 
@@ -604,7 +602,7 @@ where
     fn prepare_write_back(
         &self,
         mid: ModifiedObjectId,
-        dep_mids: &mut Vec<ModifiedObjectId>,
+        dep_mids: &mut Vec<(ModifiedObjectId, PivotKey)>,
     ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, ()> {
         trace!("prepare_write_back: Enter");
         loop {
@@ -627,10 +625,12 @@ where
                             let mid = match or {
                                 ObjRef::Unmodified(..) => break Ok(()),
                                 ObjRef::InWriteback(mid, ..) | ObjRef::Modified(mid, ..) => *mid,
+                                ObjRef::Incomplete(_) => unreachable!(),
                             };
+                            let pk = or.index().clone();
                             if cache_contains_key(&or.as_key()) {
                                 modified_children = true;
-                                dep_mids.push(mid);
+                                dep_mids.push((mid, pk));
                                 break Ok(());
                             }
                             self.fix_or(or);
@@ -717,12 +717,12 @@ where
                 self.fetch(ptr)?;
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
-                        .send(DmlMsg::fetch(ptr.offset(), ptr.size()))
+                        .send(DmlMsg::fetch(ptr.offset(), ptr.size(), or.index().clone()))
                         .map_err(|_| warn!("Channel Receiver has been dropped."));
                 }
                 // Check if any storage hints are available and update the node.
                 // This moves the object reference into the modified state.
-                if let Some(pref) = self.storage_hints.lock().remove(&ptr.offset()) {
+                if let Some(pref) = self.storage_hints.lock().remove(or.index()) {
                     if let Some(mut obj) = self.steal(or, ptr.info())? {
                         obj.set_system_storage_preference(pref)
                     }
@@ -794,7 +794,7 @@ where
             Err(RemoveError::Pinned) => unimplemented!(),
         };
         if let ObjRef::Unmodified(ref ptr, ..) = or {
-            self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove);
+            self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove, or.index().clone());
         }
     }
 
@@ -812,7 +812,7 @@ where
             };
         };
         if let ObjRef::Unmodified(ref ptr, ..) = or {
-            self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove);
+            self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove, or.index().clone());
         }
         Ok(obj.into_inner())
     }
@@ -845,7 +845,7 @@ where
         FO: DerefMut<Target = Self::ObjectRef>,
     {
         trace!("write_back: Enter");
-        let (object, mid) = loop {
+        let (object, mid, mid_pk) = loop {
             trace!("write_back: Trying to acquire lock");
             let mut or = acquire_or_lock();
             trace!("write_back: Acquired lock");
@@ -855,31 +855,23 @@ where
                 ObjRef::Incomplete(..) => unreachable!(),
             };
             let mut mids = Vec::new();
-
-            // debug!("MID: {mid:?}");
-            // match *or {
-            //     ObjectRef::Unmodified(_) => debug!("State was Unmodified"),
-            //     ObjectRef::InWriteback(_) => debug!("State was InWriteback"),
-            //     ObjectRef::Modified(_) => debug!("State was Modified"),
-            // }
-
             trace!("write_back: Preparing write back");
             match self.prepare_write_back(mid, &mut mids) {
                 Ok(None) => {
                     trace!("write_back: Was Ok(None)");
                     self.fix_or(&mut or)
                 }
-                Ok(Some(object)) => break (object, mid),
+                Ok(Some(object)) => break (object, mid, or.index().clone()),
                 Err(()) => {
                     trace!("write_back: Was Err");
                     drop(or);
-                    while let Some(mid) = mids.last().cloned() {
+                    while let Some((mid, mid_pk)) = mids.last().cloned() {
                         trace!("write_back: Trying to prepare write back");
                         match self.prepare_write_back(mid, &mut mids) {
                             Ok(None) => {}
                             Ok(Some(object)) => {
                                 trace!("write_back: Was Ok Some");
-                                self.handle_write_back(object, mid, false).map_err(|err| {
+                                self.handle_write_back(object, mid, false, mid_pk).map_err(|err| {
                                     let mut cache = self.cache.write();
                                     let _ = cache.change_key::<(), _>(
                                         &ObjectKey::InWriteback(mid),
@@ -898,12 +890,12 @@ where
         };
         trace!("write_back: Leave");
 
-        self.handle_write_back(object, mid, false)
+        self.handle_write_back(object, mid, false, mid_pk)
     }
 
     type Prefetch = Pin<
         Box<
-            dyn Future<Output = Result<(<Self as Dml>::ObjectPointer, Buf), Error>>
+            dyn Future<Output = Result<(<Self as Dml>::ObjectPointer, Buf, PivotKey), Error>>
                 + Send
                 + 'static,
         >,
@@ -914,12 +906,12 @@ where
         }
         Ok(match *or {
             ObjRef::Modified(..) | ObjRef::InWriteback(..) => None,
-            ObjRef::Unmodified(ref p, ..) => Some(Box::pin(self.try_fetch_async(p)?.into_future())),
+            ObjRef::Unmodified(ref p, pk) => Some(Box::pin(self.try_fetch_async(p, pk)?.into_future())),
         })
     }
 
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
-        let (ptr, compressed_data) = block_on(p)?;
+        let (ptr, compressed_data, pk) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = ptr
                 .decompression_tag()
@@ -934,7 +926,7 @@ where
         self.insert_object_into_cache(key, RwLock::new(object));
         if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
-                .send(DmlMsg::fetch(ptr.offset(), ptr.size()))
+                .send(DmlMsg::fetch(ptr.offset(), ptr.size(), pk))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
         Ok(())
@@ -985,7 +977,7 @@ where
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
 {
-    fn storage_hints(&self) -> Arc<Mutex<HashMap<DiskOffset, StoragePreference>>> {
+    fn storage_hints(&self) -> Arc<Mutex<HashMap<PivotKey, StoragePreference>>> {
         Arc::clone(&self.storage_hints)
     }
 

@@ -29,9 +29,6 @@ use crate::{
 ///     │       │       │       │
 ///     ▼       ▼       ▼       ▼
 /// ```
-///
-/// TODO: The key is not unique atm, multiple keys can point to same node, but
-/// this relation is atleast surjective.
 #[derive(Hash, Clone, Debug, PartialEq, Eq)]
 pub enum PivotKey {
     LeftOuter(CowBytes, DatasetId),
