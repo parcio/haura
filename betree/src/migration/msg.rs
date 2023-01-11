@@ -4,7 +4,7 @@ use crate::{
     object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
     vdev::Block,
-    StoragePreference,
+    StoragePreference, tree::PivotKey,
 };
 use std::{
     fmt::Display,
@@ -97,42 +97,34 @@ pub enum DatabaseMsg {
 }
 
 impl DmlMsg {
-    pub fn build_fetch(info: OpInfo) -> Self {
-        Self::Fetch(info)
-    }
-
-    pub fn build_write(info: OpInfo) -> Self {
-        Self::Write(info)
-    }
-
-    pub fn fetch(offset: DiskOffset, size: Block<u32>) -> Self {
-        Self::build_fetch(OpInfo {
+    pub fn fetch(offset: DiskOffset, size: Block<u32>, pivot_key: PivotKey) -> Self {
+        Self::Fetch(OpInfo {
             offset,
             size,
             time: SystemTime::now(),
-            previous_offset: None,
+            pivot_key,
         })
     }
 
     pub fn write(
         offset: DiskOffset,
         size: Block<u32>,
-        previous_offset: Option<DiskOffset>,
+        pivot_key: PivotKey,
     ) -> Self {
-        Self::build_write(OpInfo {
+        Self::Write(OpInfo {
             offset,
             size,
             time: SystemTime::now(),
-            previous_offset,
+            pivot_key,
         })
     }
 
-    pub fn remove(offset: DiskOffset, size: Block<u32>) -> Self {
+    pub fn remove(offset: DiskOffset, size: Block<u32>, pivot_key: PivotKey) -> Self {
         Self::Remove(OpInfo {
             offset,
             size,
             time: SystemTime::now(),
-            previous_offset: None,
+            pivot_key,
         })
     }
 }
@@ -208,7 +200,7 @@ pub struct OpInfo {
     pub(crate) offset: DiskOffset,
     /// The previous offset of the node written. If `None` the node has been
     /// newly created and never been written before.
-    pub(crate) previous_offset: Option<DiskOffset>,
+    pub(crate) pivot_key: PivotKey,
     /// The size of the nodes in blocks. Relevant for weighting of operations
     /// and space restrictions.
     pub(crate) size: Block<u32>,

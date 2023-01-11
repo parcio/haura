@@ -231,3 +231,22 @@ impl<T, U> DerefMut for CacheValueRef<T, RwLockWriteGuard<'static, U>> {
         &mut self.guard
     }
 }
+
+pub struct TaggedCacheValue<Val, Tag> {
+    value: Val,
+    tag: Tag,
+}
+
+impl<Val: AddSize, Tag> AddSize for TaggedCacheValue<Val, Tag> {
+    fn add_size(&self, size_delta: isize) {
+        self.value.add_size(size_delta)
+    }
+}
+
+impl<Val, Tag> Deref for TaggedCacheValue<Val, Tag> {
+    type Target = Val;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
