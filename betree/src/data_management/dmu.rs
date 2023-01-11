@@ -1,6 +1,6 @@
 use super::{
     errors::*,
-    impls::{CacheValueRef, ModifiedObjectId, ObjRef, ObjectKey},
+    impls::{CacheValueRef, ModifiedObjectId, ObjRef, ObjectKey, TaggedCacheValue},
     object_ptr::ObjectPointer,
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
@@ -125,7 +125,7 @@ impl<E, SPL> Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = TaggedCacheValue<RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>, PivotKey>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -212,7 +212,7 @@ where
 
     /// Fetches synchronously an object from disk and inserts it into the
     /// cache.
-    fn fetch(&self, op: &<Self as Dml>::ObjectPointer) -> Result<(), Error> {
+    fn fetch(&self, op: &<Self as Dml>::ObjectPointer, pivot_key: PivotKey) -> Result<(), Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
         let mut decompression_state = op.decompression_tag().new_decompression()?;
@@ -228,7 +228,7 @@ where
             Object::unpack_at(op.offset(), data)?
         };
         let key = ObjectKey::Unmodified { offset, generation };
-        self.insert_object_into_cache(key, RwLock::new(object));
+        self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key));
         Ok(())
     }
 
@@ -253,7 +253,7 @@ where
     }
 
     fn insert_object_into_cache(&self, key: ObjectKey<Generation>, mut object: E::Value) {
-        let size = object.get_mut().size();
+        let size = object.value_mut().get_mut().size();
         let mut cache = self.cache.write();
         if !cache.contains_key(&key) {
             cache.insert(key, object, size);
@@ -280,7 +280,7 @@ where
         // If this fails, call copy_on_write as object has been modified again
 
         let evict_result = cache.evict(|&key, entry, cache_contains_key| {
-            let object = entry.get_mut();
+            let object = entry.value_mut().get_mut();
             let can_be_evicted = match key {
                 ObjectKey::InWriteback(_) => false,
                 ObjectKey::Unmodified { .. } => true,
@@ -320,14 +320,15 @@ where
             ObjectKey::Modified(mid) => mid,
         };
 
-        let size = object.get_mut().size();
+        let size = object.value_mut().get_mut().size();
         cache.insert(ObjectKey::InWriteback(mid), object, size);
         let entry = cache.get(&ObjectKey::InWriteback(mid), false).unwrap();
 
+        let pk = entry.tag();
         drop(cache);
         let object = CacheValueRef::write(entry);
 
-        self.handle_write_back(object, mid, true)?;
+        self.handle_write_back(object, mid, true, pk.clone())?;
         Ok(())
     }
 
@@ -618,7 +619,7 @@ where
             }
             let result =
                 cache.change_key(&ObjectKey::Modified(mid), |_, entry, cache_contains_key| {
-                    let object = entry.get_mut();
+                    let object = entry.value_mut().get_mut();
                     let mut modified_children = false;
                     object
                         .for_each_child::<(), _>(|or| loop {
@@ -667,7 +668,7 @@ impl<E, SPL> super::Dml for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = TaggedCacheValue<RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>, PivotKey>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -711,10 +712,10 @@ where
                 drop(cache);
                 return Ok(CacheValueRef::read(entry));
             }
-            if let ObjRef::Unmodified(ref ptr, ..) = *or {
+            if let ObjRef::Unmodified(ref ptr, pk) = *or {
                 drop(cache);
 
-                self.fetch(ptr)?;
+                self.fetch(ptr, pk)?;
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
                         .send(DmlMsg::fetch(ptr.offset(), ptr.size(), or.index().clone()))
@@ -762,7 +763,7 @@ where
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
         let size = object.size();
-        self.cache.write().insert(key, RwLock::new(object), size);
+        self.cache.write().insert(key, TaggedCacheValue::new(RwLock::new(object), pk.clone()), size);
         ObjRef::Modified(mid, pk)
     }
 
@@ -781,7 +782,7 @@ where
         let size = object.size();
         let entry = {
             let mut cache = self.cache.write();
-            cache.insert(key, RwLock::new(object), size);
+            cache.insert(key, TaggedCacheValue::new(RwLock::new(object), pk.clone()), size);
             cache.get(&key, false).unwrap()
         };
         (CacheValueRef::write(entry), ObjRef::Modified(mid, pk))
@@ -814,7 +815,7 @@ where
         if let ObjRef::Unmodified(ref ptr, ..) = or {
             self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove, or.index().clone());
         }
-        Ok(obj.into_inner())
+        Ok(obj.into_value().into_inner())
     }
 
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef {
@@ -923,7 +924,7 @@ where
             offset: ptr.offset(),
             generation: ptr.generation(),
         };
-        self.insert_object_into_cache(key, RwLock::new(object));
+        self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pk.clone()));
         if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
                 .send(DmlMsg::fetch(ptr.offset(), ptr.size(), pk))
@@ -956,7 +957,7 @@ impl<E, SPL> super::DmlWithHandler for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = TaggedCacheValue<RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>, PivotKey>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -972,7 +973,7 @@ impl<E, SPL> super::DmlWithStorageHints for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = TaggedCacheValue<RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>, PivotKey>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
@@ -990,7 +991,7 @@ impl<E, SPL> super::DmlWithReport for Dmu<E, SPL>
 where
     E: Cache<
         Key = ObjectKey<Generation>,
-        Value = RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>,
+        Value = TaggedCacheValue<RwLock<Node<ObjRef<ObjectPointer<SPL::Checksum>>>>, PivotKey>,
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
