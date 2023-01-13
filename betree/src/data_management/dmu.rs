@@ -177,14 +177,15 @@ where
             ObjRef::Unmodified(..) => unreachable!(),
             ObjRef::Modified(mid, pk) => {
                 debug!("{mid:?} moved to InWriteback");
-                *or = ObjRef::InWriteback(*mid, *pk);
+                *or = ObjRef::InWriteback(*mid, pk.clone());
             }
             ObjRef::InWriteback(mid, pk) => {
                 // The object must have been written back recently.
                 debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(mid).unwrap();
-                *or = ObjRef::Unmodified(ptr, *pk);
+                *or = ObjRef::Unmodified(ptr, pk.clone());
             }
+            ObjRef::Incomplete(..) => unreachable!(),
         }
     }
 
@@ -225,7 +226,7 @@ where
 
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack_at(op.offset(), data)?
+            Object::unpack_at(op.offset(), op.info(), data)?
         };
         let key = ObjectKey::Unmodified { offset, generation };
         self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key));
@@ -324,11 +325,11 @@ where
         cache.insert(ObjectKey::InWriteback(mid), object, size);
         let entry = cache.get(&ObjectKey::InWriteback(mid), false).unwrap();
 
-        let pk = entry.tag();
+        let pk = entry.tag().clone();
         drop(cache);
         let object = CacheValueRef::write(entry);
 
-        self.handle_write_back(object, mid, true, pk.clone())?;
+        self.handle_write_back(object, mid, true, pk)?;
         Ok(())
     }
 
@@ -712,18 +713,18 @@ where
                 drop(cache);
                 return Ok(CacheValueRef::read(entry));
             }
-            if let ObjRef::Unmodified(ref ptr, pk) = *or {
+            if let ObjRef::Unmodified(ref ptr, ref pk) = *or {
                 drop(cache);
 
-                self.fetch(ptr, pk)?;
+                self.fetch(ptr, pk.clone())?;
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
-                        .send(DmlMsg::fetch(ptr.offset(), ptr.size(), or.index().clone()))
+                        .send(DmlMsg::fetch(ptr.offset(), ptr.size(), pk.clone()))
                         .map_err(|_| warn!("Channel Receiver has been dropped."));
                 }
                 // Check if any storage hints are available and update the node.
                 // This moves the object reference into the modified state.
-                if let Some(pref) = self.storage_hints.lock().remove(or.index()) {
+                if let Some(pref) = self.storage_hints.lock().remove(pk) {
                     if let Some(mut obj) = self.steal(or, ptr.info())? {
                         obj.set_system_storage_preference(pref)
                     }
@@ -907,7 +908,8 @@ where
         }
         Ok(match *or {
             ObjRef::Modified(..) | ObjRef::InWriteback(..) => None,
-            ObjRef::Unmodified(ref p, pk) => Some(Box::pin(self.try_fetch_async(p, pk)?.into_future())),
+            ObjRef::Unmodified(ref p, ref pk) => Some(Box::pin(self.try_fetch_async(p, pk.clone())?.into_future())),
+            ObjRef::Incomplete(..) => unreachable!(),
         })
     }
 
@@ -918,7 +920,7 @@ where
                 .decompression_tag()
                 .new_decompression()?
                 .decompress(&compressed_data)?;
-            Object::unpack_at(ptr.offset(), data)?
+            Object::unpack_at(ptr.offset(), ptr.info(), data)?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),

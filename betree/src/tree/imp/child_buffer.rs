@@ -81,6 +81,14 @@ impl<N: ObjectReference> ChildBuffer<N> {
         let d_id = or.index().d_id();
         or.set_index(lpk.to_global(d_id));
     }
+
+    /// Insert an arbitrary PivotKey into the `ObjectReference`.
+    ///
+    /// FIXME: This is best replaced with actual type exclusion.
+    pub fn complete_object_ref(&mut self, pk: PivotKey) {
+        self.node_pointer.get_mut().set_index(pk)
+    }
+
 }
 
 mod ser_np {
