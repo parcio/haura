@@ -89,7 +89,7 @@ pub trait HasStoragePreference {
     fn correct_preference(&self) -> StoragePreference {
         match self.current_preference() {
             Some(pref) => pref,
-
+            None => self.recalculate(),
         }
     }
 
@@ -110,7 +110,7 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
     fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
     /// Unpacks the object from the given `data`.
-    fn unpack_at(disk_offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error>;
+    fn unpack_at(disk_offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.
     fn debug_info(&self) -> String;
