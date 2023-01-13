@@ -9,7 +9,7 @@ mod message_action;
 
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
-pub(crate) use self::{
+pub use self::{
     default_message_action::DefaultMessageAction,
     imp::{Inner, Node, RangeIterator, Tree},
     layer::{TreeBaseLayer, TreeLayer},
