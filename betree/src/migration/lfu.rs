@@ -16,7 +16,7 @@ use crate::{
     object::{ObjectStore, ObjectStoreId},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,
-    Database, StoragePreference,
+    Database, StoragePreference, tree::PivotKey,
 };
 
 use super::{
@@ -30,7 +30,7 @@ struct ObjectLocation(StoragePreference, u64);
 
 /// Implementation of Least Frequently Used
 pub struct Lfu {
-    leafs: [LfuCache<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
+    leafs: [LfuCache<PivotKey, LeafInfo>; NUM_STORAGE_CLASSES],
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg>,
     db: Arc<RwLock<Database>>,
@@ -47,7 +47,7 @@ pub struct Lfu {
     ),
     /// HashMap accessible by the DML, resolution is not guaranteed but always
     /// used when a object is written.
-    storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+    storage_hint_dml: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
 }
 
 // Bucket boundaries, see comment below:
@@ -192,64 +192,25 @@ impl<'lfu> Lfu {
             match msg {
                 DmlMsg::Fetch(info) | DmlMsg::Write(info) => {
                     if let Some(entry) =
-                        self.leafs[info.offset.storage_class() as usize].get_mut(&info.offset)
+                        self.leafs[info.offset.storage_class() as usize].get_mut(&info.pivot_key)
                     {
                         // Known Offset
                         entry.offset = info.offset;
                         entry.size = info.size;
                     } else {
-                        // Unknonwn Offset
-                        match info.previous_offset {
-                            Some(offset) => {
-                                debug!("Message: Old Offset {offset:?}");
-                                // Moved Entry
-                                let new_offset = info.offset;
-                                let new_tier = new_offset.storage_class() as usize;
-                                let old_tier = offset.storage_class() as usize;
-                                if let Some((previous_value, freq)) =
-                                    self.leafs[old_tier].remove(&offset)
-                                {
-                                    debug!("Message: Moving entry..");
-                                    self.leafs[new_tier].insert(new_offset, previous_value);
-
-                                    // FIXME: This is hacky way to transfer the
-                                    // frequency to the new location. It would
-                                    // generally be better _and_ more efficient
-                                    // to do this directly in the lfu cache
-                                    // crate.
-                                    for _ in 0..(freq.saturating_sub(1)) {
-                                        self.leafs[new_tier].get(&new_offset);
-                                    }
-                                } else {
-                                    // For some reason the previous entry could not be found.
-                                    self.leafs[new_tier].insert(
-                                        new_offset,
-                                        LeafInfo {
-                                            offset: info.offset,
-                                            size: info.size,
-                                        },
-                                    );
-                                }
-                                let entry = self.leafs[new_tier].get_mut(&new_offset).unwrap();
-                                entry.offset = info.offset;
-                                entry.size = info.size;
-                            }
-                            None => {
-                                // New Entry
-                                self.leafs[info.offset.storage_class() as usize].insert(
-                                    info.offset,
-                                    LeafInfo {
-                                        offset: info.offset,
-                                        size: info.size,
-                                    },
-                                );
-                            }
-                        }
+                        // New Entry
+                        self.leafs[info.offset.storage_class() as usize].insert(
+                            info.pivot_key,
+                            LeafInfo {
+                                offset: info.offset,
+                                size: info.size,
+                            },
+                        );
                     }
                 }
-                DmlMsg::Remove(opinfo) => {
+                DmlMsg::Remove(info) => {
                     // Delete Offset
-                    self.leafs[opinfo.offset.storage_class() as usize].remove(&opinfo.offset);
+                    self.leafs[info.offset.storage_class() as usize].remove(&info.pivot_key);
                 }
             }
         }
@@ -390,7 +351,7 @@ impl<'lfu> Lfu {
         db_rx: Receiver<DatabaseMsg>,
         db: Arc<RwLock<Database>>,
         config: MigrationConfig<LfuConfig>,
-        storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+        storage_hint_dml: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
     ) -> Self {
         let dmu = Arc::clone(db.read().root_tree.dmu());
         let default_storage_class = dmu.default_storage_class();
@@ -511,11 +472,11 @@ impl super::MigrationPolicy for Lfu {
                     && num_moved < self.config.policy_config.promote_num
                     && !self.leafs[storage_tier as usize].is_empty()
                 {
-                    if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
+                    if let Some((key, entry)) = self.leafs[storage_tier as usize].pop_mfu_key_value() {
                         if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
-                            debug!("Moving {:?}", entry.offset);
+                            debug!("Moving {:?}", &key);
                             debug!("Was on storage tier: {:?}", storage_tier);
-                            self.storage_hint_dml.lock().insert(entry.offset, lifted);
+                            self.storage_hint_dml.lock().insert(key, lifted);
                             debug!("New storage preference: {:?}", lifted);
                             moved += Block(entry.size.as_u64());
                             num_moved += 1;
@@ -631,11 +592,11 @@ impl super::MigrationPolicy for Lfu {
             }
             LfuMode::Node => {
                 while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
-                    if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
+                    if let Some((key, entry)) = self.leafs[storage_tier as usize].pop_lfu_key_value() {
                         if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
                             debug!("Moving {:?}", entry.offset);
                             debug!("Was on storage tier: {:?}", storage_tier);
-                            self.storage_hint_dml.lock().insert(entry.offset, lowered);
+                            self.storage_hint_dml.lock().insert(key, lowered);
                             moved += Block(entry.size.as_u64());
                             debug!("New storage preference: {:?}", lowered);
                         }

@@ -13,13 +13,13 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ModifiedObjectId {
     pub(super) id: u64,
     pub(super) pref: StoragePreference,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ObjectKey<G> {
     Unmodified { offset: DiskOffset, generation: G },
     Modified(ModifiedObjectId),
@@ -48,7 +48,7 @@ where
 {
     type ObjectPointer = ObjectPointer<D>;
     fn get_unmodified(&self) -> Option<&ObjectPointer<D>> {
-        if let ObjRef::Unmodified(ref p, ..) = self {
+        if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
             Some(p)
         } else {
             None
@@ -72,7 +72,7 @@ where
 
     fn index(&self) -> &PivotKey {
         match self {
-            ObjRef::Incomplete(p) => unreachable!(),
+            ObjRef::Incomplete(_) => unreachable!(),
             ObjRef::Unmodified(_, pk) | ObjRef::Modified(_, pk) | ObjRef::InWriteback(_, pk) => pk,
         }
     }
@@ -94,7 +94,8 @@ impl<D> ObjRef<ObjectPointer<D>> {
 
 impl<D> From<ObjectPointer<D>> for ObjRef<ObjectPointer<D>> {
     fn from(ptr: ObjectPointer<D>) -> Self {
-        ObjRef::Incomplete(ptr)
+        let d_id = ptr.info;
+        ObjRef::Unmodified(ptr, PivotKey::Root(d_id))
     }
 }
 
@@ -159,6 +160,7 @@ where
     where
         E: Deserializer<'de>,
     {
+        debug!("Deserializing");
         ObjectPointer::<D>::deserialize(deserializer).map(ObjRef::Incomplete)
     }
 }
@@ -249,7 +251,7 @@ impl<Val, Tag> TaggedCacheValue<Val, Tag> {
         &self.value
     }
 
-    pub fn value_mut(&self) -> &mut Val {
+    pub fn value_mut(&mut self) -> &mut Val {
         &mut self.value
     }
 

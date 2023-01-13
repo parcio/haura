@@ -296,7 +296,7 @@ impl LeafNode {
         // This adjusts sibling's size and pref according to its new entries
         let (pivot_key, size_delta) = self.do_split_off(&mut right_sibling, min_size, max_size);
 
-        (right_sibling, pivot_key, size_delta, LocalPivotKey::Right(pivot_key))
+        (right_sibling, pivot_key.clone(), size_delta, LocalPivotKey::Right(pivot_key))
     }
 
     /// Merge all entries from the *right* node into the *left* node.  Returns
@@ -484,7 +484,7 @@ mod tests {
             return TestResult::discard();
         }
 
-        let (sibling, _, size_delta) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
+        let (sibling, _, size_delta, _pivot_key) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
         assert_eq!({ serialized_size(&leaf_node) }, leaf_node.size());
         assert_eq!({ serialized_size(&sibling) }, sibling.size());
         assert_eq!(
@@ -503,7 +503,7 @@ mod tests {
             return TestResult::discard();
         }
         let this = leaf_node.clone();
-        let (mut sibling, _, _) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
+        let (mut sibling, ..) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
         leaf_node.recalculate();
         leaf_node.merge(&mut sibling);
         assert_eq!(this, leaf_node);

@@ -25,7 +25,7 @@ where
             root_node.size(),
             root_node.actual_size()
         );
-        let size_delta = root_node.split_root_mut(self.tree_id(), |node, pk| {
+        let size_delta = root_node.split_root_mut(|node, pk| {
             debug!(
                 "Root split child: {}, {:?}, {}, {:?}",
                 node.kind(),

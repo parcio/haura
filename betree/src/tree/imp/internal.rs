@@ -6,7 +6,7 @@ use crate::{
     size::{Size, SizeMut, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
     tree::{KeyInfo, MessageAction, pivot_key::LocalPivotKey},
-    AtomicStoragePreference, StoragePreference,
+    AtomicStoragePreference, StoragePreference, database::DatasetId,
 };
 use bincode::serialized_size;
 use parking_lot::RwLock;
@@ -424,7 +424,7 @@ impl<N: ObjectReference> InternalNode<ChildBuffer<N>> {
             system_storage_preference: self.system_storage_preference.clone(),
             pref: AtomicStoragePreference::unknown(),
         };
-        (right_sibling, pivot_key, -(size_delta as isize), LocalPivotKey::Right(pivot_key))
+        (right_sibling, pivot_key.clone(), -(size_delta as isize), LocalPivotKey::Right(pivot_key))
     }
 
     pub fn merge(&mut self, right_sibling: &mut Self, old_pivot_key: CowBytes) -> isize {
@@ -436,6 +436,21 @@ impl<N: ObjectReference> InternalNode<ChildBuffer<N>> {
         self.children.append(&mut right_sibling.children);
 
         size_delta as isize
+    }
+
+    /// Translate any object ref in a `ChildBuffer` from `Incomplete` to `Unmodified` state.
+    pub fn complete_object_refs(mut self, d_id: DatasetId) -> Self {
+        // TODO:
+        let first_pk = match self.pivot.first() {
+            Some(p) => PivotKey::LeftOuter(p.clone(), d_id),
+            None => unreachable!("The store contains an empty InternalNode, this should never be the case."),
+        };
+        for (id,pk) in [first_pk].into_iter().chain(self.pivot.iter().map(|p| PivotKey::Right(p.clone(), d_id))).enumerate() {
+            // SAFETY: There must always be pivots + 1 many children, otherwise
+            // the state of the Internal Node is broken.
+            self.children[id].complete_object_ref(pk)
+        }
+        self
     }
 }
 
@@ -618,12 +633,15 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
     use crate::{
         arbitrary::GenExt,
-        tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
+        tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg}, database::DatasetId,
     };
     use bincode::serialized_size;
+    use owning_ref::BoxRef;
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
     use serde::Serialize;
@@ -752,6 +770,7 @@ mod tests {
         check_size(&mut node);
     }
 
+
     #[quickcheck]
     fn check_insert_msg_buffer(
         mut node: InternalNode<ChildBuffer<()>>,
@@ -781,13 +800,36 @@ mod tests {
         assert_eq!(added_size, added_size_twin);
     }
 
+    static mut PK: Option<PivotKey> = None;
+
+    impl ObjectReference for () {
+        type ObjectPointer = ();
+
+        fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
+            Some(&())
+    }
+
+        fn set_index(&mut self, pk: PivotKey) {
+            // NO-OP
+    }
+
+        fn index(&self) -> &PivotKey {
+            unsafe {
+            if PK.is_none() {
+                PK = Some(PivotKey::LeftOuter(CowBytes::from(vec![42u8]), DatasetId::default()));
+            }
+            PK.as_ref().unwrap()
+            }
+    }
+    }
+
     #[quickcheck]
     fn check_size_split(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
         if node.fanout() < 2 {
             return TestResult::discard();
         }
         let size_before = node.size();
-        let (mut right_sibling, _pivot_key, size_delta) = node.split();
+        let (mut right_sibling, _pivot, size_delta, _pivot_key) = node.split();
         assert_eq!(size_before as isize + size_delta, node.size() as isize);
         check_size(&mut node);
         check_size(&mut right_sibling);
@@ -801,13 +843,13 @@ mod tests {
             return TestResult::discard();
         }
         let twin = node.clone();
-        let (mut right_sibling, pivot_key, _size_delta) = node.split();
+        let (mut right_sibling, pivot, _size_delta, _pivot_key) = node.split();
 
         assert!(node.fanout() >= 2);
         assert!(right_sibling.fanout() >= 2);
 
-        node.entries_size += pivot_key.size() + right_sibling.entries_size;
-        node.pivot.push(pivot_key);
+        node.entries_size += pivot.size() + right_sibling.entries_size;
+        node.pivot.push(pivot);
         node.pivot.append(&mut right_sibling.pivot);
         node.children.append(&mut right_sibling.children);
 

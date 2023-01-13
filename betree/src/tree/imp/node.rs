@@ -90,10 +90,10 @@ impl<R: ObjectReference + HasStoragePreference> Object<R> for Node<R> {
         }
     }
 
-    fn unpack_at(_offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error> {
+    fn unpack_at(_offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
         if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
             match deserialize::<InternalNode<_>>(&data[4..]) {
-                Ok(internal) => Ok(Node(Internal(internal))),
+                Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
         } else {
@@ -258,7 +258,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 }
 
 impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn split_root_mut<F>(&mut self, tree_id: DatasetId, allocate_obj: F) -> isize
+    pub(super) fn split_root_mut<F>(&mut self, allocate_obj: F) -> isize
     where
         F: Fn(Self, LocalPivotKey) -> N,
     {
@@ -280,8 +280,8 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         };
         debug!("Root split pivot key: {:?}", pivot_key);
         *self = Node(Internal(InternalNode::new(
-            ChildBuffer::new(allocate_obj(left_sibling, LocalPivotKey::LeftOuter(pivot_key))),
-            ChildBuffer::new(allocate_obj(right_sibling, LocalPivotKey::Right(pivot_key))),
+            ChildBuffer::new(allocate_obj(left_sibling, LocalPivotKey::LeftOuter(pivot_key.clone()))),
+            ChildBuffer::new(allocate_obj(right_sibling, LocalPivotKey::Right(pivot_key.clone()))),
             pivot_key,
             cur_level + 1,
         )));
