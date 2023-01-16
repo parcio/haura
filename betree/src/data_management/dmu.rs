@@ -141,7 +141,7 @@ where
         &self,
         or: &mut <Self as Dml>::ObjectRef,
         info: DatasetId,
-    ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, Error> {
+    ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, DmlError> {
         debug!("Stealing {or:?}");
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
         let old_ptr = {
@@ -218,7 +218,7 @@ where
 
     /// Fetches synchronously an object from disk and inserts it into the
     /// cache.
-    fn fetch(&self, op: &<Self as Dml>::ObjectPointer) -> Result<(), Error> {
+    fn fetch(&self, op: &<Self as Dml>::ObjectPointer) -> Result<(), DmlError> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
         let mut decompression_state = op.decompression_tag().new_decompression()?;
@@ -231,7 +231,7 @@ where
 
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack_at(op.offset(), data).chain_err(|| ErrorKind::DeserializationError)?
+            Object::unpack_at(op.offset(), data)?
         };
         let key = ObjectKey::Unmodified { offset, generation };
         self.insert_object_into_cache(key, RwLock::new(object));
@@ -244,16 +244,16 @@ where
         &self,
         op: &<Self as Dml>::ObjectPointer,
     ) -> Result<
-        impl TryFuture<Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf), Error = Error>
+        impl TryFuture<Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf), Error = DmlError>
             + Send,
-        Error,
+        DmlError,
     > {
         let ptr = op.clone();
 
         Ok(self
             .pool
             .read_async(op.size(), op.offset(), op.checksum().clone())?
-            .map_err(Error::from)
+            .map_err(DmlError::from)
             .and_then(move |data| ok((ptr, data))))
     }
 
@@ -265,7 +265,7 @@ where
         }
     }
 
-    fn evict(&self, mut cache: RwLockWriteGuard<E>) -> Result<(), Error> {
+    fn evict(&self, mut cache: RwLockWriteGuard<E>) -> Result<(), DmlError> {
         // TODO we may need to evict multiple objects
         // Algorithm overview:
         // Find some evictable object
@@ -341,7 +341,7 @@ where
         mut object: <Self as Dml>::CacheValueRefMut,
         mid: ModifiedObjectId,
         evict: bool,
-    ) -> Result<<Self as Dml>::ObjectPointer, Error> {
+    ) -> Result<<Self as Dml>::ObjectPointer, DmlError> {
         let object_size = {
             #[cfg(debug_assertions)]
             {
@@ -378,8 +378,7 @@ where
             let mut state = compression.new_compression()?;
             {
                 object
-                    .pack(&mut state)
-                    .chain_err(|| ErrorKind::SerializationError)?;
+                    .pack(&mut state)?;
                 drop(object);
             }
             state.finish()
@@ -463,7 +462,7 @@ where
         Ok(obj_ptr)
     }
 
-    fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, Error> {
+    fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, DmlError> {
         assert!(storage_preference < NUM_STORAGE_CLASSES as u8);
         if size >= Block(2048) {
             warn!("Very large allocation requested: {:?}", size);
@@ -528,8 +527,7 @@ where
                     let segment_id = SegmentId::get(DiskOffset::new(class, disk_id, Block(0)));
                     let allocator = self
                         .handler
-                        .get_allocation_bitmap(segment_id, self)
-                        .chain_err(|| ErrorKind::HandlerError)?;
+                        .get_allocation_bitmap(segment_id, self)?;
                     *x = Some((segment_id, allocator));
                 }
                 let &mut (ref mut segment_id, ref mut allocator) = x.as_mut().unwrap();
@@ -557,8 +555,7 @@ where
                     }
                     *allocator = self
                         .handler
-                        .get_allocation_bitmap(next_segment_id, self)
-                        .chain_err(|| ErrorKind::HandlerError)?;
+                        .get_allocation_bitmap(next_segment_id, self)?;
                     *segment_id = next_segment_id;
                 }
             };
@@ -569,8 +566,7 @@ where
                 self.handler.get_free_space_tier(class)
             );
             self.handler
-                .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
-                .chain_err(|| ErrorKind::HandlerError)?;
+                .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)?;
 
             return Ok(disk_offset);
         }
@@ -579,12 +575,12 @@ where
             "No available layer can provide enough free storage {:?}",
             size
         );
-        bail!(ErrorKind::OutOfSpaceError)
+        Err(DmlError::OutOfSpaceError)
     }
 
     /// Tries to allocate `size` blocks at `disk_offset`.  Might fail if
     /// already in use.
-    pub fn allocate_raw_at(&self, disk_offset: DiskOffset, size: Block<u32>) -> Result<(), Error> {
+    pub fn allocate_raw_at(&self, disk_offset: DiskOffset, size: Block<u32>) -> Result<(), DmlError> {
         let disk_id = disk_offset.disk_id();
         let num_disks = self.pool.num_disks(disk_offset.storage_class(), disk_id);
         let size = size * num_disks as u32;
@@ -593,16 +589,14 @@ where
             self.allocation_data[disk_offset.storage_class() as usize][disk_id as usize].lock();
         let mut allocator = self
             .handler
-            .get_allocation_bitmap(segment_id, self)
-            .chain_err(|| ErrorKind::HandlerError)?;
+            .get_allocation_bitmap(segment_id, self)?;
         if allocator.allocate_at(size.as_u32(), SegmentId::get_block_offset(disk_offset)) {
             *x = Some((segment_id, allocator));
             self.handler
-                .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)
-                .chain_err(|| ErrorKind::HandlerError)?;
+                .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)?;
             Ok(())
         } else {
-            bail!("Cannot allocate raw at {:?} / {:?}", disk_offset, size)
+            Err(DmlError::RawAllocationError { at: disk_offset, size })
         }
     }
 
@@ -715,7 +709,7 @@ where
         }
     }
 
-    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, Error> {
+    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, DmlError> {
         let mut cache = self.cache.read();
         loop {
             if let Some(entry) = cache.get(&or.as_key(), true) {
@@ -749,7 +743,7 @@ where
         &self,
         or: &mut Self::ObjectRef,
         info: Self::Info,
-    ) -> Result<Self::CacheValueRefMut, Error> {
+    ) -> Result<Self::CacheValueRefMut, DmlError> {
         // Fast path
         if let Some(obj) = self.try_get_mut(or) {
             return Ok(obj);
@@ -813,7 +807,7 @@ where
     fn get_and_remove(
         &self,
         mut or: Self::ObjectRef,
-    ) -> Result<Node<ObjRef<ObjectPointer<SPL::Checksum>>>, Error> {
+    ) -> Result<Node<ObjRef<ObjectPointer<SPL::Checksum>>>, DmlError> {
         let obj = loop {
             self.get(&mut or)?;
             match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
@@ -833,7 +827,7 @@ where
         r.into()
     }
 
-    fn evict(&self) -> Result<(), Error> {
+    fn evict(&self) -> Result<(), DmlError> {
         // TODO shortcut without locking cache
         let cache = self.cache.write();
         if cache.size() > cache.capacity() {
@@ -851,7 +845,7 @@ where
     /// needed.  A write back on a subtree will always write the lowest modified
     /// node level first and then propagate writes upwards until the subtree
     /// root is reached.
-    fn write_back<F, FO>(&self, mut acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
+    fn write_back<F, FO>(&self, mut acquire_or_lock: F) -> Result<Self::ObjectPointer, DmlError>
     where
         F: FnMut() -> FO,
         FO: DerefMut<Target = Self::ObjectRef>,
@@ -914,12 +908,12 @@ where
 
     type Prefetch = Pin<
         Box<
-            dyn Future<Output = Result<(<Self as Dml>::ObjectPointer, Buf), Error>>
+            dyn Future<Output = Result<(<Self as Dml>::ObjectPointer, Buf), DmlError>>
                 + Send
                 + 'static,
         >,
     >;
-    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, Error> {
+    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, DmlError> {
         if self.cache.read().contains_key(&or.as_key()) {
             return Ok(None);
         }
@@ -929,14 +923,14 @@ where
         })
     }
 
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), DmlError> {
         let (ptr, compressed_data) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = ptr
                 .decompression_tag()
                 .new_decompression()?
                 .decompress(&compressed_data)?;
-            Object::unpack_at(ptr.offset(), data).chain_err(|| ErrorKind::DeserializationError)?
+            Object::unpack_at(ptr.offset(), data)?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),
