@@ -24,7 +24,7 @@ an enum indicating the position of the node based on its parent.
 ```rust
 type Pivot = CowBytes;
 
-enum PivotKey {
+enum LocalPivotKey {
     LeftOuter(Pivot),
     Right(Pivot),
     Root,
@@ -57,6 +57,16 @@ enum PivotKey {
 Also, as the root node of a tree does not have a parent which could index the
 node by it's pivot - we add another variant which simply denotes that the root
 of a given dataset is to be chosen.
+
+We propose that we internally use two kinds of pivot keys. First, the global
+`PivotKey`, which is structured as shown above including the `DatasetId`.
+Second, the scoped `LocalPivotKey`, which can offer of us some advantages when
+designing interfaces for node operations, which do not have the knowledge in
+which tree they are located in. This alleviates the need for passing around
+`DatasetIds` to layers which are normally unaffected by it. The transformation
+from `LocalPivotKey` to `PivotKey` is always possible, as all local keys which a
+tree layer will encounter belong to the tree itself, the reverse direction is
+not given to be valid and should therefore be excluded in the implementation.
 
 # Purpose
 
