@@ -27,6 +27,7 @@ type Pivot = CowBytes;
 enum PivotKey {
     LeftOuter(Pivot),
     Right(Pivot),
+    Root,
 }
 ```
 
@@ -35,7 +36,7 @@ furthermore we can structurally define Pivot Key directions which keeps the
 required memory space relatively low as only a single pivot key is required.
 Finally, the pivot keys are more persistent than normal keys in the collection,
 as they are only refreshed when the strcture of the tree changes. This might
-happen on rebalancing. Although when we consider this than any node based
+happen on rebalancing. Although, when we consider this than any node based
 algorithm needs to reconsider decisions anyway.
 
 To make the pivot key ready to use over all datasets in a database (which can
