@@ -69,7 +69,6 @@ pub(crate) type Object = Node<ObjectRef>;
 type DbHandler = Handler<ObjectRef>;
 
 pub(crate) type RootSpu = StoragePoolUnit<XxHash>;
-
 pub(crate) type RootDmu = Dmu<
     ClockCache<data_management::impls::ObjectKey<Generation>, TaggedCacheValue<RwLock<Object>, PivotKey>>,
     RootSpu,
