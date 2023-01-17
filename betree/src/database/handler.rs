@@ -59,11 +59,7 @@ pub struct Handler<OR: ObjectReference> {
 impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     fn current_root_tree<'a, X>(&'a self, dmu: &'a X) -> impl TreeLayer<DefaultMessageAction> + 'a
     where
-        X: Dml<
-            Object = Node<OR>,
-            ObjectRef = OR,
-            ObjectPointer = OR::ObjectPointer,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         Tree::from_inner(
             self.root_tree_inner.get().unwrap().as_ref(),
@@ -78,11 +74,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         dmu: &'a X,
     ) -> Option<impl TreeLayer<DefaultMessageAction> + 'a>
     where
-        X: Dml<
-            Object = Node<OR>,
-            ObjectRef = OR,
-            ObjectPointer = OR::ObjectPointer,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         OwningRef::new(self.root_tree_snapshot.read())
             .try_map(|lock| lock.as_ref().ok_or(()))
@@ -114,11 +106,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         dmu: &X,
     ) -> Result<()>
     where
-        X: Dml<
-            Object = Node<OR>,
-            ObjectRef = OR,
-            ObjectPointer = OR::ObjectPointer,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         self.allocations.fetch_add(1, Ordering::Release);
         let key = segment_id_to_key(SegmentId::get(offset));
@@ -153,11 +141,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
 
     pub fn get_allocation_bitmap<X>(&self, id: SegmentId, dmu: &X) -> Result<SegmentAllocator>
     where
-        X: Dml<
-            Object = Node<OR>,
-            ObjectRef = OR,
-            ObjectPointer = OR::ObjectPointer,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         let now = std::time::Instant::now();
         let mut bitmap = [0u8; SEGMENT_SIZE_BYTES];

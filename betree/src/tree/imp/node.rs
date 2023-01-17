@@ -5,16 +5,17 @@ use super::{
     internal::{InternalNode, TakeChildBuffer},
     leaf::LeafNode,
     packed::PackedMap,
-    FillUpResult, KeyInfo, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT, MIN_FLUSH_SIZE,
-    MIN_LEAF_NODE_SIZE, PivotKey,
+    FillUpResult, KeyInfo, PivotKey, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT,
+    MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, Object, ObjectReference},
+    database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::DiskOffset,
-    tree::{MessageAction, pivot_key::LocalPivotKey},
-    StoragePreference, database::DatasetId,
+    tree::{pivot_key::LocalPivotKey, MessageAction},
+    StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
@@ -280,8 +281,14 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         };
         debug!("Root split pivot key: {:?}", pivot_key);
         *self = Node(Internal(InternalNode::new(
-            ChildBuffer::new(allocate_obj(left_sibling, LocalPivotKey::LeftOuter(pivot_key.clone()))),
-            ChildBuffer::new(allocate_obj(right_sibling, LocalPivotKey::Right(pivot_key.clone()))),
+            ChildBuffer::new(allocate_obj(
+                left_sibling,
+                LocalPivotKey::LeftOuter(pivot_key.clone()),
+            )),
+            ChildBuffer::new(allocate_obj(
+                right_sibling,
+                LocalPivotKey::Right(pivot_key.clone()),
+            )),
             pivot_key,
             cur_level + 1,
         )));
@@ -367,7 +374,7 @@ impl<N: HasStoragePreference> Node<N> {
 
     pub(super) fn pivot_get(&self, pk: &PivotKey) -> Option<PivotGetResult<N>> {
         if pk.is_root() {
-            return Some(PivotGetResult::Target(None))
+            return Some(PivotGetResult::Target(None));
         }
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,
@@ -377,7 +384,7 @@ impl<N: HasStoragePreference> Node<N> {
 
     pub(super) fn pivot_get_mut(&mut self, pk: &PivotKey) -> Option<PivotGetMutResult<N>> {
         if pk.is_root() {
-            return Some(PivotGetMutResult::Target(None))
+            return Some(PivotGetMutResult::Target(None));
         }
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,

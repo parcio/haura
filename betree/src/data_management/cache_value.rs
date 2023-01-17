@@ -1,6 +1,4 @@
-use crate::{
-    cache::AddSize, size::SizeMut
-};
+use crate::{cache::AddSize, size::SizeMut};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use stable_deref_trait::StableDeref;
 use std::{
@@ -84,10 +82,7 @@ pub struct TaggedCacheValue<Val, Tag> {
 
 impl<Val, Tag> TaggedCacheValue<Val, Tag> {
     pub fn new(value: Val, tag: Tag) -> Self {
-        Self {
-            value,
-            tag,
-        }
+        Self { value, tag }
     }
 
     pub fn value(&self) -> &Val {

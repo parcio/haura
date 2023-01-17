@@ -15,8 +15,9 @@ use crate::{
     database::RootDmu,
     object::{ObjectStore, ObjectStoreId},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
+    tree::PivotKey,
     vdev::Block,
-    Database, StoragePreference, tree::PivotKey,
+    Database, StoragePreference,
 };
 
 use super::{
@@ -472,7 +473,9 @@ impl super::MigrationPolicy for Lfu {
                     && num_moved < self.config.policy_config.promote_num
                     && !self.leafs[storage_tier as usize].is_empty()
                 {
-                    if let Some((key, entry)) = self.leafs[storage_tier as usize].pop_mfu_key_value() {
+                    if let Some((key, entry)) =
+                        self.leafs[storage_tier as usize].pop_mfu_key_value()
+                    {
                         if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
                             debug!("Moving {:?}", &key);
                             debug!("Was on storage tier: {:?}", storage_tier);
@@ -592,7 +595,9 @@ impl super::MigrationPolicy for Lfu {
             }
             LfuMode::Node => {
                 while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
-                    if let Some((key, entry)) = self.leafs[storage_tier as usize].pop_lfu_key_value() {
+                    if let Some((key, entry)) =
+                        self.leafs[storage_tier as usize].pop_lfu_key_value()
+                    {
                         if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
                             debug!("Moving {:?}", entry.offset);
                             debug!("Was on storage tier: {:?}", storage_tier);

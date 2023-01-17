@@ -1,7 +1,7 @@
 //! Implementation of tree structures.
 use self::{
     derivate_ref::DerivateRef,
-    node::{ApplyResult, GetResult, PivotGetResult, PivotGetMutResult},
+    node::{ApplyResult, GetResult, PivotGetMutResult, PivotGetResult},
 };
 use super::{
     errors::*,
@@ -12,10 +12,11 @@ use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, ObjectReference},
+    database::DatasetId,
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
     tree::MessageAction,
-    StoragePreference, database::DatasetId,
+    StoragePreference,
 };
 use leaf::FillUpResult;
 use owning_ref::OwningRef;
@@ -66,9 +67,7 @@ pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     storage_preference: StoragePreference,
 }
 
-impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone
-    for Tree<X, M, I>
-{
+impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tree<X, M, I> {
     fn clone(&self) -> Self {
         Tree {
             inner: self.inner.clone(),
@@ -269,7 +268,9 @@ where
         let mut node = self.get_mut_root_node()?;
         Ok(loop {
             let next_node = match node.pivot_get_mut(pivot) {
-                Some(PivotGetMutResult::Target(Some(np))) => break Some(self.get_mut_node_mut(np)?),
+                Some(PivotGetMutResult::Target(Some(np))) => {
+                    break Some(self.get_mut_node_mut(np)?)
+                }
                 Some(PivotGetMutResult::Target(None)) => break Some(node),
                 Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
                 None => break None,
@@ -277,7 +278,6 @@ where
             node = next_node;
         })
     }
-
 
     fn try_get_mut_node(&self, np_ref: &mut RwLock<X::ObjectRef>) -> Option<X::CacheValueRefMut> {
         self.dml.try_get_mut(np_ref.get_mut())

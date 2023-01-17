@@ -1,10 +1,7 @@
 //! A node identification key.
 //!
 //! See [PivotKey] for more documentation.
-use crate::{
-    cow_bytes::CowBytes,
-    database::DatasetId,
-};
+use crate::{cow_bytes::CowBytes, database::DatasetId};
 
 /// An identifier for an arbitrary node.
 ///
@@ -50,7 +47,7 @@ impl PivotKey {
     pub fn bytes(&self) -> Option<CowBytes> {
         match self {
             // Cheap CowBytes clone
-            Self::LeftOuter(p, _) | Self::Right(p,_) => Some(p.clone()),
+            Self::LeftOuter(p, _) | Self::Right(p, _) => Some(p.clone()),
             Self::Root(_) => None,
         }
     }
@@ -88,7 +85,7 @@ impl PivotKey {
 pub enum LocalPivotKey {
     LeftOuter(CowBytes),
     Right(CowBytes),
-    Root()
+    Root(),
 }
 
 impl LocalPivotKey {
