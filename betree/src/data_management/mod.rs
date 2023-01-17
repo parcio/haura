@@ -14,10 +14,12 @@
 
 use crate::{
     cache::AddSize,
+    database::DatasetId,
     migration::DmlMsg,
     size::{Size, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
-    StoragePreference, tree::PivotKey, database::DatasetId,
+    tree::PivotKey,
+    StoragePreference,
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
@@ -110,7 +112,11 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
     fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
     /// Unpacks the object from the given `data`.
-    fn unpack_at(disk_offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error>;
+    fn unpack_at(
+        disk_offset: DiskOffset,
+        d_id: DatasetId,
+        data: Box<[u8]>,
+    ) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.
     fn debug_info(&self) -> String;
@@ -271,12 +277,12 @@ pub trait DmlWithReport {
     fn set_report(&mut self, tx: Sender<DmlMsg>);
 }
 
+mod cache_value;
 mod delegation;
 mod dmu;
 pub(crate) mod errors;
 pub(crate) mod impls;
 mod object_ptr;
-mod cache_value;
 
 pub(crate) use self::cache_value::TaggedCacheValue;
 

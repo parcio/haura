@@ -1,7 +1,10 @@
 use super::{object_ptr::ObjectPointer, HasStoragePreference};
 use crate::{
-    database::Generation, size::{StaticSize, SizeMut}, storage_pool::DiskOffset,
-    StoragePreference, tree::PivotKey,
+    database::Generation,
+    size::{SizeMut, StaticSize},
+    storage_pool::DiskOffset,
+    tree::PivotKey,
+    StoragePreference,
 };
 use serde::{
     de::DeserializeOwned, ser::Error as SerError, Deserialize, Deserializer, Serialize, Serializer,
@@ -56,12 +59,11 @@ where
         // }
         match self {
             ObjRef::Incomplete(ref p) => *self = ObjRef::Unmodified(p.clone(), pk),
-            ObjRef::Unmodified(_, o_pk) | ObjRef::Modified(_,o_pk ) => *o_pk = pk,
+            ObjRef::Unmodified(_, o_pk) | ObjRef::Modified(_, o_pk) => *o_pk = pk,
             // NOTE: An object reference may never need to be modified when
             // performing a write back.
             ObjRef::InWriteback(..) => unreachable!(),
         }
-
     }
 
     fn index(&self) -> &PivotKey {
@@ -88,8 +90,8 @@ impl<D> ObjRef<ObjectPointer<D>> {
     /// Create an `ObjRef` from the given to the `ObjectPointer` under the
     /// assumption that the pointer belongs to a root object.
     pub fn root_ref_from_obj_ptr(ptr: ObjectPointer<D>) -> Self {
-         let d_id = ptr.info;
-         ObjRef::Unmodified(ptr, PivotKey::Root(d_id))
+        let d_id = ptr.info;
+        ObjRef::Unmodified(ptr, PivotKey::Root(d_id))
     }
 }
 
