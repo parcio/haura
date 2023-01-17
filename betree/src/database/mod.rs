@@ -68,9 +68,10 @@ pub(crate) type ObjectRef = data_management::impls::ObjRef<ObjectPointer>;
 pub(crate) type Object = Node<ObjectRef>;
 type DbHandler = Handler<ObjectRef>;
 
+pub(crate) type RootSpu = StoragePoolUnit<XxHash>;
 pub(crate) type RootDmu = Dmu<
     ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>,
-    StoragePoolUnit<XxHash>,
+    RootSpu,
 >;
 
 pub(crate) type MessageTree<Dmu, Message> =
@@ -78,49 +79,6 @@ pub(crate) type MessageTree<Dmu, Message> =
 
 pub(crate) type RootTree<Dmu> = MessageTree<Dmu, DefaultMessageAction>;
 pub(crate) type DatasetTree<Dmu> = RootTree<Dmu>;
-
-/// This trait describes a multi-step database initialisation procedure.
-/// Each function is called sequentially to configure the individual components
-/// of the database.
-///
-/// Components of lower layers (Spu, Dmu) can be replaced, but the [DbHandler] structure
-/// belongs to the database layer, and is necessary for the database to function.
-// TODO: Is this multi-step process unnecessarily rigid? Would fewer functions defeat the purpose?
-pub trait DatabaseBuilder: Send + Sync + 'static
-where
-    Self::Spu: StoragePoolLayer,
-    Self::Dmu: Dml<Object = Object, ObjectRef = ObjectRef, Info = DatasetId, ObjectPointer = ObjectPointer>
-        + DmlWithHandler<Handler = DbHandler>
-        + DmlWithStorageHints
-        + DmlWithReport
-        + Send
-        + Sync
-        + 'static,
-{
-    /// A storage pool unit, implementing the storage pool layer trait
-    type Spu;
-    /// A data management unit
-    type Dmu;
-
-    /// Separate actions to perform before building the database, e.g. setting up metrics
-    fn pre_build(&self) {}
-    /// Assemble a new storage layer unit from `self`
-    fn new_spu(&self) -> Result<Self::Spu>;
-    /// Assemble a new [DbHandler] for `spu`, optionally configured from `self`
-    fn new_handler(&self, spu: &Self::Spu) -> DbHandler;
-    /// Assemble a new data management unit for `spu` and `handler`, optionally configured from
-    /// `self`
-    fn new_dmu(&self, spu: Self::Spu, handler: DbHandler) -> Self::Dmu;
-    /// Find and return the location of the root tree root node to use.
-    /// This may create a new root tree, then return the location of its new root node,
-    /// or retrieve a previously written root tree.
-    fn select_root_tree(&self, dmu: Arc<Self::Dmu>)
-        -> Result<(RootTree<Self::Dmu>, ObjectPointer)>;
-
-    fn sync_mode(&self) -> SyncMode;
-
-    fn migration_policy(&self) -> Option<MigrationPolicies>;
-}
 
 /// This enum controls whether to search for an existing database to reuse,
 /// and whether to create a new one if none could be found or.
@@ -212,15 +170,12 @@ impl DatabaseConfiguration {
     }
 }
 
-impl DatabaseBuilder for DatabaseConfiguration {
-    type Spu = StoragePoolUnit<XxHash>;
-    type Dmu = RootDmu;
-
-    fn new_spu(&self) -> Result<Self::Spu> {
+impl DatabaseConfiguration {
+    fn new_spu(&self) -> Result<RootSpu> {
         Ok(StoragePoolUnit::<XxHash>::new(&self.storage)?)
     }
 
-    fn new_handler(&self, spu: &Self::Spu) -> DbHandler {
+    fn new_handler(&self, spu: &RootSpu) -> DbHandler {
         // TODO: Update the free sizes of each used vdev here.
         // How do we recover this from the storage?
         // FIXME: Ensure this is recovered properly from storage
@@ -263,7 +218,7 @@ impl DatabaseBuilder for DatabaseConfiguration {
         }
     }
 
-    fn new_dmu(&self, spu: Self::Spu, handler: DbHandler) -> Self::Dmu {
+    fn new_dmu(&self, spu: RootSpu, handler: DbHandler) -> RootDmu {
         let mut strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES] =
             [[None; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES];
 
@@ -291,8 +246,8 @@ impl DatabaseBuilder for DatabaseConfiguration {
 
     fn select_root_tree(
         &self,
-        dmu: Arc<Self::Dmu>,
-    ) -> Result<(RootTree<Self::Dmu>, ObjectPointer)> {
+        dmu: Arc<RootDmu>,
+    ) -> Result<(RootTree<RootDmu>, ObjectPointer)> {
         if let Some(cfg) = &self.metrics {
             metrics_init::<Self>(cfg, dmu.clone())?;
         }
@@ -385,14 +340,14 @@ impl DatabaseBuilder for DatabaseConfiguration {
 type ErasedTree = dyn ErasedTreeSync<Pointer = ObjectPointer, ObjectRef = ObjectRef> + Send + Sync;
 
 /// The database type.
-pub struct Database<Config: DatabaseBuilder + Clone> {
-    pub(crate) root_tree: RootTree<Config::Dmu>,
-    builder: Config,
+pub struct Database {
+    pub(crate) root_tree: RootTree<RootDmu>,
+    builder: DatabaseConfiguration,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
-    pub(crate) db_tx: Option<Sender<DatabaseMsg<Config>>>,
+    pub(crate) db_tx: Option<Sender<DatabaseMsg>>,
 }
 
-impl Database<DatabaseConfiguration> {
+impl Database {
     /// Opens a database given by the storage pool configuration.
     pub fn open(cfg: StoragePoolConfiguration) -> Result<Self> {
         Self::build(DatabaseConfiguration {
@@ -426,23 +381,20 @@ impl Database<DatabaseConfiguration> {
     pub fn write_config_json<P: AsRef<Path>>(&self, p: P) -> Result<()> {
         self.builder.write_to_json(p)
     }
-}
 
-impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Opens or creates a database given by the storage pool configuration and
     /// sets the given cache size.
-    pub fn build(builder: Config) -> Result<Self> {
+    pub fn build(builder: DatabaseConfiguration) -> Result<Self> {
         Self::build_internal(builder, None, None)
     }
 
     // Construct an instance of [Database] either using external threads or not.
     // Deprecates [with_sync]
     fn build_internal(
-        builder: Config,
+        builder: DatabaseConfiguration,
         dml_tx: Option<Sender<DmlMsg>>,
-        db_tx: Option<Sender<DatabaseMsg<Config>>>,
+        db_tx: Option<Sender<DatabaseMsg>>,
     ) -> Result<Self> {
-        builder.pre_build();
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);
         let mut dmu = builder.new_dmu(spl, handler);
@@ -468,7 +420,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
 
     /// Opens or create a database given by the storage pool configuration, sets the given cache size and spawns threads to periodically perform
     /// sync (if configured with [SyncMode::Periodic]) and auto migration (if configured with [MigrationPolicies]).
-    pub fn build_threaded(builder: Config) -> Result<Arc<RwLock<Self>>> {
+    pub fn build_threaded(builder: DatabaseConfiguration) -> Result<Arc<RwLock<Self>>> {
         let db = match builder.migration_policy() {
             Some(pol) => {
                 let (dml_tx, dml_rx) = crossbeam_channel::unbounded();
@@ -642,7 +594,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn root_tree(&self) -> &RootTree<Config::Dmu> {
+    pub fn root_tree(&self) -> &RootTree<RootDmu> {
         &self.root_tree
     }
 }

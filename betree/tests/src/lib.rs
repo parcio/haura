@@ -22,7 +22,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use insta::assert_json_snapshot;
 use serde_json::json;
 
-fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
+fn test_db(tiers: u32, mb_per_tier: u32) -> Database {
     let tier_size = mb_per_tier as usize * 1024 * 1024;
     let cfg = DatabaseConfiguration {
         storage: StoragePoolConfiguration {
@@ -44,7 +44,7 @@ fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
 
 // List of sizes for each tier is attached
 // It is assumed len(that mb_per_tier) = tiers
-fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database<DatabaseConfiguration> {
+fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database {
     let cfg = DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: (0..tiers)
@@ -68,8 +68,8 @@ fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database<DatabaseConfigu
 
 struct TestDriver {
     name: String,
-    database: Database<DatabaseConfiguration>,
-    object_store: ObjectStore<DatabaseConfiguration>,
+    database: Database,
+    object_store: ObjectStore,
     rng: Xoshiro256PlusPlus,
 }
 
@@ -121,7 +121,7 @@ impl TestDriver {
         );
     }
 
-    fn open(&self, obj_name: &[u8]) -> ObjectHandle<DatabaseConfiguration> {
+    fn open(&self, obj_name: &[u8]) -> ObjectHandle {
         self.object_store
             .open_or_create_object(obj_name)
             .expect("Unable to open object")

@@ -1,6 +1,6 @@
 use crate::{
     cow_bytes::CowBytes,
-    database::{DatabaseBuilder, DatasetId},
+    database::DatasetId,
     object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
     vdev::Block,
@@ -73,13 +73,13 @@ impl Display for GlobalObjectId {
 /// might be distributed on multiple storage tiers and must not adhere to the
 /// storage preference given.
 #[derive(Clone)]
-pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
+pub enum DatabaseMsg {
     // Relevant for Promotion and/or Demotion
     DatasetOpen(DatasetId),
     DatasetClose(DatasetId),
 
     /// Announce and deliver an accessible copy of active object stores.
-    ObjectstoreOpen(ObjectStoreId, ObjectStore<Config>),
+    ObjectstoreOpen(ObjectStoreId, ObjectStore),
     ObjectstoreClose(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.

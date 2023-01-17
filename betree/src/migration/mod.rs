@@ -83,10 +83,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     data_management::DmlWithHandler,
-    database::DatabaseBuilder,
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,
-    Database, StoragePreference,
+    Database, StoragePreference, DatabaseConfiguration, database::RootDmu,
 };
 
 use self::{lfu::Lfu, reinforcment_learning::ZhangHellanderToor};
@@ -129,13 +128,13 @@ pub enum MigrationPolicies {
 }
 
 impl MigrationPolicies {
-    pub(crate) fn construct<C: DatabaseBuilder + Clone>(
+    pub(crate) fn construct(
         self,
         dml_rx: Receiver<DmlMsg>,
-        db_rx: Receiver<DatabaseMsg<C>>,
-        db: Arc<RwLock<Database<C>>>,
+        db_rx: Receiver<DatabaseMsg>,
+        db: Arc<RwLock<Database>>,
         storage_hint_sink: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
-    ) -> Box<dyn MigrationPolicy<C>> {
+    ) -> Box<dyn MigrationPolicy> {
         match self {
             MigrationPolicies::Lfu(config) => {
                 Box::new(Lfu::build(dml_rx, db_rx, db, config, storage_hint_sink))
@@ -195,7 +194,7 @@ impl<Config: Default> Default for MigrationConfig<Config> {
 /// When implementing a migration policy you can use two types of messages which
 /// are produced. They are divided by user interface and internal tree
 /// representation. These messages are defined in the two message types [DmlMsg] and [DatabaseMsg]
-pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
+pub(crate) trait MigrationPolicy {
     /// Consume all present messages and update the migration selection
     /// status for all afflicted objects
     fn update(&mut self) -> Result<()>;
@@ -214,10 +213,10 @@ pub(crate) trait MigrationPolicy<C: DatabaseBuilder + Clone> {
     fn demote(&mut self, storage_tier: u8, desired: Block<u64>) -> Result<Block<u64>>;
 
     /// Return a reference to the active [Database].
-    fn db(&self) -> &Arc<RwLock<Database<C>>>;
+    fn db(&self) -> &Arc<RwLock<Database>>;
 
     /// Return a reference to the underlying DML.
-    fn dmu(&self) -> &Arc<<C as DatabaseBuilder>::Dmu>;
+    fn dmu(&self) -> &Arc<RootDmu>;
 
     /// Return the cleaned configuration.
     fn config(&self) -> MigrationConfig<()>;
