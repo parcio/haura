@@ -51,7 +51,7 @@ impl Database {
         let mut key = Vec::with_capacity(1 + name.len());
         key.push(1);
         key.extend_from_slice(name);
-        let data = self.root_tree.get(key)?.ok_or(ErrorKind::DoesNotExist)?;
+        let data = self.root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
         Ok(DatasetId::unpack(&data))
     }
 
@@ -98,7 +98,7 @@ impl Database {
     ) -> Result<Dataset<M>> {
         let ds_data = fetch_ds_data(&self.root_tree, id)?;
         if self.open_datasets.contains_key(&id) {
-            bail!(ErrorKind::InUse)
+            return Err(Error::InUse)
         }
         let storage_preference = StoragePreference::NONE;
         let ds_tree = Tree::open(
@@ -147,8 +147,8 @@ impl Database {
         storage_preference: StoragePreference,
     ) -> Result<()> {
         match self.lookup_dataset_id(name) {
-            Ok(_) => bail!(ErrorKind::AlreadyExists),
-            Err(Error(ErrorKind::DoesNotExist, _)) => {}
+            Ok(_) => return Err(Error::AlreadyExists),
+            Err(Error::DoesNotExist) => {}
             Err(e) => return Err(e),
         };
         let ds_id = self.allocate_ds_id()?;
@@ -189,7 +189,7 @@ impl Database {
     ) -> Result<Dataset<M>> {
         match self.lookup_dataset_id(name) {
             Ok(_) => self.open_custom_dataset(name, storage_preference),
-            Err(Error(ErrorKind::DoesNotExist, _)) => self
+            Err(Error::DoesNotExist) => self
                 .create_custom_dataset::<M>(name, storage_preference)
                 .and_then(|()| self.open_custom_dataset(name, storage_preference)),
             Err(e) => Err(e),
@@ -310,8 +310,6 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
     }
 }
 
-use super::errors::ErrorKind;
-
 // Member access on internal type
 impl<Message> Dataset<Message> {
     pub(crate) fn id(&self) -> DatasetId {
@@ -403,10 +401,9 @@ impl DatasetInner<DefaultMessageAction> {
         data: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        ensure!(
-            data.len() <= tree::MAX_MESSAGE_SIZE,
-            ErrorKind::MessageTooLarge
-        );
+        if data.len() > tree::MAX_MESSAGE_SIZE {
+            return Err(Error::MessageTooLarge)
+        }
         self.insert_msg_with_pref(
             key,
             DefaultMessageAction::insert_msg(data),
@@ -431,10 +428,9 @@ impl DatasetInner<DefaultMessageAction> {
         offset: u32,
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        ensure!(
-            offset as usize + data.len() <= tree::MAX_MESSAGE_SIZE,
-            ErrorKind::MessageTooLarge
-        );
+        if offset as usize + data.len() > tree::MAX_MESSAGE_SIZE {
+            return Err(Error::MessageTooLarge)
+        }
         // TODO: In case of overfilling the underlying storage we should notify in _any_ case that the writing is not successfull, for this
         // we need to know wether the space to write out has been expanded. For this we need further information which we ideally do not want
         // to read out from the disk here.
@@ -470,7 +466,7 @@ impl DatasetInner<DefaultMessageAction> {
     ) -> Result<Option<()>> {
         use crate::storage_pool::StoragePoolLayer;
         if self.tree.dmu().spl().disk_count(pref.as_u8()) == 0 {
-            bail!(ErrorKind::DoesNotExist)
+            return Err(Error::MigrationNotPossible)
         }
         Ok(self.tree.apply_with_info(key, pref)?.map(|_| ()))
     }
@@ -488,7 +484,7 @@ impl DatasetInner<DefaultMessageAction> {
         if let Some(info) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
             Ok(info)
         } else {
-            bail!(ErrorKind::DoesNotExist)
+            return Err(Error::DoesNotExist)
         }
     }
 
