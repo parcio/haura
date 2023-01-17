@@ -276,5 +276,8 @@ mod dmu;
 pub(crate) mod errors;
 pub(crate) mod impls;
 mod object_ptr;
+mod cache_value;
+
+pub(crate) use self::cache_value::TaggedCacheValue;
 
 pub use self::{dmu::Dmu, errors::Error, object_ptr::ObjectPointer};
