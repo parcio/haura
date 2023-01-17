@@ -4,10 +4,10 @@ use parking_lot::RwLock;
 use crate::{
     cow_bytes::CowBytes,
     data_management::{DmlWithHandler, DmlWithStorageHints},
-    database::{DatabaseBuilder, StorageInfo},
+    database::{StorageInfo, RootDmu},
     object::{ObjectStore, ObjectStoreId},
     vdev::Block,
-    Database, StoragePreference,
+    Database, StoragePreference, DatabaseConfiguration,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -579,16 +579,16 @@ mod learning {
 ///
 /// This policy is intended to be used on "uniform" objets which do not use
 /// partial speed up, based on user made assumptions of the object.
-pub(crate) struct ZhangHellanderToor<C: DatabaseBuilder + Clone> {
+pub(crate) struct ZhangHellanderToor {
     tiers: Vec<TierAgent>,
     // Stores the most recently known storage location and all requests
     objects: HashMap<GlobalObjectId, ObjectInfo>,
     default_storage_class: StoragePreference,
     config: MigrationConfig<Option<RlConfig>>,
     dml_rx: Receiver<DmlMsg>,
-    db_rx: Receiver<DatabaseMsg<C>>,
+    db_rx: Receiver<DatabaseMsg>,
     delta_moved: Vec<(GlobalObjectId, u64, u8, u8)>,
-    state: DatabaseState<C>,
+    state: DatabaseState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -609,15 +609,15 @@ pub struct RlConfig {
 }
 
 /// A convenience struct to manage all the objects easier. And to please the borrow checker.
-struct DatabaseState<C: DatabaseBuilder + Clone> {
-    object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
+struct DatabaseState {
+    object_stores: HashMap<ObjectStoreId, Option<ObjectStore>>,
     active_storage_classes: u8,
-    db: Arc<RwLock<Database<C>>>,
-    dmu: Arc<<C as DatabaseBuilder>::Dmu>,
+    db: Arc<RwLock<Database>>,
+    dmu: Arc<RootDmu>,
 }
 
-impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
-    fn get_or_open_object_store<'a>(&'a self, os_id: &ObjectStoreId) -> OsHandle<'a, C> {
+impl DatabaseState {
+    fn get_or_open_object_store<'a>(&'a self, os_id: &ObjectStoreId) -> OsHandle<'a> {
         let os = if let Some(Some(store)) = self.object_stores.get(os_id) {
             store.clone()
         } else {
@@ -658,13 +658,13 @@ impl<C: DatabaseBuilder + Clone> DatabaseState<C> {
     }
 }
 
-struct OsHandle<'a, C: DatabaseBuilder + Clone> {
-    state: &'a DatabaseState<C>,
-    act: ObjectStore<C>,
+struct OsHandle<'a> {
+    state: &'a DatabaseState,
+    act: ObjectStore,
     os_id: ObjectStoreId,
 }
 
-impl<'a, C: DatabaseBuilder + Clone> Drop for OsHandle<'a, C> {
+impl<'a> Drop for OsHandle<'a> {
     fn drop(&mut self) {
         // NOTE: Object Store should not be open, close quickly..
         if self.state.object_stores.get(&self.os_id).is_none() {
@@ -709,7 +709,7 @@ pub(super) fn open_file_buf_write(
     ))
 }
 
-impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
+impl ZhangHellanderToor {
     fn timestep(&mut self) -> super::errors::Result<()> {
         // length of tiers
         // saves for each tier the list of possible states?
@@ -976,8 +976,8 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
 
     pub(super) fn build(
         dml_rx: crossbeam_channel::Receiver<super::DmlMsg>,
-        db_rx: crossbeam_channel::Receiver<super::DatabaseMsg<C>>,
-        db: std::sync::Arc<parking_lot::RwLock<crate::Database<C>>>,
+        db_rx: crossbeam_channel::Receiver<super::DatabaseMsg>,
+        db: std::sync::Arc<parking_lot::RwLock<crate::Database>>,
         config: super::MigrationConfig<Option<RlConfig>>,
     ) -> Self {
         // We do not provide single node hints in this policy
@@ -1044,7 +1044,7 @@ impl<C: DatabaseBuilder + Clone> ZhangHellanderToor<C> {
     }
 }
 
-impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
+impl MigrationPolicy for ZhangHellanderToor {
     // One update call represents one epoch
     fn update(&mut self) -> super::errors::Result<()> {
         // FIXME: This is an inefficient way to get rid of the accumulated
@@ -1155,11 +1155,11 @@ impl<C: DatabaseBuilder + Clone> MigrationPolicy<C> for ZhangHellanderToor<C> {
         }
     }
 
-    fn db(&self) -> &std::sync::Arc<parking_lot::RwLock<crate::Database<C>>> {
+    fn db(&self) -> &std::sync::Arc<parking_lot::RwLock<crate::Database>> {
         &self.state.db
     }
 
-    fn dmu(&self) -> &std::sync::Arc<<C as DatabaseBuilder>::Dmu> {
+    fn dmu(&self) -> &std::sync::Arc<RootDmu> {
         &self.state.dmu
     }
 

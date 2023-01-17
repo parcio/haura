@@ -46,7 +46,7 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatabaseBuilder, DatasetId, Error, ErrorKind, Result},
+    database::{DatasetId, Error, ErrorKind, Result},
     migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
     tree::{DefaultMessageAction, TreeLayer},
@@ -123,13 +123,13 @@ fn decode_object_chunk_key(key: &[u8; 8 + 4]) -> (ObjectId, u32) {
 /// scheme like scoped threads for example when holding multiple object stores
 /// for individual data purposes.
 #[derive(Clone)]
-pub struct ObjectStore<Config: DatabaseBuilder + Clone> {
+pub struct ObjectStore {
     id: ObjectStoreId,
-    data: Dataset<Config>,
-    metadata: Dataset<Config, MetaMessageAction>,
+    data: Dataset,
+    metadata: Dataset<MetaMessageAction>,
     object_id_counter: Arc<AtomicU64>,
     default_storage_preference: StoragePreference,
-    report: Option<Sender<DatabaseMsg<Config>>>,
+    report: Option<Sender<DatabaseMsg>>,
 }
 
 // A type alias to represent the on disk identifier for a specific object store.
@@ -162,7 +162,7 @@ const OBJECT_STORE_ID_COUNTER_PREFIX: u8 = 6;
 const OBJECT_STORE_NAME_TO_ID_PREFIX: u8 = 7;
 const OBJECT_STORE_DATA_PREFIX: u8 = 8;
 
-impl<Config: DatabaseBuilder + Clone> Database<Config> {
+impl Database {
     fn allocate_os_id(&mut self) -> Result<ObjectStoreId> {
         let key = &[OBJECT_STORE_ID_COUNTER_PREFIX] as &[_];
         let last_os_id = self
@@ -231,14 +231,14 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     pub fn open_object_store_with_id_pub(
         &mut self,
         os_id: ObjectStoreId,
-    ) -> Result<ObjectStore<Config>> {
+    ) -> Result<ObjectStore> {
         self.open_object_store_with_id(os_id)
     }
 
     pub(crate) fn open_object_store_with_id(
         &mut self,
         os_id: ObjectStoreId,
-    ) -> Result<ObjectStore<Config>> {
+    ) -> Result<ObjectStore> {
         let store = self
             .fetch_os_data(&os_id)?
             .map(Ok::<ObjectStoreData, crate::database::errors::Error>)
@@ -284,7 +284,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     }
 
     /// Create an object store backed by a single database.
-    pub fn open_object_store(&mut self) -> Result<ObjectStore<Config>> {
+    pub fn open_object_store(&mut self) -> Result<ObjectStore> {
         let id = self.get_or_create_os_id(&[0])?;
         let data = self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?;
         let meta = self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?;
@@ -303,7 +303,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
-    ) -> Result<ObjectStore<Config>> {
+    ) -> Result<ObjectStore> {
         if name.contains(&0) {
             bail!(ErrorKind::KeyContainsNullByte)
         }
@@ -329,7 +329,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         ObjectStore::with_datasets(id, data, meta, storage_preference, self.db_tx.clone())
     }
 
-    pub fn close_object_store(&mut self, store: ObjectStore<Config>) {
+    pub fn close_object_store(&mut self, store: ObjectStore) {
         if let Some(tx) = &self.db_tx {
             let _ = tx
                 .send(DatabaseMsg::ObjectstoreClose(store.id))
@@ -342,16 +342,16 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     }
 }
 
-impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
+impl<'os> ObjectStore {
     /// Provide custom datasets for the object store, allowing to use different pools backed by
     /// different storage classes.
     pub fn with_datasets(
         id: ObjectStoreId,
-        data: Dataset<Config>,
-        metadata: Dataset<Config, MetaMessageAction>,
+        data: Dataset,
+        metadata: Dataset<MetaMessageAction>,
         default_storage_preference: StoragePreference,
-        report: Option<Sender<DatabaseMsg<Config>>>,
-    ) -> Result<ObjectStore<Config>> {
+        report: Option<Sender<DatabaseMsg>>,
+    ) -> Result<ObjectStore> {
         let _d_id = data.id();
         let _m_id = metadata.id();
         let store = ObjectStore {
@@ -403,7 +403,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         &'os self,
         key: &[u8],
         access_type: PreferredAccessType,
-    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+    ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
         let pref = self.data.call_tree(|t| t.dmu().spl().access_type_preference(access_type));
         self.init_object_with_pref_and_access_type(key, pref, access_type)
     }
@@ -414,7 +414,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         &'os self,
         key: &[u8],
         storage_preference: StoragePreference,
-    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+    ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
         self.init_object_with_pref_and_access_type(key, storage_preference, PreferredAccessType::Unknown)
     }
 
@@ -425,7 +425,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         key: &[u8],
         storage_preference: StoragePreference,
         access_type: PreferredAccessType,
-    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+    ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
         if key.contains(&0) {
             bail!(ErrorKind::KeyContainsNullByte)
         }
@@ -481,7 +481,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     }
 
     /// Create a new object handle.
-    pub fn create_object(&'os self, key: &[u8]) -> Result<ObjectHandle<'os, Config>> {
+    pub fn create_object(&'os self, key: &[u8]) -> Result<ObjectHandle<'os>> {
         self.create_object_with_pref(key, self.default_storage_preference)
             .map(|(handle, _info)| handle)
     }
@@ -492,7 +492,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         &'os self,
         key: &[u8],
         storage_preference: StoragePreference,
-    ) -> Result<Option<(ObjectHandle<'os, Config>, ObjectInfo)>> {
+    ) -> Result<Option<(ObjectHandle<'os>, ObjectInfo)>> {
         if key.contains(&0) {
             bail!(ErrorKind::KeyContainsNullByte)
         }
@@ -529,12 +529,12 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     pub fn open_object_with_info(
         &'os self,
         key: &[u8],
-    ) -> Result<Option<(ObjectHandle<'os, Config>, ObjectInfo)>> {
+    ) -> Result<Option<(ObjectHandle<'os>, ObjectInfo)>> {
         self.open_object_with_pref(key, self.default_storage_preference)
     }
 
     /// Open an existing object by key, return `None` if it doesn't exist.
-    pub fn open_object(&'os self, key: &[u8]) -> Result<Option<ObjectHandle<'os, Config>>> {
+    pub fn open_object(&'os self, key: &[u8]) -> Result<Option<ObjectHandle<'os>>> {
         self.open_object_with_info(key)
             .map(|option| option.map(|(handle, _info)| handle))
     }
@@ -544,7 +544,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
         &'os self,
         key: &[u8],
         storage_preference: StoragePreference,
-    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+    ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
         if let Some(obj) = self.open_object_with_pref(key, storage_preference)? {
             Ok(obj)
         } else {
@@ -556,12 +556,12 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     pub fn open_or_create_object_with_info(
         &'os self,
         key: &[u8],
-    ) -> Result<(ObjectHandle<'os, Config>, ObjectInfo)> {
+    ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
         self.open_or_create_object_with_pref(key, self.default_storage_preference)
     }
 
     /// Try to open an object, but create it if it didn't exist.
-    pub fn open_or_create_object(&'os self, key: &[u8]) -> Result<ObjectHandle<'os, Config>> {
+    pub fn open_or_create_object(&'os self, key: &[u8]) -> Result<ObjectHandle<'os>> {
         self.open_or_create_object_with_info(key)
             .map(|(handle, _info)| handle)
     }
@@ -571,7 +571,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     /// or difficult, and doesn't protect from using mismatched [ObjectStore]s and [Object]s.
     /// Operations on an [ObjectHandle] created for an [Object] that doesn't exist in the
     /// [ObjectStore] it exists in, will result in undefined behaviour.
-    pub fn handle_from_object(&'os self, object: Object) -> ObjectHandle<'os, Config> {
+    pub fn handle_from_object(&'os self, object: Object) -> ObjectHandle<'os> {
         ObjectHandle {
             store: self,
             object,
@@ -579,7 +579,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     }
 
     /// Delete an existing object.
-    pub(crate) fn delete_object(&'os self, handle: &ObjectHandle<Config>) -> Result<()> {
+    pub(crate) fn delete_object(&'os self, handle: &ObjectHandle) -> Result<()> {
         // FIXME: bad error handling, object can end up partially deleted
         // Delete metadata before data, otherwise object could be concurrently reopened,
         // rewritten, and deleted with a live handle.
@@ -604,7 +604,7 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
     pub fn list_objects<R, K>(
         &'os self,
         range: R,
-    ) -> Result<Box<dyn Iterator<Item = (ObjectHandle<'os, Config>, ObjectInfo)> + 'os>>
+    ) -> Result<Box<dyn Iterator<Item = (ObjectHandle<'os>, ObjectInfo)> + 'os>>
     where
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
@@ -655,13 +655,13 @@ impl<'os, Config: DatabaseBuilder + Clone> ObjectStore<Config> {
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn data_tree(&self) -> &Dataset<Config> {
+    pub fn data_tree(&self) -> &Dataset {
         &self.data
     }
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn meta_tree(&self) -> &Dataset<Config, meta::MetaMessageAction> {
+    pub fn meta_tree(&self) -> &Dataset<meta::MetaMessageAction> {
         &self.metadata
     }
 }
@@ -721,13 +721,13 @@ impl Object {
 
 /// A handle to an object which may or may not exist in the [ObjectStore] it was created from.
 #[must_use]
-pub struct ObjectHandle<'os, Config: DatabaseBuilder + Clone> {
-    store: &'os ObjectStore<Config>,
+pub struct ObjectHandle<'os> {
+    store: &'os ObjectStore,
     /// The [Object] addressed by this handle
     pub object: Object,
 }
 
-impl<'os, Config: DatabaseBuilder + Clone> Clone for ObjectHandle<'os, Config> {
+impl<'os> Clone for ObjectHandle<'os> {
     fn clone(&self) -> Self {
         ObjectHandle {
             store: self.store,
@@ -736,7 +736,7 @@ impl<'os, Config: DatabaseBuilder + Clone> Clone for ObjectHandle<'os, Config> {
     }
 }
 
-impl<'ds, Config: DatabaseBuilder + Clone> ObjectHandle<'ds, Config> {
+impl<'ds> ObjectHandle<'ds> {
     /// Close this object. This function doesn't do anything for now,
     /// but might in the future.
     pub fn close(self) -> Result<()> {

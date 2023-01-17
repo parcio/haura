@@ -2,13 +2,12 @@ use super::{
     dataset::Dataset, dead_list_max_key, dead_list_max_key_ds, dead_list_min_key, ds_data_key,
     errors::*, fetch_ds_data, fetch_ss_data, offset_from_dead_list_key, ss_data_key,
     ss_data_key_max, ss_key, Database, DatasetData, DatasetId, DatasetTree, DeadListData,
-    Generation, ObjectPointer,
+    Generation, ObjectPointer, RootDmu,
 };
 use crate::{
     allocator::Action,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::DmlWithHandler,
-    database::DatabaseBuilder,
     tree::{DefaultMessageAction, Tree, TreeLayer},
     StoragePreference,
 };
@@ -16,22 +15,20 @@ use byteorder::{BigEndian, ByteOrder};
 use std::{borrow::Borrow, ops::RangeBounds, sync::Arc};
 
 /// The snapshot type.
-pub struct Snapshot<Config>
-where
-    Config: DatabaseBuilder,
+pub struct Snapshot
 {
-    tree: DatasetTree<Config::Dmu>,
+    tree: DatasetTree<RootDmu>,
     #[allow(dead_code)]
     name: Box<[u8]>,
 }
 
-impl<Config: DatabaseBuilder + Clone> Database<Config> {
+impl Database {
     /// Open a snapshot for the given data set identified by the given name.
     pub fn open_snapshot<M>(
         &self,
-        ds: &mut Dataset<Config, M>,
+        ds: &mut Dataset<M>,
         name: &[u8],
-    ) -> Result<Snapshot<Config>> {
+    ) -> Result<Snapshot> {
         let id = self.lookup_snapshot_id(ds.id(), name)?;
         if !ds.call_mut_open_snapshots(|set| set.insert(id)) {
             bail!(ErrorKind::InUse)
@@ -60,7 +57,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     ///
     /// Note that the creation fails if a snapshot with the same name exists
     /// already for the given data set.
-    pub fn create_snapshot<M>(&mut self, ds: &mut Dataset<Config, M>, name: &[u8]) -> Result<()> {
+    pub fn create_snapshot<M>(&mut self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
         match self.lookup_snapshot_id(ds.id(), name).err() {
             None => bail!(ErrorKind::AlreadyExists),
             Some(Error(ErrorKind::DoesNotExist, ..)) => {}
@@ -88,7 +85,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Iterate over all snapshots for the given data set.
     pub fn iter_snapshots<M>(
         &self,
-        ds: &Dataset<Config, M>,
+        ds: &Dataset<M>,
     ) -> Result<impl Iterator<Item = Result<SlicedCowBytes>>> {
         let mut low = [0; 9];
         low[0] = 3;
@@ -105,7 +102,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     ///
     /// Note that the deletion fails if a snapshot with the given name does not
     /// exist for this data set.
-    pub fn delete_snapshot<M>(&self, ds: &mut Dataset<Config, M>, name: &[u8]) -> Result<()> {
+    pub fn delete_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
         let ss_id = self.lookup_snapshot_id(ds.id(), name)?;
         if ds.call_open_snapshots(|set| set.contains(&ss_id)) {
             bail!(ErrorKind::InUse)
@@ -179,7 +176,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     }
 }
 
-impl<Config: DatabaseBuilder> Snapshot<Config> {
+impl Snapshot {
     /// Returns the value for the given key if existing.
     pub fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>> {
         Ok(self.tree.get(key)?)

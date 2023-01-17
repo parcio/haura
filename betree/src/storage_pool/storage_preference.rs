@@ -287,7 +287,7 @@ impl PartialEq for AtomicSystemStoragePreference {
 
 #[cfg(test)]
 mod tests {
-    use super::{AtomicSystemStoragePreference, StoragePreference, StoragePreferenceBound};
+    use super::{AtomicSystemStoragePreference, StoragePreference};
 
     #[test]
     fn pref_choose_faster() {

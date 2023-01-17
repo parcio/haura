@@ -2,7 +2,7 @@
 
 use crate::{
     data_management::{Dml, DmlWithHandler},
-    database::{DatabaseBuilder, StorageInfo},
+    database::{StorageInfo, RootDmu},
     storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
 };
 use serde::{Deserialize, Serialize};
@@ -29,10 +29,8 @@ pub struct MetricsConfiguration {
 
 pub(crate) fn metrics_init<Config>(
     cfg: &MetricsConfiguration,
-    dmu: Arc<Config::Dmu>,
+    dmu: Arc<RootDmu>,
 ) -> io::Result<thread::JoinHandle<()>>
-where
-    Config: DatabaseBuilder,
 {
     let cfg = cfg.clone();
 
@@ -47,16 +45,14 @@ where
 }
 
 #[derive(Serialize)]
-struct Metrics<Config: DatabaseBuilder> {
+struct Metrics {
     epoch_ms: u128,
-    cache: <Config::Dmu as Dml>::CacheStats,
-    storage: <<Config::Dmu as Dml>::Spl as StoragePoolLayer>::Metrics,
+    cache: <RootDmu as Dml>::CacheStats,
+    storage: <<RootDmu as Dml>::Spl as StoragePoolLayer>::Metrics,
     usage: Vec<StorageInfo>,
 }
 
-fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<Config::Dmu>)
-where
-    Config: DatabaseBuilder,
+fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<RootDmu>)
 {
     let mut output = io::BufWriter::new(output);
     let sleep_duration = Duration::from_millis(cfg.interval_ms as u64);
@@ -66,7 +62,7 @@ where
 
         let spu = dmu.spl();
 
-        let metrics: Metrics<Config> = Metrics {
+        let metrics: Metrics = Metrics {
             epoch_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_millis())
