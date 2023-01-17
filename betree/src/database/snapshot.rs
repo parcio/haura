@@ -31,7 +31,7 @@ impl Database {
     ) -> Result<Snapshot> {
         let id = self.lookup_snapshot_id(ds.id(), name)?;
         if !ds.call_mut_open_snapshots(|set| set.insert(id)) {
-            bail!(ErrorKind::InUse)
+            return Err(Error::InUse)
         }
         let ptr = fetch_ss_data(&self.root_tree, ds.id(), id)?.ptr;
         Ok(Snapshot {
@@ -48,7 +48,7 @@ impl Database {
 
     fn lookup_snapshot_id(&self, ds_id: DatasetId, name: &[u8]) -> Result<Generation> {
         let key = ss_key(ds_id, name);
-        let data = self.root_tree.get(key)?.ok_or(ErrorKind::DoesNotExist)?;
+        let data = self.root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
         Ok(Generation::unpack(&data))
     }
 
@@ -59,9 +59,9 @@ impl Database {
     /// already for the given data set.
     pub fn create_snapshot<M>(&mut self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
         match self.lookup_snapshot_id(ds.id(), name).err() {
-            None => bail!(ErrorKind::AlreadyExists),
-            Some(Error(ErrorKind::DoesNotExist, ..)) => {}
-            Some(e) => bail!(e),
+            None => return Err(Error::AlreadyExists),
+            Some(Error::DoesNotExist) => {}
+            Some(e) => return Err(e),
         };
 
         let data = fetch_ds_data(&self.root_tree, ds.id())?;
@@ -105,7 +105,7 @@ impl Database {
     pub fn delete_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
         let ss_id = self.lookup_snapshot_id(ds.id(), name)?;
         if ds.call_open_snapshots(|set| set.contains(&ss_id)) {
-            bail!(ErrorKind::InUse)
+            return Err(Error::InUse)
         }
 
         self.root_tree.insert(

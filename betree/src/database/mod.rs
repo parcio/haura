@@ -163,9 +163,7 @@ impl DatabaseConfiguration {
             .truncate(true)
             .create(true)
             .open(path)?;
-        serde_json::to_writer_pretty(file, &self).map_err(|e| {
-            crate::database::errors::Error::with_chain(e, ErrorKind::SerializeFailed)
-        })?;
+        serde_json::to_writer_pretty(file, &self)?;
         Ok(())
     }
 }
@@ -256,7 +254,7 @@ impl DatabaseConfiguration {
         {
             match Superblock::<ObjectPointer>::fetch_superblocks(dmu.pool()) {
                 Ok(None) if self.access_mode == AccessMode::OpenIfExists => {
-                    bail!(ErrorKind::InvalidSuperblock)
+                    return Err(Error::InvalidSuperblock)
                 }
                 Ok(ptr) => ptr,
                 Err(e) => return Err(e),
@@ -314,8 +312,7 @@ impl DatabaseConfiguration {
                 let dmu = tree.dmu();
                 for class in 0..dmu.pool().storage_class_count() {
                     for disk_id in 0..dmu.pool().disk_count(class) {
-                        dmu.allocate_raw_at(DiskOffset::new(class, disk_id, Block(0)), Block(2))
-                            .chain_err(|| "Superblock allocation failed")?;
+                        dmu.allocate_raw_at(DiskOffset::new(class, disk_id, Block(0)), Block(2))?;
                     }
                 }
             }
@@ -668,7 +665,7 @@ where
     T: TreeLayer<DefaultMessageAction>,
 {
     let key = &ds_data_key(id) as &[_];
-    let data = root_tree.get(key)?.ok_or(ErrorKind::DoesNotExist)?;
+    let data = root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
     DatasetData::unpack(&data)
 }
 
@@ -681,7 +678,7 @@ where
     T: TreeLayer<DefaultMessageAction>,
 {
     let key = ss_data_key(ds_id, ss_id);
-    let data = root_tree.get(key)?.ok_or(ErrorKind::DoesNotExist)?;
+    let data = root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
     DatasetData::unpack(&data)
 }
 
@@ -786,7 +783,7 @@ impl<P: Serialize> DatasetData<P> {
 }
 impl<P: DeserializeOwned> DatasetData<P> {
     fn unpack(b: &[u8]) -> Result<Self> {
-        let x = LittleEndian::read_u64(b.get(..8).ok_or("invalid data")?);
+        let x = LittleEndian::read_u64(b.get(..8).ok_or(Error::Generic("invalid data".to_string()))?);
         let ptr = deserialize(&b[8..])?;
         Ok(DatasetData {
             previous_snapshot: if x > 0 { Some(Generation(x)) } else { None },

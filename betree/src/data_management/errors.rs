@@ -1,5 +1,7 @@
+#![allow(missing_docs, unused_doc_comments)]
 use thiserror::Error;
 use crate::{storage_pool::DiskOffset, vdev::Block};
+
 
 #[derive(Error, Debug)]
 pub enum DmlError {

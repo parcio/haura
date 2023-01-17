@@ -46,7 +46,7 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{DatasetId, Error, ErrorKind, Result},
+    database::{DatasetId, Error, Result},
     migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
     tree::{DefaultMessageAction, TreeLayer},
@@ -242,7 +242,7 @@ impl Database {
         let store = self
             .fetch_os_data(&os_id)?
             .map(Ok::<ObjectStoreData, crate::database::errors::Error>)
-            .unwrap_or_else(|| bail!(crate::database::errors::ErrorKind::DoesNotExist))?;
+            .unwrap_or_else(|| bail!(Error::DoesNotExist))?;
 
         ObjectStore::with_datasets(
             os_id,
@@ -305,7 +305,7 @@ impl Database {
         storage_preference: StoragePreference,
     ) -> Result<ObjectStore> {
         if name.contains(&0) {
-            bail!(ErrorKind::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte)
         }
         let mut v = name.to_vec();
         v.push(0);
@@ -427,7 +427,7 @@ impl<'os> ObjectStore {
         access_type: PreferredAccessType,
     ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
         if key.contains(&0) {
-            bail!(ErrorKind::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte)
         }
 
         let oid = loop {
@@ -494,7 +494,7 @@ impl<'os> ObjectStore {
         storage_preference: StoragePreference,
     ) -> Result<Option<(ObjectHandle<'os>, ObjectInfo)>> {
         if key.contains(&0) {
-            bail!(ErrorKind::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte)
         }
 
         let info = self.read_object_info(key)?;
@@ -761,7 +761,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn rename(&mut self, new_key: &[u8]) -> Result<()> {
         if new_key.contains(&0) {
-            bail!(ErrorKind::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte)
         }
 
         let old_key = mem::replace(&mut self.object.key, new_key.to_vec());
@@ -995,7 +995,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn get_metadata(&self, name: &[u8]) -> Result<Option<SlicedCowBytes>> {
         if name.contains(&0) {
-            bail!(ErrorKind::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte)
         }
         let key = self.object.metadata_key(name);
         self.store.metadata.get(key)
@@ -1003,7 +1003,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn set_metadata(&self, name: &[u8], value: &[u8]) -> Result<()> {
         if name.contains(&0) {
-            bail!(ErrorKind::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte)
         }
         let key = self.object.metadata_key(name);
         let msg = meta::set_custom(value);
@@ -1014,7 +1014,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn delete_metadata(&self, name: &[u8]) -> Result<()> {
         if name.contains(&0) {
-            bail!(ErrorKind::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte)
         }
         let key = self.object.metadata_key(name);
         let msg = meta::delete_custom();
@@ -1061,7 +1061,7 @@ impl<'ds> ObjectHandle<'ds> {
             let blocks = Block::round_up_from_bytes(info.size);
             let tier_info = self.store.data.free_space_tier(pref)?;
             if blocks > tier_info.free {
-                bail!(ErrorKind::MigrationWouldExceedStorage);
+                return Err(Error::MigrationWouldExceedStorage(pref.as_u8(), blocks))
             }
         }
         self.migrate_range(u64::MAX, 0, pref)
@@ -1074,7 +1074,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lift() {
             self.migrate(pref)
         } else {
-            bail!(ErrorKind::MigrationNotPossible)
+            return Err(Error::MigrationNotPossible)
         }
     }
 
@@ -1084,7 +1084,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lift() {
             self.migrate_once(pref)
         } else {
-            bail!(ErrorKind::MigrationNotPossible)
+            return Err(Error::MigrationNotPossible)
         }
     }
 
@@ -1095,7 +1095,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lower() {
             self.migrate(pref)
         } else {
-            bail!(ErrorKind::MigrationNotPossible)
+            return Err(Error::MigrationNotPossible)
         }
     }
 
@@ -1105,7 +1105,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lower() {
             self.migrate_once(pref)
         } else {
-            bail!(ErrorKind::MigrationNotPossible)
+            return Err(Error::MigrationNotPossible)
         }
     }
 
