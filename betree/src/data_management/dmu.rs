@@ -1,6 +1,7 @@
 use super::{
     errors::*,
-    impls::{CacheValueRef, ModifiedObjectId, ObjRef, ObjectKey, TaggedCacheValue},
+    cache_value::{CacheValueRef, TaggedCacheValue},
+    impls::{ModifiedObjectId, ObjRef, ObjectKey},
     object_ptr::ObjectPointer,
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
