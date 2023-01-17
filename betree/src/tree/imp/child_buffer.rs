@@ -6,7 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::{Size, StaticSize},
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
+    storage_pool::AtomicSystemStoragePreference,
     tree::{KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
