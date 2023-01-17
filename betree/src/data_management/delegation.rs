@@ -69,8 +69,8 @@ where
         (**self).verify_cache()
     }
 
-    fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef {
-        <T::Target as Dml>::ref_from_ptr(r)
+    fn root_ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef {
+        <T::Target as Dml>::root_ref_from_ptr(r)
     }
 
     fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>

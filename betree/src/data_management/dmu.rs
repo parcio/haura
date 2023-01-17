@@ -819,8 +819,8 @@ where
         Ok(obj.into_value().into_inner())
     }
 
-    fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef {
-        r.into()
+    fn root_ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef {
+        Self::ObjectRef::root_ref_from_obj_ptr(r)
     }
 
     fn evict(&self) -> Result<(), Error> {
