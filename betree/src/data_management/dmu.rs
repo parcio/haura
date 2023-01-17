@@ -1,6 +1,6 @@
 use super::{
-    errors::*,
     cache_value::{CacheValueRef, TaggedCacheValue},
+    errors::*,
     impls::{ModifiedObjectId, ObjRef, ObjectKey},
     object_ptr::ObjectPointer,
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
@@ -190,7 +190,12 @@ where
         }
     }
 
-    fn copy_on_write(&self, obj_ptr: ObjectPointer<SPL::Checksum>, steal: CopyOnWriteReason, pivot_key: PivotKey) {
+    fn copy_on_write(
+        &self,
+        obj_ptr: ObjectPointer<SPL::Checksum>,
+        steal: CopyOnWriteReason,
+        pivot_key: PivotKey,
+    ) {
         let actual_size = self.pool.actual_size(
             obj_ptr.offset().storage_class(),
             obj_ptr.offset().disk_id(),
@@ -241,8 +246,14 @@ where
         op: &<Self as Dml>::ObjectPointer,
         pivot_key: PivotKey,
     ) -> Result<
-        impl TryFuture<Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf, PivotKey), Error = Error>
-            + Send,
+        impl TryFuture<
+                Ok = (
+                    ObjectPointer<<SPL as StoragePoolLayer>::Checksum>,
+                    Buf,
+                    PivotKey,
+                ),
+                Error = Error,
+            > + Send,
         Error,
     > {
         let ptr = op.clone();
@@ -765,7 +776,11 @@ where
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
         let size = object.size();
-        self.cache.write().insert(key, TaggedCacheValue::new(RwLock::new(object), pk.clone()), size);
+        self.cache.write().insert(
+            key,
+            TaggedCacheValue::new(RwLock::new(object), pk.clone()),
+            size,
+        );
         ObjRef::Modified(mid, pk)
     }
 
@@ -784,7 +799,11 @@ where
         let size = object.size();
         let entry = {
             let mut cache = self.cache.write();
-            cache.insert(key, TaggedCacheValue::new(RwLock::new(object), pk.clone()), size);
+            cache.insert(
+                key,
+                TaggedCacheValue::new(RwLock::new(object), pk.clone()),
+                size,
+            );
             cache.get(&key, false).unwrap()
         };
         (CacheValueRef::write(entry), ObjRef::Modified(mid, pk))
@@ -874,15 +893,17 @@ where
                             Ok(None) => {}
                             Ok(Some(object)) => {
                                 trace!("write_back: Was Ok Some");
-                                self.handle_write_back(object, mid, false, mid_pk).map_err(|err| {
-                                    let mut cache = self.cache.write();
-                                    let _ = cache.change_key::<(), _>(
-                                        &ObjectKey::InWriteback(mid),
-                                        // Has to have been in the modified state before
-                                        |_, _, _| Ok(ObjectKey::Modified(mid)),
-                                    );
-                                    err
-                                })?;
+                                self.handle_write_back(object, mid, false, mid_pk).map_err(
+                                    |err| {
+                                        let mut cache = self.cache.write();
+                                        let _ = cache.change_key::<(), _>(
+                                            &ObjectKey::InWriteback(mid),
+                                            // Has to have been in the modified state before
+                                            |_, _, _| Ok(ObjectKey::Modified(mid)),
+                                        );
+                                        err
+                                    },
+                                )?;
                             }
                             Err(()) => continue,
                         };
@@ -909,7 +930,9 @@ where
         }
         Ok(match *or {
             ObjRef::Modified(..) | ObjRef::InWriteback(..) => None,
-            ObjRef::Unmodified(ref p, ref pk) => Some(Box::pin(self.try_fetch_async(p, pk.clone())?.into_future())),
+            ObjRef::Unmodified(ref p, ref pk) => {
+                Some(Box::pin(self.try_fetch_async(p, pk.clone())?.into_future()))
+            }
             ObjRef::Incomplete(..) => unreachable!(),
         })
     }

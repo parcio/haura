@@ -282,7 +282,11 @@ impl LeafNode {
     /// Splits this `LeafNode` into to two leaf nodes.
     /// Returns a new right sibling, the corresponding pivot key, and the size
     /// delta of this node.
-    pub fn split(&mut self, min_size: usize, max_size: usize) -> (Self, CowBytes, isize, LocalPivotKey) {
+    pub fn split(
+        &mut self,
+        min_size: usize,
+        max_size: usize,
+    ) -> (Self, CowBytes, isize, LocalPivotKey) {
         // assert!(self.size() > S::MAX);
         let mut right_sibling = LeafNode {
             // During a split, preference can't be inherited because the new subset of entries
@@ -296,7 +300,12 @@ impl LeafNode {
         // This adjusts sibling's size and pref according to its new entries
         let (pivot_key, size_delta) = self.do_split_off(&mut right_sibling, min_size, max_size);
 
-        (right_sibling, pivot_key.clone(), size_delta, LocalPivotKey::Right(pivot_key))
+        (
+            right_sibling,
+            pivot_key.clone(),
+            size_delta,
+            LocalPivotKey::Right(pivot_key),
+        )
     }
 
     /// Merge all entries from the *right* node into the *left* node.  Returns

@@ -3,8 +3,9 @@ use crate::{
     database::DatasetId,
     object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
+    tree::PivotKey,
     vdev::Block,
-    StoragePreference, tree::PivotKey,
+    StoragePreference,
 };
 use std::{
     fmt::Display,
@@ -106,11 +107,7 @@ impl DmlMsg {
         })
     }
 
-    pub fn write(
-        offset: DiskOffset,
-        size: Block<u32>,
-        pivot_key: PivotKey,
-    ) -> Self {
+    pub fn write(offset: DiskOffset, size: Block<u32>, pivot_key: PivotKey) -> Self {
         Self::Write(OpInfo {
             offset,
             size,

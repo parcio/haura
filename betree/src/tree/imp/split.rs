@@ -33,7 +33,8 @@ where
                 node.size(),
                 node.actual_size()
             );
-            self.dml.insert(node, self.tree_id(), pk.to_global(self.tree_id()))
+            self.dml
+                .insert(node, self.tree_id(), pk.to_global(self.tree_id()))
         });
         info!("Root split done. {}, {}", root_node.size(), size_delta);
         debug_assert!(before as isize + size_delta == root_node.size() as isize);

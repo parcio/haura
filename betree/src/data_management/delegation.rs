@@ -1,4 +1,4 @@
-use crate::{tree::PivotKey, database::DatasetId};
+use crate::{database::DatasetId, tree::PivotKey};
 
 use super::{Dml, Error};
 use std::ops::{Deref, DerefMut};

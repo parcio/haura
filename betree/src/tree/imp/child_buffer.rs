@@ -7,7 +7,7 @@ use crate::{
     data_management::{HasStoragePreference, ObjectReference},
     size::{Size, StaticSize},
     storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
-    tree::{KeyInfo, MessageAction, PivotKey, pivot_key::LocalPivotKey},
+    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction, PivotKey},
     AtomicStoragePreference, StoragePreference,
 };
 use parking_lot::RwLock;
@@ -88,7 +88,6 @@ impl<N: ObjectReference> ChildBuffer<N> {
     pub fn complete_object_ref(&mut self, pk: PivotKey) {
         self.node_pointer.get_mut().set_index(pk)
     }
-
 }
 
 mod ser_np {
