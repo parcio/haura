@@ -3,7 +3,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::Size,
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
+    storage_pool::AtomicSystemStoragePreference,
     tree::{imp::packed, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };

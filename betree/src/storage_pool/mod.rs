@@ -110,7 +110,7 @@ pub use self::unit::StoragePoolUnit;
 
 mod storage_preference;
 pub use storage_preference::{AtomicStoragePreference, StoragePreference};
-pub(crate) use storage_preference::{AtomicSystemStoragePreference, StoragePreferenceBound};
+pub(crate) use storage_preference::AtomicSystemStoragePreference;
 
 /// The amount of storage classes.
 pub const NUM_STORAGE_CLASSES: usize = 4;

@@ -259,25 +259,8 @@ impl AtomicSystemStoragePreference {
     pub fn set(&self, pref: StoragePreference) {
         self.0.store(pref.as_u8(), Ordering::SeqCst);
     }
-}
 
-impl PartialEq for AtomicSystemStoragePreference {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.load(Ordering::SeqCst) == other.0.load(Ordering::SeqCst)
-    }
-}
-
-/// Trait describing a boundary to digest with [StoragePreference] or [AtomicStoragePreference]
-pub(crate) trait StoragePreferenceBound<Pref> {
-    /// Weak Bound expects the user given storage preference to be vital to performance, and respect the user choice in any case.
-    /// If [StoragePreference] was NONE, the bound value is chosen.
-    fn weak_bound(&self, prf: &Pref) -> Pref;
-    /// Strong Bound disregards the user choice and enforces the
-    fn strong_bound(&self, prf: &Pref) -> Pref;
-}
-
-impl StoragePreferenceBound<StoragePreference> for AtomicSystemStoragePreference {
-    fn weak_bound(&self, prf: &StoragePreference) -> StoragePreference {
+    pub fn weak_bound(&self, prf: &StoragePreference) -> StoragePreference {
         match self.0.load(Ordering::Relaxed) {
             NONE => *prf,
             lvl @ 0..=3 => {
@@ -291,21 +274,14 @@ impl StoragePreferenceBound<StoragePreference> for AtomicSystemStoragePreference
         }
     }
 
-    fn strong_bound(&self, _prf: &StoragePreference) -> StoragePreference {
+    pub fn strong_bound(&self, _prf: &StoragePreference) -> StoragePreference {
         self.into()
     }
 }
 
-impl StoragePreferenceBound<AtomicStoragePreference> for AtomicSystemStoragePreference {
-    fn weak_bound(&self, prf: &AtomicStoragePreference) -> AtomicStoragePreference {
-        match prf.as_option() {
-            Some(pref) => AtomicStoragePreference::known(self.weak_bound(&pref)),
-            None => prf.clone(),
-        }
-    }
-
-    fn strong_bound(&self, _prf: &AtomicStoragePreference) -> AtomicStoragePreference {
-        self.into()
+impl PartialEq for AtomicSystemStoragePreference {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.load(Ordering::SeqCst) == other.0.load(Ordering::SeqCst)
     }
 }
 
