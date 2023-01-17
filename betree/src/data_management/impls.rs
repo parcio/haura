@@ -90,12 +90,12 @@ impl<D> ObjRef<ObjectPointer<D>> {
             ObjRef::Incomplete(..) => unreachable!(),
         }
     }
-}
 
-impl<D> From<ObjectPointer<D>> for ObjRef<ObjectPointer<D>> {
-    fn from(ptr: ObjectPointer<D>) -> Self {
-        let d_id = ptr.info;
-        ObjRef::Unmodified(ptr, PivotKey::Root(d_id))
+    /// Create an `ObjRef` from the given to the `ObjectPointer` under the
+    /// assumption that the pointer belongs to a root object.
+    pub fn root_ref_from_obj_ptr(ptr: ObjectPointer<D>) -> Self {
+         let d_id = ptr.info;
+         ObjRef::Unmodified(ptr, PivotKey::Root(d_id))
     }
 }
 

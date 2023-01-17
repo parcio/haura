@@ -138,7 +138,7 @@ where
         storage_preference: StoragePreference,
     ) -> Self {
         Tree::new(
-            X::ref_from_ptr(root_node_ptr),
+            X::root_ref_from_ptr(root_node_ptr),
             tree_id,
             msg_action,
             dml,

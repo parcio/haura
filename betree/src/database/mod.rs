@@ -401,7 +401,7 @@ impl Database {
 
         *tree.dmu().handler().current_generation.lock_write() = root_ptr.generation().next();
         *tree.dmu().handler().root_tree_snapshot.write() = Some(TreeInner::new_ro(
-            RootDmu::ref_from_ptr(root_ptr),
+            RootDmu::root_ref_from_ptr(root_ptr),
             DefaultMessageAction,
         ));
 
@@ -563,7 +563,7 @@ impl Database {
             .write()
             .as_mut()
             .unwrap()
-            .update_root_node(RootDmu::ref_from_ptr(root_ptr));
+            .update_root_node(RootDmu::root_ref_from_ptr(root_ptr));
         Ok(())
     }
 
