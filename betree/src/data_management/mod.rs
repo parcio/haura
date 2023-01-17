@@ -190,7 +190,7 @@ pub trait Dml: Sized {
     fn get_and_remove(&self, or: Self::ObjectRef) -> Result<Self::Object, Error>;
 
     /// Turns an ObjectPointer into an ObjectReference.
-    fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
+    fn root_ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
 
     /// Writes back an object and all its dependencies.
     /// `acquire_or_lock` shall return a lock guard
