@@ -1,6 +1,16 @@
 - Title: Pivot Keys
 - Status: *DRAFT*
 
+# Summary/Motivation
+
+This RFC adds an identifier which allows node defined access to structural
+elements in the B-epsilon tree. This measure allows us to perform operations
+which are more dependent on the actual present layout of the tree rather than
+the semantic content which is stored by individual keys. Furthermore, in
+combination with the recently added migration policies we gainthe option to
+migrate singular nodes and improve the reporting scheme by using more stable
+identifiers compared to the previously used `DiskOffset`s.
+
 # Description
 
 ```ascii
