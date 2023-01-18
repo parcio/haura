@@ -91,12 +91,16 @@ data for better tier utilization.
 
 # Drawbacks
 
-To be fully usable in multiple layers the Pivot Key is required to be stored in
-each node taking up (at the moment) an arbitrary amout of extra space depending
-on the pivot element. The DML can then extract Pivot Keys from each node it acts
-on and report critical actions such as fetch, write and delete. This results in
-more code in alot of places of the `tree` and `data_management` modules as these
-will have to be adjusted to accomodate for the extra encoded member.
+The implementation does not need to require extra members in the node as we can
+generate the valid `PivotKey`s when reading the tree from disk. Although, this
+creates with the current deserialization scheme (deserializing directly into
+valid nodes) hidden states, either nodes with reconstructed `PivotKey` or nodes
+missing valid `PivotKey`s which would encounter errors when trying to actual
+read data from their children. To avoid this the deserialization scheme would
+need to be adjusted to serialize proto-types "InternalNodeProto" or whichever
+name which would need to be validated via a transformation `InternalNodeProto`
+`->` `InternalNode`. This makes the deserialization code a bit more involved,
+but more clear to avoid misuse.
 
 # Alternatives
 
