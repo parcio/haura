@@ -42,7 +42,7 @@ enum LocalPivotKey {
 ```
 
 The property we are piggy-backing on is that pivots are searchable and unique,
-furthermore we can structurally define Pivot Key directions which keeps the
+furthermore we can structurally define `PivotKey` directions which keeps the
 required memory space relatively low as only a single pivot key is required.
 Finally, the pivot keys are more persistent than normal keys in the collection,
 as they are only refreshed when the strcture of the tree changes. This might
@@ -78,12 +78,14 @@ from `LocalPivotKey` to `PivotKey` is always possible, as all local keys which a
 tree layer will encounter belong to the tree itself, the reverse direction is
 not given to be valid and should therefore be excluded in the implementation.
 
-# Purpose
+# Integration
 
-We can use the Pivot Key of a tree node to perform operations on specific nodes
-which fulfill certain conditions such as access frequency or access probability.
-This is helpful in a number of scenarios such as data prefetching or
-disk-to-disk migrations.
+The given `PivotKey` structure can be used in `ObjRef` to add a measure of
+identification to the cache location or disk location.
+We can then use the `PivotKey` of a tree node to perform operations on specific
+nodes which fulfill certain conditions such as access frequency or access
+probability. This is helpful in a number of scenarios such as data prefetching
+or disk-to-disk migrations.
 
 Since pivots are stored in the internal nodes we are required to read a
 substantial amount of data to retrieve knowledge about all exisiting pivot keys.
@@ -94,8 +96,8 @@ which recorded disk offsets and set hints to the DMU to which tier a node is
 advised to be written.
 This limited hints to often accessed nodes which are likely to be migrated to
 faster storage, as not often accessed nodes would not encounter the sent hints.
-With Pivot Keys we could actively migrate them downwards, which is the main
-advantage of Pivot Keys. This can be useful in scenarios with additional small
+With `PivotKey`s we could actively migrate them downwards, which is the main
+advantage of `PivotKey`s. This can be useful in scenarios with additional small
 layers like NVRAM where we are then more flexible to migrate granular amounts of
 data for better tier utilization.
 
@@ -136,8 +138,8 @@ having to maintain additional state when constructing keys about the just
 traversed distance. Arguably, this is semantic-wise not complicated but many
 methods will be affected by this change. Also, misidentification may become
 possible as with reconstruction of subtrees paths may be shifted around. With
-Pivot Keys these will result in a failed search indicating an outdated key.
-Currently the only advantage this method would have to the Pivot Key method is
+`PivotKey`s these will result in a failed search indicating an outdated key.
+Currently the only advantage this method would have to the `PivotKey` method is
 that the size can be expected to remain comparatively low, with 5 bytes for
 each element in the search path. A restriction of key size as discussed in [the
 corresponding issue](https://github.com/julea-io/haura/issues/12) could solve
