@@ -55,7 +55,7 @@ enum PivotKey {
 ```
 
 Also, as the root node of a tree does not have a parent which could index the
-node by it's pivot - we add another variant which simply denotes that the root
+node by its pivot - we add another variant which simply denotes that the root
 of a given dataset is to be chosen.
 
 We propose that we internally use two kinds of pivot keys. First, the global
@@ -71,7 +71,7 @@ not given to be valid and should therefore be excluded in the implementation.
 # Purpose
 
 We can use the Pivot Key of a tree node to perform operations on specific nodes
-which fulfill certain conditions such as access frequency or access probabilty.
+which fulfill certain conditions such as access frequency or access probability.
 This is helpful in a number of scenarios such as data prefetching or
 disk-to-disk migrations.
 
@@ -124,7 +124,7 @@ methods will be affected by this change. Also, misidentification may become
 possible as with reconstruction of subtrees paths may be shifted around. With
 Pivot Keys these will result in a failed search indicating an outdated key.
 Currently the only advantage this method would have to the Pivot Key method is
-that the size can be expected to remain comparatively low, with 5 bytes for each
-element in the search path. A restriction of key size as discussed in
-[Issue](https://github.com/julea-io/haura/issues/12) could solve this problem
-and is already in discussion.
+that the size can be expected to remain comparatively low, with 5 bytes for
+each element in the search path. A restriction of key size as discussed in [the
+corresponding issue](https://github.com/julea-io/haura/issues/12) could solve
+this problem and is already in discussion.
