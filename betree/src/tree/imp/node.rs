@@ -551,8 +551,8 @@ pub struct ChildInfo {
     from: Option<ByteString>,
     to: Option<ByteString>,
     storage: StoragePreference,
-    pivot_key: PivotKey,
-    child: NodeInfo,
+    pub pivot_key: PivotKey,
+    pub child: NodeInfo,
 }
 
 #[derive(serde::Serialize)]

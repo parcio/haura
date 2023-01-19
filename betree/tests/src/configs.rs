@@ -2,7 +2,7 @@ use std::sync::{Once, RwLock, RwLockWriteGuard};
 
 use betree_storage_stack::{
     database::AccessMode,
-    migration::{MigrationConfig, MigrationPolicies, LfuConfig, LfuMode},
+    migration::{LfuConfig, LfuMode, MigrationConfig, MigrationPolicies},
     storage_pool::{configuration::Vdev, LeafVdev, TierConfiguration},
     DatabaseConfiguration, StoragePoolConfiguration,
 };
@@ -14,16 +14,18 @@ pub fn access_specific_config() -> DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: vec![
                 TierConfiguration {
-                    top_level_vdevs: vec![
-                        Vdev::Leaf(LeafVdev::Memory { mem: 2048 * TO_MEBIBYTE })
-                    ],
-                    preferred_access_type: betree_storage_stack::PreferredAccessType::RandomReadWrite
+                    top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
+                        mem: 2048 * TO_MEBIBYTE,
+                    })],
+                    preferred_access_type:
+                        betree_storage_stack::PreferredAccessType::RandomReadWrite,
                 },
                 TierConfiguration {
-                    top_level_vdevs: vec![
-                        Vdev::Leaf(LeafVdev::Memory { mem: 2048 * TO_MEBIBYTE })
-                    ],
-                    preferred_access_type: betree_storage_stack::PreferredAccessType::SequentialReadWrite
+                    top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
+                        mem: 2048 * TO_MEBIBYTE,
+                    })],
+                    preferred_access_type:
+                        betree_storage_stack::PreferredAccessType::SequentialReadWrite,
                 },
             ],
             ..Default::default()
@@ -50,19 +52,15 @@ fn migration_config_lfu(mode: LfuMode) -> DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: vec![
                 TierConfiguration {
-                    top_level_vdevs: vec![
-                        Vdev::Leaf(LeafVdev::Memory {
-                            mem: 2048 * TO_MEBIBYTE,
-                        }),
-                    ],
+                    top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
+                        mem: 2048 * TO_MEBIBYTE,
+                    })],
                     ..Default::default()
                 },
                 TierConfiguration {
-                    top_level_vdevs: vec![
-                        Vdev::Leaf(LeafVdev::Memory {
-                            mem: 2048 * TO_MEBIBYTE,
-                        }),
-                    ],
+                    top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
+                        mem: 2048 * TO_MEBIBYTE,
+                    })],
                     ..Default::default()
                 },
             ],
@@ -88,19 +86,15 @@ pub(crate) fn migration_config_rl() -> DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: vec![
                 TierConfiguration {
-                    top_level_vdevs: vec![
-                        Vdev::Leaf(LeafVdev::Memory {
-                            mem: 2048 * TO_MEBIBYTE,
-                        }),
-                    ],
+                    top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
+                        mem: 2048 * TO_MEBIBYTE,
+                    })],
                     ..Default::default()
                 },
                 TierConfiguration {
-                    top_level_vdevs: vec![
-                        Vdev::Leaf(LeafVdev::Memory {
-                            mem: 2048 * TO_MEBIBYTE,
-                        }),
-                    ],
+                    top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
+                        mem: 2048 * TO_MEBIBYTE,
+                    })],
                     ..Default::default()
                 },
             ],

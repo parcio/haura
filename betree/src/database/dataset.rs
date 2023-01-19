@@ -6,7 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, DmlWithHandler},
     migration::DatabaseMsg,
-    tree::{self, DefaultMessageAction, MessageAction, PivotKey, Tree, TreeLayer},
+    tree::{self, DefaultMessageAction, MessageAction, PivotKey, Tree, TreeLayer, NodeInfo},
     StoragePreference,
 };
 use parking_lot::RwLock;
@@ -301,6 +301,15 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
         Ok(self.tree.get_mut_node_pivot(pk)?)
     }
 
+    #[cfg(feature = "internal-api")]
+    pub fn test_get_node_pivot(
+        &self,
+        pk: &PivotKey,
+    ) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+        debug_assert!(self.id == pk.d_id());
+        Ok(self.tree.get_node_pivot(pk)?)
+    }
+
     /// Iterates over all key-value pairs in the given key range.
     pub fn range<R, K>(
         &self,
@@ -320,7 +329,7 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn tree_dump(&self) -> Result<impl serde::Serialize> {
+    pub fn tree_dump(&self) -> Result<NodeInfo> {
         Ok(self.tree.tree_dump()?)
     }
 }
@@ -401,7 +410,7 @@ impl<Message: MessageAction + 'static> Dataset<Message> {
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn tree_dump(&self) -> Result<impl serde::Serialize> {
+    pub fn tree_dump(&self) -> Result<NodeInfo> {
         self.inner.read().tree_dump()
     }
 }
@@ -585,6 +594,15 @@ impl Dataset<DefaultMessageAction> {
         offset: u32,
     ) -> Result<()> {
         self.inner.read().upsert(key, data, offset)
+    }
+
+
+    #[cfg(feature = "internal-api")]
+    pub fn test_get_node_pivot(
+        &self,
+        pk: &PivotKey,
+    ) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+        self.inner.read().test_get_node_pivot(pk)
     }
 
     /// Given a key and storage preference notify for this entry to be moved to a new storage level.
