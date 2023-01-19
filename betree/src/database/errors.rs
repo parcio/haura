@@ -40,7 +40,7 @@ pub enum Error {
     #[error("Dmu encountered an error.")]
     DmlError {
         #[from]
-        source: crate::data_management::DmlError,
+        source: crate::data_management::Error,
     },
     #[error("Cannot operate on a closed dataset.")]
     Closed,

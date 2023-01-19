@@ -153,7 +153,7 @@ pub trait Dml: Sized {
 
     /// Provides immutable access to the object identified by the given
     /// `ObjectRef`.
-    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, DmlError>;
+    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, Error>;
 
     /// Provides mutable access to the object identified by the given
     /// `ObjectRef`.
@@ -164,7 +164,7 @@ pub trait Dml: Sized {
         &self,
         or: &mut Self::ObjectRef,
         info: Self::Info,
-    ) -> Result<Self::CacheValueRefMut, DmlError>;
+    ) -> Result<Self::CacheValueRefMut, Error>;
 
     /// Provides mutable access to the object
     /// if this object is already mutable.
@@ -184,7 +184,7 @@ pub trait Dml: Sized {
     fn remove(&self, or: Self::ObjectRef);
 
     /// Removes the object referenced by `or` and returns it.
-    fn get_and_remove(&self, or: Self::ObjectRef) -> Result<Self::Object, DmlError>;
+    fn get_and_remove(&self, or: Self::ObjectRef) -> Result<Self::Object, Error>;
 
     /// Turns an ObjectPointer into an ObjectReference.
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
@@ -192,7 +192,7 @@ pub trait Dml: Sized {
     /// Writes back an object and all its dependencies.
     /// `acquire_or_lock` shall return a lock guard
     /// that provides mutable access to the object reference.
-    fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, DmlError>
+    fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
     where
         F: FnMut() -> G,
         G: DerefMut<Target = Self::ObjectRef>;
@@ -202,10 +202,10 @@ pub trait Dml: Sized {
 
     /// Prefetches the on-disk object identified by `or`.
     /// Will return `None` if object is in cache.
-    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, DmlError>;
+    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, Error>;
 
     /// Finishes the prefetching.
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), DmlError>;
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error>;
 
     /// Which format the cache statistics are represented in. For example a simple struct.
     type CacheStats: serde::Serialize;
@@ -216,7 +216,7 @@ pub trait Dml: Sized {
     /// Run cache-internal self-validation.
     fn verify_cache(&self);
     /// Evicts excessive cache entries.
-    fn evict(&self) -> Result<(), DmlError>;
+    fn evict(&self) -> Result<(), Error>;
 }
 
 /// Legible result of a copy-on-write call. This describes wether the given
@@ -274,4 +274,4 @@ pub(crate) mod errors;
 pub(crate) mod impls;
 mod object_ptr;
 
-pub use self::{dmu::Dmu, errors::DmlError, object_ptr::ObjectPointer};
+pub use self::{dmu::Dmu, errors::Error, object_ptr::ObjectPointer};
