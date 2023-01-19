@@ -1,6 +1,8 @@
 //! A node identification key.
 //!
 //! See [PivotKey] for more documentation.
+use serde::Serialize;
+
 use crate::{cow_bytes::CowBytes, database::DatasetId};
 
 /// An identifier for an arbitrary node.
@@ -26,7 +28,7 @@ use crate::{cow_bytes::CowBytes, database::DatasetId};
 ///     │       │       │       │
 ///     ▼       ▼       ▼       ▼
 /// ```
-#[derive(Hash, Clone, Debug, PartialEq, Eq)]
+#[derive(Hash, Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum PivotKey {
     LeftOuter(CowBytes, DatasetId),
     Right(CowBytes, DatasetId),
@@ -82,6 +84,7 @@ impl PivotKey {
 ///
 /// This enum is useful to transport information from node local operations to
 /// the tree layer to avoid passing around [DatasetId]s continuously.
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum LocalPivotKey {
     LeftOuter(CowBytes),
     Right(CowBytes),

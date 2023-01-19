@@ -882,6 +882,18 @@ mod tests {
         TestResult::passed()
     }
 
+    #[quickcheck]
+    fn check_split_key(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
+        if node.fanout() < 4 {
+            return TestResult::discard();
+        }
+        let (right_sibling, pivot, _size_delta, pivot_key) = node.split();
+        assert!(node.fanout() >= 2);
+        assert!(right_sibling.fanout() >= 2);
+        assert_eq!(LocalPivotKey::Right(pivot), pivot_key);
+        TestResult::passed()
+    }
+
     // #[test]
     // fn check_constant() {
     //     let node: InternalNode<ChildBuffer<()>> = InternalNode {
