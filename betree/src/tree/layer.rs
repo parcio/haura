@@ -22,15 +22,15 @@ pub trait TreeLayer<M: MessageAction> {
         key: K,
         msg: SlicedCowBytes,
         storage_preference: StoragePreference,
-    ) -> Result<(), TreeError>;
+    ) -> Result<(), Error>;
 
     /// Gets the entry for the given `key` if it exists.
-    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, TreeError>;
+    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error>;
 
     /// Returns the depth of the tree.
-    fn depth(&self) -> Result<u32, TreeError>;
+    fn depth(&self) -> Result<u32, Error>;
     /// The range query iterator.
-    type Range: Iterator<Item = Result<(Key, Value), TreeError>>;
+    type Range: Iterator<Item = Result<(Key, Value), Error>>;
     /// Issues a range query for the given key range.
     /// Returns an iterator over (key, value)-tuples in that range.
     ///
@@ -41,7 +41,7 @@ pub trait TreeLayer<M: MessageAction> {
     ///     todo!()
     /// }
     /// ```
-    fn range<K, R>(&self, range: R) -> Result<Self::Range, TreeError>
+    fn range<K, R>(&self, range: R) -> Result<Self::Range, Error>
     where
         R: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
@@ -51,14 +51,14 @@ pub trait TreeLayer<M: MessageAction> {
     type Pointer: Serialize + DeserializeOwned;
 
     /// Sync the tree to disk.
-    fn sync(&self) -> Result<Self::Pointer, TreeError>;
+    fn sync(&self) -> Result<Self::Pointer, Error>;
 }
 
 /// Special-purpose interface to allow for storing and syncing trees of different message types.
 pub(crate) trait ErasedTreeSync {
     type Pointer;
     type ObjectRef;
-    fn erased_sync(&self) -> Result<Self::Pointer, TreeError>;
+    fn erased_sync(&self) -> Result<Self::Pointer, Error>;
     // ObjectRef is not object-safe, but we only need the lock, not the value
     // FIXME: find an actual abstraction, instead of encoding implementation details into this trait
     fn erased_try_lock_root(
