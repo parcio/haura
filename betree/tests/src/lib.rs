@@ -2,6 +2,8 @@
 
 mod configs;
 mod object_store;
+mod pivot_key;
+mod util;
 
 use betree_storage_stack::{
     compression::CompressionConfiguration,
@@ -894,7 +896,10 @@ fn migration_policy_single_node() {
 
     ds.insert(b"foobar".to_vec(), &[42; 4096]).unwrap();
     sync();
-    assert_json_snapshot!("migration_policy_single_node__before_migration", json!(ds.tree_dump().unwrap()));
+    assert_json_snapshot!(
+        "migration_policy_single_node__before_migration",
+        json!(ds.tree_dump().unwrap())
+    );
     std::thread::sleep(std::time::Duration::from_secs(1));
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
@@ -902,7 +907,10 @@ fn migration_policy_single_node() {
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
     sync();
     std::thread::sleep(std::time::Duration::from_secs(1));
-    assert_json_snapshot!("migration_policy_single_node__after_migration",json!(ds.tree_dump().unwrap()));
+    assert_json_snapshot!(
+        "migration_policy_single_node__after_migration",
+        json!(ds.tree_dump().unwrap())
+    );
     sync();
 }
 
@@ -916,9 +924,13 @@ fn migration_policy_single_object() {
         os = db.open_object_store().unwrap();
         db.sync().unwrap();
     }
-    let obj = os.open_or_create_object_with_pref(b"foo", StoragePreference::FAST).unwrap().0;
+    let obj = os
+        .open_or_create_object_with_pref(b"foo", StoragePreference::FAST)
+        .unwrap()
+        .0;
     let mut buf = vec![42; 200 * TO_MEBIBYTE];
-    obj.write_at_with_pref(&buf, 0, StoragePreference::FAST).unwrap();
+    obj.write_at_with_pref(&buf, 0, StoragePreference::FAST)
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_secs(2));
     shared_db.write().sync().unwrap();
     obj.read_at(&mut buf, 0).unwrap();

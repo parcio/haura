@@ -15,10 +15,13 @@ pub use self::{
     imp::{Inner, Node, Tree},
     layer::TreeLayer,
     message_action::MessageAction,
-    pivot_key::PivotKey,
 };
 
-pub use self::errors::Error;
+#[cfg(not(feature = "internal-api"))]
+pub(crate) use self::pivot_key::PivotKey;
+
+#[cfg(feature = "internal-api")]
+pub use self::{imp::NodeInfo, pivot_key::PivotKey};
 
 type Key = CowBytes;
 type Value = SlicedCowBytes;
