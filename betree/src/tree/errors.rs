@@ -6,7 +6,7 @@ pub enum TreeError {
     #[error("Storage operation could not be performed")]
     DmuError {
         #[from]
-        source: crate::data_management::DmlError,
+        source: crate::data_management::Error,
         // TODO: Once we migrate data_management module to thiserror we may use
         // the backtrace propagation feature
         // backtrace: Backtrace,

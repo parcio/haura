@@ -1,4 +1,4 @@
-use super::{Dml, DmlError};
+use super::{Dml, Error};
 use std::ops::{Deref, DerefMut};
 
 impl<T> Dml for T
@@ -23,7 +23,7 @@ where
         (**self).try_get(or)
     }
 
-    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, DmlError> {
+    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, Error> {
         (**self).get(or)
     }
 
@@ -31,7 +31,7 @@ where
         &self,
         or: &mut Self::ObjectRef,
         info: Self::Info,
-    ) -> Result<Self::CacheValueRefMut, DmlError> {
+    ) -> Result<Self::CacheValueRefMut, Error> {
         (**self).get_mut(or, info)
     }
 
@@ -55,11 +55,11 @@ where
         (**self).remove(or)
     }
 
-    fn get_and_remove(&self, or: Self::ObjectRef) -> Result<Self::Object, DmlError> {
+    fn get_and_remove(&self, or: Self::ObjectRef) -> Result<Self::Object, Error> {
         (**self).get_and_remove(or)
     }
 
-    fn evict(&self) -> Result<(), DmlError> {
+    fn evict(&self) -> Result<(), Error> {
         (**self).evict()
     }
 
@@ -71,7 +71,7 @@ where
         <T::Target as Dml>::ref_from_ptr(r)
     }
 
-    fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, DmlError>
+    fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
     where
         F: FnMut() -> G,
         G: DerefMut<Target = Self::ObjectRef>,
@@ -81,11 +81,11 @@ where
 
     type Prefetch = <T::Target as Dml>::Prefetch;
 
-    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, DmlError> {
+    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, Error> {
         (**self).prefetch(or)
     }
 
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), DmlError> {
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
         (**self).finish_prefetch(p)
     }
 

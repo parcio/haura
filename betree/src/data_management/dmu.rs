@@ -141,7 +141,7 @@ where
         &self,
         or: &mut <Self as Dml>::ObjectRef,
         info: DatasetId,
-    ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, DmlError> {
+    ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, Error> {
         debug!("Stealing {or:?}");
         let mid = self.next_modified_node_id.fetch_add(1, Ordering::Relaxed);
         let old_ptr = {
@@ -218,7 +218,7 @@ where
 
     /// Fetches synchronously an object from disk and inserts it into the
     /// cache.
-    fn fetch(&self, op: &<Self as Dml>::ObjectPointer) -> Result<(), DmlError> {
+    fn fetch(&self, op: &<Self as Dml>::ObjectPointer) -> Result<(), Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
         let mut decompression_state = op.decompression_tag().new_decompression()?;
@@ -246,16 +246,16 @@ where
     ) -> Result<
         impl TryFuture<
                 Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf),
-                Error = DmlError,
+                Error = Error,
             > + Send,
-        DmlError,
+        Error,
     > {
         let ptr = op.clone();
 
         Ok(self
             .pool
             .read_async(op.size(), op.offset(), op.checksum().clone())?
-            .map_err(DmlError::from)
+            .map_err(Error::from)
             .and_then(move |data| ok((ptr, data))))
     }
 
@@ -267,7 +267,7 @@ where
         }
     }
 
-    fn evict(&self, mut cache: RwLockWriteGuard<E>) -> Result<(), DmlError> {
+    fn evict(&self, mut cache: RwLockWriteGuard<E>) -> Result<(), Error> {
         // TODO we may need to evict multiple objects
         // Algorithm overview:
         // Find some evictable object
@@ -343,7 +343,7 @@ where
         mut object: <Self as Dml>::CacheValueRefMut,
         mid: ModifiedObjectId,
         evict: bool,
-    ) -> Result<<Self as Dml>::ObjectPointer, DmlError> {
+    ) -> Result<<Self as Dml>::ObjectPointer, Error> {
         let object_size = {
             #[cfg(debug_assertions)]
             {
@@ -463,7 +463,7 @@ where
         Ok(obj_ptr)
     }
 
-    fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, DmlError> {
+    fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, Error> {
         assert!(storage_preference < NUM_STORAGE_CLASSES as u8);
         if size >= Block(2048) {
             warn!("Very large allocation requested: {:?}", size);
@@ -572,7 +572,7 @@ where
             "No available layer can provide enough free storage {:?}",
             size
         );
-        Err(DmlError::OutOfSpaceError)
+        Err(Error::OutOfSpaceError)
     }
 
     /// Tries to allocate `size` blocks at `disk_offset`.  Might fail if
@@ -581,7 +581,7 @@ where
         &self,
         disk_offset: DiskOffset,
         size: Block<u32>,
-    ) -> Result<(), DmlError> {
+    ) -> Result<(), Error> {
         let disk_id = disk_offset.disk_id();
         let num_disks = self.pool.num_disks(disk_offset.storage_class(), disk_id);
         let size = size * num_disks as u32;
@@ -595,7 +595,7 @@ where
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)?;
             Ok(())
         } else {
-            Err(DmlError::RawAllocationError {
+            Err(Error::RawAllocationError {
                 at: disk_offset,
                 size,
             })
@@ -711,7 +711,7 @@ where
         }
     }
 
-    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, DmlError> {
+    fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, Error> {
         let mut cache = self.cache.read();
         loop {
             if let Some(entry) = cache.get(&or.as_key(), true) {
@@ -745,7 +745,7 @@ where
         &self,
         or: &mut Self::ObjectRef,
         info: Self::Info,
-    ) -> Result<Self::CacheValueRefMut, DmlError> {
+    ) -> Result<Self::CacheValueRefMut, Error> {
         // Fast path
         if let Some(obj) = self.try_get_mut(or) {
             return Ok(obj);
@@ -809,7 +809,7 @@ where
     fn get_and_remove(
         &self,
         mut or: Self::ObjectRef,
-    ) -> Result<Node<ObjRef<ObjectPointer<SPL::Checksum>>>, DmlError> {
+    ) -> Result<Node<ObjRef<ObjectPointer<SPL::Checksum>>>, Error> {
         let obj = loop {
             self.get(&mut or)?;
             match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
@@ -829,7 +829,7 @@ where
         r.into()
     }
 
-    fn evict(&self) -> Result<(), DmlError> {
+    fn evict(&self) -> Result<(), Error> {
         // TODO shortcut without locking cache
         let cache = self.cache.write();
         if cache.size() > cache.capacity() {
@@ -847,7 +847,7 @@ where
     /// needed.  A write back on a subtree will always write the lowest modified
     /// node level first and then propagate writes upwards until the subtree
     /// root is reached.
-    fn write_back<F, FO>(&self, mut acquire_or_lock: F) -> Result<Self::ObjectPointer, DmlError>
+    fn write_back<F, FO>(&self, mut acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
     where
         F: FnMut() -> FO,
         FO: DerefMut<Target = Self::ObjectRef>,
@@ -910,12 +910,12 @@ where
 
     type Prefetch = Pin<
         Box<
-            dyn Future<Output = Result<(<Self as Dml>::ObjectPointer, Buf), DmlError>>
+            dyn Future<Output = Result<(<Self as Dml>::ObjectPointer, Buf), Error>>
                 + Send
                 + 'static,
         >,
     >;
-    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, DmlError> {
+    fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, Error> {
         if self.cache.read().contains_key(&or.as_key()) {
             return Ok(None);
         }
@@ -925,7 +925,7 @@ where
         })
     }
 
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), DmlError> {
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
         let (ptr, compressed_data) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = ptr

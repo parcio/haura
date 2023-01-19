@@ -3,7 +3,7 @@ use crate::{storage_pool::DiskOffset, vdev::Block};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum DmlError {
+pub enum Error {
     #[error("The storage pool encountered an error.")]
     VdevError {
         #[from]
@@ -36,9 +36,9 @@ pub enum DmlError {
 }
 
 // To avoid recursive error types here, define a simple translation from
-// database to DmlError.
-impl From<crate::database::Error> for DmlError {
+// database to Error.
+impl From<crate::database::Error> for Error {
     fn from(value: crate::database::Error) -> Self {
-        DmlError::HandlerError(format!("{value:?}"))
+        Error::HandlerError(format!("{value:?}"))
     }
 }
