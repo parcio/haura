@@ -92,7 +92,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
                 .collect::<Result<Vec<_>, _>>()?;
 
             assert!(vec.len() <= NUM_STORAGE_CLASSES, "too many storage classes");
-            vec.resize_with(NUM_STORAGE_CLASSES, || Default::default());
+            vec.resize_with(NUM_STORAGE_CLASSES, Default::default);
             let boxed: Box<[StorageTier; NUM_STORAGE_CLASSES]> =
                 vec.into_boxed_slice().try_into().map_err(|_| ()).unwrap();
             *boxed
@@ -257,7 +257,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
                 return StoragePreference::from_u8(pref as u8)
             }
         }
-        return StoragePreference::NONE
+        StoragePreference::NONE
     }
 }
 
