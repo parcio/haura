@@ -85,7 +85,7 @@ use crate::{
     data_management::DmlWithHandler,
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,
-    Database, StoragePreference, DatabaseConfiguration, database::RootDmu,
+    Database, StoragePreference, database::RootDmu,
 };
 
 use self::{lfu::Lfu, reinforcment_learning::ZhangHellanderToor};

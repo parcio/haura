@@ -7,7 +7,7 @@ use crate::{
     database::{StorageInfo, RootDmu},
     object::{ObjectStore, ObjectStoreId},
     vdev::Block,
-    Database, StoragePreference, DatabaseConfiguration,
+    Database, StoragePreference,
 };
 use serde::{Deserialize, Serialize};
 use std::{

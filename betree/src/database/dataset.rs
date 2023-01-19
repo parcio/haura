@@ -484,7 +484,7 @@ impl DatasetInner<DefaultMessageAction> {
         if let Some(info) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
             Ok(info)
         } else {
-            return Err(Error::DoesNotExist)
+            Err(Error::DoesNotExist)
         }
     }
 

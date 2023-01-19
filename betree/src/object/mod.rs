@@ -1074,7 +1074,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lift() {
             self.migrate(pref)
         } else {
-            return Err(Error::MigrationNotPossible)
+            Err(Error::MigrationNotPossible)
         }
     }
 
@@ -1084,7 +1084,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lift() {
             self.migrate_once(pref)
         } else {
-            return Err(Error::MigrationNotPossible)
+            Err(Error::MigrationNotPossible)
         }
     }
 
@@ -1095,7 +1095,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lower() {
             self.migrate(pref)
         } else {
-            return Err(Error::MigrationNotPossible)
+            Err(Error::MigrationNotPossible)
         }
     }
 
@@ -1105,7 +1105,7 @@ impl<'ds> ObjectHandle<'ds> {
         if let Some(pref) = self.object.storage_preference.lower() {
             self.migrate_once(pref)
         } else {
-            return Err(Error::MigrationNotPossible)
+            Err(Error::MigrationNotPossible)
         }
     }
 

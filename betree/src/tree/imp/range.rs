@@ -132,7 +132,7 @@ where
             }
             next_pivot
                 .as_ref()
-                .map(|pivot| self.finished = &pivot[..] >= &max_key[..]);
+                .map(|pivot| self.finished = pivot >= max_key);
         }
 
         match next_pivot {
