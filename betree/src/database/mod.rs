@@ -169,11 +169,11 @@ impl DatabaseConfiguration {
 }
 
 impl DatabaseConfiguration {
-    fn new_spu(&self) -> Result<RootSpu> {
+    pub fn new_spu(&self) -> Result<RootSpu> {
         Ok(StoragePoolUnit::<XxHash>::new(&self.storage)?)
     }
 
-    fn new_handler(&self, spu: &RootSpu) -> DbHandler {
+    pub fn new_handler(&self, spu: &RootSpu) -> DbHandler {
         // TODO: Update the free sizes of each used vdev here.
         // How do we recover this from the storage?
         // FIXME: Ensure this is recovered properly from storage
@@ -216,7 +216,7 @@ impl DatabaseConfiguration {
         }
     }
 
-    fn new_dmu(&self, spu: RootSpu, handler: DbHandler) -> RootDmu {
+    pub fn new_dmu(&self, spu: RootSpu, handler: DbHandler) -> RootDmu {
         let mut strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES] =
             [[None; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES];
 
