@@ -1,12 +1,11 @@
 #![allow(missing_docs, unused_doc_comments)]
-use thiserror::Error;
 use crate::{storage_pool::DiskOffset, vdev::Block};
-
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum DmlError {
     #[error("The storage pool encountered an error.")]
-    VdevError{
+    VdevError {
         #[from]
         source: crate::vdev::Error,
     },
@@ -33,10 +32,7 @@ pub enum DmlError {
     #[error("A callback function to the cache has errored.")]
     CallbackError,
     #[error("A raw allocation has failed.")]
-    RawAllocationError {
-        at: DiskOffset,
-        size: Block<u32>,
-    }
+    RawAllocationError { at: DiskOffset, size: Block<u32> },
 }
 
 // To avoid recursive error types here, define a simple translation from

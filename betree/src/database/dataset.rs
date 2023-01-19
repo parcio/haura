@@ -1,6 +1,6 @@
 use super::{
     ds_data_key, errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree,
-    Generation, MessageTree, StorageInfo, RootDmu,
+    Generation, MessageTree, RootDmu, StorageInfo,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
@@ -14,8 +14,7 @@ use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
 /// The internal data set type.  This is the non-user facing variant which is
 /// then wrapped in the [Dataset] type.
-pub struct DatasetInner<Message = DefaultMessageAction>
-{
+pub struct DatasetInner<Message = DefaultMessageAction> {
     pub(super) tree: MessageTree<RootDmu, Message>,
     pub(crate) id: DatasetId,
     name: Box<[u8]>,
@@ -24,8 +23,7 @@ pub struct DatasetInner<Message = DefaultMessageAction>
 }
 
 /// The data set type.
-pub struct Dataset<Message = DefaultMessageAction>
-{
+pub struct Dataset<Message = DefaultMessageAction> {
     inner: Arc<RwLock<DatasetInner<Message>>>,
 }
 
@@ -37,8 +35,7 @@ impl<Message> Clone for Dataset<Message> {
     }
 }
 
-impl<Message> From<DatasetInner<Message>> for Dataset<Message>
-{
+impl<Message> From<DatasetInner<Message>> for Dataset<Message> {
     fn from(inner: DatasetInner<Message>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(inner)),
@@ -98,7 +95,7 @@ impl Database {
     ) -> Result<Dataset<M>> {
         let ds_data = fetch_ds_data(&self.root_tree, id)?;
         if self.open_datasets.contains_key(&id) {
-            return Err(Error::InUse)
+            return Err(Error::InUse);
         }
         let storage_preference = StoragePreference::NONE;
         let ds_tree = Tree::open(
@@ -402,7 +399,7 @@ impl DatasetInner<DefaultMessageAction> {
         storage_preference: StoragePreference,
     ) -> Result<()> {
         if data.len() > tree::MAX_MESSAGE_SIZE {
-            return Err(Error::MessageTooLarge)
+            return Err(Error::MessageTooLarge);
         }
         self.insert_msg_with_pref(
             key,
@@ -429,7 +426,7 @@ impl DatasetInner<DefaultMessageAction> {
         storage_preference: StoragePreference,
     ) -> Result<()> {
         if offset as usize + data.len() > tree::MAX_MESSAGE_SIZE {
-            return Err(Error::MessageTooLarge)
+            return Err(Error::MessageTooLarge);
         }
         // TODO: In case of overfilling the underlying storage we should notify in _any_ case that the writing is not successfull, for this
         // we need to know wether the space to write out has been expanded. For this we need further information which we ideally do not want
@@ -466,7 +463,7 @@ impl DatasetInner<DefaultMessageAction> {
     ) -> Result<Option<()>> {
         use crate::storage_pool::StoragePoolLayer;
         if self.tree.dmu().spl().disk_count(pref.as_u8()) == 0 {
-            return Err(Error::MigrationNotPossible)
+            return Err(Error::MigrationNotPossible);
         }
         Ok(self.tree.apply_with_info(key, pref)?.map(|_| ()))
     }

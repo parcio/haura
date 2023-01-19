@@ -4,7 +4,7 @@ use parking_lot::RwLock;
 use crate::{
     cow_bytes::CowBytes,
     data_management::{DmlWithHandler, DmlWithStorageHints},
-    database::{StorageInfo, RootDmu},
+    database::{RootDmu, StorageInfo},
     object::{ObjectStore, ObjectStoreId},
     vdev::Block,
     Database, StoragePreference,

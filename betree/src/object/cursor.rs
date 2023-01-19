@@ -2,10 +2,7 @@
 #![allow(irrefutable_let_patterns)]
 
 use super::ObjectHandle;
-use crate::{
-    StoragePreference,
-    database::Error as DbError,
-};
+use crate::{database::Error as DbError, StoragePreference};
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -53,7 +50,7 @@ fn convert_res(db_res: Result<u64, (u64, DbError)>) -> io::Result<usize> {
 
 fn convert_err(err: DbError) -> io::Error {
     match err {
-        DbError::IoError{ source } => source,
+        DbError::IoError { source } => source,
         // FIXME: this eats io::Errors hidden deeper into the result chain
         e => {
             dbg!("Encountered error: {:?}", e);

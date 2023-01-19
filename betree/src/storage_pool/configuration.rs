@@ -3,10 +3,10 @@ use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
 use libc;
 use serde::{Deserialize, Serialize};
-use speedy::{Writable, Readable};
+use speedy::{Readable, Writable};
 use std::{
-    fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
-    slice, convert::TryFrom,
+    convert::TryFrom, fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator,
+    os::unix::io::AsRawFd, path::PathBuf, slice,
 };
 
 /// Access pattern descriptor to differentiate and optimize drive usage. Useful

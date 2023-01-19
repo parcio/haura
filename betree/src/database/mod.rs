@@ -69,10 +69,8 @@ pub(crate) type Object = Node<ObjectRef>;
 type DbHandler = Handler<ObjectRef>;
 
 pub(crate) type RootSpu = StoragePoolUnit<XxHash>;
-pub(crate) type RootDmu = Dmu<
-    ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>,
-    RootSpu,
->;
+pub(crate) type RootDmu =
+    Dmu<ClockCache<data_management::impls::ObjectKey<Generation>, RwLock<Object>>, RootSpu>;
 
 pub(crate) type MessageTree<Dmu, Message> =
     Tree<Arc<Dmu>, Message, Arc<TreeInner<ObjectRef, DatasetId, Message>>>;
@@ -242,10 +240,7 @@ impl DatabaseConfiguration {
         )
     }
 
-    fn select_root_tree(
-        &self,
-        dmu: Arc<RootDmu>,
-    ) -> Result<(RootTree<RootDmu>, ObjectPointer)> {
+    fn select_root_tree(&self, dmu: Arc<RootDmu>) -> Result<(RootTree<RootDmu>, ObjectPointer)> {
         if let Some(cfg) = &self.metrics {
             metrics_init::<Self>(cfg, dmu.clone())?;
         }
@@ -783,7 +778,10 @@ impl<P: Serialize> DatasetData<P> {
 }
 impl<P: DeserializeOwned> DatasetData<P> {
     fn unpack(b: &[u8]) -> Result<Self> {
-        let x = LittleEndian::read_u64(b.get(..8).ok_or(Error::Generic("invalid data".to_string()))?);
+        let x = LittleEndian::read_u64(
+            b.get(..8)
+                .ok_or(Error::Generic("invalid data".to_string()))?,
+        );
         let ptr = deserialize(&b[8..])?;
         Ok(DatasetData {
             previous_snapshot: if x > 0 { Some(Generation(x)) } else { None },

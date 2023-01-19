@@ -244,8 +244,10 @@ where
         &self,
         op: &<Self as Dml>::ObjectPointer,
     ) -> Result<
-        impl TryFuture<Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf), Error = DmlError>
-            + Send,
+        impl TryFuture<
+                Ok = (ObjectPointer<<SPL as StoragePoolLayer>::Checksum>, Buf),
+                Error = DmlError,
+            > + Send,
         DmlError,
     > {
         let ptr = op.clone();
@@ -377,8 +379,7 @@ where
             // FIXME: cache this
             let mut state = compression.new_compression()?;
             {
-                object
-                    .pack(&mut state)?;
+                object.pack(&mut state)?;
                 drop(object);
             }
             state.finish()
@@ -525,9 +526,7 @@ where
 
                 if x.is_none() {
                     let segment_id = SegmentId::get(DiskOffset::new(class, disk_id, Block(0)));
-                    let allocator = self
-                        .handler
-                        .get_allocation_bitmap(segment_id, self)?;
+                    let allocator = self.handler.get_allocation_bitmap(segment_id, self)?;
                     *x = Some((segment_id, allocator));
                 }
                 let &mut (ref mut segment_id, ref mut allocator) = x.as_mut().unwrap();
@@ -553,9 +552,7 @@ where
                         );
                         continue 'class;
                     }
-                    *allocator = self
-                        .handler
-                        .get_allocation_bitmap(next_segment_id, self)?;
+                    *allocator = self.handler.get_allocation_bitmap(next_segment_id, self)?;
                     *segment_id = next_segment_id;
                 }
             };
@@ -580,23 +577,28 @@ where
 
     /// Tries to allocate `size` blocks at `disk_offset`.  Might fail if
     /// already in use.
-    pub fn allocate_raw_at(&self, disk_offset: DiskOffset, size: Block<u32>) -> Result<(), DmlError> {
+    pub fn allocate_raw_at(
+        &self,
+        disk_offset: DiskOffset,
+        size: Block<u32>,
+    ) -> Result<(), DmlError> {
         let disk_id = disk_offset.disk_id();
         let num_disks = self.pool.num_disks(disk_offset.storage_class(), disk_id);
         let size = size * num_disks as u32;
         let segment_id = SegmentId::get(disk_offset);
         let mut x =
             self.allocation_data[disk_offset.storage_class() as usize][disk_id as usize].lock();
-        let mut allocator = self
-            .handler
-            .get_allocation_bitmap(segment_id, self)?;
+        let mut allocator = self.handler.get_allocation_bitmap(segment_id, self)?;
         if allocator.allocate_at(size.as_u32(), SegmentId::get_block_offset(disk_offset)) {
             *x = Some((segment_id, allocator));
             self.handler
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)?;
             Ok(())
         } else {
-            Err(DmlError::RawAllocationError { at: disk_offset, size })
+            Err(DmlError::RawAllocationError {
+                at: disk_offset,
+                size,
+            })
         }
     }
 
