@@ -360,7 +360,7 @@ where
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn tree_dump(&self) -> Result<impl serde::Serialize, Error>
+    pub fn tree_dump(&self) -> Result<NodeInfo, Error>
     where
         X::ObjectRef: HasStoragePreference,
     {
@@ -566,4 +566,4 @@ mod packed;
 mod range;
 mod split;
 
-pub use self::{node::Node, range::RangeIterator};
+pub use self::{node::{Node, NodeInfo}, range::RangeIterator};
