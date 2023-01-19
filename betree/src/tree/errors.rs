@@ -1,3 +1,4 @@
+#![allow(missing_docs, unused_doc_comments)]
 use thiserror::Error;
 
 #[derive(Error, Debug)]
