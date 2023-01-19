@@ -551,6 +551,7 @@ pub struct ChildInfo {
     from: Option<ByteString>,
     to: Option<ByteString>,
     storage: StoragePreference,
+    pivot_key: PivotKey,
     child: NodeInfo,
 }
 
@@ -597,7 +598,7 @@ impl serde::Serialize for ByteString {
     }
 }
 
-impl<N: HasStoragePreference> Node<N> {
+impl<N: HasStoragePreference + ObjectReference> Node<N> {
     pub(crate) fn node_info<D>(&self, dml: &D) -> NodeInfo
     where
         D: Dml<Object = Node<N>, ObjectRef = N>,
@@ -611,11 +612,12 @@ impl<N: HasStoragePreference> Node<N> {
                 children: {
                     int.iter_with_bounds()
                         .map(|(maybe_left, child_buf, maybe_right)| {
-                            let (child, storage_preference) = {
+                            let (child, storage_preference, pivot_key) = {
                                 let mut np = child_buf.node_pointer.write();
+                                let pivot_key = np.index().clone();
                                 let storage_preference = np.correct_preference();
                                 let child = dml.get(&mut np).unwrap();
-                                (child, storage_preference)
+                                (child, storage_preference, pivot_key)
                             };
 
                             let node_info = child.node_info(dml);
@@ -627,6 +629,7 @@ impl<N: HasStoragePreference> Node<N> {
                                 from: maybe_left.map(|cow| ByteString(cow.to_vec())),
                                 to: maybe_right.map(|cow| ByteString(cow.to_vec())),
                                 storage: storage_preference,
+                                pivot_key,
                                 child: node_info,
                             }
                         })
