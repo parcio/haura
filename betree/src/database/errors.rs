@@ -20,7 +20,7 @@ pub enum Error {
     #[error("A tree operation encountered an error. This is likely an internal error.")]
     TreeError {
         #[from]
-        source: crate::tree::TreeError,
+        source: crate::tree::Error,
     },
     #[error("Serializing into the binary format failed. This is an internal error.")]
     BinarySerializationError {

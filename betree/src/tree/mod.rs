@@ -16,7 +16,7 @@ pub use self::{
     message_action::MessageAction,
 };
 
-pub use self::errors::TreeError;
+pub use self::errors::Error;
 
 type Key = CowBytes;
 type Value = SlicedCowBytes;

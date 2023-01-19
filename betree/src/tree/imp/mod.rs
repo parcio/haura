@@ -223,7 +223,7 @@ where
         &self.inner.borrow().msg_action
     }
 
-    fn get_mut_root_node(&self) -> Result<X::CacheValueRefMut, TreeError> {
+    fn get_mut_root_node(&self) -> Result<X::CacheValueRefMut, Error> {
         if let Some(node) = self.dml.try_get_mut(&self.inner.borrow().root_node.read()) {
             return Ok(node);
         }
@@ -232,11 +232,11 @@ where
             .get_mut(&mut self.inner.borrow().root_node.write(), self.tree_id())?)
     }
 
-    fn get_root_node(&self) -> Result<X::CacheValueRef, TreeError> {
+    fn get_root_node(&self) -> Result<X::CacheValueRef, Error> {
         self.get_node(&self.inner.borrow().root_node)
     }
 
-    fn get_node(&self, np_ref: &RwLock<X::ObjectRef>) -> Result<X::CacheValueRef, TreeError> {
+    fn get_node(&self, np_ref: &RwLock<X::ObjectRef>) -> Result<X::CacheValueRef, Error> {
         if let Some(node) = self.dml.try_get(&np_ref.read()) {
             return Ok(node);
         }
@@ -250,7 +250,7 @@ where
     fn get_mut_node_mut(
         &self,
         np_ref: &mut X::ObjectRef,
-    ) -> Result<X::CacheValueRefMut, TreeError> {
+    ) -> Result<X::CacheValueRefMut, Error> {
         if let Some(node) = self.dml.try_get_mut(np_ref) {
             return Ok(node);
         }
@@ -260,7 +260,7 @@ where
     fn get_mut_node(
         &self,
         np_ref: &mut RwLock<X::ObjectRef>,
-    ) -> Result<X::CacheValueRefMut, TreeError> {
+    ) -> Result<X::CacheValueRefMut, Error> {
         self.get_mut_node_mut(np_ref.get_mut())
     }
 
@@ -324,7 +324,7 @@ where
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn tree_dump(&self) -> Result<impl serde::Serialize, TreeError>
+    pub fn tree_dump(&self) -> Result<impl serde::Serialize, Error>
     where
         X::ObjectRef: HasStoragePreference,
     {
@@ -340,7 +340,7 @@ where
     pub(crate) fn get_with_info<K: Borrow<[u8]>>(
         &self,
         key: K,
-    ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, TreeError> {
+    ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, Error> {
         let key = key.borrow();
         let mut msgs = Vec::new();
         let mut node = self.get_root_node()?;
@@ -379,7 +379,7 @@ where
         &self,
         key: K,
         pref: StoragePreference,
-    ) -> Result<Option<KeyInfo>, TreeError> {
+    ) -> Result<Option<KeyInfo>, Error> {
         let key = key.borrow();
         let mut node = self.get_mut_root_node()?;
         // Iterate to leaf
@@ -413,7 +413,7 @@ where
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
-    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, TreeError> {
+    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error> {
         self.get_with_info(key)
             .map(|res| res.map(|(_info, data)| data))
     }
@@ -423,12 +423,12 @@ where
         key: K,
         msg: SlicedCowBytes,
         storage_preference: StoragePreference,
-    ) -> Result<(), TreeError>
+    ) -> Result<(), Error>
     where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
         if key.borrow().is_empty() {
-            return Err(TreeError::EmptyKey);
+            return Err(Error::EmptyKey);
         }
         let mut parent = None;
         let mut node = {
@@ -471,7 +471,7 @@ where
         Ok(())
     }
 
-    fn depth(&self) -> Result<u32, TreeError> {
+    fn depth(&self) -> Result<u32, Error> {
         Ok(self.get_root_node()?.level() + 1)
     }
 
@@ -479,19 +479,19 @@ where
 
     type Range = RangeIterator<X, M, I>;
 
-    fn range<K, T>(&self, range: T) -> Result<Self::Range, TreeError>
+    fn range<K, T>(&self, range: T) -> Result<Self::Range, Error>
     where
         T: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
         Self: Clone,
     {
         if !is_inclusive_non_empty(&range) {
-            return Err(TreeError::InvalidRange);
+            return Err(Error::InvalidRange);
         }
         Ok(RangeIterator::new(range, self.clone()))
     }
 
-    fn sync(&self) -> Result<Self::Pointer, TreeError> {
+    fn sync(&self) -> Result<Self::Pointer, Error> {
         trace!("sync: Enter");
         let obj_ptr = self
             .dml
@@ -510,7 +510,7 @@ where
 {
     type Pointer = X::ObjectPointer;
     type ObjectRef = R;
-    fn erased_sync(&self) -> Result<Self::Pointer, TreeError> {
+    fn erased_sync(&self) -> Result<Self::Pointer, Error> {
         TreeLayer::sync(self)
     }
     fn erased_try_lock_root(
