@@ -274,8 +274,4 @@ pub(crate) mod errors;
 pub(crate) mod impls;
 mod object_ptr;
 
-pub use self::{
-    dmu::Dmu,
-    errors::DmlError,
-    object_ptr::ObjectPointer,
-};
+pub use self::{dmu::Dmu, errors::DmlError, object_ptr::ObjectPointer};

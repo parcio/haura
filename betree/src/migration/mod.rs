@@ -83,9 +83,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     data_management::DmlWithHandler,
+    database::RootDmu,
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
     vdev::Block,
-    Database, StoragePreference, database::RootDmu,
+    Database, StoragePreference,
 };
 
 use self::{lfu::Lfu, reinforcment_learning::ZhangHellanderToor};

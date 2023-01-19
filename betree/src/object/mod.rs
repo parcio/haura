@@ -46,14 +46,14 @@
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::Dml,
     database::{DatasetId, Error, Result},
     migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
+    storage_pool::StoragePoolLayer,
     tree::{DefaultMessageAction, TreeLayer},
     vdev::Block,
-    data_management::Dml,
-    storage_pool::StoragePoolLayer,
-    Database, Dataset, StoragePreference, PreferredAccessType,
+    Database, Dataset, PreferredAccessType, StoragePreference,
 };
 
 use crossbeam_channel::Sender;
@@ -228,10 +228,7 @@ impl Database {
     /// whenever storing the actual names of object stores is too much expected
     /// effort.
     #[cfg(feature = "internal-api")]
-    pub fn open_object_store_with_id_pub(
-        &mut self,
-        os_id: ObjectStoreId,
-    ) -> Result<ObjectStore> {
+    pub fn open_object_store_with_id_pub(&mut self, os_id: ObjectStoreId) -> Result<ObjectStore> {
         self.open_object_store_with_id(os_id)
     }
 
@@ -274,11 +271,9 @@ impl Database {
         let low = &[OBJECT_STORE_NAME_TO_ID_PREFIX] as &[_];
         let high = &[OBJECT_STORE_NAME_TO_ID_PREFIX + 1] as &[_];
         Ok(self.root_tree.range(low..high)?.filter_map(move |result| {
-            result.ok().and_then(|(b, _)| {
-                match b.contains(&0) {
-                    true => None,
-                    false => Some(b)
-                }
+            result.ok().and_then(|(b, _)| match b.contains(&0) {
+                true => None,
+                false => Some(b),
             })
         }))
     }
@@ -305,7 +300,7 @@ impl Database {
         storage_preference: StoragePreference,
     ) -> Result<ObjectStore> {
         if name.contains(&0) {
-            return Err(Error::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte);
         }
         let mut v = name.to_vec();
         v.push(0);
@@ -404,10 +399,11 @@ impl<'os> ObjectStore {
         key: &[u8],
         access_type: PreferredAccessType,
     ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
-        let pref = self.data.call_tree(|t| t.dmu().spl().access_type_preference(access_type));
+        let pref = self
+            .data
+            .call_tree(|t| t.dmu().spl().access_type_preference(access_type));
         self.init_object_with_pref_and_access_type(key, pref, access_type)
     }
-
 
     /// Create a new object handle.
     pub fn create_object_with_pref(
@@ -415,9 +411,12 @@ impl<'os> ObjectStore {
         key: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
-        self.init_object_with_pref_and_access_type(key, storage_preference, PreferredAccessType::Unknown)
+        self.init_object_with_pref_and_access_type(
+            key,
+            storage_preference,
+            PreferredAccessType::Unknown,
+        )
     }
-
 
     /// Create a new object handle.
     fn init_object_with_pref_and_access_type(
@@ -427,7 +426,7 @@ impl<'os> ObjectStore {
         access_type: PreferredAccessType,
     ) -> Result<(ObjectHandle<'os>, ObjectInfo)> {
         if key.contains(&0) {
-            return Err(Error::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte);
         }
 
         let oid = loop {
@@ -494,7 +493,7 @@ impl<'os> ObjectStore {
         storage_preference: StoragePreference,
     ) -> Result<Option<(ObjectHandle<'os>, ObjectInfo)>> {
         if key.contains(&0) {
-            return Err(Error::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte);
         }
 
         let info = self.read_object_info(key)?;
@@ -761,7 +760,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn rename(&mut self, new_key: &[u8]) -> Result<()> {
         if new_key.contains(&0) {
-            return Err(Error::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte);
         }
 
         let old_key = mem::replace(&mut self.object.key, new_key.to_vec());
@@ -995,7 +994,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn get_metadata(&self, name: &[u8]) -> Result<Option<SlicedCowBytes>> {
         if name.contains(&0) {
-            return Err(Error::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte);
         }
         let key = self.object.metadata_key(name);
         self.store.metadata.get(key)
@@ -1003,7 +1002,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn set_metadata(&self, name: &[u8], value: &[u8]) -> Result<()> {
         if name.contains(&0) {
-            return Err(Error::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte);
         }
         let key = self.object.metadata_key(name);
         let msg = meta::set_custom(value);
@@ -1014,7 +1013,7 @@ impl<'ds> ObjectHandle<'ds> {
 
     pub fn delete_metadata(&self, name: &[u8]) -> Result<()> {
         if name.contains(&0) {
-            return Err(Error::KeyContainsNullByte)
+            return Err(Error::KeyContainsNullByte);
         }
         let key = self.object.metadata_key(name);
         let msg = meta::delete_custom();
@@ -1061,7 +1060,7 @@ impl<'ds> ObjectHandle<'ds> {
             let blocks = Block::round_up_from_bytes(info.size);
             let tier_info = self.store.data.free_space_tier(pref)?;
             if blocks > tier_info.free {
-                return Err(Error::MigrationWouldExceedStorage(pref.as_u8(), blocks))
+                return Err(Error::MigrationWouldExceedStorage(pref.as_u8(), blocks));
             }
         }
         self.migrate_range(u64::MAX, 0, pref)

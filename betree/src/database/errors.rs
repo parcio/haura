@@ -1,7 +1,7 @@
 #![allow(missing_docs, unused_doc_comments)]
 
-use thiserror::Error;
 use crate::vdev::Block;
+use thiserror::Error;
 
 pub type Result<R> = std::result::Result<R, Error>;
 

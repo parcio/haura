@@ -298,12 +298,7 @@ impl<'lfu> Lfu {
                         }
                         None => {
                             // Insert new
-                            Lfu::insert_object(
-                                &mut self.object_buckets,
-                                new_location,
-                                key,
-                                name,
-                            );
+                            Lfu::insert_object(&mut self.object_buckets, new_location, key, name);
                         }
                     }
                 }

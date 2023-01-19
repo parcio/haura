@@ -15,8 +15,7 @@ use byteorder::{BigEndian, ByteOrder};
 use std::{borrow::Borrow, ops::RangeBounds, sync::Arc};
 
 /// The snapshot type.
-pub struct Snapshot
-{
+pub struct Snapshot {
     tree: DatasetTree<RootDmu>,
     #[allow(dead_code)]
     name: Box<[u8]>,
@@ -24,14 +23,10 @@ pub struct Snapshot
 
 impl Database {
     /// Open a snapshot for the given data set identified by the given name.
-    pub fn open_snapshot<M>(
-        &self,
-        ds: &mut Dataset<M>,
-        name: &[u8],
-    ) -> Result<Snapshot> {
+    pub fn open_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<Snapshot> {
         let id = self.lookup_snapshot_id(ds.id(), name)?;
         if !ds.call_mut_open_snapshots(|set| set.insert(id)) {
-            return Err(Error::InUse)
+            return Err(Error::InUse);
         }
         let ptr = fetch_ss_data(&self.root_tree, ds.id(), id)?.ptr;
         Ok(Snapshot {
@@ -105,7 +100,7 @@ impl Database {
     pub fn delete_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<()> {
         let ss_id = self.lookup_snapshot_id(ds.id(), name)?;
         if ds.call_open_snapshots(|set| set.contains(&ss_id)) {
-            return Err(Error::InUse)
+            return Err(Error::InUse);
         }
 
         self.root_tree.insert(

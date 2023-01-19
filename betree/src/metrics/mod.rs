@@ -2,7 +2,7 @@
 
 use crate::{
     data_management::{Dml, DmlWithHandler},
-    database::{StorageInfo, RootDmu},
+    database::{RootDmu, StorageInfo},
     storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
 };
 use serde::{Deserialize, Serialize};
@@ -30,8 +30,7 @@ pub struct MetricsConfiguration {
 pub(crate) fn metrics_init<Config>(
     cfg: &MetricsConfiguration,
     dmu: Arc<RootDmu>,
-) -> io::Result<thread::JoinHandle<()>>
-{
+) -> io::Result<thread::JoinHandle<()>> {
     let cfg = cfg.clone();
 
     let file = fs::OpenOptions::new()
@@ -52,8 +51,7 @@ struct Metrics {
     usage: Vec<StorageInfo>,
 }
 
-fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<RootDmu>)
-{
+fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<RootDmu>) {
     let mut output = io::BufWriter::new(output);
     let sleep_duration = Duration::from_millis(cfg.interval_ms as u64);
     loop {
