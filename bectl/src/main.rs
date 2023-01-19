@@ -7,8 +7,7 @@ use std::{
 
 use betree_storage_stack::{
     cow_bytes::CowBytes,
-    data_management::Handler,
-    database::{Database, DatabaseBuilder, DatabaseConfiguration, Superblock},
+    database::{Database, DatabaseConfiguration, Superblock},
     tree::{DefaultMessageAction, TreeLayer},
     StoragePreference,
 };
@@ -170,7 +169,7 @@ impl<'a> Display for PseudoAscii<'a> {
     }
 }
 
-fn open_db(cfg: DatabaseConfiguration) -> Result<Database<DatabaseConfiguration>, Error> {
+fn open_db(cfg: DatabaseConfiguration) -> Result<Database, Error> {
     Database::build(cfg).chain_err(|| "couldn't open database")
 }
 
