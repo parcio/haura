@@ -44,6 +44,7 @@
 //! Could easily have per-object chunk size, by storing block size in meta chunk
 //! Con: Necessary read per object open (but not create), possibly not worth it
 
+#![allow(missing_docs)]
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::Dml,
