@@ -1,10 +1,6 @@
 use super::util;
-use betree_storage_stack::{
-    data_management::HasStoragePreference,
-    tree::{NodeInfo, PivotKey},
-    Database, DatabaseConfiguration, Dataset,
-};
-use rand::{seq::IteratorRandom, RngCore};
+use betree_storage_stack::tree::{NodeInfo, PivotKey};
+use rand::seq::IteratorRandom;
 
 #[test]
 fn structure_is_good() {

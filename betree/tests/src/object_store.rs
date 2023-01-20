@@ -1,8 +1,6 @@
 use betree_storage_stack::{Database, StoragePreference};
 
-use crate::{configs, TO_MEBIBYTE};
-
-use super::test_db;
+use super::{configs, test_db, TO_MEBIBYTE};
 
 #[test]
 // Open and close the default object store and test if the objects are preserved
