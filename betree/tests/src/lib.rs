@@ -149,7 +149,7 @@ impl TestDriver {
             self.rng
                 .try_fill(&mut buf[..])
                 .expect("Couldn't fill with random data");
-            obj.write_at_with_pref(&buf, offset + i * block_size as u64, pref)
+            obj.write_at_with_pref(&buf, offset + i * block_size, pref)
                 .expect("Failed to write buf");
         }
     }
@@ -299,17 +299,16 @@ fn write_flaky(tier_size_mb: u32, write_size_mb: usize) {
             let obj = os
                 .open_or_create_object(b"hewo")
                 .expect("Oh no! Could not open object!");
-            obj.write_at(&buf, 0).expect(
-                format!(
+            obj.write_at(&buf, 0).unwrap_or_else(|_| {
+                panic!(
                     "Writing of {} MiB into {} MiB storage failed",
                     write_size_mb, tier_size_mb
                 )
-                .as_str(),
-            );
+            });
         }
         db.close_object_store(os);
         db.sync()
-            .expect(format!("Sync failed ({}MB of {}MB)", write_size_mb, tier_size_mb).as_str());
+            .unwrap_or_else(|_| panic!("Sync failed ({}MB of {}MB)", write_size_mb, tier_size_mb));
     }
 }
 
@@ -452,17 +451,16 @@ fn write_delete_sequence(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
                 accumulated += size;
             }
             false => {
-                if inserted.len() > 0 {
+                if !inserted.is_empty() {
                     println!("Delete object");
-                    let key = inserted
+                    let key = *inserted
                         .choose(&mut rng)
-                        .expect("Could not choose an element")
-                        .clone();
-                    let foo = os
+                        .expect("Could not choose an element");
+                    let obj = os
                         .open_object(&key.to_le_bytes())
                         .expect("Key is not contained")
                         .expect("No content beyond object");
-                    foo.delete().expect("Could not delete");
+                    obj.delete().expect("Could not delete");
                     inserted.retain(|e| *e != key);
                 }
             }
@@ -495,7 +493,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
             .open_or_create_object(b"test")
             .expect("Could not create object");
         obj.write_at(&buf, 0)
-            .expect(&format!("Could not write buffer of size {}MB", buf_size));
+            .unwrap_or_else(|_| panic!("Could not write buffer of size {}MB", buf_size));
     }
     db.sync().expect("Could not sync database");
     {
@@ -503,7 +501,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
             .open_or_create_object(b"test2")
             .expect("Could not create object");
         obj.write_at(&buf, 0)
-            .expect(&format!("Could not write buffer of size {}MB", buf_size));
+            .unwrap_or_else(|_| panic!("Could not write buffer of size {}MB", buf_size));
     }
     db.sync().expect("Could not sync database");
     {
@@ -518,7 +516,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
             .open_or_create_object(b"test3")
             .expect("Could not create object");
         obj.write_at(&buf2, 0)
-            .expect(&format!("Could not write buffer of size {}MB", buf_size));
+            .unwrap_or_else(|_| panic!("Could not write buffer of size {}MB", buf_size));
     }
     db.sync().expect("Could not sync database");
     {
@@ -557,22 +555,28 @@ fn overwrite_buffer(#[case] tier_size_mb: u32, #[case] buf_size: usize) {
         let obj = os
             .open_or_create_object(b"test")
             .expect("Could not create object");
-        obj.write_at(&buf, 0).expect(&format!(
-            "Could not write buffer of size {}MB at offset {}",
-            buf_size, 0
-        ));
+        obj.write_at(&buf, 0).unwrap_or_else(|_| {
+            panic!(
+                "Could not write buffer of size {}MB at offset {}",
+                buf_size, 0
+            )
+        });
         db.sync().expect("Could not sync database");
-        obj.write_at(&buf, buf.len() as u64).expect(&format!(
-            "Could not write buffer of size {}MB at offset {}",
-            buf_size,
-            buf.len()
-        ));
+        obj.write_at(&buf, buf.len() as u64).unwrap_or_else(|_| {
+            panic!(
+                "Could not write buffer of size {}MB at offset {}",
+                buf_size,
+                buf.len()
+            )
+        });
         db.sync().expect("Could not sync database");
-        obj.write_at(&buf, buf.len() as u64).expect(&format!(
-            "Could not write buffer of size {}MB at offset {}",
-            buf_size,
-            buf.len()
-        ));
+        obj.write_at(&buf, buf.len() as u64).unwrap_or_else(|_| {
+            panic!(
+                "Could not write buffer of size {}MB at offset {}",
+                buf_size,
+                buf.len()
+            )
+        });
     }
     db.sync().expect("Could not sync database");
 }
@@ -781,7 +785,7 @@ fn space_accounting_persistence(
             .open_named_object_store(b"test", StoragePreference::NONE)
             .unwrap();
         let obj = ds.open_or_create_object(b"foobar").unwrap();
-        let buf = vec![42u8; 1 * TO_MEBIBYTE];
+        let buf = vec![42u8; TO_MEBIBYTE];
         dbg!(obj.write_at(&buf, 0).unwrap());
         db.close_object_store(ds);
         db.sync().unwrap();
