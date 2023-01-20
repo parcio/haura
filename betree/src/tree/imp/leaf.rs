@@ -4,7 +4,7 @@ use crate::{
     data_management::HasStoragePreference,
     size::Size,
     storage_pool::AtomicSystemStoragePreference,
-    tree::{imp::packed, KeyInfo, MessageAction, pivot_key::LocalPivotKey},
+    tree::{imp::packed, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
 use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};

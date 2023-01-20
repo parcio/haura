@@ -583,11 +583,7 @@ where
 
     /// Tries to allocate `size` blocks at `disk_offset`.  Might fail if
     /// already in use.
-    pub fn allocate_raw_at(
-        &self,
-        disk_offset: DiskOffset,
-        size: Block<u32>,
-    ) -> Result<(), Error> {
+    pub fn allocate_raw_at(&self, disk_offset: DiskOffset, size: Block<u32>) -> Result<(), Error> {
         let disk_id = disk_offset.disk_id();
         let num_disks = self.pool.num_disks(disk_offset.storage_class(), disk_id);
         let size = size * num_disks as u32;

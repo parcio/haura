@@ -18,7 +18,7 @@ pub use self::{
 };
 
 #[cfg(not(feature = "internal-api"))]
-pub(crate) use self::{pivot_key::PivotKey, imp::NodeInfo};
+pub(crate) use self::{imp::NodeInfo, pivot_key::PivotKey};
 
 #[cfg(feature = "internal-api")]
 pub use self::{imp::NodeInfo, pivot_key::PivotKey};
@@ -27,4 +27,4 @@ type Key = CowBytes;
 type Value = SlicedCowBytes;
 
 use self::imp::KeyInfo;
-pub(crate) use self::{imp::MAX_MESSAGE_SIZE, layer::ErasedTreeSync, errors::Error};
+pub(crate) use self::{errors::Error, imp::MAX_MESSAGE_SIZE, layer::ErasedTreeSync};
