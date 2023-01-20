@@ -283,10 +283,7 @@ where
         self.dml.try_get_mut(np_ref.get_mut())
     }
 
-    fn get_mut_node_mut(
-        &self,
-        np_ref: &mut X::ObjectRef,
-    ) -> Result<X::CacheValueRefMut, Error> {
+    fn get_mut_node_mut(&self, np_ref: &mut X::ObjectRef) -> Result<X::CacheValueRefMut, Error> {
         if let Some(node) = self.dml.try_get_mut(np_ref) {
             return Ok(node);
         }
@@ -566,4 +563,7 @@ mod packed;
 mod range;
 mod split;
 
-pub use self::{node::{Node, NodeInfo}, range::RangeIterator};
+pub use self::{
+    node::{Node, NodeInfo},
+    range::RangeIterator,
+};

@@ -6,7 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, DmlWithHandler},
     migration::DatabaseMsg,
-    tree::{self, DefaultMessageAction, MessageAction, PivotKey, Tree, TreeLayer, NodeInfo},
+    tree::{self, DefaultMessageAction, MessageAction, NodeInfo, PivotKey, Tree, TreeLayer},
     StoragePreference,
 };
 use parking_lot::RwLock;
@@ -595,7 +595,6 @@ impl Dataset<DefaultMessageAction> {
     ) -> Result<()> {
         self.inner.read().upsert(key, data, offset)
     }
-
 
     #[cfg(feature = "internal-api")]
     pub fn test_get_node_pivot(
