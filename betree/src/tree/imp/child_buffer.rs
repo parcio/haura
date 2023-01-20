@@ -6,7 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, ObjectReference},
     size::{Size, StaticSize},
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
+    storage_pool::AtomicSystemStoragePreference,
     tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction, PivotKey},
     AtomicStoragePreference, StoragePreference,
 };

@@ -5,7 +5,7 @@ expression: json!(ds.tree_dump().unwrap())
 {
   "entry_count": 1,
   "level": 0,
-  "storage": 254,
-  "system_storage": 254,
+  "storage": 0,
+  "system_storage": 0,
   "type": "leaf"
 }
