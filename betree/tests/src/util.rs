@@ -1,5 +1,5 @@
 use super::test_db;
-use betree_storage_stack::{Database, DatabaseConfiguration, Dataset};
+use betree_storage_stack::{Database, Dataset};
 use rand::RngCore;
 
 pub fn random_db(tier: u32, mb_per_tier: u32) -> (Database, Dataset) {
