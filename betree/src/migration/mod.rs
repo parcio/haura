@@ -84,7 +84,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     data_management::DmlWithHandler,
     database::RootDmu,
-    storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
+    storage_pool::{NUM_STORAGE_CLASSES},
     tree::PivotKey,
     vdev::Block,
     Database, StoragePreference,

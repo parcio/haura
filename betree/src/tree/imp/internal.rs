@@ -655,7 +655,7 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    
 
     use super::*;
     use crate::{
@@ -664,7 +664,7 @@ mod tests {
         tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
     };
     use bincode::serialized_size;
-    use owning_ref::BoxRef;
+    
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
     use serde::Serialize;
@@ -831,7 +831,7 @@ mod tests {
             Some(&())
         }
 
-        fn set_index(&mut self, pk: PivotKey) {
+        fn set_index(&mut self, _pk: PivotKey) {
             // NO-OP
         }
 
