@@ -6,8 +6,8 @@ pub fn random_db(
     tier: u32,
     mb_per_tier: u32,
 ) -> (
-    Database<DatabaseConfiguration>,
-    Dataset<DatabaseConfiguration>,
+    Database,
+    Dataset,
 ) {
     let mut db = test_db(tier, mb_per_tier);
     let ds = db.open_or_create_dataset(b"hey").unwrap();
