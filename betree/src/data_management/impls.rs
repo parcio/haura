@@ -1,7 +1,7 @@
 use super::{object_ptr::ObjectPointer, HasStoragePreference};
 use crate::{
     database::Generation,
-    size::{SizeMut, StaticSize},
+    size::{StaticSize},
     storage_pool::DiskOffset,
     tree::PivotKey,
     StoragePreference,
