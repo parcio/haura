@@ -287,7 +287,7 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
     pub(crate) fn get_node_pivot(
         &self,
         pk: &PivotKey,
-    ) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+    ) -> Result<Option<<RootDmu as Dml>::CacheValueRef>> {
         debug_assert!(self.id == pk.d_id());
         Ok(self.tree.get_node_pivot(pk)?)
     }
@@ -296,7 +296,7 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
     pub(crate) fn get_node_pivot_mut(
         &self,
         pk: &PivotKey,
-    ) -> Result<Option<<Config::Dmu as Dml>::CacheValueRefMut>> {
+    ) -> Result<Option<<RootDmu as Dml>::CacheValueRefMut>> {
         debug_assert!(self.id == pk.d_id());
         Ok(self.tree.get_mut_node_pivot(pk)?)
     }
@@ -305,7 +305,7 @@ impl<Message: MessageAction + 'static> DatasetInner<Message> {
     pub fn test_get_node_pivot(
         &self,
         pk: &PivotKey,
-    ) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+    ) -> Result<Option<<RootDmu as Dml>::CacheValueRef>> {
         debug_assert!(self.id == pk.d_id());
         Ok(self.tree.get_node_pivot(pk)?)
     }
@@ -601,7 +601,7 @@ impl Dataset<DefaultMessageAction> {
     pub fn test_get_node_pivot(
         &self,
         pk: &PivotKey,
-    ) -> Result<Option<<Config::Dmu as Dml>::CacheValueRef>> {
+    ) -> Result<Option<<RootDmu as Dml>::CacheValueRef>> {
         self.inner.read().test_get_node_pivot(pk)
     }
 

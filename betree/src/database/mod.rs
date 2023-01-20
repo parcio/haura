@@ -5,7 +5,7 @@ use crate::{
     checksum::{XxHash, XxHashBuilder},
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints, Dmu, impls::TaggedCacheValue},
+    data_management::{self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints, Dmu, TaggedCacheValue},
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
     size::StaticSize,
