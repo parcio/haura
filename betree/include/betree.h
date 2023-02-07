@@ -44,7 +44,7 @@
 typedef struct byte_slice_rc_t byte_slice_rc_t;
 
 /**
- * The type for a storage pool configuration
+ * The type for a database configuration
  */
 typedef struct cfg_t cfg_t;
 
@@ -144,6 +144,20 @@ typedef struct byte_slice_t {
   const struct byte_slice_rc_t *arc;
 } byte_slice_t;
 
+#define STORAGE_PREF_FASTEST (storage_pref_t){ ._0 = StoragePreference_FASTEST }
+
+#define STORAGE_PREF_NONE (storage_pref_t){ ._0 = StoragePreference_NONE }
+
+#define STORAGE_PREF_SLOWEST (storage_pref_t){ ._0 = StoragePreference_SLOWEST }
+
+/**
+ * Build a database given by a configuration.
+ *
+ * On success, return a `db_t` which has to be freed with `betree_close_db`.
+ * On error, return null.  If `err` is not null, store an error in `err`.
+ */
+struct db_t *betree_build_db(const struct cfg_t *cfg, struct err_t **err);
+
 /**
  * Closes a database.
  *
@@ -162,7 +176,15 @@ void betree_close_db(struct db_t *db);
 int betree_close_ds(struct db_t *db, struct ds_t *ds, struct err_t **err);
 
 /**
- * Create a database given by a storate pool configuration.
+ * Parse configuration from file specified in environment (BETREE_CONFIG).
+ *
+ * On success, return a `cfg_t` which has to be freed with `betree_free_cfg`.
+ * On error, return null.  If `err` is not null, store an error in `err`.
+ */
+struct cfg_t *betree_configuration_from_env(struct err_t **err);
+
+/**
+ * Create a database given by a configuration.
  *
  * On success, return a `db_t` which has to be freed with `betree_close_db`.
  * On error, return null.  If `err` is not null, store an error in `err`.
@@ -440,12 +462,13 @@ int betree_object_write_at(struct obj_t *obj,
                            struct err_t **err);
 
 /**
- * Open a database given by a storate pool configuration.
+ * Open a database given by a configuration. If no initialized database is present this procedure will fail.
  *
  * On success, return a `db_t` which has to be freed with `betree_close_db`.
  * On error, return null.  If `err` is not null, store an error in `err`.
  */
-struct db_t *betree_open_db(const struct cfg_t *cfg, struct err_t **err);
+struct db_t *betree_open_db(const struct cfg_t *cfg,
+                            struct err_t **err);
 
 /**
  * Open a data set identified by the given name.
@@ -458,6 +481,16 @@ struct ds_t *betree_open_ds(struct db_t *db,
                             unsigned int len,
                             struct storage_pref_t storage_pref,
                             struct err_t **err);
+
+/**
+ * Create a database given by a configuration.
+ *
+ * On success, return a `db_t` which has to be freed with `betree_close_db`.
+ * On error, return null.  If `err` is not null, store an error in `err`.
+ *
+ * Note that any existing database will be overwritten!
+ */
+struct db_t *betree_open_or_create_db(const struct cfg_t *cfg, struct err_t **err);
 
 /**
  * Parse the configuration string for a storage pool.
