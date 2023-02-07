@@ -2,7 +2,7 @@
 #![allow(non_camel_case_types)]
 use std::{
     ffi::CStr,
-    io::{stderr, Write},
+    io::{stderr, BufReader, Write},
     os::raw::{c_char, c_int, c_uint, c_ulong},
     process::abort,
     ptr::{null_mut, read, write},
@@ -12,16 +12,15 @@ use std::{
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{Database, Dataset, Error, Snapshot},
+    database::{AccessMode, Database, Dataset, Error, Snapshot},
     object::{ObjectHandle, ObjectStore},
     storage_pool::{StoragePoolConfiguration, TierConfiguration},
     tree::DefaultMessageAction,
-    StoragePreference,
+    DatabaseConfiguration, StoragePreference,
 };
-use error_chain::ChainedError;
 
-/// The type for a storage pool configuration
-pub struct cfg_t(StoragePoolConfiguration);
+/// The type for a database configuration
+pub struct cfg_t(DatabaseConfiguration);
 /// The general error type
 pub struct err_t(Error);
 /// The storage preference
@@ -43,9 +42,9 @@ pub struct obj_store_t(ObjectStore);
 /// The handle of an object in the corresponding object store
 pub struct obj_t<'os>(ObjectHandle<'os>);
 
-pub static STORAGE_PREF_NONE: storage_pref_t = storage_pref_t(StoragePreference::NONE);
-pub static STORAGE_PREF_FASTEST: storage_pref_t = storage_pref_t(StoragePreference::FASTEST);
-pub static STORAGE_PREF_SLOWEST: storage_pref_t = storage_pref_t(StoragePreference::SLOWEST);
+pub const STORAGE_PREF_NONE: storage_pref_t = storage_pref_t(StoragePreference::NONE);
+pub const STORAGE_PREF_FASTEST: storage_pref_t = storage_pref_t(StoragePreference::FASTEST);
+pub const STORAGE_PREF_SLOWEST: storage_pref_t = storage_pref_t(StoragePreference::SLOWEST);
 
 /// A reference counted byte slice
 #[repr(C)]
@@ -99,7 +98,7 @@ impl HandleResult for () {
     }
 }
 
-impl HandleResult for StoragePoolConfiguration {
+impl HandleResult for DatabaseConfiguration {
     type Result = *mut cfg_t;
     fn success(self) -> *mut cfg_t {
         b(cfg_t(self))
@@ -238,10 +237,35 @@ pub unsafe extern "C" fn betree_parse_configuration(
         .map(|&p| CStr::from_ptr(p).to_string_lossy());
 
     TierConfiguration::parse_zfs_like(cfg_string_iter)
-        .map(|tier_cfg| StoragePoolConfiguration {
-            tiers: vec![tier_cfg],
+        .map(|tier_cfg| DatabaseConfiguration {
+            storage: StoragePoolConfiguration {
+                tiers: vec![tier_cfg],
+                ..Default::default()
+            },
             ..Default::default()
         })
+        .map_err(Error::from)
+        .handle_result(err)
+}
+
+/// Parse configuration from file specified in environment (BETREE_CONFIG).
+///
+/// On success, return a `cfg_t` which has to be freed with `betree_free_cfg`.
+/// On error, return null.  If `err` is not null, store an error in `err`.
+#[no_mangle]
+pub unsafe extern "C" fn betree_configuration_from_env(err: *mut *mut err_t) -> *mut cfg_t {
+    let path = match std::env::var_os("BETREE_CONFIG") {
+        Some(val) => val,
+        None => {
+            handle_err(
+                Error::Generic("Environment variable BETREE_CONFIG is not defined.".into()),
+                err,
+            );
+            return null_mut();
+        }
+    };
+    let file = std::fs::OpenOptions::new().read(true).open(path).unwrap();
+    serde_json::from_reader::<_, DatabaseConfiguration>(BufReader::new(file))
         .map_err(Error::from)
         .handle_result(err)
 }
@@ -283,16 +307,27 @@ pub unsafe extern "C" fn betree_free_range_iter(range_iter: *mut range_iter_t) {
     let _ = Box::from_raw(range_iter);
 }
 
-/// Open a database given by a storate pool configuration.
+/// Build a database given by a configuration.
+///
+/// On success, return a `db_t` which has to be freed with `betree_close_db`.
+/// On error, return null.  If `err` is not null, store an error in `err`.
+#[no_mangle]
+pub unsafe extern "C" fn betree_build_db(cfg: *const cfg_t, err: *mut *mut err_t) -> *mut db_t {
+    Database::build((*cfg).0.clone()).handle_result(err)
+}
+
+/// Open a database given by a configuration. If no initialized database is present this procedure will fail.
 ///
 /// On success, return a `db_t` which has to be freed with `betree_close_db`.
 /// On error, return null.  If `err` is not null, store an error in `err`.
 #[no_mangle]
 pub unsafe extern "C" fn betree_open_db(cfg: *const cfg_t, err: *mut *mut err_t) -> *mut db_t {
-    Database::open((*cfg).0.clone()).handle_result(err)
+    let mut db_cfg = (*cfg).0.clone();
+    db_cfg.access_mode = AccessMode::OpenIfExists;
+    Database::build(db_cfg).handle_result(err)
 }
 
-/// Create a database given by a storate pool configuration.
+/// Create a database given by a configuration.
 ///
 /// On success, return a `db_t` which has to be freed with `betree_close_db`.
 /// On error, return null.  If `err` is not null, store an error in `err`.
@@ -300,7 +335,25 @@ pub unsafe extern "C" fn betree_open_db(cfg: *const cfg_t, err: *mut *mut err_t)
 /// Note that any existing database will be overwritten!
 #[no_mangle]
 pub unsafe extern "C" fn betree_create_db(cfg: *const cfg_t, err: *mut *mut err_t) -> *mut db_t {
-    Database::create((*cfg).0.clone()).handle_result(err)
+    let mut db_cfg = (*cfg).0.clone();
+    db_cfg.access_mode = AccessMode::AlwaysCreateNew;
+    Database::build(db_cfg).handle_result(err)
+}
+
+/// Create a database given by a configuration.
+///
+/// On success, return a `db_t` which has to be freed with `betree_close_db`.
+/// On error, return null.  If `err` is not null, store an error in `err`.
+///
+/// Note that any existing database will be overwritten!
+#[no_mangle]
+pub unsafe extern "C" fn betree_open_or_create_db(
+    cfg: *const cfg_t,
+    err: *mut *mut err_t,
+) -> *mut db_t {
+    let mut db_cfg = (*cfg).0.clone();
+    db_cfg.access_mode = AccessMode::OpenOrCreate;
+    Database::build(db_cfg).handle_result(err)
 }
 
 /// Sync a database.
