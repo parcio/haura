@@ -1,20 +1,26 @@
 //! This module provides the C interface to the database.
 #![allow(non_camel_case_types)]
 use std::{
-    ffi::CStr,
+    env::SplitPaths,
+    ffi::{CStr, OsStr},
     io::{stderr, BufReader, Write},
-    os::raw::{c_char, c_int, c_uint, c_ulong},
+    os::{
+        raw::{c_char, c_int, c_uint, c_ulong},
+        unix::prelude::OsStrExt,
+    },
     process::abort,
     ptr::{null_mut, read, write},
     slice::{from_raw_parts, from_raw_parts_mut},
     sync::Arc,
 };
 
+use libc::{c_void, memcpy};
+
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{AccessMode, Database, Dataset, Error, Snapshot},
     object::{ObjectHandle, ObjectStore},
-    storage_pool::{StoragePoolConfiguration, TierConfiguration},
+    storage_pool::{LeafVdev, StoragePoolConfiguration, TierConfiguration, Vdev},
     tree::DefaultMessageAction,
     DatabaseConfiguration, StoragePreference,
 };
@@ -305,6 +311,59 @@ pub unsafe extern "C" fn betree_free_name_iter(name_iter: *mut name_iter_t) {
 #[no_mangle]
 pub unsafe extern "C" fn betree_free_range_iter(range_iter: *mut range_iter_t) {
     let _ = Box::from_raw(range_iter);
+}
+
+fn set_leaf_vdev_direct(leaf: &mut LeafVdev) {
+    if let LeafVdev::FileWithOpts { direct, .. } = leaf {
+        *direct = Some(true)
+    }
+}
+
+/// Resets the access modes for all applicable vdevs to 'Direct'.
+#[no_mangle]
+pub unsafe extern "C" fn betree_configuration_set_direct(cfg: *mut cfg_t, direct: i32) {
+    if direct == 1 {
+        for tier in (*cfg).0.storage.tiers.iter_mut() {
+            for vdev in tier.top_level_vdevs.iter_mut() {
+                match vdev {
+                    crate::storage_pool::Vdev::Leaf(ref mut l) => set_leaf_vdev_direct(l),
+                    crate::storage_pool::Vdev::Mirror { ref mut mirror } => {
+                        for l in mirror.iter_mut() {
+                            set_leaf_vdev_direct(l)
+                        }
+                    }
+                    crate::storage_pool::Vdev::Parity1 { ref mut parity1 } => {
+                        for l in parity1.iter_mut() {
+                            set_leaf_vdev_direct(l)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Reconfigures the given configuration to use a single tier with the given path as the sole backing disk.
+#[no_mangle]
+pub unsafe extern "C" fn betree_configuration_set_disks(
+    cfg: *mut cfg_t,
+    paths: *const *const c_char,
+    num_disks: usize,
+) {
+    let path_slice = from_raw_parts(paths, num_disks);
+    let disks: Vec<Vdev> = (0..num_disks)
+        .map(|pos| {
+            let p = CStr::from_ptr(path_slice[pos]);
+            Vdev::Leaf(LeafVdev::FileWithOpts {
+                path: p.to_str().unwrap().into(),
+                direct: Some(false),
+            })
+        })
+        .collect();
+    (*cfg).0.storage.tiers = vec![TierConfiguration {
+        top_level_vdevs: disks,
+        ..Default::default()
+    }]
 }
 
 /// Build a database given by a configuration.

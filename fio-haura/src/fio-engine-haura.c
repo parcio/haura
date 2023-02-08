@@ -71,6 +71,10 @@ static int bail(struct err_t *error) {
   return 1;
 }
 
+static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
+  betree_configuration_set_direct(cfg, td->o.odirect);
+}
+
 /*
  * The ->event() hook is called to match an event number with an io_u.
  * After the core has called ->getevents() and it has returned eg 3,
@@ -181,6 +185,7 @@ static int fio_haura_init(struct thread_data *td) {
     if ((cfg = betree_configuration_from_env(&error)) == NULL) {
       return bail(error);
     }
+    fio_haura_translate(td, cfg);
     if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
       return bail(error);
     }
