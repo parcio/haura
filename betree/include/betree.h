@@ -184,6 +184,18 @@ int betree_close_ds(struct db_t *db, struct ds_t *ds, struct err_t **err);
 struct cfg_t *betree_configuration_from_env(struct err_t **err);
 
 /**
+ * Resets the access modes for all applicable vdevs to 'Direct'.
+ */
+void betree_configuration_set_direct(struct cfg_t *cfg, int32_t direct);
+
+/**
+ * Reconfigures the given configuration to use a single tier with the given path as the sole backing disk.
+ */
+void betree_configuration_set_disks(struct cfg_t *cfg,
+                                    const char *const *paths,
+                                    uintptr_t num_disks);
+
+/**
  * Create a database given by a configuration.
  *
  * On success, return a `db_t` which has to be freed with `betree_close_db`.
