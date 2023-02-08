@@ -8,6 +8,7 @@
  * -DCONFIG_STRSEP on Linux)
  *
  */
+#include <asm-generic/errno-base.h>
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -162,13 +163,15 @@ static int fio_haura_init(struct thread_data *td) {
   struct storage_pref_t pref = {._0 = 0};
 
   if (!td->o.use_thread && td->o.numjobs != 1) {
-    perror("Cannot use fio-engine-haura with multiple processes. Specify "
-           "`--thread` when calling fio.");
+    fprintf(stderr,
+            "Cannot use fio-engine-haura with multiple processes. Specify "
+            "`--thread` when calling fio.\n");
     exit(1);
   }
 
   if (0 != pthread_mutex_lock(&haura_mtx)) {
-    perror("Mutex locking failed.");
+    fprintf(stderr, "Mutex locking failed.\n");
+    exit(1);
   }
 
   // Initialize the database if not already present
@@ -199,7 +202,8 @@ static int fio_haura_init(struct thread_data *td) {
   }
 
   if (0 != pthread_mutex_unlock(&haura_mtx)) {
-    perror("Mutex unlocking failed.");
+    fprintf(stderr, "Mutex unlocking failed.\n");
+    exit(1);
   }
   return 0;
 }
