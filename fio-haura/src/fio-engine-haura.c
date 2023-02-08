@@ -161,6 +161,12 @@ static int fio_haura_init(struct thread_data *td) {
   struct err_t *error = NULL;
   struct storage_pref_t pref = {._0 = 0};
 
+  if (!td->o.use_thread && td->o.numjobs != 1) {
+    perror("Cannot use fio-engine-haura with multiple processes. Specify "
+           "`--thread` when calling fio.");
+    exit(1);
+  }
+
   if (0 != pthread_mutex_lock(&haura_mtx)) {
     perror("Mutex locking failed.");
   }
