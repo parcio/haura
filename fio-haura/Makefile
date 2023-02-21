@@ -16,8 +16,9 @@ fio-fio-${FIO_RELEASE}:
 	sha256sum -c checksum.txt
 	tar xzf ${FIO_ARCHIVE}
 	${RM} ${FIO_ARCHIVE}
+	cd fio-fio-${FIO_RELEASE} && ./configure
 
 .PHONY: clean
 
 clean:
-	${RM} fio-fio-${FIO_RELEASE}
+	${RM} -rf fio-fio-${FIO_RELEASE}
