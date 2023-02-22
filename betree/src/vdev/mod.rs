@@ -29,7 +29,7 @@ pub struct Statistics {
     pub read_latency: u64,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct AtomicStatistics {
     read: AtomicU64,
     written: AtomicU64,
@@ -243,10 +243,17 @@ pub use self::mirror::Mirror;
 mod mem;
 pub use self::mem::Memory;
 
+#[cfg(feature = "nvm")]
+mod pmemfile;
+#[cfg(feature = "nvm")]
+pub use self::pmemfile::PMemFile;
+
 #[enum_dispatch(Vdev, VdevRead, VdevLeafWrite, VdevLeafRead)]
 pub(crate) enum Leaf {
     File,
     Memory,
+    #[cfg(feature = "nvm")]
+    PMemFile,
 }
 
 #[enum_dispatch(Vdev, VdevWrite, VdevRead)]

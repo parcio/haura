@@ -1,4 +1,7 @@
 //! Storage Pool configuration.
+#[cfg(feature = "nvm")]
+use pmdk::libpmem;
+
 use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
 use libc;
@@ -117,6 +120,11 @@ pub enum Vdev {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum LeafVdev {
+    #[cfg(feature = "nvm")]
+    PMemFile {
+        path: PathBuf,
+        len: usize
+    },    
     /// Backed by a file or disk.
     File(PathBuf),
     /// Customisable file vdev.
@@ -220,6 +228,8 @@ impl TierConfiguration {
                         write!(s, "{} (direct: {:?}) ", path.display(), direct).unwrap()
                     }
                     LeafVdev::Memory { mem } => write!(s, "memory({}) ", mem).unwrap(),
+                    #[cfg(feature = "nvm")]
+                    LeafVdev::PMemFile{path, len} => write!(s, "{} {}", path.display(), len).unwrap(),
                 }
             }
         }
@@ -276,6 +286,8 @@ impl LeafVdev {
                     LeafVdev::File(path) => (path, true),
                     LeafVdev::FileWithOpts { path, direct } => (path, direct.unwrap_or(true)),
                     LeafVdev::Memory { .. } => unreachable!(),
+                    #[cfg(feature = "nvm")]
+                    LeafVdev::PMemFile { .. } => unreachable!(),
                 };
 
                 let mut file = OpenOptions::new();
@@ -300,6 +312,46 @@ impl LeafVdev {
                 mem,
                 format!("memory-{}", mem),
             )?)),
+            #[cfg(feature = "nvm")]
+            LeafVdev::PMemFile { .. } => {
+                let (path, len) = match self {
+                    LeafVdev::File(path) => unreachable!(),
+                    LeafVdev::FileWithOpts { .. } => unreachable!(),
+                    LeafVdev::Memory { .. } => unreachable!(),
+                    LeafVdev::PMemFile {path, len} => (path, len),
+                };
+
+                let mut is_pmem : i32 = 0;
+                let mut mapped_len : u64 = 0;
+                let mut file = match path.to_str() {
+                    Some(filepath_str) => match libpmem::pmem_file_open(format!("{}\0",filepath_str).as_str(), &mut mapped_len, &mut is_pmem) { //match libpmem::pmem_file_create(filepath_str, *len as u64, &mut mapped_len, &mut is_pmem) {
+                        Some(existing_handle) => existing_handle,
+                        None => match libpmem::pmem_file_create(format!("{}\0",filepath_str).as_str(), *len as u64, &mut mapped_len, &mut is_pmem) {//match libpmem::pmem_file_open(filepath_str, &mut mapped_len, &mut is_pmem) {
+                            Some(new_handle) => new_handle,
+                            None =>  panic!("{}", io::Error::new(io::ErrorKind::Other,
+                                                           format!("Failed to create or open handle for pmem file. Path: {}",
+                                                                   filepath_str)))
+                        }
+                    },
+                    None => {
+                        panic!("{}", io::Error::new(io::ErrorKind::Other,
+                                              format!("Invalid file path: {:?}",
+                                                      path)))
+                    }
+                };
+
+                if (mapped_len != *len as u64) {
+                     panic!("{}", io::Error::new(io::ErrorKind::Other,
+                                           format!("The file already exists with a differnt length. Provided length: {}, File's length: {}",
+                                                   len, mapped_len)));
+                }
+
+                Ok(Leaf::PMemFile(vdev::PMemFile::new(
+                    file,
+                    path.to_string_lossy().into_owned(),
+                    mapped_len
+                )?))
+            }
         }
     }
 }
@@ -360,6 +412,11 @@ impl LeafVdev {
             LeafVdev::Memory { mem } => {
                 writeln!(f, "{:indent$}memory({})", "", mem, indent = indent)
             }
+            #[cfg(feature = "nvm")]
+            LeafVdev::PMemFile {path, len} => {
+                writeln!(f, "{:indent$}{}", "", path.display(), indent = indent)
+            }
+
         }
     }
 }
