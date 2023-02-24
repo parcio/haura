@@ -4,34 +4,30 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{hash_map::Entry, HashMap},
-    fmt::Display,
     io::Write,
     sync::Arc,
 };
 
 use crate::{
     cow_bytes::CowBytes,
-    data_management::DmlWithStorageHints,
+    data_management::{DmlWithStorageHints, HasStoragePreference},
     database::RootDmu,
     object::{ObjectStore, ObjectStoreId},
-    storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
+    storage_pool::NUM_STORAGE_CLASSES,
     tree::PivotKey,
     vdev::Block,
     Database, StoragePreference,
 };
 
 use super::{
-    errors::Result, reinforcment_learning::open_file_buf_write, DatabaseMsg, DmlMsg,
-    GlobalObjectId, MigrationConfig,
+    errors::{Error, Result},
+    reinforcment_learning::open_file_buf_write,
+    DatabaseMsg, DmlMsg, GlobalObjectId, MigrationConfig,
 };
-
-#[derive(Clone, Debug, Hash, PartialEq)]
-/// Internal Object Representation to locate objects on changing buckets and tiers
-struct ObjectLocation(StoragePreference, u64);
 
 /// Implementation of Least Frequently Used
 pub struct Lfu {
-    leafs: [LfuCache<PivotKey, LeafInfo>; NUM_STORAGE_CLASSES],
+    nodes: [LfuCache<PivotKey, Block<u32>>; NUM_STORAGE_CLASSES],
     dml_rx: Receiver<DmlMsg>,
     db_rx: Receiver<DatabaseMsg>,
     db: Arc<RwLock<Database>>,
@@ -39,48 +35,10 @@ pub struct Lfu {
     config: MigrationConfig<LfuConfig>,
     // Store open object stores to move inactive objects within.
     object_stores: HashMap<ObjectStoreId, Option<ObjectStore>>,
-    /// Object Buckets dividing them into multiple file size ranges,
-    /// taken from <https://doi.org/10.1145/3489143>
-    objects: HashMap<GlobalObjectId, ObjectLocation>,
-    object_buckets: (
-        [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
-        StoragePreference,
-    ),
+    object_buckets: [LfuCache<GlobalObjectId, CowBytes>; NUM_STORAGE_CLASSES],
     /// HashMap accessible by the DML, resolution is not guaranteed but always
     /// used when a object is written.
     storage_hint_dml: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
-}
-
-// Bucket boundaries, see comment below:
-const SMALLEST: u64 = 256 * 1024;
-const SMALLEST_: u64 = 256 * 1024 + 1;
-const SMALL: u64 = 1024 * 1024;
-const SMALL_: u64 = 1024 * 1024 + 1;
-const MEDIUM: u64 = 10 * 1024 * 1024;
-const MEDIUM_: u64 = 10 * 1024 * 1024 + 1;
-const LARGE: u64 = 100 * 1024 * 1024;
-const LARGE_: u64 = 100 * 1024 * 1024 + 1;
-const LARGEST: u64 = 1024 * 1024 * 1024;
-const LARGEST_: u64 = 1024 * 1024 * 1024 + 1;
-const NUM_SIZE_BUCKETS: usize = 6;
-
-impl ObjectLocation {
-    // Exlusive Range Patterns are not yet stable, since 6 years...
-    // https://github.com/rust-lang/rust/issues/37854
-    fn bucket_id(&self) -> usize {
-        match self.1 {
-            0..=SMALLEST => 0,
-            SMALLEST_..=SMALL => 1,
-            SMALL_..=MEDIUM => 2,
-            MEDIUM_..=LARGE => 3,
-            LARGE_..=LARGEST => 4,
-            LARGEST_.. => 5,
-        }
-    }
-
-    fn pref_id(&self, default_class: StoragePreference) -> usize {
-        self.0.or(default_class).as_u8() as usize
-    }
 }
 
 /// Least frequently used (LFU) specific configuration details.
@@ -138,80 +96,44 @@ impl Default for LfuConfig {
     }
 }
 
-struct LeafInfo {
-    offset: DiskOffset,
-    size: Block<u32>,
-}
-
-impl Display for LeafInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "LeafInfo {{ mid: {:?}, size: {:?}",
-            self.offset, self.size
-        ))
-    }
-}
-
 impl<'lfu> Lfu {
-    fn get_object(
-        store: &'lfu mut (
-            [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
-            StoragePreference,
-        ),
-        loc: &ObjectLocation,
-        key: &GlobalObjectId,
-    ) -> Option<&'lfu CowBytes> {
-        store.0[loc.pref_id(store.1)][loc.bucket_id()].get(key)
-    }
-
-    fn insert_object(
-        store: &'lfu mut (
-            [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
-            StoragePreference,
-        ),
-        loc: ObjectLocation,
-        key: GlobalObjectId,
-        name: CowBytes,
-    ) -> Option<CowBytes> {
-        store.0[loc.pref_id(store.1)][loc.bucket_id()].insert(key, name)
-    }
-
-    fn remove_object(
-        store: &'lfu mut (
-            [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
-            StoragePreference,
-        ),
-        loc: &ObjectLocation,
-        key: &GlobalObjectId,
-    ) -> Option<(CowBytes, usize)> {
-        store.0[loc.pref_id(store.1)][loc.bucket_id()].remove(key)
-    }
-
+    // Okay for new logic.
     fn update_dml(&mut self) -> Result<()> {
         // Consume available messages
         for msg in self.dml_rx.try_iter() {
             match msg {
-                DmlMsg::Fetch(info) | DmlMsg::Write(info) => {
-                    if let Some(entry) =
-                        self.leafs[info.offset.storage_class() as usize].get_mut(&info.pivot_key)
-                    {
-                        // Known Offset
-                        entry.offset = info.offset;
-                        entry.size = info.size;
-                    } else {
-                        // New Entry
-                        self.leafs[info.offset.storage_class() as usize].insert(
-                            info.pivot_key,
-                            LeafInfo {
-                                offset: info.offset,
-                                size: info.size,
-                            },
-                        );
+                DmlMsg::Write(info) => {
+                    // We may possibly encounter the node on other layers if it
+                    // has been migrated. So scan previous locations (still
+                    // constant but suboptimal).
+                    for tier in 0..NUM_STORAGE_CLASSES {
+                        if tier == info.offset.storage_class() as usize {
+                            continue;
+                        }
+                        // Move to new storage tier
+                        if let Some((_, freq)) =
+                            self.nodes[tier].remove_with_frequency(&info.pivot_key)
+                        {
+                            self.nodes[info.offset.storage_class() as usize].insert_with_frequency(
+                                info.pivot_key.clone(),
+                                info.size,
+                                freq,
+                            );
+                        }
                     }
+
+                    *self.nodes[info.offset.storage_class() as usize]
+                        .entry(info.pivot_key)
+                        .or_insert(info.size) = info.size;
+                }
+                DmlMsg::Fetch(info) => {
+                    *self.nodes[info.offset.storage_class() as usize]
+                        .entry(info.pivot_key)
+                        .or_insert(info.size) = info.size;
                 }
                 DmlMsg::Remove(info) => {
                     // Delete Offset
-                    self.leafs[info.offset.storage_class() as usize].remove(&info.pivot_key);
+                    self.nodes[info.offset.storage_class() as usize].remove(&info.pivot_key);
                 }
             }
         }
@@ -221,7 +143,6 @@ impl<'lfu> Lfu {
     fn update_db(&mut self) -> Result<()> {
         for msg in self.db_rx.try_iter() {
             match msg {
-                // cool but not as useful right now
                 // FIXME: Noop for now, this should optimally be maybe matching
                 // which datasets are active to prevent migrations from them or
                 // some other kind of preference treatment
@@ -238,106 +159,27 @@ impl<'lfu> Lfu {
                     if let Entry::Vacant(e) = self.object_stores.entry(*key.store_key()) {
                         e.insert(None);
                     }
-                    let new_location = ObjectLocation(info.pref, info.size);
-                    let old = self.objects.insert(key.clone(), new_location.clone());
-                    match old {
-                        Some(old_value) if old_value == new_location => {
-                            // Update
-                            Lfu::get_object(&mut self.object_buckets, &old_value, &key);
-                        }
-                        Some(old_value) => {
-                            // For some reason move
-                            if let Some((name, _)) =
-                                Lfu::remove_object(&mut self.object_buckets, &old_value, &key)
-                            {
-                                Lfu::insert_object(
-                                    &mut self.object_buckets,
-                                    new_location,
-                                    key,
-                                    name,
-                                );
-                            }
-                        }
+                    match self.object_buckets[info.pref.as_u8() as usize].get(&key) {
+                        Some(_) => {}
                         None => {
                             // Insert new
-                            Lfu::insert_object(&mut self.object_buckets, new_location, key, name);
+                            self.object_buckets[info.pref.as_u8() as usize].insert(key, name);
                         }
                     }
                 }
                 DatabaseMsg::ObjectClose(key, info) => {
-                    // Insert and get old value
-                    let new_location = ObjectLocation(info.pref, info.size);
-                    let old = self
-                        .objects
-                        .insert(key.clone(), new_location.clone())
-                        .clone();
-                    match old {
-                        Some(old_value) if old_value == new_location => {
-                            // Update
-                            Lfu::get_object(&mut self.object_buckets, &old_value, &key);
-                        }
-                        Some(old_value) => {
-                            // For some reason move
-                            if let Some((name, _)) =
-                                Lfu::remove_object(&mut self.object_buckets, &old_value, &key)
-                            {
-                                Lfu::insert_object(
-                                    &mut self.object_buckets,
-                                    new_location,
-                                    key,
-                                    name,
-                                );
-                            }
-                        }
-                        None => unreachable!(),
-                    }
+                    // NO-OP
                 }
-                DatabaseMsg::ObjectRead(key, _) => {
-                    if let Some(location) = self.objects.get(&key) {
-                        Lfu::get_object(&mut self.object_buckets, location, &key);
-                    }
-                }
-                DatabaseMsg::ObjectWrite(key, size, pref, _) => {
-                    let new_location = ObjectLocation(pref, size);
-                    let old = self
-                        .objects
-                        .insert(key.clone(), new_location.clone())
-                        .clone();
-                    match old {
-                        Some(old_value) if old_value == new_location => {
-                            // Update
-                            Lfu::get_object(&mut self.object_buckets, &old_value, &key);
-                        }
-                        Some(old_value) => {
-                            if let Some((name, _)) =
-                                Lfu::remove_object(&mut self.object_buckets, &old_value, &key)
-                            {
-                                Lfu::insert_object(
-                                    &mut self.object_buckets,
-                                    new_location,
-                                    key,
-                                    name,
-                                );
-                            }
-                        }
-                        None => unreachable!(),
+                DatabaseMsg::ObjectRead(key, _) | DatabaseMsg::ObjectWrite(key, ..) => {
+                    // This has the potential to be of cost 4*hash_lookup but overall it is still constant..
+                    for id in 0..NUM_STORAGE_CLASSES {
+                        self.object_buckets[id].get(&key);
                     }
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
-                    if let Some(location) = self.objects.get(&key) {
-                        if location.0 != pref {
-                            // Move in representation
-                            let new_location = ObjectLocation(pref, location.1);
-                            if let Some((name, _)) =
-                                Lfu::remove_object(&mut self.object_buckets, location, &key)
-                            {
-                                Lfu::insert_object(
-                                    &mut self.object_buckets,
-                                    new_location,
-                                    key,
-                                    name,
-                                );
-                            }
+                    for id in 0..NUM_STORAGE_CLASSES {
+                        if let Some(name) = self.object_buckets[id].remove(&key) {
+                            self.object_buckets[pref.as_u8() as usize].insert(key.clone(), name);
                         }
                     }
                 }
@@ -357,140 +199,107 @@ impl<'lfu> Lfu {
         let dmu = Arc::clone(db.read().root_tree.dmu());
         let default_storage_class = dmu.default_storage_class();
         Self {
-            leafs: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
+            nodes: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
             dml_rx,
             db_rx,
             dmu,
             db,
             config,
             storage_hint_dml,
-            objects: Default::default(),
             object_stores: Default::default(),
-            object_buckets: (
-                [(); NUM_STORAGE_CLASSES]
-                    .map(|_| [(); NUM_SIZE_BUCKETS].map(|_| LfuCache::unbounded())),
-                default_storage_class,
-            ),
+            object_buckets: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
         }
+    }
+
+    fn migrate_object_from_to(
+        &self,
+        object_id: GlobalObjectId,
+        object_name: &CowBytes,
+        from: StoragePreference,
+        to: StoragePreference,
+    ) -> Result<Block<u64>> {
+        // NOTE: Object store can either be unused or active.
+        let store = if let Some(Some(active_store)) = self.object_stores.get(object_id.store_key())
+        {
+            active_store.clone()
+        } else {
+            // NOTE: If not active we may try to open the store.
+            // This carries some implications to the actual user
+            // using the storage stack and should be fixed.
+
+            // Best effort to try to open an object store.
+            if let Some(mut db) = self.db.try_write() {
+                let os = db.open_object_store_with_id(*object_id.store_key())?;
+                os
+            } else {
+                return Err(Error::from_kind(super::errors::ErrorKind::MigrationFailed));
+            }
+        };
+        if let Some(mut obj) = store.open_object(object_name)? {
+            let size = obj
+                .info()?
+                .expect("Object does not have any metadata.")
+                .size;
+            obj.migrate(to)?;
+            return Ok(Block::from_bytes(size));
+        }
+        Err(Error::from_kind(super::errors::ErrorKind::MigrationFailed))
     }
 }
 
 impl super::MigrationPolicy for Lfu {
     fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u64>> {
-        // PROMOTE OF NODES
-        // let mut moved = Block(0_u32);
-
         let desired = Block(self.config.policy_config.promote_size.as_u64());
         let mut moved = Block(0_u64);
-
+        let target = StoragePreference::from_u8(storage_tier - 1);
         match self.config.policy_config.mode {
             LfuMode::Object => {
-                for bucket in 0..NUM_SIZE_BUCKETS {
-                    let mut falsely_removed_objs = vec![];
-                    while let Some((objectkey, name, freq)) = self.object_buckets.0
-                        [storage_tier as usize][bucket]
+                while let Some((object_id, name, freq)) =
+                    self.object_buckets[storage_tier as usize].peek_mfu_key_value_frequency()
+                {
+                    moved += self.migrate_object_from_to(
+                        object_id.clone(),
+                        &name,
+                        StoragePreference::from_u8(storage_tier),
+                        target,
+                    )?;
+                    let (key, val, freq) = self.object_buckets[storage_tier as usize]
                         .pop_mfu_key_value_frequency()
-                    {
-                        if let (Some(store_result), Some(lifted)) = (
-                            self.object_stores.get(objectkey.store_key()),
-                            StoragePreference::from_u8(storage_tier).lift(),
-                        ) {
-                            // NOTE: Object store can either be unused or active.
-                            if let Some(active_store) = store_result.as_ref() {
-                                let mut obj = active_store.open_object(&name).unwrap().unwrap();
-                                obj.migrate(lifted).expect("Could not migrate");
-                                let entry = self.objects.get_mut(&objectkey).unwrap();
-                                let size = entry.1;
-                                entry.0 = lifted;
-                                let new_location = ObjectLocation(lifted, size);
-                                Self::insert_object(
-                                    &mut self.object_buckets,
-                                    new_location.clone(),
-                                    objectkey.clone(),
-                                    name,
-                                );
-                                for _ in 0..freq {
-                                    let _ = Self::get_object(
-                                        &mut self.object_buckets,
-                                        &new_location,
-                                        &objectkey,
-                                    );
-                                }
-                                moved += Block::from_bytes(size);
-                            } else {
-                                // NOTE: If not active we may try to open the store.
-                                // This carries some implications to the actual user
-                                // using the storage stack and should be fixed.
+                        .expect("Invalid Pop");
+                    self.object_buckets[target.as_u8() as usize]
+                        .insert_with_frequency(key, val, freq);
 
-                                // Best effort to try to open an object store.
-                                if let Some(mut db) = self.db.try_write() {
-                                    let os =
-                                        db.open_object_store_with_id(*objectkey.store_key())?;
-                                    if let Some(mut obj) = os.open_object(&name)? {
-                                        obj.migrate(lifted)?;
-                                        let entry = self.objects.get_mut(&objectkey).unwrap();
-                                        let size = entry.1;
-                                        entry.0 = lifted;
-                                        let new_location = ObjectLocation(lifted, size);
-                                        Self::insert_object(
-                                            &mut self.object_buckets,
-                                            new_location.clone(),
-                                            objectkey.clone(),
-                                            name,
-                                        );
-                                        for _ in 0..freq {
-                                            let _ = Self::get_object(
-                                                &mut self.object_buckets,
-                                                &new_location,
-                                                &objectkey,
-                                            );
-                                        }
-                                        moved += Block::from_bytes(size);
-                                    }
-                                    db.close_object_store(os);
-                                }
-                            }
-
-                            if moved >= desired {
-                                break;
-                            }
-                        } else {
-                            falsely_removed_objs.push((objectkey, name))
-                        }
-                    }
-                    // This more of shitty fix bc we only have active stores rn, pls FIXME
-                    for (key, name) in falsely_removed_objs.into_iter() {
-                        self.object_buckets.0[storage_tier as usize][bucket].insert(key, name);
-                    }
                     if moved >= desired {
                         break;
                     }
                 }
             }
             LfuMode::Node => {
-                let mut num_moved = 0;
-                while moved < Block(self.config.policy_config.promote_size.as_u64())
-                    && num_moved < self.config.policy_config.promote_num
-                    && !self.leafs[storage_tier as usize].is_empty()
-                {
-                    if let Some((key, entry)) =
-                        self.leafs[storage_tier as usize].pop_mfu_key_value()
+                loop {
+                    if let Some((key, lower_size, freq)) =
+                        self.nodes[storage_tier as usize].peek_mfu_key_value_frequency()
                     {
-                        if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
-                            debug!("Moving {:?}", &key);
-                            debug!("Was on storage tier: {:?}", storage_tier);
-                            self.storage_hint_dml.lock().insert(key, lifted);
-                            debug!("New storage preference: {:?}", lifted);
-                            moved += Block(entry.size.as_u64());
-                            num_moved += 1;
+                        if let Some((_upper_size, up_freq)) =
+                            self.nodes[target.as_u8() as usize].peek_lfu_frequency()
+                        {
+                            if up_freq < freq {
+                                // MOVE DATA UPWARDS
+                                self.storage_hint_dml.lock().insert(key.clone(), target);
+                                moved += lower_size.as_u64();
+
+                                // In case enough data has been moved; rate limited.
+                                if moved >= desired {
+                                    break;
+                                }
+                                // NOTE:
+                                // Any node which could have been displaced by
+                                // this operation is migrated later downwards
+                                // when clearing the space requirements
+                                continue;
+                            }
                         }
-                    } else {
-                        // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
-                        // See https://github.com/jwuensche/lfu-cache
-                        warn!(
-                            "Cache indicated that it is not empty but no value could be fetched."
-                        );
                     }
+                    break;
                 }
             }
             LfuMode::Both => unimplemented!(),
@@ -503,108 +312,48 @@ impl super::MigrationPolicy for Lfu {
         let mut moved = Block(0_u64);
         match self.config.policy_config.mode {
             LfuMode::Object => {
-                // DEMOTION OF OBJECTS - Use active object stores?
-                // Try to demote smallest objects first migrating as many as possible to
-                // the next lower storage class.
-                for bucket in (0..NUM_SIZE_BUCKETS).skip(3).chain(0..2) {
-                    // NOTE: This function turned out to have a quite high code width
-                    // with a maximum of 8 indentation.. this is too high. It would be
-                    // good to to refactor this code as we continue to work on haura
-                    // also to reduce it's complexity. If you are reading this "we"
-                    // might be even you :D
-                    let mut falsely_removed_objs = vec![];
-                    while let Some((objectkey, name, freq)) = self.object_buckets.0
-                        [storage_tier as usize][bucket]
+                let target = StoragePreference::from_u8(storage_tier + 1);
+                while let Some((object_id, name, freq)) =
+                    self.object_buckets[storage_tier as usize].peek_lfu_key_value_frequency()
+                {
+                    moved += self.migrate_object_from_to(
+                        object_id.clone(),
+                        &name,
+                        StoragePreference::from_u8(storage_tier),
+                        target,
+                    )?;
+
+                    let (key, val, freq) = self.object_buckets[storage_tier as usize]
                         .pop_lfu_key_value_frequency()
-                    {
-                        if let (Some(store_result), Some(lowered)) = (
-                            self.object_stores.get(objectkey.store_key()),
-                            StoragePreference::from_u8(storage_tier).lower(),
-                        ) {
-                            // NOTE: Object store can either be unused or active.
-                            if let Some(active_store) = store_result.as_ref() {
-                                let mut obj = active_store.open_object(&name).unwrap().unwrap();
-                                obj.migrate(lowered).expect("Could not migrate");
-                                let entry = self.objects.get_mut(&objectkey).unwrap();
-                                let size = entry.1;
-                                entry.0 = lowered;
-                                let new_location = ObjectLocation(lowered, size);
-                                Self::insert_object(
-                                    &mut self.object_buckets,
-                                    new_location.clone(),
-                                    objectkey.clone(),
-                                    name,
-                                );
-                                for _ in 0..freq {
-                                    let _ = Self::get_object(
-                                        &mut self.object_buckets,
-                                        &new_location,
-                                        &objectkey,
-                                    );
-                                }
-                                moved += Block::from_bytes(size);
-                            } else {
-                                // NOTE: If not active we may try to open the store.
-                                // This carries some implications to the actual user
-                                // using the storage stack and should be fixed.
+                        .expect("Invalid Pop");
+                    self.object_buckets[target.as_u8() as usize]
+                        .insert_with_frequency(key, val, freq);
 
-                                // Best effort to try to open an object store.
-                                if let Some(mut db) = self.db.try_write() {
-                                    let os =
-                                        db.open_object_store_with_id(*objectkey.store_key())?;
-                                    if let Some(mut obj) = os.open_object(&name)? {
-                                        obj.migrate(lowered)?;
-                                        let entry = self.objects.get_mut(&objectkey).unwrap();
-                                        let size = entry.1;
-                                        entry.0 = lowered;
-                                        let new_location = ObjectLocation(lowered, size);
-                                        Self::insert_object(
-                                            &mut self.object_buckets,
-                                            new_location.clone(),
-                                            objectkey.clone(),
-                                            name,
-                                        );
-                                        for _ in 0..freq {
-                                            let _ = Self::get_object(
-                                                &mut self.object_buckets,
-                                                &new_location,
-                                                &objectkey,
-                                            );
-                                        }
-                                        moved += Block::from_bytes(size);
-                                    }
-                                    db.close_object_store(os);
-                                }
-                            }
-
-                            if moved >= desired {
-                                break;
-                            }
-                        } else {
-                            falsely_removed_objs.push((objectkey, name))
-                        }
-                    }
-                    // This more of shitty fix bc we only have active stores rn, pls FIXME
-                    for (key, name) in falsely_removed_objs.into_iter() {
-                        self.object_buckets.0[storage_tier as usize][bucket].insert(key, name);
-                    }
                     if moved >= desired {
                         break;
                     }
                 }
             }
             LfuMode::Node => {
-                while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
-                    if let Some((key, entry)) =
-                        self.leafs[storage_tier as usize].pop_lfu_key_value()
+                let target = StoragePreference::from_u8(storage_tier + 1);
+
+                while moved < desired && !self.nodes[storage_tier as usize].is_empty() {
+                    if let Some((key, entry, freq)) =
+                        self.nodes[storage_tier as usize].pop_lfu_key_value_frequency()
                     {
-                        if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
-                            debug!("Moving {:?}", entry.offset);
-                            debug!("Was on storage tier: {:?}", storage_tier);
-                            self.storage_hint_dml.lock().insert(key, lowered);
-                            moved += Block(entry.size.as_u64());
-                            debug!("New storage preference: {:?}", lowered);
-                        }
+                        let ds = self
+                            .db
+                            .write()
+                            .open_dataset_with_id(key.d_id())
+                            .expect("Dataset Id incorrect");
+                        let mut cache_entry = ds.get_node_pivot_mut(&key).unwrap().unwrap();
+                        cache_entry.set_system_storage_preference(target);
+                        // This does not adhere to constant costs, but rather is of O(number of unique frequencies)
+                        debug!("Moving {:?}", key);
+                        self.nodes[target.as_u8() as usize].insert_with_frequency(key, entry, freq);
+                        debug!("Was on storage tier: {:?}", storage_tier);
+                        moved += Block(entry.as_u64());
+                        debug!("New storage preference: {:?}", target);
                     } else {
                         // If this message occured you'll have most likely encountered a bug in the lfu implemenation.
                         // See https://github.com/jwuensche/lfu-cache
@@ -614,7 +363,7 @@ impl super::MigrationPolicy for Lfu {
                     }
                 }
             }
-            LfuMode::Both => todo!(),
+            LfuMode::Both => unimplemented!(),
         }
 
         Ok(moved)
@@ -667,11 +416,11 @@ impl super::MigrationPolicy for Lfu {
             let mut maps: [Dummy; NUM_STORAGE_CLASSES] =
                 [0; NUM_STORAGE_CLASSES].map(|_| Dummy::new());
 
-            let d_class = self.object_buckets.1;
-            for (obj, loc) in self.objects.iter() {
-                let pref = loc.pref_id(d_class);
-                maps[pref].files.insert(obj.clone(), (0.0, loc.1, 0));
-            }
+            // let d_class = self.object_buckets.1;
+            // for (obj, loc) in self.objects.iter() {
+            //     let pref = loc.pref_id(d_class);
+            //     maps[pref].files.insert(obj.clone(), (0.0, loc.1, 0));
+            // }
             serde_json::to_writer(&mut file, &maps)?;
             file.write_all(b"\n")?;
             file.flush()?;

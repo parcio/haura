@@ -55,7 +55,8 @@ bitvec = "1.0"
 
 serde_json = "1.0"
 crossbeam-channel = "0.5.5"
-lfu_cache = { git = "https://github.com/julea-io/lfu-cache", rev = "haura-v4" }
+# FIXME: THIS IS NOT MEANT FOR THE FINAL PR REMOVE BEFORE, DO NOT DEPEND ON UNPINNED VERSIONS
+lfu_cache = { git = "https://github.com/julea-io/lfu-cache", branch = "rework" }
 rand = { version = "0.8", features = ["std_rng"] }
 
 [dev-dependencies]
