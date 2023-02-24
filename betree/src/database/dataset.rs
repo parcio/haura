@@ -596,6 +596,22 @@ impl Dataset<DefaultMessageAction> {
         self.inner.read().upsert(key, data, offset)
     }
 
+    /// Immutably fetch a given node by its pivot key.
+    pub(crate) fn get_node_pivot(
+        &self,
+        pk: &PivotKey,
+    ) -> Result<Option<<RootDmu as Dml>::CacheValueRef>> {
+        self.inner.read().get_node_pivot(pk)
+    }
+
+    /// Mutably fetch a given node by its pivot key.
+    pub(crate) fn get_node_pivot_mut(
+        &self,
+        pk: &PivotKey,
+    ) -> Result<Option<<RootDmu as Dml>::CacheValueRefMut>> {
+        self.inner.read().get_node_pivot_mut(pk)
+    }
+
     #[cfg(feature = "internal-api")]
     pub fn test_get_node_pivot(
         &self,
