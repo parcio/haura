@@ -132,7 +132,6 @@ impl<'lfu> Lfu {
                         .or_insert(info.size) = info.size;
                 }
                 DmlMsg::Remove(info) => {
-                    // Delete Offset
                     self.nodes[info.offset.storage_class() as usize].remove(&info.pivot_key);
                 }
             }
@@ -248,7 +247,11 @@ impl<'lfu> Lfu {
 }
 
 impl super::MigrationPolicy for Lfu {
-    fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u64>> {
+    fn promote(
+        &mut self,
+        storage_tier: u8,
+        tight_space: bool,
+    ) -> super::errors::Result<Block<u64>> {
         let desired = Block(self.config.policy_config.promote_size.as_u64());
         let mut moved = Block(0_u64);
         let target = StoragePreference::from_u8(storage_tier - 1);
@@ -257,20 +260,30 @@ impl super::MigrationPolicy for Lfu {
                 while let Some((object_id, name, freq)) =
                     self.object_buckets[storage_tier as usize].peek_mfu_key_value_frequency()
                 {
-                    moved += self.migrate_object_from_to(
-                        object_id.clone(),
-                        &name,
-                        StoragePreference::from_u8(storage_tier),
-                        target,
-                    )?;
-                    let (key, val, freq) = self.object_buckets[storage_tier as usize]
-                        .pop_mfu_key_value_frequency()
-                        .expect("Invalid Pop");
-                    self.object_buckets[target.as_u8() as usize]
-                        .insert_with_frequency(key, val, freq);
+                    let up_freq = if let Some((_upper_size, other_freq)) =
+                        self.object_buckets[target.as_u8() as usize].peek_lfu_frequency()
+                    {
+                        other_freq
+                    } else {
+                        0
+                    };
 
-                    if moved >= desired {
-                        break;
+                    if up_freq < freq || !tight_space {
+                        moved += self.migrate_object_from_to(
+                            object_id.clone(),
+                            &name,
+                            StoragePreference::from_u8(storage_tier),
+                            target,
+                        )?;
+                        let (key, val, freq) = self.object_buckets[storage_tier as usize]
+                            .pop_mfu_key_value_frequency()
+                            .expect("Invalid Pop");
+                        self.object_buckets[target.as_u8() as usize]
+                            .insert_with_frequency(key, val, freq);
+
+                        if moved >= desired {
+                            break;
+                        }
                     }
                 }
             }
@@ -279,24 +292,27 @@ impl super::MigrationPolicy for Lfu {
                     if let Some((key, lower_size, freq)) =
                         self.nodes[storage_tier as usize].peek_mfu_key_value_frequency()
                     {
-                        if let Some((_upper_size, up_freq)) =
+                        let up_freq = if let Some((_upper_size, other_freq)) =
                             self.nodes[target.as_u8() as usize].peek_lfu_frequency()
                         {
-                            if up_freq < freq {
-                                // MOVE DATA UPWARDS
-                                self.storage_hint_dml.lock().insert(key.clone(), target);
-                                moved += lower_size.as_u64();
+                            other_freq
+                        } else {
+                            0
+                        };
+                        if up_freq < freq || !tight_space {
+                            // MOVE DATA UPWARDS
+                            self.storage_hint_dml.lock().insert(key.clone(), target);
+                            moved += lower_size.as_u64();
 
-                                // In case enough data has been moved; rate limited.
-                                if moved >= desired {
-                                    break;
-                                }
-                                // NOTE:
-                                // Any node which could have been displaced by
-                                // this operation is migrated later downwards
-                                // when clearing the space requirements
-                                continue;
+                            // In case enough data has been moved; rate limited.
+                            if moved >= desired {
+                                break;
                             }
+                            // NOTE:
+                            // Any node which could have been displaced by
+                            // this operation is migrated later downwards
+                            // when clearing the space requirements
+                            continue;
                         }
                     }
                     break;

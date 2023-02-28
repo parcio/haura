@@ -82,12 +82,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    data_management::DmlWithHandler,
-    database::RootDmu,
-    storage_pool::{NUM_STORAGE_CLASSES},
-    tree::PivotKey,
-    vdev::Block,
-    Database, StoragePreference,
+    data_management::DmlWithHandler, database::RootDmu, storage_pool::NUM_STORAGE_CLASSES,
+    tree::PivotKey, vdev::Block, Database, StoragePreference,
 };
 
 use self::{lfu::Lfu, reinforcment_learning::ZhangHellanderToor};
@@ -209,7 +205,7 @@ pub(crate) trait MigrationPolicy {
     /// This functions returns how many blocks have been migrated in total. When
     /// using lazy node migration also specify the amount of blocks hinted to be
     /// migrated.
-    fn promote(&mut self, storage_tier: u8) -> Result<Block<u64>>;
+    fn promote(&mut self, storage_tier: u8, tight_space: bool) -> Result<Block<u64>>;
     /// Demote atleast `desired` many blocks from the given storage tier to any
     /// tier lower than the given tier.
     fn demote(&mut self, storage_tier: u8, desired: Block<u64>) -> Result<Block<u64>>;
@@ -252,12 +248,15 @@ pub(crate) trait MigrationPolicy {
                 })
                 .collect();
 
-            for (high_tier, _high_info) in infos
+            for ((high_tier, high_info), (low_tier, _low_info)) in infos
                 .iter()
-                .skip(1)
-                .filter(|(_, high_info)| high_info.total != Block(0))
+                .tuple_windows()
+                .filter(|(_, (_, low_info))| low_info.total != Block(0))
             {
-                self.promote(*high_tier)?;
+                self.promote(
+                    *low_tier,
+                    high_info.percent_full() >= threshold[*high_tier as usize],
+                )?;
             }
 
             // Update after iteration
