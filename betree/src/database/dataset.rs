@@ -9,6 +9,10 @@ use crate::{
     tree::{self, DefaultMessageAction, MessageAction, PivotKey, Tree, TreeLayer},
     StoragePreference,
 };
+
+#[cfg(feature = "internal-api")]
+use crate::tree::NodeInfo;
+
 use parking_lot::RwLock;
 use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
