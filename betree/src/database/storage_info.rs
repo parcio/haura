@@ -31,6 +31,15 @@ impl StorageInfo {
                 .clamp(0.0, f32::MAX) as u64,
         )
     }
+
+    pub fn blocks_until_filled_to(&self, threshold: f32) -> Block<u64> {
+        let threshold = threshold.clamp(0.0, 1.0);
+        Block(
+            (self.total.0 as f32 * threshold - (self.total.0 - self.free.0) as f32)
+                .ceil()
+                .clamp(0.0, f32::MAX) as u64,
+        )
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

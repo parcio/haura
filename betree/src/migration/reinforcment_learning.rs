@@ -1126,7 +1126,11 @@ impl MigrationPolicy for ZhangHellanderToor {
         Ok(())
     }
 
-    fn promote(&mut self, _storage_tier: u8) -> super::errors::Result<crate::vdev::Block<u64>> {
+    fn promote(
+        &mut self,
+        _storage_tier: u8,
+        _tight_space: bool,
+    ) -> super::errors::Result<crate::vdev::Block<u64>> {
         unimplemented!()
     }
 
