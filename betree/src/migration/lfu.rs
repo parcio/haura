@@ -35,7 +35,8 @@ pub struct Lfu {
     config: MigrationConfig<LfuConfig>,
     // Store open object stores to move inactive objects within.
     object_stores: HashMap<ObjectStoreId, Option<ObjectStore>>,
-    objects: [LfuCache<GlobalObjectId, CowBytes>; NUM_STORAGE_CLASSES],
+    objects: [LfuCache<GlobalObjectId, (CowBytes, Block<u64>)>; NUM_STORAGE_CLASSES],
+    default_storage_class: StoragePreference,
     /// HashMap accessible by the DML, resolution is not guaranteed but always
     /// used when a object is written.
     storage_hint_dml: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
@@ -158,15 +159,17 @@ impl<'lfu> Lfu {
                     if let Entry::Vacant(e) = self.object_stores.entry(*key.store_key()) {
                         e.insert(None);
                     }
-                    match self.objects[info.pref.as_u8() as usize].get(&key) {
-                        Some(_) => {}
-                        None => {
-                            // Insert new
-                            self.objects[info.pref.as_u8() as usize].insert(key, name);
-                        }
+                    if let lfu_cache::Entry::Vacant(e) = self.objects[info
+                        .pref
+                        .preferred_class()
+                        .unwrap_or(self.default_storage_class.as_u8())
+                        as usize]
+                        .entry(key)
+                    {
+                        e.insert((name, Block::from_bytes(info.size)));
                     }
                 }
-                DatabaseMsg::ObjectClose(key, info) => {
+                DatabaseMsg::ObjectClose(_key, _info) => {
                     // NO-OP
                 }
                 DatabaseMsg::ObjectRead(key, _) | DatabaseMsg::ObjectWrite(key, ..) => {
@@ -177,8 +180,12 @@ impl<'lfu> Lfu {
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     for id in 0..NUM_STORAGE_CLASSES {
-                        if let Some(name) = self.objects[id].remove(&key) {
-                            self.objects[pref.as_u8() as usize].insert(key.clone(), name);
+                        if let Some((name, freq)) = self.objects[id].remove_with_frequency(&key) {
+                            self.objects[pref
+                                .preferred_class()
+                                .unwrap_or(self.default_storage_class.as_u8())
+                                as usize]
+                                .insert_with_frequency(key.clone(), name, freq);
                         }
                     }
                 }
@@ -207,6 +214,7 @@ impl<'lfu> Lfu {
             storage_hint_dml,
             object_stores: Default::default(),
             objects: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
+            default_storage_class,
         }
     }
 
@@ -214,7 +222,7 @@ impl<'lfu> Lfu {
         &self,
         object_id: GlobalObjectId,
         object_name: &CowBytes,
-        from: StoragePreference,
+        _from: StoragePreference,
         to: StoragePreference,
     ) -> Result<Block<u64>> {
         // NOTE: Object store can either be unused or active.
@@ -257,7 +265,7 @@ impl super::MigrationPolicy for Lfu {
         let target = StoragePreference::from_u8(storage_tier - 1);
         match self.config.policy_config.mode {
             LfuMode::Object => {
-                while let Some((object_id, name, freq)) =
+                while let Some((object_id, (name, _), freq)) =
                     self.objects[storage_tier as usize].peek_mfu_key_value_frequency()
                 {
                     let up_freq = if let Some((_upper_size, other_freq)) =
@@ -328,7 +336,7 @@ impl super::MigrationPolicy for Lfu {
         match self.config.policy_config.mode {
             LfuMode::Object => {
                 let target = StoragePreference::from_u8(storage_tier + 1);
-                while let Some((object_id, name, freq)) =
+                while let Some((object_id, (name, _), _freq)) =
                     self.objects[storage_tier as usize].peek_lfu_key_value_frequency()
                 {
                     moved += self.migrate_object_from_to(
@@ -430,11 +438,11 @@ impl super::MigrationPolicy for Lfu {
             let mut maps: [Dummy; NUM_STORAGE_CLASSES] =
                 [0; NUM_STORAGE_CLASSES].map(|_| Dummy::new());
 
-            // let d_class = self.object_buckets.1;
-            // for (obj, loc) in self.objects.iter() {
-            //     let pref = loc.pref_id(d_class);
-            //     maps[pref].files.insert(obj.clone(), (0.0, loc.1, 0));
-            // }
+            for (id, objs) in self.objects.iter().enumerate() {
+                for (key, (_, size)) in objs.peek_iter() {
+                    maps[id].files.insert(key.clone(), (0.0, size.as_u64(), 0));
+                }
+            }
             serde_json::to_writer(&mut file, &maps)?;
             file.write_all(b"\n")?;
             file.flush()?;
