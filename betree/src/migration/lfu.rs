@@ -35,7 +35,7 @@ pub struct Lfu {
     config: MigrationConfig<LfuConfig>,
     // Store open object stores to move inactive objects within.
     object_stores: HashMap<ObjectStoreId, Option<ObjectStore>>,
-    object_buckets: [LfuCache<GlobalObjectId, CowBytes>; NUM_STORAGE_CLASSES],
+    objects: [LfuCache<GlobalObjectId, CowBytes>; NUM_STORAGE_CLASSES],
     /// HashMap accessible by the DML, resolution is not guaranteed but always
     /// used when a object is written.
     storage_hint_dml: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
@@ -158,11 +158,11 @@ impl<'lfu> Lfu {
                     if let Entry::Vacant(e) = self.object_stores.entry(*key.store_key()) {
                         e.insert(None);
                     }
-                    match self.object_buckets[info.pref.as_u8() as usize].get(&key) {
+                    match self.objects[info.pref.as_u8() as usize].get(&key) {
                         Some(_) => {}
                         None => {
                             // Insert new
-                            self.object_buckets[info.pref.as_u8() as usize].insert(key, name);
+                            self.objects[info.pref.as_u8() as usize].insert(key, name);
                         }
                     }
                 }
@@ -172,13 +172,13 @@ impl<'lfu> Lfu {
                 DatabaseMsg::ObjectRead(key, _) | DatabaseMsg::ObjectWrite(key, ..) => {
                     // This has the potential to be of cost 4*hash_lookup but overall it is still constant..
                     for id in 0..NUM_STORAGE_CLASSES {
-                        self.object_buckets[id].get(&key);
+                        self.objects[id].get(&key);
                     }
                 }
                 DatabaseMsg::ObjectMigrate(key, pref) => {
                     for id in 0..NUM_STORAGE_CLASSES {
-                        if let Some(name) = self.object_buckets[id].remove(&key) {
-                            self.object_buckets[pref.as_u8() as usize].insert(key.clone(), name);
+                        if let Some(name) = self.objects[id].remove(&key) {
+                            self.objects[pref.as_u8() as usize].insert(key.clone(), name);
                         }
                     }
                 }
@@ -206,7 +206,7 @@ impl<'lfu> Lfu {
             config,
             storage_hint_dml,
             object_stores: Default::default(),
-            object_buckets: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
+            objects: [(); NUM_STORAGE_CLASSES].map(|_| LfuCache::unbounded()),
         }
     }
 
@@ -258,10 +258,10 @@ impl super::MigrationPolicy for Lfu {
         match self.config.policy_config.mode {
             LfuMode::Object => {
                 while let Some((object_id, name, freq)) =
-                    self.object_buckets[storage_tier as usize].peek_mfu_key_value_frequency()
+                    self.objects[storage_tier as usize].peek_mfu_key_value_frequency()
                 {
                     let up_freq = if let Some((_upper_size, other_freq)) =
-                        self.object_buckets[target.as_u8() as usize].peek_lfu_frequency()
+                        self.objects[target.as_u8() as usize].peek_lfu_frequency()
                     {
                         other_freq
                     } else {
@@ -275,11 +275,10 @@ impl super::MigrationPolicy for Lfu {
                             StoragePreference::from_u8(storage_tier),
                             target,
                         )?;
-                        let (key, val, freq) = self.object_buckets[storage_tier as usize]
+                        let (key, val, freq) = self.objects[storage_tier as usize]
                             .pop_mfu_key_value_frequency()
                             .expect("Invalid Pop");
-                        self.object_buckets[target.as_u8() as usize]
-                            .insert_with_frequency(key, val, freq);
+                        self.objects[target.as_u8() as usize].insert_with_frequency(key, val, freq);
 
                         if moved >= desired {
                             break;
@@ -330,7 +329,7 @@ impl super::MigrationPolicy for Lfu {
             LfuMode::Object => {
                 let target = StoragePreference::from_u8(storage_tier + 1);
                 while let Some((object_id, name, freq)) =
-                    self.object_buckets[storage_tier as usize].peek_lfu_key_value_frequency()
+                    self.objects[storage_tier as usize].peek_lfu_key_value_frequency()
                 {
                     moved += self.migrate_object_from_to(
                         object_id.clone(),
@@ -339,11 +338,10 @@ impl super::MigrationPolicy for Lfu {
                         target,
                     )?;
 
-                    let (key, val, freq) = self.object_buckets[storage_tier as usize]
+                    let (key, val, freq) = self.objects[storage_tier as usize]
                         .pop_lfu_key_value_frequency()
                         .expect("Invalid Pop");
-                    self.object_buckets[target.as_u8() as usize]
-                        .insert_with_frequency(key, val, freq);
+                    self.objects[target.as_u8() as usize].insert_with_frequency(key, val, freq);
 
                     if moved >= desired {
                         break;
