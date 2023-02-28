@@ -6,7 +6,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::Dml,
     migration::DatabaseMsg,
-    tree::{self, DefaultMessageAction, MessageAction, NodeInfo, PivotKey, Tree, TreeLayer},
+    tree::{self, DefaultMessageAction, MessageAction, PivotKey, Tree, TreeLayer},
     StoragePreference,
 };
 use parking_lot::RwLock;
