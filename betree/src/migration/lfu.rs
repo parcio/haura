@@ -279,7 +279,7 @@ impl super::MigrationPolicy for Lfu {
                     if up_freq < freq || !tight_space {
                         moved += self.migrate_object_from_to(
                             object_id.clone(),
-                            &name,
+                            name,
                             StoragePreference::from_u8(storage_tier),
                             target,
                         )?;
@@ -341,7 +341,7 @@ impl super::MigrationPolicy for Lfu {
                 {
                     moved += self.migrate_object_from_to(
                         object_id.clone(),
-                        &name,
+                        name,
                         StoragePreference::from_u8(storage_tier),
                         target,
                     )?;
