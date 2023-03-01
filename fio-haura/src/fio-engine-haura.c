@@ -10,6 +10,7 @@
  */
 #include <asm-generic/errno-base.h>
 #include <assert.h>
+#include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -44,11 +45,11 @@ struct haura_data {
   db_t *db;
   obj_store_t *obj_s;
   char *obj_counter;
+  pthread_mutex_t mtx;
 };
 
-static struct haura_data global_data = {.db = NULL, .obj_s = NULL};
-
-static pthread_mutex_t haura_mtx = PTHREAD_MUTEX_INITIALIZER;
+static struct haura_data global_data = {
+    .db = NULL, .obj_s = NULL, .mtx = PTHREAD_MUTEX_INITIALIZER};
 
 static struct fio_option options[] = {
     {
@@ -173,7 +174,7 @@ static int fio_haura_init(struct thread_data *td) {
     exit(1);
   }
 
-  if (0 != pthread_mutex_lock(&haura_mtx)) {
+  if (0 != pthread_mutex_lock(&global_data.mtx)) {
     fprintf(stderr, "Mutex locking failed.\n");
     exit(1);
   }
@@ -206,7 +207,7 @@ static int fio_haura_init(struct thread_data *td) {
     return bail(error);
   }
 
-  if (0 != pthread_mutex_unlock(&haura_mtx)) {
+  if (0 != pthread_mutex_unlock(&global_data.mtx)) {
     fprintf(stderr, "Mutex unlocking failed.\n");
     exit(1);
   }
@@ -219,7 +220,7 @@ static int fio_haura_init(struct thread_data *td) {
  * Not required.
  */
 static void fio_haura_cleanup(struct thread_data *td) {
-  if (0 != pthread_mutex_lock(&haura_mtx)) {
+  if (0 != pthread_mutex_lock(&global_data.mtx)) {
     fprintf(stderr, "Mutex locking failed.\n");
     exit(1);
   }
@@ -227,8 +228,9 @@ static void fio_haura_cleanup(struct thread_data *td) {
     betree_close_db(global_data.db);
     global_data.db = NULL;
     global_data.obj_s = NULL;
+    free(global_data.obj_counter);
   }
-  if (0 != pthread_mutex_unlock(&haura_mtx)) {
+  if (0 != pthread_mutex_unlock(&global_data.mtx)) {
     fprintf(stderr, "Mutex unlocking failed.\n");
     exit(1);
   }
