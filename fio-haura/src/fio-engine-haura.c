@@ -38,7 +38,7 @@
  */
 struct fio_haura_options {
   void *pad; /* avoid ->off1 of fio_option becomes 0 */
-  unsigned int dummy;
+  int respect_fio_files;
 };
 
 struct haura_data {
@@ -53,16 +53,14 @@ static struct haura_data global_data = {
 
 static struct fio_option options[] = {
     {
-        .name = "haura",
-        .lname = "lhaura",
+        .name = "respect-fio-files",
+        .lname = "respect-fio-files",
         .type = FIO_OPT_STR_SET,
-        .off1 = offsetof(struct fio_haura_options, dummy),
-        .help = "Set dummy",
+        .off1 = offsetof(struct fio_haura_options, respect_fio_files),
+        .help = "Respect the files given by fio; instead of using the haura "
+                "specific configured devices.",
         .category = FIO_OPT_C_ENGINE, /* always use this */
         .group = FIO_OPT_G_INVALID,   /* this can be different */
-    },
-    {
-        .name = NULL,
     },
 };
 
@@ -74,6 +72,21 @@ static int bail(struct err_t *error) {
 
 static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
   betree_configuration_set_direct(cfg, td->o.odirect);
+  if (((struct fio_haura_options *)td->eo)->respect_fio_files) {
+    char **paths;
+
+    if ((paths = malloc(sizeof(char *) * td->files_index)) == NULL) {
+      fprintf(stderr, "fio-haura: OOM");
+      exit(2);
+    }
+    for (size_t idx = 0; idx < td->files_index; idx += 1) {
+      paths[idx] = td->files[idx]->file_name;
+    }
+
+    betree_configuration_set_disks(cfg, (const char *const *)paths,
+                                   td->files_index);
+    free(paths);
+  }
 }
 
 /*
