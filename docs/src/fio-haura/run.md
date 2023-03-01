@@ -73,3 +73,14 @@ Run status group 0 (all jobs):
 
 Have a look at the examples directory of `fio` for more usage examples and job
 files.
+
+> Disclaimer: Benchmarks performing *only* read queries are incorrect.
+> 
+> ---
+> 
+> As haura is implemented as an object/key-value store performing read tests in
+> an unstaged job, for example a simple read IOPS test is rather pointless, as
+> search queries will simply fail for all keys and only cached nodes are
+> traversed copying no data and fetching no data from disk. The implementation
+> of objects then does not assume that sparse areas are actually empty but
+> rather void of information (all zeroed) resulting in insanely good values.
