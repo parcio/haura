@@ -9,4 +9,3 @@ $ make
 On build errors consult the `configure.log` in the fio directory.
 
 You'll find the ioengine in the `src/` directory.
-
