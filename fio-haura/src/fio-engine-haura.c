@@ -218,7 +218,21 @@ static int fio_haura_init(struct thread_data *td) {
  * done doing io. Should tear down anything setup by the ->init() function.
  * Not required.
  */
-static void fio_haura_cleanup(struct thread_data *td) {}
+static void fio_haura_cleanup(struct thread_data *td) {
+  if (0 != pthread_mutex_lock(&haura_mtx)) {
+    fprintf(stderr, "Mutex locking failed.\n");
+    exit(1);
+  }
+  if (global_data.db != NULL) {
+    betree_close_db(global_data.db);
+    global_data.db = NULL;
+    global_data.obj_s = NULL;
+  }
+  if (0 != pthread_mutex_unlock(&haura_mtx)) {
+    fprintf(stderr, "Mutex unlocking failed.\n");
+    exit(1);
+  }
+}
 
 /*
  * Hook for opening the given file. Unless the engine has special
