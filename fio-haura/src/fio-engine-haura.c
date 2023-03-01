@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,7 +127,7 @@ static int fio_haura_cancel(struct thread_data *td, struct io_u *io_u) {
  * The io engine must transfer in the direction noted by io_u->ddir
  * to the buffer pointed to by io_u->xfer_buf for as many bytes as
  * io_u->xfer_buflen. Residual data count may be set in io_u->resid
- * for a short read/write.
+ * for a short read/writ
  */
 static enum fio_q_status fio_haura_queue(struct thread_data *td,
                                          struct io_u *io_u) {
@@ -179,7 +180,10 @@ static int fio_haura_prep(struct thread_data *td, struct io_u *io_u) {
 static int fio_haura_init(struct thread_data *td) {
   struct err_t *error = NULL;
   struct storage_pref_t pref = {._0 = 0};
-
+  if (td->o.td_ddir & TD_DDIR_READ && !(td->o.td_ddir & TD_DDIR_WRITE)) {
+    fprintf(stderr, "Not supported.\n");
+    exit(3);
+  }
   if (!td->o.use_thread && td->o.numjobs != 1) {
     fprintf(stderr,
             "Cannot use fio-engine-haura with multiple processes. Specify "
