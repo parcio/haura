@@ -294,7 +294,10 @@ static int fio_haura_prepopulate_file(struct thread_data *td,
   unsigned long long max_io_size = td->o.size;
   /* Haura needs some additional space to provide extra data like object
    * pointers and metadata. This is more of a hack, but nonetheless. */
-  truncate(file->file_name, td->o.size + (200 * 1024 * 1024));
+  if (truncate(file->file_name, td->o.size + (200 * 1024 * 1024))) {
+    fprintf(stderr,
+            "Could not retruncate file to provide enough storage for Haura.");
+  }
   unsigned long long total_written = 0;
   void *buf = malloc(block_size);
 

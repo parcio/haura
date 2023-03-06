@@ -1,0 +1,35 @@
+{
+  "storage": {
+    "tiers": [
+      {
+        "top_level_vdevs": [],
+        "preferred_access_type": "Unknown"
+      }
+    ],
+    "queue_depth_factor": 20,
+    "thread_pool_size": null,
+    "thread_pool_pinned": false
+  },
+  "alloc_strategy": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ]
+  ],
+  "default_storage_class": 0,
+  "compression": "None",
+  "cache_size": 268435456,
+  "access_mode": "OpenOrCreate",
+  "sync_interval_ms": null,
+  "migration_policy": null,
+  "metrics": null
+}
+

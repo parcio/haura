@@ -1,4 +1,5 @@
 *.o
 fio-fio-*
+fio
 # Crude exclusion of fio generated files.
 *.0
