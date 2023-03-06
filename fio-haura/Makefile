@@ -8,7 +8,7 @@ all: src/fio-engine-haura.so
 src/fio-engine-haura.so: fio-fio-${FIO_RELEASE}
 	 ${CC} -Wall -O2 -g -D_GNU_SOURCE -include \
 		 fio-fio-${FIO_RELEASE}/config-host.h -shared -rdynamic -fPIC \
-		 -L ../target/release/deps -l betree_storage_stack \
+         -Wl,--no-as-needed -l betree_storage_stack \
 		 -o src/fio-engine-haura.o src/fio-engine-haura.c 
 
 fio-fio-${FIO_RELEASE}:
@@ -18,7 +18,12 @@ fio-fio-${FIO_RELEASE}:
 	${RM} ${FIO_ARCHIVE}
 	cd fio-fio-${FIO_RELEASE} && ./configure
 
-.PHONY: clean
+
+.PHONY: clean fio
+
+fio: fio-fio-${FIO_RELEASE}
+	cd fio-fio-${FIO_RELEASE} && make
+	cp fio-fio-${FIO_RELEASE}/fio .
 
 clean:
 	${RM} -rf fio-fio-${FIO_RELEASE}
