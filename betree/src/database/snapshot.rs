@@ -1,8 +1,6 @@
 use super::{
-    dataset::Dataset, dead_list_max_key, dead_list_max_key_ds, dead_list_min_key, ds_data_key,
-    errors::*, fetch_ds_data, fetch_ss_data, offset_from_dead_list_key, ss_data_key,
-    ss_data_key_max, ss_key, Database, DatasetData, DatasetId, DatasetTree, DeadListData,
-    Generation, ObjectPointer, RootDmu,
+    dataset::Dataset, errors::*, fetch_ds_data, fetch_ss_data, root_tree_msg, Database,
+    DatasetData, DatasetId, DatasetTree, DeadListData, Generation, ObjectPointer, RootDmu,
 };
 use crate::{
     allocator::Action,
@@ -42,7 +40,7 @@ impl Database {
     }
 
     fn lookup_snapshot_id(&self, ds_id: DatasetId, name: &[u8]) -> Result<Generation> {
-        let key = ss_key(ds_id, name);
+        let key = root_tree_msg::ss_key(ds_id, name);
         let data = self.root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
         Ok(Generation::unpack(&data))
     }
@@ -61,14 +59,14 @@ impl Database {
 
         let data = fetch_ds_data(&self.root_tree, ds.id())?;
         let ss_id = data.ptr.generation();
-        let key = &ss_data_key(ds.id(), ss_id) as &[_];
+        let key = &root_tree_msg::ss_data_key(ds.id(), ss_id) as &[_];
         let data = data.pack()?;
         self.root_tree.insert(
             key,
             DefaultMessageAction::insert_msg(&data),
             StoragePreference::NONE,
         )?;
-        let key = &ds_data_key(ds.id()) as &[_];
+        let key = &root_tree_msg::ds_data_key(ds.id()) as &[_];
         self.root_tree.insert(
             key,
             DatasetData::<ObjectPointer>::update_previous_snapshot(Some(ss_id)),
@@ -104,7 +102,7 @@ impl Database {
         }
 
         self.root_tree.insert(
-            ss_key(ds.id(), name),
+            root_tree_msg::ss_key(ds.id(), name),
             DefaultMessageAction::delete_msg(),
             StoragePreference::NONE,
         )?;
@@ -118,28 +116,28 @@ impl Database {
 
         let max_key = if let Some(next_ss_id) = self.next_snapshot_id(ds.id(), ss_id)? {
             self.root_tree.insert(
-                &ss_data_key(ds.id(), next_ss_id) as &[_],
+                &root_tree_msg::ss_data_key(ds.id(), next_ss_id) as &[_],
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_snapshot = dead_list_max_key(ds.id(), next_ss_id);
+            max_key_snapshot = root_tree_msg::dead_list_max_key(ds.id(), next_ss_id);
             &max_key_snapshot as &[_]
         } else {
             self.root_tree.insert(
-                &ds_data_key(ds.id()) as &[_],
+                &root_tree_msg::ds_data_key(ds.id()) as &[_],
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_dataset = dead_list_max_key_ds(ds.id());
+            max_key_dataset = root_tree_msg::dead_list_max_key_ds(ds.id());
             &max_key_dataset as &[_]
         };
-        let min_key = &dead_list_min_key(ds.id(), ss_id.next()) as &[_];
+        let min_key = &root_tree_msg::dead_list_min_key(ds.id(), ss_id.next()) as &[_];
 
         for result in self.root_tree.range(min_key..max_key)? {
             let (key, value) = result?;
             let entry = DeadListData::unpack(&value)?;
             if previous_ss_id < Some(entry.birth) {
-                let offset = offset_from_dead_list_key(&key);
+                let offset = root_tree_msg::offset_from_dead_list_key(&key);
                 self.root_tree.dmu().handler().update_allocation_bitmap(
                     offset,
                     entry.size,
@@ -158,8 +156,8 @@ impl Database {
     }
 
     fn next_snapshot_id(&self, ds_id: DatasetId, ss_id: Generation) -> Result<Option<Generation>> {
-        let low = &ss_data_key(ds_id, ss_id.next()) as &[_];
-        let high = &ss_data_key_max(ds_id) as &[_];
+        let low = &root_tree_msg::ss_data_key(ds_id, ss_id.next()) as &[_];
+        let high = &root_tree_msg::ss_data_key_max(ds_id) as &[_];
         Ok(
             if let Some(result) = self.root_tree.range(low..high)?.next() {
                 let (key, _) = result?;
