@@ -42,6 +42,7 @@ use std::{
 mod dataset;
 pub(crate) mod errors;
 mod handler;
+mod root_tree_msg;
 mod snapshot;
 mod storage_info;
 mod superblock;
@@ -490,7 +491,7 @@ impl Database {
         let ptr = ds_tree.erased_sync()?;
         trace!("sync_ds: erased_sync");
         let msg = DatasetData::update_ptr(ptr)?;
-        let key = &ds_data_key(ds_id) as &[_];
+        let key = &root_tree_msg::ds_data_key(ds_id) as &[_];
         self.root_tree.insert(key, msg, StoragePreference::NONE)?;
         Ok(())
     }
@@ -600,75 +601,11 @@ impl Database {
     }
 }
 
-fn ss_key(ds_id: DatasetId, name: &[u8]) -> Vec<u8> {
-    let mut key = Vec::with_capacity(1 + 8 + name.len());
-    key.push(3);
-    key.extend_from_slice(&ds_id.pack());
-    key.extend_from_slice(name);
-    key
-}
-
-fn ss_data_key(ds_id: DatasetId, ss_id: Generation) -> [u8; 17] {
-    let mut key = [0; 17];
-    key[0] = 4;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key[9..].copy_from_slice(&ss_id.pack());
-    key
-}
-
-fn ss_data_key_max(mut ds_id: DatasetId) -> [u8; 9] {
-    ds_id.0 += 1;
-    let mut key = [0; 9];
-    key[0] = 4;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key
-}
-
-fn dead_list_min_key(ds_id: DatasetId, ss_id: Generation) -> [u8; 17] {
-    let mut key = [0; 17];
-    key[0] = 5;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key[9..].copy_from_slice(&ss_id.pack());
-    key
-}
-
-fn dead_list_max_key(ds_id: DatasetId, ss_id: Generation) -> [u8; 17] {
-    dead_list_min_key(ds_id, ss_id.next())
-}
-
-fn dead_list_max_key_ds(mut ds_id: DatasetId) -> [u8; 9] {
-    ds_id.0 += 1;
-    let mut key = [0; 9];
-    key[0] = 5;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key
-}
-
-fn dead_list_key(ds_id: DatasetId, cur_gen: Generation, offset: DiskOffset) -> [u8; 25] {
-    let mut key = [0; 25];
-    key[0] = 5;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key[9..17].copy_from_slice(&cur_gen.pack());
-    BigEndian::write_u64(&mut key[17..], offset.as_u64());
-    key
-}
-
-fn offset_from_dead_list_key(key: &[u8]) -> DiskOffset {
-    DiskOffset::from_u64(BigEndian::read_u64(&key[17..]))
-}
-
-fn ds_data_key(id: DatasetId) -> [u8; 9] {
-    let mut key = [0; 9];
-    key[0] = 2;
-    key[1..].copy_from_slice(&id.pack());
-    key
-}
-
 fn fetch_ds_data<T>(root_tree: &T, id: DatasetId) -> Result<DatasetData<ObjectPointer>>
 where
     T: TreeLayer<DefaultMessageAction>,
 {
-    let key = &ds_data_key(id) as &[_];
+    let key = &root_tree_msg::ds_data_key(id) as &[_];
     let data = root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
     DatasetData::unpack(&data)
 }
@@ -681,7 +618,7 @@ fn fetch_ss_data<T>(
 where
     T: TreeLayer<DefaultMessageAction>,
 {
-    let key = ss_data_key(ds_id, ss_id);
+    let key = root_tree_msg::ss_data_key(ds_id, ss_id);
     let data = root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
     DatasetData::unpack(&data)
 }
