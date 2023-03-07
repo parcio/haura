@@ -163,6 +163,7 @@ static enum fio_q_status fio_haura_queue(struct thread_data *td,
    * if we could queue no more at this point (you'd have to
    * define ->commit() to handle that.
    */
+  betree_sync_db(global_data.db, &error);
   return FIO_Q_COMPLETED;
 }
 
@@ -300,6 +301,12 @@ static int fio_haura_prepopulate_file(struct thread_data *td,
     fprintf(stderr,
             "Could not retruncate file to provide enough storage for Haura.");
   }
+
+  if (td_write(td)) {
+    // If it is write only we can omit this step
+    goto wrapup;
+  }
+
   unsigned long long total_written = 0;
   void *buf = malloc(block_size);
 
@@ -340,6 +347,7 @@ static int fio_haura_prepopulate_file(struct thread_data *td,
     exit(1);
   }
 
+wrapup:
   /* fio wants this set, soo... */
   file->fd = open(file->file_name, 0, 0644);
   return 0;
