@@ -343,6 +343,12 @@ pub unsafe extern "C" fn betree_configuration_set_direct(cfg: *mut cfg_t, direct
     }
 }
 
+/// Sets the storage pools disk-dependent iodepth.
+#[no_mangle]
+pub unsafe extern "C" fn betree_configuration_set_iodepth(cfg: *mut cfg_t, iodepth: u32) {
+    (*cfg).0.storage.queue_depth_factor = iodepth
+}
+
 /// Reconfigures the given configuration to use a single tier with the given path as the sole backing disk.
 #[no_mangle]
 pub unsafe extern "C" fn betree_configuration_set_disks(

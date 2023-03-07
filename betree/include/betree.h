@@ -196,6 +196,11 @@ void betree_configuration_set_disks(struct cfg_t *cfg,
                                     uintptr_t num_disks);
 
 /**
+ * Sets the storage pools disk-dependent iodepth.
+ */
+void betree_configuration_set_iodepth(struct cfg_t *cfg, uint32_t iodepth);
+
+/**
  * Create a database given by a configuration.
  *
  * On success, return a `db_t` which has to be freed with `betree_close_db`.
