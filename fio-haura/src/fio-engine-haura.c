@@ -73,6 +73,8 @@ static int bail(struct err_t *error) {
 
 static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
   betree_configuration_set_direct(cfg, td->o.odirect);
+  // Asynchronous read can still benefit from this setting.
+  betree_configuration_set_iodepth(cfg, td->o.iodepth);
   if (((struct fio_haura_options *)td->eo)->respect_fio_files) {
     char **paths;
 
