@@ -1,7 +1,7 @@
 use super::{
     dataset::Dataset, errors::*, fetch_ds_data, fetch_ss_data, root_tree_msg,
-    root_tree_msg::Deadlist, Database, DatasetData, DatasetId, DatasetTree, DeadListData,
-    Generation, ObjectPointer,
+    root_tree_msg::deadlist, root_tree_msg::snapshot, Database, DatasetData, DatasetId,
+    DatasetTree, DeadListData, Generation, ObjectPointer, RootDmu
 };
 use crate::{
     allocator::Action,
@@ -41,7 +41,7 @@ impl Database {
     }
 
     fn lookup_snapshot_id(&self, ds_id: DatasetId, name: &[u8]) -> Result<Generation> {
-        let key = root_tree_msg::ss_key(ds_id, name);
+        let key = snapshot::key(ds_id, name);
         let data = self.root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
         Ok(Generation::unpack(&data))
     }
@@ -60,7 +60,7 @@ impl Database {
 
         let data = fetch_ds_data(&self.root_tree, ds.id())?;
         let ss_id = data.ptr.generation();
-        let key = &root_tree_msg::ss_data_key(ds.id(), ss_id) as &[_];
+        let key = &snapshot::data_key(ds.id(), ss_id) as &[_];
         let data = data.pack()?;
         self.root_tree.insert(
             key,
@@ -103,7 +103,7 @@ impl Database {
         }
 
         self.root_tree.insert(
-            root_tree_msg::ss_key(ds.id(), name),
+            snapshot::key(ds.id(), name),
             DefaultMessageAction::delete_msg(),
             StoragePreference::NONE,
         )?;
@@ -117,11 +117,11 @@ impl Database {
 
         let max_key = if let Some(next_ss_id) = self.next_snapshot_id(ds.id(), ss_id)? {
             self.root_tree.insert(
-                &root_tree_msg::ss_data_key(ds.id(), next_ss_id) as &[_],
+                &snapshot::data_key(ds.id(), next_ss_id) as &[_],
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_snapshot = Deadlist::max_key(ds.id(), next_ss_id);
+            max_key_snapshot = deadlist::max_key(ds.id(), next_ss_id);
             &max_key_snapshot as &[_]
         } else {
             self.root_tree.insert(
@@ -129,16 +129,16 @@ impl Database {
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_dataset = Deadlist::max_key_ds(ds.id());
+            max_key_dataset = deadlist::max_key_ds(ds.id());
             &max_key_dataset as &[_]
         };
-        let min_key = &Deadlist::min_key(ds.id(), ss_id.next()) as &[_];
+        let min_key = &deadlist::min_key(ds.id(), ss_id.next()) as &[_];
 
         for result in self.root_tree.range(min_key..max_key)? {
             let (key, value) = result?;
             let entry = DeadListData::unpack(&value)?;
             if previous_ss_id < Some(entry.birth) {
-                let offset = Deadlist::offset_from_key(&key);
+                let offset = deadlist::offset_from_key(&key);
                 self.root_tree.dmu().handler().update_allocation_bitmap(
                     offset,
                     entry.size,
@@ -157,8 +157,8 @@ impl Database {
     }
 
     fn next_snapshot_id(&self, ds_id: DatasetId, ss_id: Generation) -> Result<Option<Generation>> {
-        let low = &root_tree_msg::ss_data_key(ds_id, ss_id.next()) as &[_];
-        let high = &root_tree_msg::ss_data_key_max(ds_id) as &[_];
+        let low = &snapshot::data_key(ds_id, ss_id.next()) as &[_];
+        let high = &snapshot::data_key_max(ds_id) as &[_];
         Ok(
             if let Some(result) = self.root_tree.range(low..high)?.next() {
                 let (key, _) = result?;

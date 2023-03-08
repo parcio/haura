@@ -4,10 +4,7 @@
 //! To add new messages define an additional prefix and describe the purpose of
 //! it here.
 
-use crate::storage_pool::DiskOffset;
-use byteorder::{BigEndian, ByteOrder};
-
-use super::{DatasetId, Generation};
+use super::DatasetId;
 
 pub(super) const DATASET_ID_COUNTER: u8 = 0;
 pub(super) const DATASET_NAME_TO_ID: u8 = 1;
@@ -36,28 +33,40 @@ pub(super) fn ds_data_key(id: DatasetId) -> [u8; 9] {
 
 // SNAPSHOTS
 
-pub(super) fn ss_key(ds_id: DatasetId, name: &[u8]) -> Vec<u8> {
-    let mut key = Vec::with_capacity(1 + 8 + name.len());
-    key.push(SNAPSHOT_DS_ID_AND_NAME_TO_ID);
-    key.extend_from_slice(&ds_id.pack());
-    key.extend_from_slice(name);
-    key
-}
+pub(super) mod snapshot {
+    use crate::database::{DatasetId, Generation};
 
-pub(super) fn ss_data_key(ds_id: DatasetId, ss_id: Generation) -> [u8; 17] {
-    let mut key = [0; 17];
-    key[0] = SNAPSHOT_DATA;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key[9..].copy_from_slice(&ss_id.pack());
-    key
-}
+    use super::{SNAPSHOT_DATA, SNAPSHOT_DS_ID_AND_NAME_TO_ID};
 
-pub(super) fn ss_data_key_max(mut ds_id: DatasetId) -> [u8; 9] {
-    ds_id.0 += 1;
-    let mut key = [0; 9];
-    key[0] = SNAPSHOT_DATA;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key
+    const DS_ID_OFFSET: usize = 1;
+    const SS_ID_OFFSET: usize = 9;
+    const FULL: usize = 17;
+
+    // Full Key indicating a snapshot name to snapshot id mapping.
+    pub fn key(ds_id: DatasetId, name: &[u8]) -> Vec<u8> {
+        let mut key = Vec::with_capacity(FULL + name.len());
+        key.push(SNAPSHOT_DS_ID_AND_NAME_TO_ID);
+        key.extend_from_slice(&ds_id.pack());
+        key.extend_from_slice(name);
+        key
+    }
+
+    pub fn data_key(ds_id: DatasetId, ss_id: Generation) -> [u8; FULL] {
+        let mut key = [0; FULL];
+        key[0] = SNAPSHOT_DATA;
+        key[DS_ID_OFFSET..SS_ID_OFFSET].copy_from_slice(&ds_id.pack());
+        key[SS_ID_OFFSET..].copy_from_slice(&ss_id.pack());
+        key
+    }
+
+    // Partial Key
+    pub fn data_key_max(mut ds_id: DatasetId) -> [u8; SS_ID_OFFSET] {
+        ds_id.0 += 1;
+        let mut key = [0; SS_ID_OFFSET];
+        key[0] = SNAPSHOT_DATA;
+        key[DS_ID_OFFSET..SS_ID_OFFSET].copy_from_slice(&ds_id.pack());
+        key
+    }
 }
 
 // DEADLIST - snapshot only objects
