@@ -10,7 +10,6 @@ pub struct DiskOffset(u64);
 const MASK_STORAGE_CLASS: u64 = ((1 << 2) - 1) << (10 + 52);
 const MASK_DISK_ID: u64 = ((1 << 10) - 1) << 52;
 const MASK_OFFSET: u64 = (1 << 52) - 1;
-
 const MASK_CLASS_DISK_ID_COMBINED: u64 = ((1 << 12) - 1) << 52;
 
 impl DiskOffset {
@@ -48,6 +47,12 @@ impl DiskOffset {
     /// Constructs a disk offset from the given `u64`.
     pub fn from_u64(x: u64) -> Self {
         DiskOffset(x)
+    }
+
+    // Glue together a class identifier with a class depdendent disk_id.
+    // TODO: Provide typization for this?
+    pub fn construct_disk_id(class: u8, disk_id: u16) -> u16 {
+        ((class as u16) << 10) | disk_id
     }
 }
 

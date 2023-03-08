@@ -49,7 +49,7 @@ pub struct Handler<OR: ObjectReference> {
     pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
-    pub(crate) free_space: HashMap<(u8, u16), AtomicStorageInfo>,
+    pub(crate) free_space: HashMap<u16, AtomicStorageInfo>,
     pub(crate) free_space_tier: Vec<AtomicStorageInfo>,
     pub(crate) delayed_messages: Mutex<Vec<(Box<[u8]>, SlicedCowBytes)>>,
     pub(crate) last_snapshot_generation: RwLock<HashMap<DatasetId, Generation>>,
@@ -118,7 +118,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         match action {
             Action::Deallocate => {
                 self.free_space
-                    .get(&(offset.storage_class(), offset.disk_id()))
+                    .get(&disk_key)
                     .expect("Could not find disk id in storage class")
                     .free
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
@@ -128,7 +128,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             }
             Action::Allocate => {
                 self.free_space
-                    .get(&(offset.storage_class(), offset.disk_id()))
+                    .get(&disk_key)
                     .expect("Could not find disk id in storage class")
                     .free
                     .fetch_sub(size.as_u64(), Ordering::Relaxed);
@@ -141,14 +141,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             .insert(&key[..], msg, StoragePreference::NONE)?;
         self.current_root_tree(dmu).insert(
             &space_accounting::key(disk_key)[..],
-            update_storage_info(
-                &self
-                    .free_space
-                    .get(&(offset.storage_class(), offset.disk_id()))
-                    .unwrap()
-                    .into(),
-            )
-            .unwrap(),
+            update_storage_info(&self.free_space.get(&disk_key).unwrap().into()).unwrap(),
             StoragePreference::NONE,
         )?;
         Ok(())
@@ -194,10 +187,8 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         Ok(allocator)
     }
 
-    pub fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo> {
-        self.free_space
-            .get(&(class, disk_id))
-            .map(|elem| elem.into())
+    pub fn get_free_space(&self, disk_id: u16) -> Option<StorageInfo> {
+        self.free_space.get(&disk_id).map(|elem| elem.into())
     }
 
     pub fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo> {
@@ -233,7 +224,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             let msg = update_allocation_bitmap_msg(offset, size, Action::Deallocate);
             // NOTE: Update free size on both positions
             self.free_space
-                .get(&(offset.storage_class(), offset.disk_id()))
+                .get(&offset.class_disk_id())
                 .expect("Could not fetch disk id from storage class")
                 .free
                 .fetch_add(size.as_u64(), Ordering::Relaxed);
@@ -244,14 +235,8 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             delayed_msgs.push((key.into(), msg));
             delayed_msgs.push((
                 Box::new(space_accounting::key(offset.class_disk_id())),
-                update_storage_info(
-                    &self
-                        .free_space
-                        .get(&(offset.storage_class(), offset.disk_id()))
-                        .unwrap()
-                        .into(),
-                )
-                .unwrap(),
+                update_storage_info(&self.free_space.get(&offset.class_disk_id()).unwrap().into())
+                    .unwrap(),
             ));
             CopyOnWriteEvent::Removed
         } else {

@@ -518,7 +518,7 @@ where
                         class,
                         disk_id,
                         self.handler
-                            .get_free_space(class, disk_id)
+                            .get_free_space(DiskOffset::construct_disk_id(class, disk_id))
                             .expect("We can be sure that this disk id exists.")
                             .free,
                     )

@@ -156,7 +156,6 @@ where
     where
         E: Deserializer<'de>,
     {
-        debug!("Deserializing");
         ObjectPointer::<D>::deserialize(deserializer).map(ObjRef::Incomplete)
     }
 }
