@@ -62,35 +62,57 @@ pub(super) fn ss_data_key_max(mut ds_id: DatasetId) -> [u8; 9] {
 
 // DEADLIST - snapshot only objects
 
-pub(super) fn dead_list_min_key(ds_id: DatasetId, ss_id: Generation) -> [u8; 17] {
-    let mut key = [0; 17];
-    key[0] = 5;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key[9..].copy_from_slice(&ss_id.pack());
-    key
-}
+pub(super) mod deadlist {
+    //! The required definitions and helpers to handle slices representing a
+    //! deadlist object key.  Safe handling is only guarantee when using these
+    //! provided functions, byte-wise handling is discouraged.
 
-pub(super) fn dead_list_max_key(ds_id: DatasetId, ss_id: Generation) -> [u8; 17] {
-    dead_list_min_key(ds_id, ss_id.next())
-}
+    use byteorder::{BigEndian, ByteOrder};
 
-pub(super) fn dead_list_max_key_ds(mut ds_id: DatasetId) -> [u8; 9] {
-    ds_id.0 += 1;
-    let mut key = [0; 9];
-    key[0] = 5;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key
-}
+    use crate::{
+        database::{DatasetId, Generation},
+        storage_pool::DiskOffset,
+    };
 
-pub(super) fn dead_list_key(ds_id: DatasetId, cur_gen: Generation, offset: DiskOffset) -> [u8; 25] {
-    let mut key = [0; 25];
-    key[0] = DEADLIST;
-    key[1..9].copy_from_slice(&ds_id.pack());
-    key[9..17].copy_from_slice(&cur_gen.pack());
-    BigEndian::write_u64(&mut key[17..], offset.as_u64());
-    key
-}
+    use super::DEADLIST;
+    const DS_ID_OFFSET: usize = 1;
+    const SS_ID_OFFSET: usize = 9;
+    const DO_OFFSET: usize = 17;
+    const FULL: usize = 25;
 
-pub(super) fn offset_from_dead_list_key(key: &[u8]) -> DiskOffset {
-    DiskOffset::from_u64(BigEndian::read_u64(&key[17..]))
+    // Partially Key filled up to the snapshot id
+    pub fn min_key(ds_id: DatasetId, ss_id: Generation) -> [u8; DO_OFFSET] {
+        let mut key = [0; DO_OFFSET];
+        key[0] = DEADLIST;
+        key[DS_ID_OFFSET..SS_ID_OFFSET].copy_from_slice(&ds_id.pack());
+        key[SS_ID_OFFSET..].copy_from_slice(&ss_id.pack());
+        key
+    }
+
+    // Partially Key filled up to the snapshot id
+    pub fn max_key(ds_id: DatasetId, ss_id: Generation) -> [u8; DO_OFFSET] {
+        min_key(ds_id, ss_id.next())
+    }
+
+    // Partially Key filled up to the dataset id
+    pub fn max_key_ds(mut ds_id: DatasetId) -> [u8; SS_ID_OFFSET] {
+        ds_id.0 += 1;
+        let mut key = [0; SS_ID_OFFSET];
+        key[0] = DEADLIST;
+        key[DS_ID_OFFSET..SS_ID_OFFSET].copy_from_slice(&ds_id.pack());
+        key
+    }
+
+    pub fn key(ds_id: DatasetId, cur_gen: Generation, offset: DiskOffset) -> [u8; FULL] {
+        let mut key = [0; FULL];
+        key[0] = DEADLIST;
+        key[DS_ID_OFFSET..SS_ID_OFFSET].copy_from_slice(&ds_id.pack());
+        key[SS_ID_OFFSET..DO_OFFSET].copy_from_slice(&cur_gen.pack());
+        BigEndian::write_u64(&mut key[DO_OFFSET..], offset.as_u64());
+        key
+    }
+
+    pub fn offset_from_key(key: &[u8]) -> DiskOffset {
+        DiskOffset::from_u64(BigEndian::read_u64(&key[DO_OFFSET..]))
+    }
 }
