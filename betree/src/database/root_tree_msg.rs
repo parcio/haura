@@ -15,6 +15,7 @@ pub(super) const DATASET_DATA: u8 = 2;
 pub(super) const SNAPSHOT_DS_ID_AND_NAME_TO_ID: u8 = 3;
 pub(super) const SNAPSHOT_DATA: u8 = 4;
 pub(super) const DEADLIST: u8 = 5;
+pub(super) const DISK_SPACE: u8 = 6;
 
 // DATASETS
 
@@ -170,5 +171,35 @@ pub(super) mod deadlist {
 
     pub fn offset_from_key(key: &[u8]) -> DiskOffset {
         DiskOffset::from_u64(BigEndian::read_u64(&key[DO_OFFSET..]))
+    }
+}
+
+// SPACE ACCOUNTING
+
+pub(super) mod space_accounting {
+    //! Each space accounting entry is characterized by the 1 bit prefix
+    //! followed by a 16 bit disk id.  The tier summarization is for simplicity
+    //! encoded in the superblock instead.
+
+    use byteorder::{BigEndian, ByteOrder};
+
+    use super::DISK_SPACE;
+
+    const FULL: usize = 3;
+    const D_ID_OFFSET: usize = 1;
+
+    pub fn key(disk_id: u16) -> [u8; FULL] {
+        let mut key = [0u8; FULL];
+        key[0] = DISK_SPACE;
+        BigEndian::write_u16(&mut key[D_ID_OFFSET..], disk_id);
+        key
+    }
+
+    pub fn min_key() -> [u8; 1] {
+        [DISK_SPACE]
+    }
+
+    pub fn max_key() -> [u8; 1] {
+        [DISK_SPACE + 1]
     }
 }
