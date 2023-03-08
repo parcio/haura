@@ -4,7 +4,12 @@
 //! To add new messages define an additional prefix and describe the purpose of
 //! it here.
 
+// NOTE: Dataset counter and segment is doubly occupied, as only a single
+// counter may ever exist and all segment entries have keys of length 9 this is
+// fine.
 pub(super) const DATASET_ID_COUNTER: u8 = 0;
+pub(super) const SEGMENT: u8 = 0;
+
 pub(super) const DATASET_NAME_TO_ID: u8 = 1;
 pub(super) const DATASET_DATA: u8 = 2;
 pub(super) const SNAPSHOT_DS_ID_AND_NAME_TO_ID: u8 = 3;
@@ -47,6 +52,26 @@ pub(super) mod dataset {
     // Above-Upper End of dataset data keys for the use in non-inclusive range queries.
     pub fn data_key_max() -> [u8; 1] {
         [DATASET_DATA + 1]
+    }
+}
+
+// SEGMENTS
+
+pub(super) mod segment {
+    use byteorder::{BigEndian, ByteOrder};
+
+    use crate::allocator::SegmentId;
+
+    use super::SEGMENT;
+
+    const S_ID_OFFSET: usize = 1;
+    const FULL: usize = 9;
+
+    pub fn id_to_key(segment_id: SegmentId) -> [u8; FULL] {
+        let mut key = [0; FULL];
+        key[0] = SEGMENT;
+        BigEndian::write_u64(&mut key[S_ID_OFFSET..], segment_id.0);
+        key
     }
 }
 
