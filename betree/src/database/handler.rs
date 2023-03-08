@@ -1,5 +1,5 @@
 use super::{
-    errors::*, root_tree_msg::deadlist, AtomicStorageInfo, DatasetId, DeadListData, Generation,
+    errors::*, root_tree_msg::{deadlist, segment}, AtomicStorageInfo, DatasetId, DeadListData, Generation,
     Object, ObjectPointer, ObjectRef, StorageInfo, TreeInner,
 };
 use crate::{
@@ -12,7 +12,6 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
-use byteorder::{BigEndian, ByteOrder};
 use owning_ref::OwningRef;
 use parking_lot::{Mutex, RwLock};
 use seqlock::SeqLock;
@@ -87,12 +86,6 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     }
 }
 
-pub(super) fn segment_id_to_key(segment_id: SegmentId) -> [u8; 9] {
-    let mut key = [0; 9];
-    BigEndian::write_u64(&mut key[1..], segment_id.0);
-    key
-}
-
 impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     pub fn current_generation(&self) -> Generation {
         self.current_generation.read()
@@ -109,7 +102,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         self.allocations.fetch_add(1, Ordering::Release);
-        let key = segment_id_to_key(SegmentId::get(offset));
+        let key = segment::id_to_key(SegmentId::get(offset));
         let msg = update_allocation_bitmap_msg(offset, size, action);
         // NOTE: We perform double the amount of atomics here than necessary, but we do this for now to avoid reiteration
         match action {
@@ -146,7 +139,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         let now = std::time::Instant::now();
         let mut bitmap = [0u8; SEGMENT_SIZE_BYTES];
 
-        let key = segment_id_to_key(id);
+        let key = segment::id_to_key(id);
         let segment = self.current_root_tree(dmu).get(&key[..])?;
         log::info!(
             "fetched {:?} bitmap elements",
@@ -209,7 +202,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             < Some(generation)
         {
             // Deallocate
-            let key = &segment_id_to_key(SegmentId::get(offset)) as &[_];
+            let key = &segment::id_to_key(SegmentId::get(offset)) as &[_];
             log::debug!(
                 "Marked a block range {{ offset: {:?}, size: {:?} }} for deallocation",
                 offset,
