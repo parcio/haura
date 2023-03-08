@@ -48,6 +48,7 @@ mod storage_info;
 mod superblock;
 mod sync_timer;
 
+use root_tree_msg::snapshot as snapshot_key;
 use storage_info::AtomicStorageInfo;
 pub use storage_info::StorageInfo;
 
@@ -618,7 +619,7 @@ fn fetch_ss_data<T>(
 where
     T: TreeLayer<DefaultMessageAction>,
 {
-    let key = root_tree_msg::ss_data_key(ds_id, ss_id);
+    let key = snapshot_key::data_key(ds_id, ss_id);
     let data = root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
     DatasetData::unpack(&data)
 }
