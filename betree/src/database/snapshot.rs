@@ -1,6 +1,7 @@
 use super::{
-    dataset::Dataset, errors::*, fetch_ds_data, fetch_ss_data, root_tree_msg, Database,
-    DatasetData, DatasetId, DatasetTree, DeadListData, Generation, ObjectPointer, RootDmu,
+    dataset::Dataset, errors::*, fetch_ds_data, fetch_ss_data, root_tree_msg,
+    root_tree_msg::Deadlist, Database, DatasetData, DatasetId, DatasetTree, DeadListData,
+    Generation, ObjectPointer,
 };
 use crate::{
     allocator::Action,
@@ -120,7 +121,7 @@ impl Database {
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_snapshot = root_tree_msg::dead_list_max_key(ds.id(), next_ss_id);
+            max_key_snapshot = Deadlist::max_key(ds.id(), next_ss_id);
             &max_key_snapshot as &[_]
         } else {
             self.root_tree.insert(
@@ -128,16 +129,16 @@ impl Database {
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
-            max_key_dataset = root_tree_msg::dead_list_max_key_ds(ds.id());
+            max_key_dataset = Deadlist::max_key_ds(ds.id());
             &max_key_dataset as &[_]
         };
-        let min_key = &root_tree_msg::dead_list_min_key(ds.id(), ss_id.next()) as &[_];
+        let min_key = &Deadlist::min_key(ds.id(), ss_id.next()) as &[_];
 
         for result in self.root_tree.range(min_key..max_key)? {
             let (key, value) = result?;
             let entry = DeadListData::unpack(&value)?;
             if previous_ss_id < Some(entry.birth) {
-                let offset = root_tree_msg::offset_from_dead_list_key(&key);
+                let offset = Deadlist::offset_from_key(&key);
                 self.root_tree.dmu().handler().update_allocation_bitmap(
                     offset,
                     entry.size,

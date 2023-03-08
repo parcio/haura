@@ -1,6 +1,6 @@
 use super::{
-    errors::*, root_tree_msg, AtomicStorageInfo, DatasetId, DeadListData, Generation, Object,
-    ObjectPointer, ObjectRef, StorageInfo, TreeInner,
+    errors::*, root_tree_msg::deadlist, AtomicStorageInfo, DatasetId, DeadListData, Generation,
+    Object, ObjectPointer, ObjectRef, StorageInfo, TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
@@ -229,9 +229,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             CopyOnWriteEvent::Removed
         } else {
             // Add to dead list
-            let key =
-                &root_tree_msg::dead_list_key(dataset_id, self.current_generation.read(), offset)
-                    as &[_];
+            let key = &deadlist::key(dataset_id, self.current_generation.read(), offset) as &[_];
 
             let data = DeadListData {
                 birth: generation,
