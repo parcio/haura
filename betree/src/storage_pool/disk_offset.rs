@@ -11,6 +11,8 @@ const MASK_STORAGE_CLASS: u64 = ((1 << 2) - 1) << (10 + 52);
 const MASK_DISK_ID: u64 = ((1 << 10) - 1) << 52;
 const MASK_OFFSET: u64 = (1 << 52) - 1;
 
+const MASK_CLASS_DISK_ID_COMBINED: u64 = ((1 << 12) - 1) << 52;
+
 impl DiskOffset {
     /// Constructs a new `DiskOffset`.
     /// The given `block_offset` may not be larger than (1 << 52) - 1.
@@ -30,6 +32,10 @@ impl DiskOffset {
     /// Returns the 10-bit disk ID.
     pub fn disk_id(&self) -> u16 {
         ((self.0 & MASK_DISK_ID) >> 52) as u16
+    }
+    /// Returns the 12-bit storage class with attached disk ID.
+    pub fn class_disk_id(&self) -> u16 {
+        ((self.0 & MASK_CLASS_DISK_ID_COMBINED) >> 52) as u16
     }
     /// Returns the block offset.
     pub fn block_offset(&self) -> Block<u64> {

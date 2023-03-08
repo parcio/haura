@@ -1,6 +1,8 @@
 use super::{
-    errors::*, root_tree_msg::{deadlist, segment}, AtomicStorageInfo, DatasetId, DeadListData, Generation,
-    Object, ObjectPointer, ObjectRef, StorageInfo, TreeInner,
+    errors::*,
+    root_tree_msg::{deadlist, segment, space_accounting},
+    AtomicStorageInfo, DatasetId, DeadListData, Generation, Object, ObjectPointer, ObjectRef,
+    StorageInfo, TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
@@ -31,6 +33,13 @@ pub fn update_allocation_bitmap_msg(
 ) -> SlicedCowBytes {
     let segment_offset = SegmentId::get_block_offset(offset);
     DefaultMessageAction::upsert_bits_msg(segment_offset, size.0, action.as_bool())
+}
+
+pub fn update_storage_info(info: &StorageInfo) -> Option<SlicedCowBytes> {
+    bincode::serialize(info)
+        .ok()
+        .as_ref()
+        .map(|bytes| DefaultMessageAction::upsert_msg(0, bytes))
 }
 
 /// The database handler, holding management data for interactions
@@ -103,6 +112,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
     {
         self.allocations.fetch_add(1, Ordering::Release);
         let key = segment::id_to_key(SegmentId::get(offset));
+        let disk_key = offset.class_disk_id();
         let msg = update_allocation_bitmap_msg(offset, size, action);
         // NOTE: We perform double the amount of atomics here than necessary, but we do this for now to avoid reiteration
         match action {
@@ -129,6 +139,18 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         };
         self.current_root_tree(dmu)
             .insert(&key[..], msg, StoragePreference::NONE)?;
+        self.current_root_tree(dmu).insert(
+            &space_accounting::key(disk_key)[..],
+            update_storage_info(
+                &self
+                    .free_space
+                    .get(&(offset.storage_class(), offset.disk_id()))
+                    .unwrap()
+                    .into(),
+            )
+            .unwrap(),
+            StoragePreference::NONE,
+        )?;
         Ok(())
     }
 
@@ -218,7 +240,19 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             self.free_space_tier[offset.storage_class() as usize]
                 .free
                 .fetch_add(size.as_u64(), Ordering::Relaxed);
-            self.delayed_messages.lock().push((key.into(), msg));
+            let mut delayed_msgs = self.delayed_messages.lock();
+            delayed_msgs.push((key.into(), msg));
+            delayed_msgs.push((
+                Box::new(space_accounting::key(offset.class_disk_id())),
+                update_storage_info(
+                    &self
+                        .free_space
+                        .get(&(offset.storage_class(), offset.disk_id()))
+                        .unwrap()
+                        .into(),
+                )
+                .unwrap(),
+            ));
             CopyOnWriteEvent::Removed
         } else {
             // Add to dead list
