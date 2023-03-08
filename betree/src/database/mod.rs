@@ -48,7 +48,7 @@ mod storage_info;
 mod superblock;
 mod sync_timer;
 
-use root_tree_msg::snapshot as snapshot_key;
+use root_tree_msg::{dataset as dataset_key, snapshot as snapshot_key};
 use storage_info::AtomicStorageInfo;
 pub use storage_info::StorageInfo;
 
@@ -492,7 +492,7 @@ impl Database {
         let ptr = ds_tree.erased_sync()?;
         trace!("sync_ds: erased_sync");
         let msg = DatasetData::update_ptr(ptr)?;
-        let key = &root_tree_msg::ds_data_key(ds_id) as &[_];
+        let key = &dataset_key::data_key(ds_id) as &[_];
         self.root_tree.insert(key, msg, StoragePreference::NONE)?;
         Ok(())
     }
@@ -606,7 +606,7 @@ fn fetch_ds_data<T>(root_tree: &T, id: DatasetId) -> Result<DatasetData<ObjectPo
 where
     T: TreeLayer<DefaultMessageAction>,
 {
-    let key = &root_tree_msg::ds_data_key(id) as &[_];
+    let key = &dataset_key::data_key(id) as &[_];
     let data = root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
     DatasetData::unpack(&data)
 }

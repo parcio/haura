@@ -1,4 +1,4 @@
-use super::root_tree_msg;
+use super::root_tree_msg::dataset;
 use super::{
     errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree, Generation,
     MessageTree, StorageInfo, RootDmu,
@@ -50,7 +50,7 @@ impl<Message> From<DatasetInner<Message>> for Dataset<Message> {
 
 impl Database {
     fn lookup_dataset_id(&self, name: &[u8]) -> Result<DatasetId> {
-        let key = root_tree_msg::ds_name_to_id(name);
+        let key = dataset::name_to_id(name);
         let data = self.root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
         Ok(DatasetId::unpack(&data))
     }
@@ -160,7 +160,7 @@ impl Database {
         );
         let ptr = tree.sync()?;
 
-        let key = &root_tree_msg::ds_data_key(ds_id) as &[_];
+        let key = &dataset::data_key(ds_id) as &[_];
         let data = DatasetData {
             ptr,
             previous_snapshot: None,
@@ -197,7 +197,7 @@ impl Database {
     }
 
     fn allocate_ds_id(&mut self) -> Result<DatasetId> {
-        let key = &root_tree_msg::ds_id_counter() as &[_];
+        let key = &dataset::id_counter() as &[_];
         let last_ds_id = self
             .root_tree
             .get(key)?
@@ -215,8 +215,8 @@ impl Database {
 
     /// Iterates over all data sets in the database.
     pub fn iter_datasets(&self) -> Result<impl Iterator<Item = Result<SlicedCowBytes>>> {
-        let low = &root_tree_msg::ds_data_key(DatasetId::default()) as &[_];
-        let high = &[root_tree_msg::DATASET_DATA + 1] as &[_];
+        let low = &dataset::data_key(DatasetId::default()) as &[_];
+        let high = &dataset::data_key_max() as &[_];
         Ok(self.root_tree.range(low..high)?.map(move |result| {
             let (b, _) = result?;
             let len = b.len() as u32;

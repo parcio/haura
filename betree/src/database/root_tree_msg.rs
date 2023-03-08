@@ -4,8 +4,6 @@
 //! To add new messages define an additional prefix and describe the purpose of
 //! it here.
 
-use super::DatasetId;
-
 pub(super) const DATASET_ID_COUNTER: u8 = 0;
 pub(super) const DATASET_NAME_TO_ID: u8 = 1;
 pub(super) const DATASET_DATA: u8 = 2;
@@ -13,27 +11,51 @@ pub(super) const SNAPSHOT_DS_ID_AND_NAME_TO_ID: u8 = 3;
 pub(super) const SNAPSHOT_DATA: u8 = 4;
 pub(super) const DEADLIST: u8 = 5;
 
-pub(super) fn ds_id_counter() -> [u8; 1] {
-    [DATASET_ID_COUNTER]
-}
+// DATASETS
 
-pub(super) fn ds_name_to_id(name: &[u8]) -> Vec<u8> {
-    let mut key = Vec::with_capacity(1 + name.len());
-    key.push(DATASET_NAME_TO_ID);
-    key.extend_from_slice(name);
-    key
-}
+pub(super) mod dataset {
+    //! The required definitions and helpers to handle slices representing a
+    //! dataset keys.  Safe handling is only guarantee when using these provided
+    //! functions, byte-wise handling is discouraged.
+    use crate::database::DatasetId;
 
-pub(super) fn ds_data_key(id: DatasetId) -> [u8; 9] {
-    let mut key = [0; 9];
-    key[0] = DATASET_DATA;
-    key[1..].copy_from_slice(&id.pack());
-    key
+    use super::{DATASET_DATA, DATASET_ID_COUNTER, DATASET_NAME_TO_ID};
+
+    const DS_ID_OFFSET: usize = 1;
+    const DATA_FULL: usize = 9;
+
+    pub fn id_counter() -> [u8; 1] {
+        [DATASET_ID_COUNTER]
+    }
+
+    // Full Key for the name to id mapping
+    pub fn name_to_id(name: &[u8]) -> Vec<u8> {
+        let mut key = Vec::with_capacity(1 + name.len());
+        key.push(DATASET_NAME_TO_ID);
+        key.extend_from_slice(name);
+        key
+    }
+
+    // Full Key for the id to data mapping
+    pub fn data_key(id: DatasetId) -> [u8; DATA_FULL] {
+        let mut key = [0; DATA_FULL];
+        key[0] = DATASET_DATA;
+        key[DS_ID_OFFSET..].copy_from_slice(&id.pack());
+        key
+    }
+
+    // Above-Upper End of dataset data keys for the use in non-inclusive range queries.
+    pub fn data_key_max() -> [u8; 1] {
+        [DATASET_DATA + 1]
+    }
 }
 
 // SNAPSHOTS
 
 pub(super) mod snapshot {
+    //! The required definitions and helpers to handle slices representing a
+    //! snapshot key.  Safe handling is only guarantee when using these provided
+    //! functions, byte-wise handling is discouraged.
     use crate::database::{DatasetId, Generation};
 
     use super::{SNAPSHOT_DATA, SNAPSHOT_DS_ID_AND_NAME_TO_ID};

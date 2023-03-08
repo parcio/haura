@@ -1,5 +1,5 @@
 use super::{
-    dataset::Dataset, errors::*, fetch_ds_data, fetch_ss_data, root_tree_msg,
+    dataset::Dataset, errors::*, fetch_ds_data, fetch_ss_data, root_tree_msg::dataset,
     root_tree_msg::deadlist, root_tree_msg::snapshot, Database, DatasetData, DatasetId,
     DatasetTree, DeadListData, Generation, ObjectPointer, RootDmu
 };
@@ -67,7 +67,7 @@ impl Database {
             DefaultMessageAction::insert_msg(&data),
             StoragePreference::NONE,
         )?;
-        let key = &root_tree_msg::ds_data_key(ds.id()) as &[_];
+        let key = &dataset::data_key(ds.id()) as &[_];
         self.root_tree.insert(
             key,
             DatasetData::<ObjectPointer>::update_previous_snapshot(Some(ss_id)),
@@ -125,7 +125,7 @@ impl Database {
             &max_key_snapshot as &[_]
         } else {
             self.root_tree.insert(
-                &root_tree_msg::ds_data_key(ds.id()) as &[_],
+                &dataset::data_key(ds.id()) as &[_],
                 update_previous_ss_msg,
                 StoragePreference::NONE,
             )?;
