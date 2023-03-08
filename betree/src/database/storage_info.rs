@@ -42,7 +42,7 @@ impl StorageInfo {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 /// Atomic version of [StorageInfo].
 pub(crate) struct AtomicStorageInfo {
     pub(crate) free: AtomicU64,

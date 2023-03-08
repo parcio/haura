@@ -48,7 +48,7 @@ mod storage_info;
 mod superblock;
 mod sync_timer;
 
-use root_tree_msg::{dataset as dataset_key, snapshot as snapshot_key};
+use root_tree_msg::{dataset as dataset_key, snapshot as snapshot_key, space_accounting};
 use storage_info::AtomicStorageInfo;
 pub use storage_info::StorageInfo;
 
@@ -183,20 +183,19 @@ impl DatabaseConfiguration {
     }
 
     pub fn new_handler(&self, spu: &RootSpu) -> DbHandler {
-        // TODO: Update the free sizes of each used vdev here.
-        // How do we recover this from the storage?
-        // FIXME: Ensure this is recovered properly from storage
         Handler {
             root_tree_inner: AtomicOption::new(),
             root_tree_snapshot: RwLock::new(None),
             current_generation: SeqLock::new(Generation(1)),
+            delayed_messages: Mutex::new(Vec::new()),
+            last_snapshot_generation: RwLock::new(HashMap::new()),
             free_space: HashMap::from_iter((0..spu.storage_class_count()).flat_map(|class| {
                 (0..spu.disk_count(class)).map(move |disk_id| {
                     let free = spu
                         .effective_free_size(class, disk_id, spu.size_in_blocks(class, disk_id))
                         .as_u64();
                     (
-                        (class, disk_id),
+                        DiskOffset::construct_disk_id(class, disk_id),
                         AtomicStorageInfo {
                             free: AtomicU64::new(free),
                             total: AtomicU64::new(free),
@@ -204,22 +203,9 @@ impl DatabaseConfiguration {
                     )
                 })
             })),
-            // FIXME: This can be done much nicer
-            free_space_tier: (0..spu.storage_class_count())
-                .map(|class| {
-                    let free = (0..spu.disk_count(class)).fold(0, |acc, disk_id| {
-                        acc + spu
-                            .effective_free_size(class, disk_id, spu.size_in_blocks(class, disk_id))
-                            .as_u64()
-                    });
-                    AtomicStorageInfo {
-                        free: AtomicU64::new(free),
-                        total: AtomicU64::new(free),
-                    }
-                })
+            free_space_tier: (0..NUM_STORAGE_CLASSES)
+                .map(|_| AtomicStorageInfo::default())
                 .collect_vec(),
-            delayed_messages: Mutex::new(Vec::new()),
-            last_snapshot_generation: RwLock::new(HashMap::new()),
             allocations: AtomicU64::new(0),
             old_root_allocation: SeqLock::new(None),
         }
@@ -301,6 +287,27 @@ impl DatabaseConfiguration {
                 .handler()
                 .root_tree_inner
                 .set(Arc::clone(tree.inner()));
+
+            // Iterate over disk space usage
+            for (disk_id, space) in tree
+                .range(&space_accounting::min_key()[..]..&space_accounting::max_key()[..])?
+                .filter_map(|res| res.ok())
+            {
+                let space_info = tree
+                    .dmu()
+                    .handler()
+                    .free_space
+                    .get(&BigEndian::read_u16(&disk_id))
+                    .unwrap();
+                let stored_info: StorageInfo = bincode::deserialize(&space)?;
+                space_info
+                    .free
+                    .store(stored_info.free.as_u64(), Ordering::Relaxed);
+                space_info
+                    .total
+                    .store(stored_info.total.as_u64(), Ordering::Relaxed);
+            }
+
             Ok((tree, root_ptr))
         } else {
             Superblock::<ObjectPointer>::clear_superblock(dmu.pool())?;
@@ -310,6 +317,23 @@ impl DatabaseConfiguration {
                 dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
             );
+
+            for (tier_id, tier) in tree.dmu().handler().free_space_tier.iter().enumerate() {
+                let free =
+                    (0..tree.dmu().spl().disk_count(tier_id as u8)).fold(0, |acc, disk_id| {
+                        let spu = tree.dmu().spl();
+                        acc + spu
+                            .effective_free_size(
+                                tier_id as u8,
+                                disk_id,
+                                spu.size_in_blocks(tier_id as u8, disk_id),
+                            )
+                            .as_u64()
+                    });
+                tier.free.store(free, Ordering::Relaxed);
+                tier.total.store(free, Ordering::Relaxed);
+            }
+
             tree.dmu()
                 .handler()
                 .root_tree_inner
