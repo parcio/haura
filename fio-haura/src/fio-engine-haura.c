@@ -163,7 +163,6 @@ static enum fio_q_status fio_haura_queue(struct thread_data *td,
    * if we could queue no more at this point (you'd have to
    * define ->commit() to handle that.
    */
-  betree_sync_db(global_data.db, &error);
   return FIO_Q_COMPLETED;
 }
 
