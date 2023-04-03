@@ -46,14 +46,24 @@ struct fio_haura_options {
 };
 
 struct haura_data {
+  atomic_bool not_init;
+  size_t cnt;
+  size_t jobs;
+  char **files;
   db_t *db;
   obj_store_t *obj_s;
-  char *obj_counter;
+  obj_t **objs;
   pthread_mutex_t mtx;
 };
 
-static struct haura_data global_data = {
-    .db = NULL, .obj_s = NULL, .mtx = PTHREAD_MUTEX_INITIALIZER};
+struct storage_pref_t pref = {._0 = 0};
+
+static struct haura_data global_data = {.db = NULL,
+                                        .obj_s = NULL,
+                                        .objs = NULL,
+                                        .mtx = PTHREAD_MUTEX_INITIALIZER,
+                                        .not_init = true,
+                                        .cnt = 0};
 
 static struct fio_option options[] = {
     {
@@ -116,19 +126,8 @@ static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
     betree_configuration_set_iodepth(cfg, td->o.iodepth);
   }
   if (!((struct fio_haura_options *)td->eo)->disrespect_fio_files) {
-    char **paths;
-
-    if ((paths = malloc(sizeof(char *) * td->files_index)) == NULL) {
-      fprintf(stderr, "fio-haura: OOM");
-      exit(2);
-    }
-    for (size_t idx = 0; idx < td->files_index; idx += 1) {
-      paths[idx] = td->files[idx]->file_name;
-    }
-
-    betree_configuration_set_disks(cfg, (const char *const *)paths,
-                                   td->files_index);
-    free(paths);
+    betree_configuration_set_disks(cfg, (const char *const *)global_data.files,
+                                   td->files_index * td->o.numjobs);
   }
 }
 
@@ -174,7 +173,13 @@ static int fio_haura_cancel(struct thread_data *td, struct io_u *io_u) {
 static enum fio_q_status fio_haura_queue(struct thread_data *td,
                                          struct io_u *io_u) {
   struct err_t *error = NULL;
-  struct obj_t *obj = td->io_ops_data;
+  if (atomic_load(&global_data.not_init)) {
+    printf("BUSY\n");
+    return FIO_Q_BUSY;
+  }
+  printf("START\n");
+  size_t obj_num = *(size_t *)td->io_ops_data;
+  struct obj_t *obj = global_data.objs[obj_num];
   /*
    * Double sanity check to catch errant write on a readonly setup
    */
@@ -223,15 +228,29 @@ static int fio_haura_prep(struct thread_data *td, struct io_u *io_u) {
 static int fio_haura_init(struct thread_data *td) {
 
   struct err_t *error = NULL;
-  struct storage_pref_t pref = {._0 = 0};
 
   if (0 != pthread_mutex_lock(&global_data.mtx)) {
     fprintf(stderr, "Mutex locking failed.\n");
     exit(1);
   }
+  if (global_data.cnt == 0) {
+    // Size = numjobs * files per job
+    global_data.jobs = td->o.numjobs;
+    global_data.files =
+        malloc(sizeof(char *) * global_data.jobs * td->files_index);
+  }
+  for (size_t idx = 0; idx < td->files_index; idx += 1) {
+    global_data.files[(global_data.cnt * td->files_index) + idx] =
+        td->files[idx]->file_name;
+  }
 
-  // Initialize the database if not already present
-  if (global_data.db == NULL) {
+  td->io_ops_data = malloc(sizeof(size_t));
+  *(size_t *)td->io_ops_data = global_data.cnt;
+  global_data.cnt += 1;
+
+  // Initialize the database on last pass
+  printf("Setting up DB. %zu of %zu\n", global_data.cnt, global_data.jobs);
+  if (global_data.cnt == global_data.jobs) {
     betree_init_env_logger();
     struct cfg_t *cfg;
 
@@ -239,6 +258,7 @@ static int fio_haura_init(struct thread_data *td) {
       return bail(error);
     }
     fio_haura_translate(td, cfg);
+    betree_print_config(cfg);
     if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
       return bail(error);
     }
@@ -246,19 +266,18 @@ static int fio_haura_init(struct thread_data *td) {
              global_data.db, "fio", 3, pref, &error)) == NULL) {
       return bail(error);
     }
-    global_data.obj_counter = malloc(2);
     char init[2] = {1};
-    memcpy(global_data.obj_counter, (void *)init, 2);
-  }
 
-  if (td->io_ops_data == NULL) {
+    global_data.objs = malloc(sizeof(struct obj_t *) * global_data.jobs);
     // Create a private object for each thread
-    global_data.obj_counter[1]++;
-    if ((td->io_ops_data = betree_object_open_or_create(
-             global_data.obj_s, global_data.obj_counter, 2, pref, &error)) ==
-        NULL) {
-      return bail(error);
+    for (size_t idx = 0; idx < global_data.jobs; idx += 1) {
+      init[1] += 1;
+      if ((global_data.objs[idx] = betree_object_open_or_create(
+               global_data.obj_s, init, 2, pref, &error)) == NULL) {
+        return bail(error);
+      }
     }
+    atomic_store(&global_data.not_init, false);
   }
 
   if (0 != pthread_mutex_unlock(&global_data.mtx)) {
@@ -292,8 +311,9 @@ static void fio_haura_cleanup(struct thread_data *td) {
     betree_close_db(global_data.db);
     global_data.db = NULL;
     global_data.obj_s = NULL;
-    free(global_data.obj_counter);
+    free(global_data.files);
   }
+  free(td->io_ops_data);
   if (0 != pthread_mutex_unlock(&global_data.mtx)) {
     fprintf(stderr, "Mutex unlocking failed.\n");
     exit(1);
