@@ -39,7 +39,10 @@
  */
 struct fio_haura_options {
   void *pad; /* avoid ->off1 of fio_option becomes 0 */
-  int respect_fio_files;
+  int disrespect_fio_files;
+  int disrespect_fio_queue_depth;
+  int disrespect_fio_direct;
+  int disrespect_fio_options;
 };
 
 struct haura_data {
@@ -54,12 +57,43 @@ static struct haura_data global_data = {
 
 static struct fio_option options[] = {
     {
-        .name = "respect-fio-files",
-        .lname = "respect-fio-files",
+        .name = "disrespect-fio-files",
+        .lname = "disrespect-fio-files",
         .type = FIO_OPT_STR_SET,
-        .off1 = offsetof(struct fio_haura_options, respect_fio_files),
-        .help = "Respect the files given by fio; instead of using the haura "
-                "specific configured devices.",
+        .off1 = offsetof(struct fio_haura_options, disrespect_fio_files),
+        .help = "Avoid transferring fio file configuration to haura. Can be "
+                "used to use specific disks regardless of fio specification.",
+        .category = FIO_OPT_C_ENGINE, /* always use this */
+        .group = FIO_OPT_G_INVALID,   /* this can be different */
+    },
+    {
+        .name = "disrespect-fio-queue-depth",
+        .lname = "disrespect-fio-queue-depth",
+        .type = FIO_OPT_STR_SET,
+        .off1 = offsetof(struct fio_haura_options, disrespect_fio_queue_depth),
+        .help =
+            "Avoid transferring fio queue configuration to haura. Can be "
+            "used to use defined I/O depth regardless of fio specification.",
+        .category = FIO_OPT_C_ENGINE, /* always use this */
+        .group = FIO_OPT_G_INVALID,   /* this can be different */
+    },
+    {
+        .name = "disrespect-fio-direct",
+        .lname = "disrespect-fio-direct",
+        .type = FIO_OPT_STR_SET,
+        .off1 = offsetof(struct fio_haura_options, disrespect_fio_direct),
+        .help = "Use direct mode only as specified in haura configuration.",
+        .category = FIO_OPT_C_ENGINE, /* always use this */
+        .group = FIO_OPT_G_INVALID,   /* this can be different */
+    },
+    {
+        .name = "disrespect-fio-options",
+        .lname = "disrespect-fio-options",
+        .type = FIO_OPT_STR_SET,
+        .off1 = offsetof(struct fio_haura_options, disrespect_fio_options),
+        .help = "Disregard all fio options in Haura. This only uses the I/O "
+                "workflow as executed by fio. Take care to ensure "
+                "comparability with results of other engines.",
         .category = FIO_OPT_C_ENGINE, /* always use this */
         .group = FIO_OPT_G_INVALID,   /* this can be different */
     },
@@ -72,10 +106,16 @@ static int bail(struct err_t *error) {
 }
 
 static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
-  betree_configuration_set_direct(cfg, td->o.odirect);
-  // Asynchronous read can still benefit from this setting.
-  betree_configuration_set_iodepth(cfg, td->o.iodepth);
-  if (((struct fio_haura_options *)td->eo)->respect_fio_files) {
+  if (((struct fio_haura_options *)td->eo)->disrespect_fio_options) {
+    return;
+  }
+  if (!((struct fio_haura_options *)td->eo)->disrespect_fio_direct) {
+    betree_configuration_set_direct(cfg, td->o.odirect);
+  }
+  if (!((struct fio_haura_options *)td->eo)->disrespect_fio_queue_depth) {
+    betree_configuration_set_iodepth(cfg, td->o.iodepth);
+  }
+  if (!((struct fio_haura_options *)td->eo)->disrespect_fio_files) {
     char **paths;
 
     if ((paths = malloc(sizeof(char *) * td->files_index)) == NULL) {
