@@ -127,7 +127,7 @@ static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
   }
   if (!((struct fio_haura_options *)td->eo)->disrespect_fio_files) {
     betree_configuration_set_disks(cfg, (const char *const *)global_data.files,
-                                   td->files_index * td->o.numjobs);
+                                   td->files_index * global_data.jobs);
   }
 }
 
@@ -174,10 +174,8 @@ static enum fio_q_status fio_haura_queue(struct thread_data *td,
                                          struct io_u *io_u) {
   struct err_t *error = NULL;
   if (atomic_load(&global_data.not_init)) {
-    printf("BUSY\n");
     return FIO_Q_BUSY;
   }
-  printf("START\n");
   size_t obj_num = *(size_t *)td->io_ops_data;
   struct obj_t *obj = global_data.objs[obj_num];
   /*
@@ -234,8 +232,13 @@ static int fio_haura_init(struct thread_data *td) {
     exit(1);
   }
   if (global_data.cnt == 0) {
+    //! Get global options as this thread might have an incorrect view of the
+    //! invocation flags of fio...
+    //! Take care that this function is undocumented and nowhere else used in
+    //! the engines.
+    struct thread_data *global = get_global_options();
+    global_data.jobs = global->o.numjobs;
     // Size = numjobs * files per job
-    global_data.jobs = td->o.numjobs;
     global_data.files =
         malloc(sizeof(char *) * global_data.jobs * td->files_index);
   }
@@ -300,18 +303,22 @@ static void fio_haura_cleanup(struct thread_data *td) {
   }
   if (global_data.db != NULL) {
     struct err_t *error = NULL;
-    betree_sync_db(global_data.db, &error);
+    // betree_sync_db(global_data.db, &error);
+    // if (error != NULL) {
+    //   exit(bail(error));
+    // }
+    size_t obj_num = *(size_t *)td->io_ops_data;
+    betree_object_close(global_data.objs[obj_num], &error);
     if (error != NULL) {
       exit(bail(error));
     }
-    betree_object_close(td->io_ops_data, &error);
-    if (error != NULL) {
-      exit(bail(error));
+    global_data.cnt -= 1;
+    if (global_data.cnt == 0) {
+      betree_close_db(global_data.db);
+      global_data.db = NULL;
+      global_data.obj_s = NULL;
+      free(global_data.files);
     }
-    betree_close_db(global_data.db);
-    global_data.db = NULL;
-    global_data.obj_s = NULL;
-    free(global_data.files);
   }
   free(td->io_ops_data);
   if (0 != pthread_mutex_unlock(&global_data.mtx)) {
