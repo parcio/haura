@@ -1,0 +1,7 @@
+[seq-read-bw]
+rw=read
+numjobs=4
+bs=4m
+direct=1
+ioengine=external:src/fio-engine-haura.o
+size=512M
