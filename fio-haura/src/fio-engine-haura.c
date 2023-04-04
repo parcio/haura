@@ -119,9 +119,6 @@ static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
   if (((struct fio_haura_options *)td->eo)->disrespect_fio_options) {
     return;
   }
-  if (!((struct fio_haura_options *)td->eo)->disrespect_fio_direct) {
-    betree_configuration_set_direct(cfg, td->o.odirect);
-  }
   // @jwuensche: This sets the queue depth to one on presumed "sync" workflows
   // which is detrimental to any functionality of haura as it provokes lock ups.
   // if (!((struct fio_haura_options *)td->eo)->disrespect_fio_queue_depth) {
@@ -130,6 +127,9 @@ static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
   if (!((struct fio_haura_options *)td->eo)->disrespect_fio_files) {
     betree_configuration_set_disks(cfg, (const char *const *)global_data.files,
                                    td->files_index * global_data.jobs);
+  }
+  if (!((struct fio_haura_options *)td->eo)->disrespect_fio_direct) {
+    betree_configuration_set_direct(cfg, td->o.odirect);
   }
 }
 
