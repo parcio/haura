@@ -76,17 +76,17 @@ static struct fio_option options[] = {
         .category = FIO_OPT_C_ENGINE, /* always use this */
         .group = FIO_OPT_G_INVALID,   /* this can be different */
     },
-    {
-        .name = "disrespect-fio-queue-depth",
-        .lname = "disrespect-fio-queue-depth",
-        .type = FIO_OPT_STR_SET,
-        .off1 = offsetof(struct fio_haura_options, disrespect_fio_queue_depth),
-        .help =
-            "Avoid transferring fio queue configuration to haura. Can be "
-            "used to use defined I/O depth regardless of fio specification.",
-        .category = FIO_OPT_C_ENGINE, /* always use this */
-        .group = FIO_OPT_G_INVALID,   /* this can be different */
-    },
+    //{
+    //    .name = "disrespect-fio-queue-depth",
+    //    .lname = "disrespect-fio-queue-depth",
+    //    .type = FIO_OPT_STR_SET,
+    //    .off1 = offsetof(struct fio_haura_options,
+    //    disrespect_fio_queue_depth), .help =
+    //        "Avoid transferring fio queue configuration to haura. Can be "
+    //        "used to use defined I/O depth regardless of fio specification.",
+    //    .category = FIO_OPT_C_ENGINE, /* always use this */
+    //    .group = FIO_OPT_G_INVALID,   /* this can be different */
+    //},
     {
         .name = "disrespect-fio-direct",
         .lname = "disrespect-fio-direct",
@@ -122,9 +122,11 @@ static void fio_haura_translate(struct thread_data *td, struct cfg_t *cfg) {
   if (!((struct fio_haura_options *)td->eo)->disrespect_fio_direct) {
     betree_configuration_set_direct(cfg, td->o.odirect);
   }
-  if (!((struct fio_haura_options *)td->eo)->disrespect_fio_queue_depth) {
-    betree_configuration_set_iodepth(cfg, td->o.iodepth);
-  }
+  // @jwuensche: This sets the queue depth to one on presumed "sync" workflows
+  // which is detrimental to any functionality of haura as it provokes lock ups.
+  // if (!((struct fio_haura_options *)td->eo)->disrespect_fio_queue_depth) {
+  //   betree_configuration_set_iodepth(cfg, td->o.iodepth);
+  // }
   if (!((struct fio_haura_options *)td->eo)->disrespect_fio_files) {
     betree_configuration_set_disks(cfg, (const char *const *)global_data.files,
                                    td->files_index * global_data.jobs);
@@ -252,7 +254,6 @@ static int fio_haura_init(struct thread_data *td) {
   global_data.cnt += 1;
 
   // Initialize the database on last pass
-  printf("Setting up DB. %zu of %zu\n", global_data.cnt, global_data.jobs);
   if (global_data.cnt == global_data.jobs) {
     betree_init_env_logger();
     struct cfg_t *cfg;
@@ -261,7 +262,6 @@ static int fio_haura_init(struct thread_data *td) {
       return bail(error);
     }
     fio_haura_translate(td, cfg);
-    betree_print_config(cfg);
     if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
       return bail(error);
     }
