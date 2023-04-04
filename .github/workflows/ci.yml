@@ -200,4 +200,4 @@ jobs:
           # build it from the copy we already have.
           make fio
           export BETREE_CONFIG=$(realpath ./.ci/haura.json)
-          ./fio --direct=1 --rw=write --bs=4M --ioengine=external:src/fio-engine-haura.o --respect-fio-files --numjobs=1 --name=iops-test-job --size=128M
+          ./fio --direct=1 --rw=write --bs=4M --ioengine=external:src/fio-engine-haura.o --numjobs=1 --name=iops-test-job --size=128M
