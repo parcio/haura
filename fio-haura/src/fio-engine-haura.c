@@ -175,9 +175,6 @@ static int fio_haura_cancel(struct thread_data *td, struct io_u *io_u) {
 static enum fio_q_status fio_haura_queue(struct thread_data *td,
                                          struct io_u *io_u) {
   struct err_t *error = NULL;
-  if (atomic_load(&global_data.not_init)) {
-    return FIO_Q_BUSY;
-  }
   size_t obj_num = *(size_t *)td->io_ops_data;
   struct obj_t *obj = global_data.objs[obj_num];
   /*
@@ -226,20 +223,30 @@ static int fio_haura_prep(struct thread_data *td, struct io_u *io_u) {
  * required.
  */
 static int fio_haura_init(struct thread_data *td) {
-
   struct err_t *error = NULL;
 
+  if (td->thread_number != 1) {
+    // lock until the first thread has initialized everything as they only
+    // have the needed knowledge *guaranteed*
+    while (!global_data.files) {
+      // erroneous states if we *don't* sleep
+      // more of hack, but works so..
+      sleep(1);
+    }
+  }
   if (0 != pthread_mutex_lock(&global_data.mtx)) {
     fprintf(stderr, "Mutex locking failed.\n");
     exit(1);
   }
   if (global_data.cnt == 0) {
-    //! Get global options as this thread might have an incorrect view of the
-    //! invocation flags of fio...
-    //! Take care that this function is undocumented and nowhere else used in
-    //! the engines.
-    struct thread_data *global = get_global_options();
-    global_data.jobs = global->o.numjobs;
+
+    /*
+    ** This section may only ever get executed by the thread with thread_number
+    *  1!
+    *  Any other thread will deliver incorrect defaults, which are not safe to
+    *  run.
+    */
+    global_data.jobs = td->o.numjobs;
     // Size = numjobs * files per job
     global_data.files =
         malloc(sizeof(char *) * global_data.jobs * td->files_index);
@@ -279,6 +286,36 @@ static int fio_haura_init(struct thread_data *td) {
                global_data.obj_s, init, 2, pref, &error)) == NULL) {
         return bail(error);
       }
+
+      /* Due to limitations in the fio initialization process we prepopulate the
+       * objects here, which is suboptimal but the only place possible due to
+       * the order of execution. */
+      if (!td_write(td)) {
+        unsigned long long block_size = td->o.bs[DDIR_WRITE];
+        unsigned long long max_io_size = td->o.size;
+        void *buf = malloc(block_size);
+        unsigned long long total_written = 0;
+        // Fill buffer somewhat random
+        for (unsigned long long off = 0; off < (block_size / 4); off += 1) {
+          ((u_int32_t *)buf)[off] = random();
+        }
+        while (max_io_size > total_written) {
+
+          unsigned long written = 0;
+          betree_object_write_at(global_data.objs[idx], buf, block_size,
+                                 total_written, &written, &error);
+          if (error != NULL) {
+            exit(bail(error));
+          }
+          total_written += written;
+        }
+        free(buf);
+        printf("haura: Prepopulated! :3\n");
+      }
+    }
+    betree_sync_db(global_data.db, &error);
+    if (error != NULL) {
+      exit(bail(error));
     }
     atomic_store(&global_data.not_init, false);
   }
@@ -286,6 +323,9 @@ static int fio_haura_init(struct thread_data *td) {
   if (0 != pthread_mutex_unlock(&global_data.mtx)) {
     fprintf(stderr, "Mutex unlocking failed.\n");
     exit(1);
+  }
+
+  while (atomic_load(&global_data.not_init)) {
   }
 
   return 0;
@@ -354,66 +394,12 @@ static int fio_haura_setup(struct thread_data *td) {
 
 static int fio_haura_prepopulate_file(struct thread_data *td,
                                       struct fio_file *file) {
-  /* We don't really care about the fio file as it is already covered by the
-   * database. Also we rather do this in prepopulate then in setup as this
-   * function is only called when required.*/
-
-  struct err_t *error = NULL;
-  unsigned long long block_size = td->o.bs[DDIR_WRITE];
-  unsigned long long max_io_size = td->o.size;
   /* Haura needs some additional space to provide extra data like object
    * pointers and metadata. This is more of a hack, but nonetheless. */
-  if (truncate(file->file_name, td->o.size + (200 * 1024 * 1024))) {
+  if (truncate(file->file_name, td->o.size + (50 * 1024 * 1024))) {
     fprintf(stderr,
             "Could not retruncate file to provide enough storage for Haura.");
   }
-
-  if (td_write(td)) {
-    // If it is write only we can omit this step
-    goto wrapup;
-  }
-
-  unsigned long long total_written = 0;
-  void *buf = malloc(block_size);
-
-  /* Prepopulate is executed before initiating the engine initialization. */
-  if (td->io_ops_data == NULL) {
-    fio_haura_init(td);
-  }
-
-  assert(td->io_ops_data != NULL);
-
-  if (0 != pthread_mutex_lock(&global_data.mtx)) {
-    fprintf(stderr, "Mutex locking failed.\n");
-    exit(1);
-  }
-
-  while (max_io_size > total_written) {
-    // Fill buffer somewhat random
-    for (unsigned long long off = 0; off < (block_size / 32); off += 1) {
-      ((u_int32_t *)buf)[off] = random();
-    }
-    unsigned long written = 0;
-    betree_object_write_at(td->io_ops_data, buf, block_size, total_written,
-                           &written, &error);
-    if (error != NULL) {
-      exit(bail(error));
-    }
-    total_written += written;
-  }
-  free(buf);
-
-  betree_sync_db(global_data.db, &error);
-  if (error != NULL) {
-    exit(bail(error));
-  }
-
-  if (0 != pthread_mutex_unlock(&global_data.mtx)) {
-    fprintf(stderr, "Mutex unlocking failed.\n");
-    exit(1);
-  }
-
-wrapup:
   /* fio wants this set, soo... */
   file->fd = open(file->file_name, 0, 0644);
   return 0;
