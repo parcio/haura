@@ -1,5 +1,11 @@
 *.o
 fio-fio-*
 fio
-# Crude exclusion of fio generated files.
-*.0
+# Crude exclusion of fio generated files. Might mismatch
+*.*.*
+# Plotting related files
+*.json
+*.jpg
+*.mp4
+*.txt
+*.svg
