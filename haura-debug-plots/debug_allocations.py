@@ -48,7 +48,9 @@ def file_to_plot(path):
     subfigs = fig.subfigures(disks + 1, len(allocs[0][0][0]) + 1, squeeze=False)
     for disk in range(0, disks):
         for idx, segment in enumerate(allocs[0][disk][0]):
-            np_seg = numpy.array(segment)
+            vec_expand = numpy.vectorize(u8_to_8_x_u8, otypes=[numpy.ndarray])
+            np_seg = vec_expand(numpy.array(segment["data"]))
+            np_seg = numpy.concatenate([x.ravel() for x in np_seg])
             sub = subfigs[disk][idx].add_axes([(label_width / dpi)/inches,0,1,0.95])
             subfigs[disk][idx].text(0,0.5, f"disk {disk}\nseg. {idx}", fontsize="x-large")
             sub.set_axis_off()
@@ -79,6 +81,18 @@ def alloc_tries_plot():
     fig = plt.figure()
     fragmentation_plot(fig)
     fig.savefig("alloc_tries_plot.svg")
+
+def u8_to_8_x_u8(num):
+    return numpy.array([
+        (num & (1 << 0)) >> 0,
+        (num & (1 << 1)) >> 1,
+        (num & (1 << 2)) >> 2,
+        (num & (1 << 3)) >> 3,
+        (num & (1 << 4)) >> 4,
+        (num & (1 << 5)) >> 5,
+        (num & (1 << 6)) >> 6,
+        (num & (1 << 7)) >> 7,
+    ])
 
 alloc_tries_plot()
 p = Pool() # use all available CPUs

@@ -20,6 +20,7 @@ use crate::{
     vdev::{Block, BLOCK_SIZE},
     StoragePreference,
 };
+use bitvec::BitArr;
 use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -35,6 +36,8 @@ use std::{
     thread::yield_now,
 };
 
+#[cfg(feature = "debug_allocations")]
+use crate::allocator::SEGMENT_SIZE;
 #[cfg(feature = "debug_allocations")]
 use bitvec::prelude::{BitArray, Lsb0};
 #[cfg(feature = "debug_allocations")]
@@ -491,8 +494,10 @@ where
         #[cfg(feature = "debug_allocations")]
         {
             #[derive(Serialize)]
-            // Map of Class -> Disks -> Segments -> Pages
-            struct AllocationBitmaps(Vec<Vec<(Vec<Vec<u8>>, Vec<u64>)>>);
+            // Map of              Class->Disks->Segments->(Pages, Num Free Pages)
+            struct AllocationBitmaps(
+                Vec<Vec<(Vec<BitArr!(for SEGMENT_SIZE, in u8, Lsb0)>, Vec<u64>)>>,
+            );
             let mut alloc_count = self.alloc_counter.lock();
             let mut alloc_history = self.alloc_history.lock();
             let mut allocation_bitmaps = AllocationBitmaps(Vec::new());
@@ -532,7 +537,7 @@ where
                     let first_id = segment_id;
                     loop {
                         let allocator = self.handler.get_allocation_bitmap(segment_id, self)?;
-                        disk_segments.push(allocator.data.iter().by_vals().map(u8::from).collect());
+                        disk_segments.push(allocator.data.clone());
                         segment_id = segment_id.next(disk_size);
                         if first_id == segment_id {
                             break;
