@@ -11,6 +11,7 @@ from glob import glob
 import json
 from multiprocessing import Pool
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from tqdm import tqdm
 import numpy
 import math
@@ -18,7 +19,11 @@ import subprocess
 
 FRAGMENTATION_TXT = "alloc_tries.txt"
 
-def fragmentation_plot(fig, end=2**39):
+def fragmentation_plot(fig, end=2**128):
+    """
+    Insert into an existing figure the fragmentation plot until a (maybe) specified end.
+    2**128 is the maximum length which is possible due to name restrictions of the logs.
+    """
     file = open(FRAGMENTATION_TXT)
     vals = [int("0" + line) for line in file.readlines()][:end]
     ax = fig.subplots(1,1)
@@ -47,6 +52,14 @@ def file_to_plot(path):
             sub = subfigs[disk][idx].add_axes([(label_width / dpi)/inches,0,1,0.95])
             subfigs[disk][idx].text(0,0.5, f"disk {disk}\nseg. {idx}", fontsize="x-large")
             sub.set_axis_off()
+            subfigs[disk][idx].add_artist(Rectangle(
+                [(label_width / dpi)/inches,0],
+                1 - (label_width / dpi)/inches,
+                0.95,
+                fill=None,
+                edgecolor="black",
+                linewidth=2
+            ))
             sub.imshow(np_seg.reshape(512, 512), cmap='binary', aspect='auto', interpolation='nearest')
         ax = subfigs[disk][-1:][0].subplots(1,1)
         sizes = allocs[0][disk][1]
