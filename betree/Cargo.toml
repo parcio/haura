@@ -51,7 +51,7 @@ enum_dispatch = "0.3"
 figment = { version = "0.10", optional = true, features = ["env"] }
 
 indexmap = "1.6"
-bitvec = "1.0"
+bitvec = {version = "1.0", features = ["serde"] }
 
 serde_json = "1.0"
 crossbeam-channel = "0.5.5"
@@ -77,3 +77,4 @@ figment_config = ["figment"]
 # leaf vdev. This requires additional system calls due to time measuring and is
 # therefore safeguarded into it's own feature
 latency_metrics = []
+debug_allocations = []

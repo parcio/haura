@@ -35,6 +35,16 @@ use std::{
     thread::yield_now,
 };
 
+#[cfg(feature = "debug_allocations")]
+use bitvec::prelude::{BitArray, Lsb0};
+#[cfg(feature = "debug_allocations")]
+use serde::Serialize;
+#[cfg(feature = "debug_allocations")]
+use std::{
+    fs::{create_dir, OpenOptions},
+    io::BufWriter,
+};
+
 /// The Data Management Unit.
 pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
 where
@@ -55,11 +65,15 @@ where
     // NOTE: The semantic structure of this looks as this
     // Storage Pool Layers:
     //      Layer Disks:
-    //          Tuple of SegmentIDs and their according Allocators
+    //          Tuple of SegmentID and their according Allocator
     allocation_data: Box<[Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>]>,
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
+    #[cfg(feature = "debug_allocations")]
+    alloc_counter: Mutex<u128>,
+    #[cfg(feature = "debug_allocations")]
+    alloc_history: Mutex<HashMap<(u8, u16), Vec<u64>>>,
 }
 
 impl<E, SPL> Dmu<E, SPL>
@@ -103,6 +117,10 @@ where
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
             report_tx: None,
+            #[cfg(feature = "debug_allocations")]
+            alloc_counter: Mutex::new(0),
+            #[cfg(feature = "debug_allocations")]
+            alloc_history: Mutex::new(HashMap::new()),
         }
     }
 
@@ -193,24 +211,22 @@ where
     fn copy_on_write(
         &self,
         obj_ptr: ObjectPointer<SPL::Checksum>,
-        steal: CopyOnWriteReason,
+        reason: CopyOnWriteReason,
         pivot_key: PivotKey,
     ) {
-        let actual_size = self.pool.actual_size(
-            obj_ptr.offset().storage_class(),
-            obj_ptr.offset().disk_id(),
-            obj_ptr.size(),
+        let disk_ptr = obj_ptr.offset;
+        let actual_size =
+            self.pool
+                .actual_size(disk_ptr.storage_class(), disk_ptr.disk_id(), obj_ptr.size());
+        let cow_event = self.handler.copy_on_write(
+            obj_ptr.offset(),
+            actual_size,
+            obj_ptr.generation(),
+            obj_ptr.info(),
         );
-        if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) = (
-            self.handler.copy_on_write(
-                obj_ptr.offset(),
-                actual_size,
-                obj_ptr.generation(),
-                obj_ptr.info(),
-            ),
-            &self.report_tx,
-            steal,
-        ) {
+        if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) =
+            (&cow_event, &self.report_tx, reason)
+        {
             let _ = tx
                 .send(DmlMsg::remove(obj_ptr.offset(), obj_ptr.size(), pivot_key))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
@@ -470,6 +486,72 @@ where
     }
 
     fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, Error> {
+        /* Write out all segemnts in this method for debugging purposes and to visualize fragmentation. */
+
+        #[cfg(feature = "debug_allocations")]
+        {
+            #[derive(Serialize)]
+            // Map of Class -> Disks -> Segments -> Pages
+            struct AllocationBitmaps(Vec<Vec<(Vec<Vec<u8>>, Vec<u64>)>>);
+            let mut alloc_count = self.alloc_counter.lock();
+            let mut alloc_history = self.alloc_history.lock();
+            let mut allocation_bitmaps = AllocationBitmaps(Vec::new());
+            // 1. iterate over classes
+            // 2. get all segments
+            // 3. add each segment to format
+            for class in 0..self.pool.storage_class_count() {
+                allocation_bitmaps.0.push(Vec::new());
+                let disks_in_class = self.pool.disk_count(class);
+                for disk_id in 0..disks_in_class {
+                    let data = match alloc_history.entry((class, disk_id)) {
+                        std::collections::hash_map::Entry::Occupied(ref mut o) => {
+                            o.get_mut()
+                                .push(self.handler.get_free_space(class, disk_id).unwrap().free.0);
+                            o.get().clone()
+                        }
+                        std::collections::hash_map::Entry::Vacant(v) => v
+                            .insert(vec![
+                                self.handler.get_free_space(class, disk_id).unwrap().free.0,
+                            ])
+                            .clone(),
+                    };
+                    allocation_bitmaps
+                        .0
+                        .last_mut()
+                        .unwrap()
+                        .push((Vec::new(), data));
+                    let disk_segments = &mut allocation_bitmaps
+                        .0
+                        .last_mut()
+                        .unwrap()
+                        .last_mut()
+                        .unwrap()
+                        .0;
+                    let mut segment_id = SegmentId::get(DiskOffset::new(class, disk_id, Block(0)));
+                    let disk_size = self.pool.size_in_blocks(class, disk_id);
+                    let first_id = segment_id;
+                    loop {
+                        let allocator = self.handler.get_allocation_bitmap(segment_id, self)?;
+                        disk_segments.push(allocator.data.iter().by_vals().map(u8::from).collect());
+                        segment_id = segment_id.next(disk_size);
+                        if first_id == segment_id {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = create_dir("logs");
+            let file = BufWriter::new(
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(format!("logs/{:0>39}.json", alloc_count))
+                    .unwrap(),
+            );
+            *alloc_count += 1;
+            serde_json::to_writer(file, &allocation_bitmaps).unwrap();
+        }
+
         assert!(storage_preference < NUM_STORAGE_CLASSES as u8);
         if size >= Block(2048) {
             warn!("Very large allocation requested: {:?}", size);
@@ -527,6 +609,7 @@ where
             let size = self.pool.actual_size(class, disk_id, size);
             let disk_size = self.pool.size_in_blocks(class, disk_id);
 
+            let mut total_tries = 0;
             let disk_offset = {
                 let mut x = self.allocation_data[class as usize][disk_id as usize].lock();
 
@@ -539,9 +622,13 @@ where
 
                 let first_seen_segment_id = *segment_id;
                 loop {
-                    if let Some(segment_offset) = allocator.allocate(size.as_u32()) {
-                        break segment_id.disk_offset(segment_offset);
+                    let foo = allocator.allocate(size.as_u32());
+
+                    if let (Some(segment_offset), _) = &foo {
+                        break segment_id.disk_offset(*segment_offset);
                     }
+                    let (_, tries) = &foo;
+                    total_tries += *tries;
                     let next_segment_id = segment_id.next(disk_size);
                     trace!(
                         "Next allocator segment: {:?} -> {:?} ({:?})",
@@ -562,6 +649,18 @@ where
                     *segment_id = next_segment_id;
                 }
             };
+
+            #[cfg(feature = "debug_allocations")]
+            {
+                let lock = self.alloc_counter.lock();
+                use std::io::Write;
+                let file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("logs/alloc_tries.txt")
+                    .unwrap();
+                writeln!(&file, "{total_tries}").unwrap();
+            }
 
             info!("Allocated {:?} at {:?}", size, disk_offset);
             debug!(

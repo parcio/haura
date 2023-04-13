@@ -705,7 +705,7 @@ pub unsafe extern "C" fn betree_snapshot_range(
 #[no_mangle]
 pub unsafe extern "C" fn betree_print_error(err: *mut err_t) {
     let err = &(*err).0;
-    if write!(&mut stderr(), "{}", err).is_err() {
+    if write!(&mut stderr(), "{}\n", err).is_err() {
         abort();
     }
 }

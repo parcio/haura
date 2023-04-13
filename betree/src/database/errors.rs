@@ -17,7 +17,7 @@ pub enum Error {
         #[from]
         source: crate::storage_pool::Error,
     },
-    #[error("A tree operation encountered an error. This is likely an internal error.")]
+    #[error("A tree operation encountered an error {source:?}. This is likely an internal error.")]
     TreeError {
         #[from]
         source: crate::tree::Error,

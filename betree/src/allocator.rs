@@ -14,7 +14,7 @@ const SEGMENT_SIZE_MASK: usize = SEGMENT_SIZE - 1;
 
 /// Simple first-fit bitmap allocator
 pub struct SegmentAllocator {
-    data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
+    pub(crate) data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
 }
 
 impl SegmentAllocator {
@@ -28,16 +28,18 @@ impl SegmentAllocator {
 
     /// Allocates a block of the given `size`.
     /// Returns `None` if the allocation request cannot be satisfied.
-    pub fn allocate(&mut self, size: u32) -> Option<u32> {
+    pub fn allocate(&mut self, size: u32) -> (Option<u32>, u32) {
         if size == 0 {
-            return Some(0);
+            return (Some(0), 0);
         }
+        let mut tries = 0;
         let offset = {
             let mut idx = 0;
             loop {
+                tries += 1;
                 loop {
                     if idx + size > SEGMENT_SIZE as u32 {
-                        return None;
+                        return (None, tries);
                     }
                     if !self.data[idx as usize] {
                         break;
@@ -55,7 +57,7 @@ impl SegmentAllocator {
             }
         };
         self.mark(offset, size, Action::Allocate);
-        Some(offset)
+        (Some(offset), tries)
     }
 
     /// Allocates a block of the given `size` at `offset`.
@@ -79,11 +81,6 @@ impl SegmentAllocator {
 
     /// Deallocates the allocated block.
     pub fn deallocate(&mut self, offset: u32, size: u32) {
-        log::debug!(
-            "Marked a block range {{ offset: {}, size: {} }} for deallocation",
-            offset,
-            size
-        );
         self.mark(offset, size, Action::Deallocate);
     }
 
@@ -92,12 +89,12 @@ impl SegmentAllocator {
         let end_idx = (offset + size) as usize;
         let range = &mut self.data[start_idx..end_idx];
 
-        match action {
+        debug_assert!(match action {
             // Is allocation, so range must be free
-            Action::Allocate => debug_assert!(!range.any()),
+            Action::Allocate => !range.any(),
             // Is deallocation, so range must be previously used
-            Action::Deallocate => debug_assert!(range.all()),
-        }
+            Action::Deallocate => range.all(),
+        });
 
         range.fill(action.as_bool());
     }
