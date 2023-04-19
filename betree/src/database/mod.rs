@@ -42,7 +42,7 @@ use std::{
 mod dataset;
 pub(crate) mod errors;
 mod handler;
-mod root_tree_msg;
+pub(crate) mod root_tree_msg;
 mod snapshot;
 mod storage_info;
 mod superblock;

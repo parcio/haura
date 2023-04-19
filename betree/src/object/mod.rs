@@ -48,6 +48,9 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::Dml,
+    database::root_tree_msg::{
+        OBJECT_STORE_DATA_PREFIX, OBJECT_STORE_ID_COUNTER_PREFIX, OBJECT_STORE_NAME_TO_ID_PREFIX,
+    },
     database::{DatasetId, Error, Result},
     migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
@@ -158,10 +161,6 @@ impl ObjectStoreData {
         }
     }
 }
-
-const OBJECT_STORE_ID_COUNTER_PREFIX: u8 = 6;
-const OBJECT_STORE_NAME_TO_ID_PREFIX: u8 = 7;
-const OBJECT_STORE_DATA_PREFIX: u8 = 8;
 
 impl Database {
     fn allocate_os_id(&mut self) -> Result<ObjectStoreId> {

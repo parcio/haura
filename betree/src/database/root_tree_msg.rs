@@ -15,6 +15,9 @@ pub(super) const DATASET_DATA: u8 = 2;
 pub(super) const SNAPSHOT_DS_ID_AND_NAME_TO_ID: u8 = 3;
 pub(super) const SNAPSHOT_DATA: u8 = 4;
 pub(super) const DEADLIST: u8 = 5;
+pub(crate) const OBJECT_STORE_ID_COUNTER_PREFIX: u8 = 6;
+pub(crate) const OBJECT_STORE_NAME_TO_ID_PREFIX: u8 = 7;
+pub(crate) const OBJECT_STORE_DATA_PREFIX: u8 = 8;
 pub(super) const DISK_SPACE: u8 = 9;
 
 // DATASETS
