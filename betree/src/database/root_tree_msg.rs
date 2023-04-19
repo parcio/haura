@@ -15,7 +15,7 @@ pub(super) const DATASET_DATA: u8 = 2;
 pub(super) const SNAPSHOT_DS_ID_AND_NAME_TO_ID: u8 = 3;
 pub(super) const SNAPSHOT_DATA: u8 = 4;
 pub(super) const DEADLIST: u8 = 5;
-pub(super) const DISK_SPACE: u8 = 6;
+pub(super) const DISK_SPACE: u8 = 9;
 
 // DATASETS
 
