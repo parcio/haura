@@ -297,7 +297,7 @@ impl DatabaseConfiguration {
                     .dmu()
                     .handler()
                     .free_space
-                    .get(&BigEndian::read_u16(&disk_id))
+                    .get(&BigEndian::read_u16(&disk_id[1..]))
                     .unwrap();
                 let stored_info: StorageInfo = bincode::deserialize(&space)?;
                 space_info
