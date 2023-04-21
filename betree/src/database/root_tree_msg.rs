@@ -186,16 +186,25 @@ pub(super) mod space_accounting {
 
     use byteorder::{BigEndian, ByteOrder};
 
+    use crate::storage_pool::GlobalDiskId;
+
     use super::DISK_SPACE;
 
     const FULL: usize = 3;
     const D_ID_OFFSET: usize = 1;
 
-    pub fn key(disk_id: u16) -> [u8; FULL] {
+    pub fn key(disk_id: GlobalDiskId) -> [u8; FULL] {
         let mut key = [0u8; FULL];
         key[0] = DISK_SPACE;
-        BigEndian::write_u16(&mut key[D_ID_OFFSET..], disk_id);
+        BigEndian::write_u16(&mut key[D_ID_OFFSET..], disk_id.as_u16());
         key
+    }
+
+    /// This function should always receive a buffer of exactly FULL length.
+    /// Other usages are not intended nor supported.
+    pub fn read_key(buf: &[u8]) -> GlobalDiskId {
+        debug_assert!(buf.len() == FULL);
+        GlobalDiskId(BigEndian::read_u16(&buf[D_ID_OFFSET..]))
     }
 
     pub fn min_key() -> [u8; 1] {

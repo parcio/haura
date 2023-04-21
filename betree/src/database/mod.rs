@@ -297,7 +297,7 @@ impl DatabaseConfiguration {
                     .dmu()
                     .handler()
                     .free_space
-                    .get(&BigEndian::read_u16(&disk_id[1..]))
+                    .get(&space_accounting::read_key(&disk_id))
                     .unwrap();
                 let stored_info: StorageInfo = bincode::deserialize(&space)?;
                 space_info
@@ -582,7 +582,7 @@ impl Database {
                 .root_tree
                 .dmu()
                 .handler()
-                .get_free_space_tier(idx as u8)
+                .free_space_tier(idx as u8)
                 .expect("Class hat to exist");
         }
         Superblock::<ObjectPointer>::write_superblock(pool, &root_ptr, &info)?;
@@ -613,7 +613,7 @@ impl Database {
                 self.root_tree
                     .dmu()
                     .handler()
-                    .get_free_space_tier(class)
+                    .free_space_tier(class)
                     .unwrap()
             })
             .collect()

@@ -17,8 +17,9 @@ use crate::{
     database::DatasetId,
     migration::DmlMsg,
     size::{Size, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer},
+    storage_pool::{DiskOffset, GlobalDiskId, StoragePoolLayer},
     tree::PivotKey,
+    vdev::Block,
     StoragePreference,
 };
 use parking_lot::Mutex;

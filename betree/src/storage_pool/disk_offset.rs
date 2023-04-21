@@ -12,6 +12,22 @@ const MASK_DISK_ID: u64 = ((1 << 10) - 1) << 52;
 const MASK_OFFSET: u64 = (1 << 52) - 1;
 const MASK_CLASS_DISK_ID_COMBINED: u64 = ((1 << 12) - 1) << 52;
 
+/// An identifier containing the class id and disk id. Uniquely identifies a
+/// disk over all storage devices.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlobalDiskId(pub u16);
+
+impl GlobalDiskId {
+    /// Expose the internal representation of the identifier.
+    pub fn as_u16(&self) -> u16 {
+        self.0
+    }
+}
+
+/// A class specific disk identifier. Only unique within a set class and only
+/// valid for the original class.
+pub struct LocalDiskId(u16);
+
 impl DiskOffset {
     /// Constructs a new `DiskOffset`.
     /// The given `block_offset` may not be larger than (1 << 52) - 1.
@@ -33,8 +49,8 @@ impl DiskOffset {
         ((self.0 & MASK_DISK_ID) >> 52) as u16
     }
     /// Returns the 12-bit storage class with attached disk ID.
-    pub fn class_disk_id(&self) -> u16 {
-        ((self.0 & MASK_CLASS_DISK_ID_COMBINED) >> 52) as u16
+    pub fn class_disk_id(&self) -> GlobalDiskId {
+        GlobalDiskId(((self.0 & MASK_CLASS_DISK_ID_COMBINED) >> 52) as u16)
     }
     /// Returns the block offset.
     pub fn block_offset(&self) -> Block<u64> {
@@ -50,9 +66,8 @@ impl DiskOffset {
     }
 
     // Glue together a class identifier with a class depdendent disk_id.
-    // TODO: Provide typization for this?
-    pub fn construct_disk_id(class: u8, disk_id: u16) -> u16 {
-        ((class as u16) << 10) | disk_id
+    pub fn construct_disk_id(class: u8, disk_id: u16) -> GlobalDiskId {
+        GlobalDiskId(((class as u16) << 10) | disk_id)
     }
 }
 
