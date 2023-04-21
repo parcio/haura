@@ -99,7 +99,7 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
 }
 
 mod disk_offset;
-pub use self::disk_offset::DiskOffset;
+pub use self::disk_offset::{DiskOffset, GlobalDiskId, LocalDiskId};
 
 pub mod configuration;
 pub use self::configuration::{

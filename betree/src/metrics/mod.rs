@@ -69,7 +69,7 @@ fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<Ro
             storage: spu.metrics(),
             // We can be sure that the following is always correct
             usage: (0..NUM_STORAGE_CLASSES as u8)
-                .map(|tier| dmu.handler().get_free_space_tier(tier).unwrap())
+                .map(|tier| dmu.handler().free_space_tier(tier).unwrap())
                 .collect(),
         };
 

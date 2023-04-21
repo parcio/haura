@@ -1,15 +1,15 @@
 use super::{
     errors::*,
     root_tree_msg::{deadlist, segment, space_accounting},
-    AtomicStorageInfo, DatasetId, DeadListData, Generation, Object, ObjectPointer, ObjectRef,
+    AtomicStorageInfo, DatasetId, DeadListData, Generation, Object, ObjectPointer,
     StorageInfo, TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{CopyOnWriteEvent, Dml, HasStoragePreference, ObjectReference},
-    storage_pool::DiskOffset,
+    data_management::{self, CopyOnWriteEvent, Dml, ObjectReference, HasStoragePreference},
+    storage_pool::{DiskOffset, GlobalDiskId},
     tree::{DefaultMessageAction, Node, Tree, TreeLayer},
     vdev::Block,
     StoragePreference,
@@ -49,7 +49,7 @@ pub struct Handler<OR: ObjectReference> {
     pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
-    pub(crate) free_space: HashMap<u16, AtomicStorageInfo>,
+    pub(crate) free_space: HashMap<GlobalDiskId, AtomicStorageInfo>,
     pub(crate) free_space_tier: Vec<AtomicStorageInfo>,
     pub(crate) delayed_messages: Mutex<Vec<(Box<[u8]>, SlicedCowBytes)>>,
     pub(crate) last_snapshot_generation: RwLock<HashMap<DatasetId, Generation>>,
@@ -187,11 +187,11 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         Ok(allocator)
     }
 
-    pub fn get_free_space(&self, disk_id: u16) -> Option<StorageInfo> {
+    pub fn free_space_disk(&self, disk_id: GlobalDiskId) -> Option<StorageInfo> {
         self.free_space.get(&disk_id).map(|elem| elem.into())
     }
 
-    pub fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo> {
+    pub fn free_space_tier(&self, class: u8) -> Option<StorageInfo> {
         self.free_space_tier
             .get(class as usize)
             .map(|elem| elem.into())

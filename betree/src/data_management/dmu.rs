@@ -491,7 +491,7 @@ where
 
             if self
                 .handler
-                .get_free_space_tier(class)
+                .free_space_tier(class)
                 .expect("Has to exist")
                 .free
                 .as_u64()
@@ -500,7 +500,7 @@ where
                 warn!(
                     "Storage tier {class} does not have enough space remaining. {} blocks of {}",
                     self.handler
-                        .get_free_space_tier(class)
+                        .free_space_tier(class)
                         .unwrap()
                         .free
                         .as_u64(),
@@ -518,7 +518,7 @@ where
                         class,
                         disk_id,
                         self.handler
-                            .get_free_space(DiskOffset::construct_disk_id(class, disk_id))
+                            .free_space_disk(DiskOffset::construct_disk_id(class, disk_id))
                             .expect("We can be sure that this disk id exists.")
                             .free,
                     )
@@ -554,7 +554,7 @@ where
                         warn!("Allocation failed not enough space");
                         debug!(
                             "Free space is {:?} blocks",
-                            self.handler.get_free_space_tier(class)
+                            self.handler.free_space_tier(class)
                         );
                         continue 'class;
                     }
@@ -566,7 +566,7 @@ where
             info!("Allocated {:?} at {:?}", size, disk_offset);
             debug!(
                 "Remaining space is {:?} blocks",
-                self.handler.get_free_space_tier(class)
+                self.handler.free_space_tier(class)
             );
             self.handler
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)?;

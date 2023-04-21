@@ -508,7 +508,7 @@ impl DatasetInner<DefaultMessageAction> {
     }
 
     pub(crate) fn free_space_tier(&self, pref: StoragePreference) -> Result<StorageInfo> {
-        if let Some(info) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
+        if let Some(info) = self.tree.dmu().handler().free_space_tier(pref.as_u8()) {
             Ok(info)
         } else {
             Err(Error::DoesNotExist)

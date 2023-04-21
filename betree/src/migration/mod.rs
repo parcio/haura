@@ -243,7 +243,7 @@ pub(crate) trait MigrationPolicy {
                 .filter_map(|class| {
                     self.dmu()
                         .handler()
-                        .get_free_space_tier(class)
+                        .free_space_tier(class)
                         .map(|blocks| (class, blocks))
                 })
                 .collect();
@@ -264,7 +264,7 @@ pub(crate) trait MigrationPolicy {
                 .filter_map(|class| {
                     self.dmu()
                         .handler()
-                        .get_free_space_tier(class)
+                        .free_space_tier(class)
                         .map(|blocks| (class, blocks))
                 })
                 .collect();
