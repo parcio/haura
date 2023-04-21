@@ -8,6 +8,7 @@ mod util;
 use betree_storage_stack::{
     compression::CompressionConfiguration,
     database::AccessMode,
+    env_logger,
     object::{ObjectHandle, ObjectStore},
     storage_pool::{LeafVdev, TierConfiguration, Vdev},
     Database, DatabaseConfiguration, StoragePoolConfiguration, StoragePreference,
@@ -774,6 +775,7 @@ fn space_accounting_smoke() {
 fn space_accounting_persistence(
     file_backed_config: RwLockWriteGuard<'static, DatabaseConfiguration>,
 ) {
+    env_logger::init_env_logger();
     let previous;
     {
         // Write some data and close again
@@ -786,7 +788,7 @@ fn space_accounting_persistence(
             .unwrap();
         let obj = ds.open_or_create_object(b"foobar").unwrap();
         let buf = vec![42u8; TO_MEBIBYTE];
-        dbg!(obj.write_at(&buf, 0).unwrap());
+        obj.write_at(&buf, 0).unwrap();
         db.close_object_store(ds);
         db.sync().unwrap();
     }
@@ -807,46 +809,6 @@ fn space_accounting_persistence(
 fn file_backed_config() -> RwLockWriteGuard<'static, DatabaseConfiguration> {
     configs::file_backed()
 }
-
-// #[rstest]
-// fn migration_policy_object_pointer_iterator_smoke(
-//     file_backed_config: RwLockWriteGuard<'static, DatabaseConfiguration>,
-// ) {
-//     // env_logger::init();
-//     {
-//         // Opening and writing a miniscule amount of data
-//         let cfg = file_backed_config.clone();
-//         let shared_db = Database::build_threaded(cfg).unwrap();
-//         let mut db = shared_db.write();
-//         let ds = db
-//             .open_named_object_store(b"test", StoragePreference::NONE)
-//             .unwrap();
-//         let obj = ds.open_or_create_object(b"foobar").unwrap();
-//         // at best the current impl takes 1.1 promille additional space for each leaf (3.2 MB size with 32 bytes metadata)
-//         let buf = vec![42u8; 1024 * TO_MEBIBYTE];
-//         dbg!(obj.write_at(&buf, 0).unwrap());
-//         db.close_object_store(ds);
-//         db.sync().unwrap();
-//     }
-//     log::info!("Opening Again");
-//     {
-//         // Trying to fetch information of previous state and reinit policies, using tree iterator
-//         let mut cfg = file_backed_config.clone();
-//         cfg.access_mode = AccessMode::OpenIfExists;
-//         let shared_db = Database::build_threaded(cfg).unwrap();
-//         let mut db = shared_db.write();
-//         let ds = db
-//             .open_named_object_store(b"test", StoragePreference::NONE)
-//             .unwrap();
-//         let obj = ds.open_object(b"foobar").unwrap().unwrap();
-//         let mut buf = vec![255u8; 1 * TO_MEBIBYTE];
-//         dbg!(obj.read_at(&mut buf, 0).unwrap());
-//         // for chunk in obj.read_all_chunks().unwrap() {
-//         //     log::debug!("{:?}", chunk);
-//         // }
-//         assert_eq!(buf[0], 42);
-//     }
-// }
 
 fn migration_policy_smoke(cfg: DatabaseConfiguration) {
     let shared_db = Database::build_threaded(cfg).unwrap();
@@ -872,7 +834,7 @@ fn migration_policy_smoke(cfg: DatabaseConfiguration) {
 
 #[rstest]
 fn migration_policy_smoke_rl() {
-    env_logger::init();
+    // env_logger::init();
     migration_policy_smoke(configs::migration_config_rl());
 }
 
