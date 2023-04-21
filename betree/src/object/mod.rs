@@ -229,7 +229,7 @@ impl Database {
     pub fn internal_open_object_store_with_id(
         &mut self,
         os_id: ObjectStoreId,
-    ) -> Result<ObjectStore<Config>> {
+    ) -> Result<ObjectStore> {
         self.open_object_store_with_id(os_id)
     }
 
