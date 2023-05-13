@@ -324,26 +324,26 @@ impl LeafVdev {
                 let mut is_pmem : i32 = 0;
                 let mut mapped_len : u64 = 0;
                 let mut file = match path.to_str() {
-                    Some(filepath_str) => match libpmem::pmem_file_open(format!("{}\0",filepath_str).as_str(), &mut mapped_len, &mut is_pmem) { //match libpmem::pmem_file_create(filepath_str, *len as u64, &mut mapped_len, &mut is_pmem) {
-                        Some(existing_handle) => existing_handle,
-                        None => match libpmem::pmem_file_create(format!("{}\0",filepath_str).as_str(), *len as u64, &mut mapped_len, &mut is_pmem) {//match libpmem::pmem_file_open(filepath_str, &mut mapped_len, &mut is_pmem) {
-                            Some(new_handle) => new_handle,
-                            None =>  panic!("{}", io::Error::new(io::ErrorKind::Other,
-                                                           format!("Failed to create or open handle for pmem file. Path: {}",
-                                                                   filepath_str)))
+                    Some(filepath_str) => match libpmem::PMem::open(format!("{}\0",filepath_str).as_str(), &mut mapped_len, &mut is_pmem) {
+                        Ok(handle) => handle,
+                        Err(e) => match libpmem::PMem::create(format!("{}\0",filepath_str).as_str(), *len as u64, &mut mapped_len, &mut is_pmem) {
+                            Ok(handle) => handle,
+                            Err(e) => {
+                                return Err(io::Error::new(io::ErrorKind::Other,
+                                            format!("Failed to create or open handle for pmem file. Path: {}", filepath_str)));
+                            }
                         }
                     },
                     None => {
-                        panic!("{}", io::Error::new(io::ErrorKind::Other,
-                                              format!("Invalid file path: {:?}",
-                                                      path)))
+                        return Err(io::Error::new(io::ErrorKind::Other,
+                                              format!("Invalid file path: {:?}", path)));
                     }
                 };
 
                 if (mapped_len != *len as u64) {
-                     panic!("{}", io::Error::new(io::ErrorKind::Other,
-                                           format!("The file already exists with a differnt length. Provided length: {}, File's length: {}",
-                                                   len, mapped_len)));
+                     return Err(io::Error::new(io::ErrorKind::Other,
+                                    format!("The file already exists with a differnt length. Provided length: {}, File's length: {}",
+                                            len, mapped_len)));
                 }
 
                 Ok(Leaf::PMemFile(vdev::PMemFile::new(

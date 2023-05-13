@@ -19,7 +19,7 @@ use std::{
 /// `LeafVdev` that is backed by a file.
 #[derive(Debug)]
 pub struct PMemFile {
-    file: pmdk::ptr_to_pmem,
+    file: pmdk::PMem,
     id: String,
     size: Block<u64>,
     stats: AtomicStatistics,
@@ -27,7 +27,7 @@ pub struct PMemFile {
 
 impl PMemFile {
     /// Creates a new `PMEMFile`.
-    pub fn new(file: pmdk::ptr_to_pmem, id: String, len: u64) -> io::Result<Self> {
+    pub fn new(file: pmdk::PMem, id: String, len: u64) -> io::Result<Self> {
         let size = Block::from_bytes(len);
         Ok(PMemFile {
             file,
@@ -63,7 +63,7 @@ impl VdevRead for PMemFile {
         let buf = {
             let mut buf = Buf::zeroed(size).into_full_mut();
 
-            if let Err(e) = libpmem::pmem_file_read( &self.file, offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
+            if let Err(e) = self.file.read(offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
                 self.stats
                     .failed_reads
                     .fetch_add(size.as_u64(), Ordering::Relaxed);
@@ -102,7 +102,7 @@ impl VdevRead for PMemFile {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let mut buf = Buf::zeroed(size).into_full_mut();
        
-        match libpmem::pmem_file_read( &self.file, offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
+        match self.file.read(offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
             Ok(()) => Ok(vec![buf.into_full_buf()]),
             Err(e) => {
                 self.stats
@@ -148,7 +148,7 @@ impl VdevLeafRead for PMemFile {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         
-        match libpmem::pmem_file_read( &self.file, offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
+        match self.file.read(offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
             Ok(()) => Ok(buf),
             Err(e) => {
                 self.stats
@@ -179,7 +179,7 @@ impl VdevLeafWrite for PMemFile {
         let block_cnt = Block::from_bytes(data.as_ref().len() as u64).as_u64();
         self.stats.written.fetch_add(block_cnt, Ordering::Relaxed);
 
-        match libpmem::pmem_file_write( &self.file, offset.to_bytes() as usize, data.as_ref(), data.as_ref().len())
+        match self.file.write(offset.to_bytes() as usize, data.as_ref(), data.as_ref().len())
             .map_err(|_| VdevError::Write(self.id.clone()))
         {
             Ok(()) => {
