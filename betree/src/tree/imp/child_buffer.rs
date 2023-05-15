@@ -4,10 +4,10 @@
 //! [super::leaf::LeafNode].
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::HasStoragePreference,
+    data_management::{HasStoragePreference, ObjectReference},
     size::{Size, StaticSize},
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
-    tree::{KeyInfo, MessageAction},
+    storage_pool::AtomicSystemStoragePreference,
+    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction, PivotKey},
     AtomicStoragePreference, StoragePreference,
 };
 use parking_lot::RwLock;
@@ -70,6 +70,23 @@ impl<N: HasStoragePreference> HasStoragePreference for ChildBuffer<N> {
 
     fn set_system_storage_preference(&mut self, pref: StoragePreference) {
         self.system_storage_preference.set(pref)
+    }
+}
+
+impl<N: ObjectReference> ChildBuffer<N> {
+    /// Access the pivot key of the underlying object reference and update it to
+    /// reflect a structural change in the tree.
+    pub fn update_pivot_key(&mut self, lpk: LocalPivotKey) {
+        let or = self.node_pointer.get_mut();
+        let d_id = or.index().d_id();
+        or.set_index(lpk.to_global(d_id));
+    }
+
+    /// Insert an arbitrary PivotKey into the `ObjectReference`.
+    ///
+    /// FIXME: This is best replaced with actual type exclusion.
+    pub fn complete_object_ref(&mut self, pk: PivotKey) {
+        self.node_pointer.get_mut().set_index(pk)
     }
 }
 
@@ -232,7 +249,7 @@ impl<N> ChildBuffer<N> {
                 let lower_size = lower_msg.size();
                 let merged_msg = msg_action.merge(&key, msg, lower_msg);
                 let merged_msg_size = merged_msg.size();
-                (*e.get_mut()).1 = merged_msg;
+                e.get_mut().1 = merged_msg;
                 self.buffer_entries_size -= lower_size;
                 self.buffer_entries_size += merged_msg_size;
                 merged_msg_size as isize - lower_size as isize

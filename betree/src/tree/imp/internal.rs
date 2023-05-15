@@ -1,11 +1,16 @@
 //! Implementation of the [InternalNode] node type.
-use super::child_buffer::ChildBuffer;
+use super::{
+    child_buffer::ChildBuffer,
+    node::{PivotGetMutResult, PivotGetResult},
+    PivotKey,
+};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::HasStoragePreference,
+    data_management::{HasStoragePreference, ObjectReference},
+    database::DatasetId,
     size::{Size, SizeMut, StaticSize},
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
-    tree::{KeyInfo, MessageAction},
+    storage_pool::AtomicSystemStoragePreference,
+    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
 use bincode::serialized_size;
@@ -54,7 +59,7 @@ pub(super) struct InternalNode<T> {
 
 // NOTE: Waiting for OnceCell to be stabilized...
 // https://doc.rust-lang.org/stable/std/cell/struct.OnceCell.html
-const EMPTY_NODE: InternalNode<()> = InternalNode {
+static EMPTY_NODE: InternalNode<()> = InternalNode {
     level: 0,
     entries_size: 0,
     system_storage_preference: AtomicSystemStoragePreference::none(),
@@ -196,9 +201,61 @@ impl<N> InternalNode<ChildBuffer<N>> {
         (&child.node_pointer, msg)
     }
 
-    pub fn probe_storage_level(&self, key: &[u8]) -> &RwLock<N> {
-        let child = &self.children[self.idx(key)];
-        &child.node_pointer
+    pub fn pivot_get(&self, pk: &PivotKey) -> PivotGetResult<N> {
+        // Exact pivot matches are required only
+        debug_assert!(!pk.is_root());
+        let pivot = pk.bytes().unwrap();
+        self.pivot
+            .iter()
+            .enumerate()
+            .find(|(_idx, p)| **p == pivot)
+            .map_or_else(
+                || {
+                    // Continue the search to the next level
+                    let child = &self.children[self.idx(&pivot)];
+                    PivotGetResult::NextNode(&child.node_pointer)
+                },
+                |(idx, _)| {
+                    // Fetch the correct child pointer
+                    let child;
+                    if pk.is_left() {
+                        child = &self.children[idx];
+                    } else {
+                        child = &self.children[idx + 1];
+                    }
+                    PivotGetResult::Target(Some(&child.node_pointer))
+                },
+            )
+    }
+
+    pub fn pivot_get_mut(&mut self, pk: &PivotKey) -> PivotGetMutResult<N> {
+        // Exact pivot matches are required only
+        debug_assert!(!pk.is_root());
+        let pivot = pk.bytes().unwrap();
+        let (id, is_target) = self
+            .pivot
+            .iter()
+            .enumerate()
+            .find(|(_idx, p)| **p == pivot)
+            .map_or_else(
+                || {
+                    // Continue the search to the next level
+                    (self.idx(&pivot), false)
+                },
+                |(idx, _)| {
+                    // Fetch the correct child pointer
+                    (idx, true)
+                },
+            );
+        match (is_target, pk.is_left()) {
+            (true, true) => {
+                PivotGetMutResult::Target(Some(self.children[id].node_pointer.get_mut()))
+            }
+            (true, false) => {
+                PivotGetMutResult::Target(Some(self.children[id + 1].node_pointer.get_mut()))
+            }
+            (false, _) => PivotGetMutResult::NextNode(self.children[id].node_pointer.get_mut()),
+        }
     }
 
     pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N {
@@ -349,13 +406,18 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<T: Size> InternalNode<T> {
-    pub fn split(&mut self) -> (Self, CowBytes, isize) {
+impl<N: ObjectReference> InternalNode<ChildBuffer<N>> {
+    pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.pref.invalidate();
         let split_off_idx = self.fanout() / 2;
         let pivot = self.pivot.split_off(split_off_idx);
         let pivot_key = self.pivot.pop().unwrap();
         let mut children = self.children.split_off(split_off_idx);
+
+        if let (Some(new_left_outer), Some(new_left_pivot)) = (children.first_mut(), pivot.first())
+        {
+            new_left_outer.update_pivot_key(LocalPivotKey::LeftOuter(new_left_pivot.clone()))
+        }
 
         let entries_size = pivot.iter().map(Size::size).sum::<usize>()
             + children.iter_mut().map(SizeMut::size).sum::<usize>();
@@ -373,7 +435,12 @@ impl<T: Size> InternalNode<T> {
             system_storage_preference: self.system_storage_preference.clone(),
             pref: AtomicStoragePreference::unknown(),
         };
-        (right_sibling, pivot_key, -(size_delta as isize))
+        (
+            right_sibling,
+            pivot_key.clone(),
+            -(size_delta as isize),
+            LocalPivotKey::Right(pivot_key),
+        )
     }
 
     pub fn merge(&mut self, right_sibling: &mut Self, old_pivot_key: CowBytes) -> isize {
@@ -385,6 +452,27 @@ impl<T: Size> InternalNode<T> {
         self.children.append(&mut right_sibling.children);
 
         size_delta as isize
+    }
+
+    /// Translate any object ref in a `ChildBuffer` from `Incomplete` to `Unmodified` state.
+    pub fn complete_object_refs(mut self, d_id: DatasetId) -> Self {
+        // TODO:
+        let first_pk = match self.pivot.first() {
+            Some(p) => PivotKey::LeftOuter(p.clone(), d_id),
+            None => unreachable!(
+                "The store contains an empty InternalNode, this should never be the case."
+            ),
+        };
+        for (id, pk) in [first_pk]
+            .into_iter()
+            .chain(self.pivot.iter().map(|p| PivotKey::Right(p.clone(), d_id)))
+            .enumerate()
+        {
+            // SAFETY: There must always be pivots + 1 many children, otherwise
+            // the state of the Internal Node is broken.
+            self.children[id].complete_object_ref(pk)
+        }
+        self
     }
 }
 
@@ -567,12 +655,16 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
 
 #[cfg(test)]
 mod tests {
+    
+
     use super::*;
     use crate::{
         arbitrary::GenExt,
+        database::DatasetId,
         tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
     };
     use bincode::serialized_size;
+    
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
     use serde::Serialize;
@@ -730,13 +822,39 @@ mod tests {
         assert_eq!(added_size, added_size_twin);
     }
 
+    static mut PK: Option<PivotKey> = None;
+
+    impl ObjectReference for () {
+        type ObjectPointer = ();
+
+        fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
+            Some(&())
+        }
+
+        fn set_index(&mut self, _pk: PivotKey) {
+            // NO-OP
+        }
+
+        fn index(&self) -> &PivotKey {
+            unsafe {
+                if PK.is_none() {
+                    PK = Some(PivotKey::LeftOuter(
+                        CowBytes::from(vec![42u8]),
+                        DatasetId::default(),
+                    ));
+                }
+                PK.as_ref().unwrap()
+            }
+        }
+    }
+
     #[quickcheck]
     fn check_size_split(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
         if node.fanout() < 2 {
             return TestResult::discard();
         }
         let size_before = node.size();
-        let (mut right_sibling, _pivot_key, size_delta) = node.split();
+        let (mut right_sibling, _pivot, size_delta, _pivot_key) = node.split();
         assert_eq!(size_before as isize + size_delta, node.size() as isize);
         check_size(&mut node);
         check_size(&mut right_sibling);
@@ -750,18 +868,30 @@ mod tests {
             return TestResult::discard();
         }
         let twin = node.clone();
-        let (mut right_sibling, pivot_key, _size_delta) = node.split();
+        let (mut right_sibling, pivot, _size_delta, _pivot_key) = node.split();
 
         assert!(node.fanout() >= 2);
         assert!(right_sibling.fanout() >= 2);
 
-        node.entries_size += pivot_key.size() + right_sibling.entries_size;
-        node.pivot.push(pivot_key);
+        node.entries_size += pivot.size() + right_sibling.entries_size;
+        node.pivot.push(pivot);
         node.pivot.append(&mut right_sibling.pivot);
         node.children.append(&mut right_sibling.children);
 
         assert_eq!(node, twin);
 
+        TestResult::passed()
+    }
+
+    #[quickcheck]
+    fn check_split_key(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
+        if node.fanout() < 4 {
+            return TestResult::discard();
+        }
+        let (right_sibling, pivot, _size_delta, pivot_key) = node.split();
+        assert!(node.fanout() >= 2);
+        assert!(right_sibling.fanout() >= 2);
+        assert_eq!(LocalPivotKey::Right(pivot), pivot_key);
         TestResult::passed()
     }
 

@@ -5,15 +5,16 @@ use super::{
     internal::{InternalNode, TakeChildBuffer},
     leaf::LeafNode,
     packed::PackedMap,
-    FillUpResult, KeyInfo, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT, MIN_FLUSH_SIZE,
-    MIN_LEAF_NODE_SIZE,
+    FillUpResult, KeyInfo, PivotKey, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT,
+    MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HandlerDml, HasStoragePreference, Object, ObjectRef},
+    data_management::{Dml, HasStoragePreference, Object, ObjectReference},
+    database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::DiskOffset,
-    tree::MessageAction,
+    tree::{pivot_key::LocalPivotKey, MessageAction},
     StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
@@ -77,7 +78,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
     }
 }
 
-impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
+impl<R: ObjectReference + HasStoragePreference> Object<R> for Node<R> {
     fn pack<W: Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()),
@@ -90,10 +91,10 @@ impl<R: ObjectRef + HasStoragePreference> Object<R> for Node<R> {
         }
     }
 
-    fn unpack_at(_offset: DiskOffset, data: Box<[u8]>) -> Result<Self, io::Error> {
+    fn unpack_at(_offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
         if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
             match deserialize::<InternalNode<_>>(&data[4..]) {
-                Ok(internal) => Ok(Node(Internal(internal))),
+                Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
         } else {
@@ -257,30 +258,37 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     }
 }
 
-impl<N: StaticSize + HasStoragePreference> Node<N> {
+impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
     pub(super) fn split_root_mut<F>(&mut self, allocate_obj: F) -> isize
     where
-        F: Fn(Self) -> N,
+        F: Fn(Self, LocalPivotKey) -> N,
     {
         let size_before = self.size();
         self.ensure_unpacked();
+        // FIXME: Update this PivotKey, as the index of the node is changing due to the structural change.
         let mut left_sibling = self.take();
         let (right_sibling, pivot_key, cur_level) = match left_sibling.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
-                let (right_sibling, pivot_key, _) =
+                let (right_sibling, pivot_key, _, _pk) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
                 (Node(Leaf(right_sibling)), pivot_key, 0)
             }
             Internal(ref mut internal) => {
-                let (right_sibling, pivot_key, _) = internal.split();
+                let (right_sibling, pivot_key, _, _pk) = internal.split();
                 (Node(Internal(right_sibling)), pivot_key, internal.level())
             }
         };
         debug!("Root split pivot key: {:?}", pivot_key);
         *self = Node(Internal(InternalNode::new(
-            ChildBuffer::new(allocate_obj(left_sibling)),
-            ChildBuffer::new(allocate_obj(right_sibling)),
+            ChildBuffer::new(allocate_obj(
+                left_sibling,
+                LocalPivotKey::LeftOuter(pivot_key.clone()),
+            )),
+            ChildBuffer::new(allocate_obj(
+                right_sibling,
+                LocalPivotKey::Right(pivot_key.clone()),
+            )),
             pivot_key,
             cur_level + 1,
         )));
@@ -299,9 +307,14 @@ pub(super) enum ApplyResult<'a, N: 'a> {
     NextNode(&'a mut N),
 }
 
-pub(super) enum ProbeResult<'a, N: 'a> {
-    Leaf,
+pub(super) enum PivotGetResult<'a, N: 'a> {
+    Target(Option<&'a RwLock<N>>),
     NextNode(&'a RwLock<N>),
+}
+
+pub(super) enum PivotGetMutResult<'a, N: 'a> {
+    Target(Option<&'a mut N>),
+    NextNode(&'a mut N),
 }
 
 pub(super) enum GetRangeResult<'a, T, N: 'a> {
@@ -358,6 +371,26 @@ impl<N: HasStoragePreference> Node<N> {
             }
         }
     }
+
+    pub(super) fn pivot_get(&self, pk: &PivotKey) -> Option<PivotGetResult<N>> {
+        if pk.is_root() {
+            return Some(PivotGetResult::Target(None));
+        }
+        match self.0 {
+            PackedLeaf(_) | Leaf(_) => None,
+            Internal(ref internal) => Some(internal.pivot_get(pk)),
+        }
+    }
+
+    pub(super) fn pivot_get_mut(&mut self, pk: &PivotKey) -> Option<PivotGetMutResult<N>> {
+        if pk.is_root() {
+            return Some(PivotGetMutResult::Target(None));
+        }
+        match self.0 {
+            PackedLeaf(_) | Leaf(_) => None,
+            Internal(ref mut internal) => Some(internal.pivot_get_mut(pk)),
+        }
+    }
 }
 
 impl<N: HasStoragePreference + StaticSize> Node<N> {
@@ -392,9 +425,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             + (match self.0 {
                 PackedLeaf(_) => unreachable!(),
                 Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
-                Internal(ref mut internal) => {
-                    internal.insert_msg_buffer(msg_buffer, msg_action) as isize
-                }
+                Internal(ref mut internal) => internal.insert_msg_buffer(msg_buffer, msg_action),
             })
     }
 
@@ -447,15 +478,15 @@ impl<N: HasStoragePreference> Node<N> {
     }
 }
 
-impl<N: StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn split(&mut self) -> (Self, CowBytes, isize) {
+impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
+    pub(super) fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.ensure_unpacked();
         match self.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
-                let (node, pivot_key, size_delta) =
+                let (node, pivot_key, size_delta, pk) =
                     leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
-                (Node(Leaf(node)), pivot_key, size_delta)
+                (Node(Leaf(node)), pivot_key, size_delta, pk)
             }
             Internal(ref mut internal) => {
                 debug_assert!(
@@ -465,8 +496,8 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
                     internal.size(),
                     internal.actual_size()
                 );
-                let (node, pivot_key, size_delta) = internal.split();
-                (Node(Internal(node)), pivot_key, size_delta)
+                let (node, pivot_key, size_delta, pk) = internal.split();
+                (Node(Internal(node)), pivot_key, size_delta, pk)
             }
         }
     }
@@ -520,7 +551,8 @@ pub struct ChildInfo {
     from: Option<ByteString>,
     to: Option<ByteString>,
     storage: StoragePreference,
-    child: NodeInfo,
+    pub pivot_key: PivotKey,
+    pub child: NodeInfo,
 }
 
 #[derive(serde::Serialize)]
@@ -566,11 +598,11 @@ impl serde::Serialize for ByteString {
     }
 }
 
-impl<N: HasStoragePreference> Node<N> {
+impl<N: HasStoragePreference + ObjectReference> Node<N> {
     pub(crate) fn node_info<D>(&self, dml: &D) -> NodeInfo
     where
-        D: HandlerDml<Object = Node<N>, ObjectRef = N>,
-        N: ObjectRef<ObjectPointer = D::ObjectPointer>,
+        D: Dml<Object = Node<N>, ObjectRef = N>,
+        N: ObjectReference<ObjectPointer = D::ObjectPointer>,
     {
         match &self.0 {
             Inner::Internal(int) => NodeInfo::Internal {
@@ -580,11 +612,12 @@ impl<N: HasStoragePreference> Node<N> {
                 children: {
                     int.iter_with_bounds()
                         .map(|(maybe_left, child_buf, maybe_right)| {
-                            let (child, storage_preference) = {
+                            let (child, storage_preference, pivot_key) = {
                                 let mut np = child_buf.node_pointer.write();
+                                let pivot_key = np.index().clone();
                                 let storage_preference = np.correct_preference();
                                 let child = dml.get(&mut np).unwrap();
-                                (child, storage_preference)
+                                (child, storage_preference, pivot_key)
                             };
 
                             let node_info = child.node_info(dml);
@@ -596,6 +629,7 @@ impl<N: HasStoragePreference> Node<N> {
                                 from: maybe_left.map(|cow| ByteString(cow.to_vec())),
                                 to: maybe_right.map(|cow| ByteString(cow.to_vec())),
                                 storage: storage_preference,
+                                pivot_key,
                                 child: node_info,
                             }
                         })

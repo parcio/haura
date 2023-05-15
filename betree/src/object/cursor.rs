@@ -2,28 +2,25 @@
 #![allow(irrefutable_let_patterns)]
 
 use super::ObjectHandle;
-use crate::{
-    database::{self, DatabaseBuilder},
-    StoragePreference,
-};
+use crate::{database::Error as DbError, StoragePreference};
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 /// A streaming interface for [ObjectHandle]s, allowing the use of [Read], [Write], and [Seek]
 /// to interoperate with other libraries. Additionally, the per-object storage preference can
 /// be overridden with [ObjectHandle::cursor_with_pref] and [ObjectCursor::set_storage_preference].
-pub struct ObjectCursor<'handle, 'r, Config: DatabaseBuilder + Clone> {
-    handle: &'r ObjectHandle<'handle, Config>,
+pub struct ObjectCursor<'handle, 'r> {
+    handle: &'r ObjectHandle<'handle>,
     pos: u64,
     pref: StoragePreference,
 }
 
-impl<'handle, Config: DatabaseBuilder + Clone> ObjectHandle<'handle, Config> {
+impl<'handle> ObjectHandle<'handle> {
     /// Create a cursor with a storage preference override, at position 0.
     pub fn cursor_with_pref<'r>(
         &'handle self,
         pref: StoragePreference,
-    ) -> ObjectCursor<'handle, 'r, Config> {
+    ) -> ObjectCursor<'handle, 'r> {
         ObjectCursor {
             handle: self,
             pos: 0,
@@ -32,29 +29,28 @@ impl<'handle, Config: DatabaseBuilder + Clone> ObjectHandle<'handle, Config> {
     }
 
     /// Create a cursor without a storage preference override, at position 0.
-    pub fn cursor<'r>(&'handle self) -> ObjectCursor<'handle, 'r, Config> {
+    pub fn cursor<'r>(&'handle self) -> ObjectCursor<'handle, 'r> {
         self.cursor_with_pref(StoragePreference::NONE)
     }
 }
 
-impl<'handle, 'r, Config: DatabaseBuilder + Clone> ObjectCursor<'handle, 'r, Config> {
+impl<'handle, 'r> ObjectCursor<'handle, 'r> {
     /// Override the storage preference to use for future operations with this cursor.
     pub fn set_storage_preference(&mut self, pref: StoragePreference) {
         self.pref = pref;
     }
 }
 
-fn convert_res(db_res: Result<u64, (u64, database::Error)>) -> io::Result<usize> {
+fn convert_res(db_res: Result<u64, (u64, DbError)>) -> io::Result<usize> {
     match db_res {
         Ok(n) => Ok(n as usize),
         Err((_n, e)) => Err(convert_err(e)),
     }
 }
 
-fn convert_err(database::Error(kind, _): database::Error) -> io::Error {
-    use database::ErrorKind;
-    match kind {
-        ErrorKind::Io(io_err) => io_err,
+fn convert_err(err: DbError) -> io::Error {
+    match err {
+        DbError::IoError { source } => source,
         // FIXME: this eats io::Errors hidden deeper into the result chain
         e => {
             dbg!("Encountered error: {:?}", e);
@@ -63,7 +59,7 @@ fn convert_err(database::Error(kind, _): database::Error) -> io::Error {
     }
 }
 
-impl<'a, 'b, Config: DatabaseBuilder + Clone> Read for ObjectCursor<'a, 'b, Config> {
+impl<'a, 'b> Read for ObjectCursor<'a, 'b> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let res = self.handle.read_at(buf, self.pos);
 
@@ -75,7 +71,7 @@ impl<'a, 'b, Config: DatabaseBuilder + Clone> Read for ObjectCursor<'a, 'b, Conf
     }
 }
 
-impl<'a, 'b, Config: DatabaseBuilder + Clone> Write for ObjectCursor<'a, 'b, Config> {
+impl<'a, 'b> Write for ObjectCursor<'a, 'b> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let res = self.handle.write_at_with_pref(buf, self.pos, self.pref);
 
@@ -91,7 +87,7 @@ impl<'a, 'b, Config: DatabaseBuilder + Clone> Write for ObjectCursor<'a, 'b, Con
     }
 }
 
-impl<'a, 'b, Config: DatabaseBuilder + Clone> Seek for ObjectCursor<'a, 'b, Config> {
+impl<'a, 'b> Seek for ObjectCursor<'a, 'b> {
     fn seek(&mut self, target: SeekFrom) -> io::Result<u64> {
         fn add_u64_i64(base: u64, delta: i64) -> Option<u64> {
             if delta >= 0 {

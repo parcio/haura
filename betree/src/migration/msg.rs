@@ -1,8 +1,9 @@
 use crate::{
     cow_bytes::CowBytes,
-    database::{DatabaseBuilder, DatasetId},
+    database::DatasetId,
     object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
+    tree::PivotKey,
     vdev::Block,
     StoragePreference,
 };
@@ -73,13 +74,13 @@ impl Display for GlobalObjectId {
 /// might be distributed on multiple storage tiers and must not adhere to the
 /// storage preference given.
 #[derive(Clone)]
-pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
+pub enum DatabaseMsg {
     // Relevant for Promotion and/or Demotion
     DatasetOpen(DatasetId),
     DatasetClose(DatasetId),
 
     /// Announce and deliver an accessible copy of active object stores.
-    ObjectstoreOpen(ObjectStoreId, ObjectStore<Config>),
+    ObjectstoreOpen(ObjectStoreId, ObjectStore),
     ObjectstoreClose(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.
@@ -96,47 +97,31 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     ObjectDiscover(GlobalObjectId, ObjectInfo, CowBytes),
 }
 
-pub trait ConstructReport {
-    fn build_fetch(info: OpInfo) -> Self;
-    fn build_write(info: OpInfo) -> Self;
-    fn fetch(offset: DiskOffset, size: Block<u32>) -> Self;
-    fn write(offset: DiskOffset, size: Block<u32>, previous_offset: Option<DiskOffset>) -> Self;
-    fn remove(offset: DiskOffset, size: Block<u32>) -> Self;
-}
-
-impl ConstructReport for DmlMsg {
-    fn build_fetch(info: OpInfo) -> Self {
-        Self::Fetch(info)
-    }
-
-    fn build_write(info: OpInfo) -> Self {
-        Self::Write(info)
-    }
-
-    fn fetch(offset: DiskOffset, size: Block<u32>) -> Self {
-        Self::build_fetch(OpInfo {
+impl DmlMsg {
+    pub fn fetch(offset: DiskOffset, size: Block<u32>, pivot_key: PivotKey) -> Self {
+        Self::Fetch(OpInfo {
             offset,
             size,
             time: SystemTime::now(),
-            previous_offset: None,
+            pivot_key,
         })
     }
 
-    fn write(offset: DiskOffset, size: Block<u32>, previous_offset: Option<DiskOffset>) -> Self {
-        Self::build_write(OpInfo {
+    pub fn write(offset: DiskOffset, size: Block<u32>, pivot_key: PivotKey) -> Self {
+        Self::Write(OpInfo {
             offset,
             size,
             time: SystemTime::now(),
-            previous_offset,
+            pivot_key,
         })
     }
 
-    fn remove(offset: DiskOffset, size: Block<u32>) -> Self {
+    pub fn remove(offset: DiskOffset, size: Block<u32>, pivot_key: PivotKey) -> Self {
         Self::Remove(OpInfo {
             offset,
             size,
             time: SystemTime::now(),
-            previous_offset: None,
+            pivot_key,
         })
     }
 }
@@ -212,7 +197,7 @@ pub struct OpInfo {
     pub(crate) offset: DiskOffset,
     /// The previous offset of the node written. If `None` the node has been
     /// newly created and never been written before.
-    pub(crate) previous_offset: Option<DiskOffset>,
+    pub(crate) pivot_key: PivotKey,
     /// The size of the nodes in blocks. Relevant for weighting of operations
     /// and space restrictions.
     pub(crate) size: Block<u32>,

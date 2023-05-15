@@ -15,8 +15,8 @@ use log::error;
 use parking_lot::RwLock;
 
 use betree_storage_stack::{
-    database::{self, DatabaseConfiguration},
-    object::{self, ObjectInfo},
+    database::{Database, DatabaseConfiguration},
+    object::{self, ObjectInfo, ObjectStore},
     StoragePreference,
 };
 
@@ -34,10 +34,8 @@ error_chain::error_chain! {
     }
 }
 
-type Database = database::Database<DatabaseConfiguration>;
-type ObjectStore = object::ObjectStore<DatabaseConfiguration>;
 type ObjectStoreRef<'b> = dashmap::mapref::one::Ref<'b, CString, Pin<Box<ObjectStore>>>;
-type ObjectHandle<'os> = object::ObjectHandle<'os, DatabaseConfiguration>;
+type ObjectHandle<'os> = object::ObjectHandle<'os>;
 
 struct Backend {
     database: Arc<RwLock<Database>>,

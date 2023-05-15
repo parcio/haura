@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, ObjectRef},
+    data_management::{Dml, HasStoragePreference, ObjectReference},
     tree::{errors::*, Key, KeyInfo, MessageAction, Value},
 };
 use std::{
@@ -30,7 +30,7 @@ enum Bounded<T> {
 /// The iterator performs asynchronous prefetching to allow for a better
 /// utilization of underlying resources. It is advised to use [RangeIterator]
 /// and methods utilizing it in almost all cases.
-pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
+pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     buffer: VecDeque<(Key, (KeyInfo, Value))>,
     min_key: Bounded<Vec<u8>>,
     /// Always inclusive
@@ -43,11 +43,11 @@ pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> 
 impl<X, R, M, I> Iterator for RangeIterator<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
-    type Item = Result<(Key, Value), TreeError>;
+    type Item = Result<(Key, Value), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -66,9 +66,9 @@ where
 impl<X, R, M, I> RangeIterator<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     pub(super) fn new<K, T>(range: T, tree: Tree<X, M, I>) -> Self
     where
@@ -100,7 +100,7 @@ where
         }
     }
 
-    fn fill_buffer(&mut self) -> Result<(), TreeError> {
+    fn fill_buffer(&mut self) -> Result<(), Error> {
         let next_pivot = {
             let min_key = match self.min_key {
                 Bounded::Included(ref x) | Bounded::Excluded(ref x) => x,
@@ -113,7 +113,7 @@ where
         while self
             .buffer
             .front()
-            .map(|&(ref key, _)| match self.min_key {
+            .map(|(key, _)| match self.min_key {
                 Bounded::Included(ref min_key) => key < min_key,
                 Bounded::Excluded(ref min_key) => key <= min_key,
             })
@@ -125,14 +125,14 @@ where
             while self
                 .buffer
                 .back()
-                .map(|&(ref key, _)| key > max_key)
+                .map(|(key, _)| key > max_key)
                 .unwrap_or_default()
             {
                 self.buffer.pop_back().unwrap();
             }
             next_pivot
                 .as_ref()
-                .map(|pivot| self.finished = &pivot[..] >= &max_key[..]);
+                .map(|pivot| self.finished = pivot >= max_key);
         }
 
         match next_pivot {
@@ -160,16 +160,16 @@ where
 impl<X, R, M, I> Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     fn leaf_range_query(
         &self,
         key: &[u8],
         data: &mut VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
         prefetch: &mut Option<X::Prefetch>,
-    ) -> Result<Option<CowBytes>, TreeError> {
+    ) -> Result<Option<CowBytes>, Error> {
         let result = {
             let mut left_pivot_key = None;
             let mut right_pivot_key = None;
@@ -235,11 +235,11 @@ where
         // left_pivot_key..right_pivot_key.
         let msgs_iter = messages
             .into_iter()
-            .skip_while(|&(ref key, _)| match *left_pivot_key {
+            .skip_while(|(key, _)| match *left_pivot_key {
                 None => false,
                 Some(ref min_key) => key < min_key,
             })
-            .take_while(|&(ref key, _)| match *right_pivot_key {
+            .take_while(|(key, _)| match *right_pivot_key {
                 None => true,
                 Some(ref max_key) => key <= max_key,
             });

@@ -6,6 +6,7 @@
   - [betree\_storage\_stack](./betree.md)
     - [Build & Test](./betree/build.md)
     - [Design Overview](./betree/design.md)
+    - [Debug Plots](./betree/debug_plots.md)
     - [Known Bugs](./betree/bugs.md)
   - [bectl](./bectl.md)
     - [Build & Test](./bectl/build.md)

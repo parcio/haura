@@ -2,6 +2,8 @@
 
 mod configs;
 mod object_store;
+mod pivot_key;
+mod util;
 
 use betree_storage_stack::{
     compression::CompressionConfiguration,
@@ -22,7 +24,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use insta::assert_json_snapshot;
 use serde_json::json;
 
-fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
+fn test_db(tiers: u32, mb_per_tier: u32) -> Database {
     let tier_size = mb_per_tier as usize * 1024 * 1024;
     let cfg = DatabaseConfiguration {
         storage: StoragePoolConfiguration {
@@ -44,7 +46,7 @@ fn test_db(tiers: u32, mb_per_tier: u32) -> Database<DatabaseConfiguration> {
 
 // List of sizes for each tier is attached
 // It is assumed len(that mb_per_tier) = tiers
-fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database<DatabaseConfiguration> {
+fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database {
     let cfg = DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: (0..tiers)
@@ -68,8 +70,8 @@ fn test_db_uneven(tiers: usize, mb_per_tier: &[u32]) -> Database<DatabaseConfigu
 
 struct TestDriver {
     name: String,
-    database: Database<DatabaseConfiguration>,
-    object_store: ObjectStore<DatabaseConfiguration>,
+    database: Database,
+    object_store: ObjectStore,
     rng: Xoshiro256PlusPlus,
 }
 
@@ -121,7 +123,7 @@ impl TestDriver {
         );
     }
 
-    fn open(&self, obj_name: &[u8]) -> ObjectHandle<DatabaseConfiguration> {
+    fn open(&self, obj_name: &[u8]) -> ObjectHandle {
         self.object_store
             .open_or_create_object(obj_name)
             .expect("Unable to open object")
@@ -147,7 +149,7 @@ impl TestDriver {
             self.rng
                 .try_fill(&mut buf[..])
                 .expect("Couldn't fill with random data");
-            obj.write_at_with_pref(&buf, offset + i * block_size as u64, pref)
+            obj.write_at_with_pref(&buf, offset + i * block_size, pref)
                 .expect("Failed to write buf");
         }
     }
@@ -297,17 +299,16 @@ fn write_flaky(tier_size_mb: u32, write_size_mb: usize) {
             let obj = os
                 .open_or_create_object(b"hewo")
                 .expect("Oh no! Could not open object!");
-            obj.write_at(&buf, 0).expect(
-                format!(
+            obj.write_at(&buf, 0).unwrap_or_else(|_| {
+                panic!(
                     "Writing of {} MiB into {} MiB storage failed",
                     write_size_mb, tier_size_mb
                 )
-                .as_str(),
-            );
+            });
         }
         db.close_object_store(os);
         db.sync()
-            .expect(format!("Sync failed ({}MB of {}MB)", write_size_mb, tier_size_mb).as_str());
+            .unwrap_or_else(|_| panic!("Sync failed ({}MB of {}MB)", write_size_mb, tier_size_mb));
     }
 }
 
@@ -450,17 +451,16 @@ fn write_delete_sequence(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
                 accumulated += size;
             }
             false => {
-                if inserted.len() > 0 {
+                if !inserted.is_empty() {
                     println!("Delete object");
-                    let key = inserted
+                    let key = *inserted
                         .choose(&mut rng)
-                        .expect("Could not choose an element")
-                        .clone();
-                    let foo = os
+                        .expect("Could not choose an element");
+                    let obj = os
                         .open_object(&key.to_le_bytes())
                         .expect("Key is not contained")
                         .expect("No content beyond object");
-                    foo.delete().expect("Could not delete");
+                    obj.delete().expect("Could not delete");
                     inserted.retain(|e| *e != key);
                 }
             }
@@ -493,7 +493,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
             .open_or_create_object(b"test")
             .expect("Could not create object");
         obj.write_at(&buf, 0)
-            .expect(&format!("Could not write buffer of size {}MB", buf_size));
+            .unwrap_or_else(|_| panic!("Could not write buffer of size {}MB", buf_size));
     }
     db.sync().expect("Could not sync database");
     {
@@ -501,7 +501,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
             .open_or_create_object(b"test2")
             .expect("Could not create object");
         obj.write_at(&buf, 0)
-            .expect(&format!("Could not write buffer of size {}MB", buf_size));
+            .unwrap_or_else(|_| panic!("Could not write buffer of size {}MB", buf_size));
     }
     db.sync().expect("Could not sync database");
     {
@@ -516,7 +516,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
             .open_or_create_object(b"test3")
             .expect("Could not create object");
         obj.write_at(&buf2, 0)
-            .expect(&format!("Could not write buffer of size {}MB", buf_size));
+            .unwrap_or_else(|_| panic!("Could not write buffer of size {}MB", buf_size));
     }
     db.sync().expect("Could not sync database");
     {
@@ -555,22 +555,28 @@ fn overwrite_buffer(#[case] tier_size_mb: u32, #[case] buf_size: usize) {
         let obj = os
             .open_or_create_object(b"test")
             .expect("Could not create object");
-        obj.write_at(&buf, 0).expect(&format!(
-            "Could not write buffer of size {}MB at offset {}",
-            buf_size, 0
-        ));
+        obj.write_at(&buf, 0).unwrap_or_else(|_| {
+            panic!(
+                "Could not write buffer of size {}MB at offset {}",
+                buf_size, 0
+            )
+        });
         db.sync().expect("Could not sync database");
-        obj.write_at(&buf, buf.len() as u64).expect(&format!(
-            "Could not write buffer of size {}MB at offset {}",
-            buf_size,
-            buf.len()
-        ));
+        obj.write_at(&buf, buf.len() as u64).unwrap_or_else(|_| {
+            panic!(
+                "Could not write buffer of size {}MB at offset {}",
+                buf_size,
+                buf.len()
+            )
+        });
         db.sync().expect("Could not sync database");
-        obj.write_at(&buf, buf.len() as u64).expect(&format!(
-            "Could not write buffer of size {}MB at offset {}",
-            buf_size,
-            buf.len()
-        ));
+        obj.write_at(&buf, buf.len() as u64).unwrap_or_else(|_| {
+            panic!(
+                "Could not write buffer of size {}MB at offset {}",
+                buf_size,
+                buf.len()
+            )
+        });
     }
     db.sync().expect("Could not sync database");
 }
@@ -779,7 +785,7 @@ fn space_accounting_persistence(
             .open_named_object_store(b"test", StoragePreference::NONE)
             .unwrap();
         let obj = ds.open_or_create_object(b"foobar").unwrap();
-        let buf = vec![42u8; 1 * TO_MEBIBYTE];
+        let buf = vec![42u8; TO_MEBIBYTE];
         dbg!(obj.write_at(&buf, 0).unwrap());
         db.close_object_store(ds);
         db.sync().unwrap();
@@ -894,7 +900,10 @@ fn migration_policy_single_node() {
 
     ds.insert(b"foobar".to_vec(), &[42; 4096]).unwrap();
     sync();
-    assert_json_snapshot!("migration_policy_single_node__before_migration", json!(ds.tree_dump().unwrap()));
+    assert_json_snapshot!(
+        "migration_policy_single_node__before_migration",
+        json!(ds.tree_dump().unwrap())
+    );
     std::thread::sleep(std::time::Duration::from_secs(1));
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
@@ -902,7 +911,10 @@ fn migration_policy_single_node() {
     ds.upsert(b"foobar".to_vec(), &[43; 1024], 1).unwrap();
     sync();
     std::thread::sleep(std::time::Duration::from_secs(1));
-    assert_json_snapshot!("migration_policy_single_node__after_migration",json!(ds.tree_dump().unwrap()));
+    assert_json_snapshot!(
+        "migration_policy_single_node__after_migration",
+        json!(ds.tree_dump().unwrap())
+    );
     sync();
 }
 
@@ -916,9 +928,13 @@ fn migration_policy_single_object() {
         os = db.open_object_store().unwrap();
         db.sync().unwrap();
     }
-    let obj = os.open_or_create_object_with_pref(b"foo", StoragePreference::FAST).unwrap().0;
+    let obj = os
+        .open_or_create_object_with_pref(b"foo", StoragePreference::FAST)
+        .unwrap()
+        .0;
     let mut buf = vec![42; 200 * TO_MEBIBYTE];
-    obj.write_at_with_pref(&buf, 0, StoragePreference::FAST).unwrap();
+    obj.write_at_with_pref(&buf, 0, StoragePreference::FAST)
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_secs(2));
     shared_db.write().sync().unwrap();
     obj.read_at(&mut buf, 0).unwrap();

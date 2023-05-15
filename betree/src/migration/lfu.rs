@@ -12,9 +12,10 @@ use std::{
 use crate::{
     cow_bytes::CowBytes,
     data_management::DmlWithStorageHints,
-    database::DatabaseBuilder,
+    database::RootDmu,
     object::{ObjectStore, ObjectStoreId},
     storage_pool::{DiskOffset, NUM_STORAGE_CLASSES},
+    tree::PivotKey,
     vdev::Block,
     Database, StoragePreference,
 };
@@ -29,15 +30,15 @@ use super::{
 struct ObjectLocation(StoragePreference, u64);
 
 /// Implementation of Least Frequently Used
-pub struct Lfu<C: DatabaseBuilder + Clone> {
-    leafs: [LfuCache<DiskOffset, LeafInfo>; NUM_STORAGE_CLASSES],
+pub struct Lfu {
+    leafs: [LfuCache<PivotKey, LeafInfo>; NUM_STORAGE_CLASSES],
     dml_rx: Receiver<DmlMsg>,
-    db_rx: Receiver<DatabaseMsg<C>>,
-    db: Arc<RwLock<Database<C>>>,
-    dmu: Arc<<C as DatabaseBuilder>::Dmu>,
+    db_rx: Receiver<DatabaseMsg>,
+    db: Arc<RwLock<Database>>,
+    dmu: Arc<RootDmu>,
     config: MigrationConfig<LfuConfig>,
     // Store open object stores to move inactive objects within.
-    object_stores: HashMap<ObjectStoreId, Option<ObjectStore<C>>>,
+    object_stores: HashMap<ObjectStoreId, Option<ObjectStore>>,
     /// Object Buckets dividing them into multiple file size ranges,
     /// taken from <https://doi.org/10.1145/3489143>
     objects: HashMap<GlobalObjectId, ObjectLocation>,
@@ -47,7 +48,7 @@ pub struct Lfu<C: DatabaseBuilder + Clone> {
     ),
     /// HashMap accessible by the DML, resolution is not guaranteed but always
     /// used when a object is written.
-    storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+    storage_hint_dml: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
 }
 
 // Bucket boundaries, see comment below:
@@ -151,7 +152,7 @@ impl Display for LeafInfo {
     }
 }
 
-impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
+impl<'lfu> Lfu {
     fn get_object(
         store: &'lfu mut (
             [[LfuCache<GlobalObjectId, CowBytes>; NUM_SIZE_BUCKETS]; NUM_STORAGE_CLASSES],
@@ -192,64 +193,25 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
             match msg {
                 DmlMsg::Fetch(info) | DmlMsg::Write(info) => {
                     if let Some(entry) =
-                        self.leafs[info.offset.storage_class() as usize].get_mut(&info.offset)
+                        self.leafs[info.offset.storage_class() as usize].get_mut(&info.pivot_key)
                     {
                         // Known Offset
                         entry.offset = info.offset;
                         entry.size = info.size;
                     } else {
-                        // Unknonwn Offset
-                        match info.previous_offset {
-                            Some(offset) => {
-                                debug!("Message: Old Offset {offset:?}");
-                                // Moved Entry
-                                let new_offset = info.offset;
-                                let new_tier = new_offset.storage_class() as usize;
-                                let old_tier = offset.storage_class() as usize;
-                                if let Some((previous_value, freq)) =
-                                    self.leafs[old_tier].remove(&offset)
-                                {
-                                    debug!("Message: Moving entry..");
-                                    self.leafs[new_tier].insert(new_offset, previous_value);
-
-                                    // FIXME: This is hacky way to transfer the
-                                    // frequency to the new location. It would
-                                    // generally be better _and_ more efficient
-                                    // to do this directly in the lfu cache
-                                    // crate.
-                                    for _ in 0..(freq.saturating_sub(1)) {
-                                        self.leafs[new_tier].get(&new_offset);
-                                    }
-                                } else {
-                                    // For some reason the previous entry could not be found.
-                                    self.leafs[new_tier].insert(
-                                        new_offset,
-                                        LeafInfo {
-                                            offset: info.offset,
-                                            size: info.size,
-                                        },
-                                    );
-                                }
-                                let entry = self.leafs[new_tier].get_mut(&new_offset).unwrap();
-                                entry.offset = info.offset;
-                                entry.size = info.size;
-                            }
-                            None => {
-                                // New Entry
-                                self.leafs[info.offset.storage_class() as usize].insert(
-                                    info.offset,
-                                    LeafInfo {
-                                        offset: info.offset,
-                                        size: info.size,
-                                    },
-                                );
-                            }
-                        }
+                        // New Entry
+                        self.leafs[info.offset.storage_class() as usize].insert(
+                            info.pivot_key,
+                            LeafInfo {
+                                offset: info.offset,
+                                size: info.size,
+                            },
+                        );
                     }
                 }
-                DmlMsg::Remove(opinfo) => {
+                DmlMsg::Remove(info) => {
                     // Delete Offset
-                    self.leafs[opinfo.offset.storage_class() as usize].remove(&opinfo.offset);
+                    self.leafs[info.offset.storage_class() as usize].remove(&info.pivot_key);
                 }
             }
         }
@@ -281,14 +243,14 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     match old {
                         Some(old_value) if old_value == new_location => {
                             // Update
-                            Lfu::<C>::get_object(&mut self.object_buckets, &old_value, &key);
+                            Lfu::get_object(&mut self.object_buckets, &old_value, &key);
                         }
                         Some(old_value) => {
                             // For some reason move
                             if let Some((name, _)) =
-                                Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key)
+                                Lfu::remove_object(&mut self.object_buckets, &old_value, &key)
                             {
-                                Lfu::<C>::insert_object(
+                                Lfu::insert_object(
                                     &mut self.object_buckets,
                                     new_location,
                                     key,
@@ -298,12 +260,7 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                         }
                         None => {
                             // Insert new
-                            Lfu::<C>::insert_object(
-                                &mut self.object_buckets,
-                                new_location,
-                                key,
-                                name,
-                            );
+                            Lfu::insert_object(&mut self.object_buckets, new_location, key, name);
                         }
                     }
                 }
@@ -317,14 +274,14 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     match old {
                         Some(old_value) if old_value == new_location => {
                             // Update
-                            Lfu::<C>::get_object(&mut self.object_buckets, &old_value, &key);
+                            Lfu::get_object(&mut self.object_buckets, &old_value, &key);
                         }
                         Some(old_value) => {
                             // For some reason move
                             if let Some((name, _)) =
-                                Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key)
+                                Lfu::remove_object(&mut self.object_buckets, &old_value, &key)
                             {
-                                Lfu::<C>::insert_object(
+                                Lfu::insert_object(
                                     &mut self.object_buckets,
                                     new_location,
                                     key,
@@ -337,7 +294,7 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                 }
                 DatabaseMsg::ObjectRead(key, _) => {
                     if let Some(location) = self.objects.get(&key) {
-                        Lfu::<C>::get_object(&mut self.object_buckets, location, &key);
+                        Lfu::get_object(&mut self.object_buckets, location, &key);
                     }
                 }
                 DatabaseMsg::ObjectWrite(key, size, pref, _) => {
@@ -349,13 +306,13 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                     match old {
                         Some(old_value) if old_value == new_location => {
                             // Update
-                            Lfu::<C>::get_object(&mut self.object_buckets, &old_value, &key);
+                            Lfu::get_object(&mut self.object_buckets, &old_value, &key);
                         }
                         Some(old_value) => {
                             if let Some((name, _)) =
-                                Lfu::<C>::remove_object(&mut self.object_buckets, &old_value, &key)
+                                Lfu::remove_object(&mut self.object_buckets, &old_value, &key)
                             {
-                                Lfu::<C>::insert_object(
+                                Lfu::insert_object(
                                     &mut self.object_buckets,
                                     new_location,
                                     key,
@@ -372,9 +329,9 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
                             // Move in representation
                             let new_location = ObjectLocation(pref, location.1);
                             if let Some((name, _)) =
-                                Lfu::<C>::remove_object(&mut self.object_buckets, location, &key)
+                                Lfu::remove_object(&mut self.object_buckets, location, &key)
                             {
-                                Lfu::<C>::insert_object(
+                                Lfu::insert_object(
                                     &mut self.object_buckets,
                                     new_location,
                                     key,
@@ -392,10 +349,10 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
 
     pub(super) fn build(
         dml_rx: Receiver<DmlMsg>,
-        db_rx: Receiver<DatabaseMsg<C>>,
-        db: Arc<RwLock<Database<C>>>,
+        db_rx: Receiver<DatabaseMsg>,
+        db: Arc<RwLock<Database>>,
         config: MigrationConfig<LfuConfig>,
-        storage_hint_dml: Arc<Mutex<HashMap<DiskOffset, StoragePreference>>>,
+        storage_hint_dml: Arc<Mutex<HashMap<PivotKey, StoragePreference>>>,
     ) -> Self {
         let dmu = Arc::clone(db.read().root_tree.dmu());
         let default_storage_class = dmu.default_storage_class();
@@ -418,7 +375,7 @@ impl<'lfu, C: DatabaseBuilder + Clone> Lfu<C> {
     }
 }
 
-impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
+impl super::MigrationPolicy for Lfu {
     fn promote(&mut self, storage_tier: u8) -> super::errors::Result<Block<u64>> {
         // PROMOTE OF NODES
         // let mut moved = Block(0_u32);
@@ -469,7 +426,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 if let Some(mut db) = self.db.try_write() {
                                     let os =
                                         db.open_object_store_with_id(*objectkey.store_key())?;
-                                    if let Some(mut obj) = os.open_object(&*name)? {
+                                    if let Some(mut obj) = os.open_object(&name)? {
                                         obj.migrate(lifted)?;
                                         let entry = self.objects.get_mut(&objectkey).unwrap();
                                         let size = entry.1;
@@ -516,11 +473,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                     && num_moved < self.config.policy_config.promote_num
                     && !self.leafs[storage_tier as usize].is_empty()
                 {
-                    if let Some(entry) = self.leafs[storage_tier as usize].pop_mfu() {
+                    if let Some((key, entry)) =
+                        self.leafs[storage_tier as usize].pop_mfu_key_value()
+                    {
                         if let Some(lifted) = StoragePreference::from_u8(storage_tier).lift() {
-                            debug!("Moving {:?}", entry.offset);
+                            debug!("Moving {:?}", &key);
                             debug!("Was on storage tier: {:?}", storage_tier);
-                            self.storage_hint_dml.lock().insert(entry.offset, lifted);
+                            self.storage_hint_dml.lock().insert(key, lifted);
                             debug!("New storage preference: {:?}", lifted);
                             moved += Block(entry.size.as_u64());
                             num_moved += 1;
@@ -593,7 +552,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
                                 if let Some(mut db) = self.db.try_write() {
                                     let os =
                                         db.open_object_store_with_id(*objectkey.store_key())?;
-                                    if let Some(mut obj) = os.open_object(&*name)? {
+                                    if let Some(mut obj) = os.open_object(&name)? {
                                         obj.migrate(lowered)?;
                                         let entry = self.objects.get_mut(&objectkey).unwrap();
                                         let size = entry.1;
@@ -636,11 +595,13 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
             }
             LfuMode::Node => {
                 while moved < desired && !self.leafs[storage_tier as usize].is_empty() {
-                    if let Some(entry) = self.leafs[storage_tier as usize].pop_lfu() {
+                    if let Some((key, entry)) =
+                        self.leafs[storage_tier as usize].pop_lfu_key_value()
+                    {
                         if let Some(lowered) = StoragePreference::from_u8(storage_tier).lower() {
                             debug!("Moving {:?}", entry.offset);
                             debug!("Was on storage tier: {:?}", storage_tier);
-                            self.storage_hint_dml.lock().insert(entry.offset, lowered);
+                            self.storage_hint_dml.lock().insert(key, lowered);
                             moved += Block(entry.size.as_u64());
                             debug!("New storage preference: {:?}", lowered);
                         }
@@ -659,7 +620,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
         Ok(moved)
     }
 
-    fn db(&self) -> &Arc<RwLock<Database<C>>> {
+    fn db(&self) -> &Arc<RwLock<Database>> {
         &self.db
     }
 
@@ -672,7 +633,7 @@ impl<C: DatabaseBuilder + Clone> super::MigrationPolicy<C> for Lfu<C> {
         self.update_db()
     }
 
-    fn dmu(&self) -> &Arc<<C as DatabaseBuilder>::Dmu> {
+    fn dmu(&self) -> &Arc<RootDmu> {
         &self.dmu
     }
 

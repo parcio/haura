@@ -16,7 +16,7 @@ pub struct Dummy<T> {
     f: Vec<T>,
 }
 
-const DUMMY_NODE: Dummy<()> = Dummy {
+static DUMMY_NODE: Dummy<()> = Dummy {
     a: 0,
     b: 0,
     c: AtomicU8::new(0),

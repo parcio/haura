@@ -3,8 +3,8 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::Size,
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
-    tree::{imp::packed, KeyInfo, MessageAction},
+    storage_pool::AtomicSystemStoragePreference,
+    tree::{imp::packed, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
 use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};
@@ -279,12 +279,16 @@ impl LeafNode {
         size_delta
     }
 
-    /// Splits this `LeafNode` into to two nodes.
-    /// Returns a new right sibling, the corresponding pivot key,
-    /// and the size delta of this node.
-    pub fn split(&mut self, min_size: usize, max_size: usize) -> (Self, CowBytes, isize) {
+    /// Splits this `LeafNode` into to two leaf nodes.
+    /// Returns a new right sibling, the corresponding pivot key, and the size
+    /// delta of this node.
+    pub fn split(
+        &mut self,
+        min_size: usize,
+        max_size: usize,
+    ) -> (Self, CowBytes, isize, LocalPivotKey) {
         // assert!(self.size() > S::MAX);
-        let mut sibling = LeafNode {
+        let mut right_sibling = LeafNode {
             // During a split, preference can't be inherited because the new subset of entries
             // might be a subset with a lower maximal preference.
             storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
@@ -294,9 +298,14 @@ impl LeafNode {
         };
 
         // This adjusts sibling's size and pref according to its new entries
-        let (pivot_key, size_delta) = self.do_split_off(&mut sibling, min_size, max_size);
+        let (pivot_key, size_delta) = self.do_split_off(&mut right_sibling, min_size, max_size);
 
-        (sibling, pivot_key, size_delta)
+        (
+            right_sibling,
+            pivot_key.clone(),
+            size_delta,
+            LocalPivotKey::Right(pivot_key),
+        )
     }
 
     /// Merge all entries from the *right* node into the *left* node.  Returns
@@ -470,7 +479,7 @@ mod tests {
         let size_delta = leaf_node.insert(key, key_info, msg.0, DefaultMessageAction);
         let size_after = leaf_node.size();
         assert_eq!((size_before as isize + size_delta) as usize, size_after);
-        assert_eq!(serialized_size(&leaf_node) as usize, size_after);
+        assert_eq!({ serialized_size(&leaf_node) }, size_after);
     }
 
     const MIN_LEAF_SIZE: usize = 512;
@@ -484,9 +493,9 @@ mod tests {
             return TestResult::discard();
         }
 
-        let (sibling, _, size_delta) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
-        assert_eq!(serialized_size(&leaf_node) as usize, leaf_node.size());
-        assert_eq!(serialized_size(&sibling) as usize, sibling.size());
+        let (sibling, _, size_delta, _pivot_key) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
+        assert_eq!({ serialized_size(&leaf_node) }, leaf_node.size());
+        assert_eq!({ serialized_size(&sibling) }, sibling.size());
         assert_eq!(
             (size_before as isize + size_delta) as usize,
             leaf_node.size()
@@ -503,7 +512,7 @@ mod tests {
             return TestResult::discard();
         }
         let this = leaf_node.clone();
-        let (mut sibling, _, _) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
+        let (mut sibling, ..) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
         leaf_node.recalculate();
         leaf_node.merge(&mut sibling);
         assert_eq!(this, leaf_node);

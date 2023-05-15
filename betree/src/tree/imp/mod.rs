@@ -1,16 +1,18 @@
 //! Implementation of tree structures.
 use self::{
     derivate_ref::DerivateRef,
-    node::{ApplyResult, GetResult},
+    node::{ApplyResult, GetResult, PivotGetMutResult, PivotGetResult},
 };
 use super::{
     errors::*,
-    layer::{ErasedTreeSync, TreeBaseLayer, TreeLayer},
+    layer::{ErasedTreeSync, TreeLayer},
+    PivotKey,
 };
 use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef},
+    data_management::{Dml, HasStoragePreference, ObjectReference},
+    database::DatasetId,
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
     tree::MessageAction,
@@ -57,7 +59,7 @@ const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// The actual tree type.
-pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
+pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     inner: I,
     dml: X,
     evict: bool,
@@ -65,9 +67,7 @@ pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     storage_preference: StoragePreference,
 }
 
-impl<X: Clone + DmlBase, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clone
-    for Tree<X, M, I>
-{
+impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tree<X, M, I> {
     fn clone(&self) -> Self {
         Tree {
             inner: self.inner.clone(),
@@ -80,14 +80,14 @@ impl<X: Clone + DmlBase, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> 
 }
 
 /// The inner tree type that does not contain the DML object.
-pub struct Inner<R, I, M> {
+pub struct Inner<R, M> {
     root_node: RwLock<R>,
-    tree_id: Option<I>,
+    tree_id: Option<DatasetId>,
     msg_action: M,
 }
 
-impl<R, I, M> Inner<R, I, M> {
-    fn new(tree_id: I, root_node: R, msg_action: M) -> Self {
+impl<R, M> Inner<R, M> {
+    fn new(tree_id: DatasetId, root_node: R, msg_action: M) -> Self {
         Inner {
             tree_id: Some(tree_id),
             root_node: RwLock::new(root_node),
@@ -112,32 +112,32 @@ impl<R, I, M> Inner<R, I, M> {
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>> + From<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>> + From<Inner<X::ObjectRef, M>>,
 {
     /// Returns a new, empty tree.
     pub fn empty_tree(
-        tree_id: X::Info,
+        tree_id: DatasetId,
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
     ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(), tree_id);
+        let root_node = dml.insert(Node::empty_leaf(), tree_id, PivotKey::Root(tree_id));
         Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 
     /// Opens a tree identified by the given root node.
     pub fn open(
-        tree_id: X::Info,
+        tree_id: DatasetId,
         root_node_ptr: X::ObjectPointer,
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
     ) -> Self {
         Tree::new(
-            X::ref_from_ptr(root_node_ptr),
+            X::root_ref_from_ptr(root_node_ptr),
             tree_id,
             msg_action,
             dml,
@@ -147,7 +147,7 @@ where
 
     fn new(
         root_node: R,
-        tree_id: X::Info,
+        tree_id: DatasetId,
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
@@ -164,10 +164,10 @@ where
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer>,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
     /// Returns the inner of the tree.
     pub fn inner(&self) -> &I {
@@ -207,12 +207,12 @@ where
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
-    fn tree_id(&self) -> X::Info {
+    fn tree_id(&self) -> DatasetId {
         self.inner
             .borrow()
             .tree_id
@@ -223,7 +223,7 @@ where
         &self.inner.borrow().msg_action
     }
 
-    fn get_mut_root_node(&self) -> Result<X::CacheValueRefMut, TreeError> {
+    fn get_mut_root_node(&self) -> Result<X::CacheValueRefMut, Error> {
         if let Some(node) = self.dml.try_get_mut(&self.inner.borrow().root_node.read()) {
             return Ok(node);
         }
@@ -232,25 +232,58 @@ where
             .get_mut(&mut self.inner.borrow().root_node.write(), self.tree_id())?)
     }
 
-    fn get_root_node(&self) -> Result<X::CacheValueRef, TreeError> {
+    fn get_root_node(&self) -> Result<X::CacheValueRef, Error> {
         self.get_node(&self.inner.borrow().root_node)
     }
 
-    fn get_node(&self, np_ref: &RwLock<X::ObjectRef>) -> Result<X::CacheValueRef, TreeError> {
+    fn get_node(&self, np_ref: &RwLock<X::ObjectRef>) -> Result<X::CacheValueRef, Error> {
         if let Some(node) = self.dml.try_get(&np_ref.read()) {
             return Ok(node);
         }
         Ok(self.dml.get(&mut np_ref.write())?)
     }
 
+    pub(crate) fn get_node_pivot(
+        &self,
+        pivot: &PivotKey,
+    ) -> Result<Option<X::CacheValueRef>, Error> {
+        let pivot = pivot.borrow();
+        let mut node = self.get_root_node()?;
+        Ok(loop {
+            let next_node = match node.pivot_get(pivot) {
+                Some(PivotGetResult::Target(Some(np))) => break Some(self.get_node(np)?),
+                Some(PivotGetResult::Target(None)) => break Some(node),
+                Some(PivotGetResult::NextNode(np)) => self.get_node(np)?,
+                None => break None,
+            };
+            node = next_node;
+        })
+    }
+
+    pub(crate) fn get_mut_node_pivot(
+        &self,
+        pivot: &PivotKey,
+    ) -> Result<Option<X::CacheValueRefMut>, Error> {
+        let pivot = pivot.borrow();
+        let mut node = self.get_mut_root_node()?;
+        Ok(loop {
+            let next_node = match node.pivot_get_mut(pivot) {
+                Some(PivotGetMutResult::Target(Some(np))) => {
+                    break Some(self.get_mut_node_mut(np)?)
+                }
+                Some(PivotGetMutResult::Target(None)) => break Some(node),
+                Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
+                None => break None,
+            };
+            node = next_node;
+        })
+    }
+
     fn try_get_mut_node(&self, np_ref: &mut RwLock<X::ObjectRef>) -> Option<X::CacheValueRefMut> {
         self.dml.try_get_mut(np_ref.get_mut())
     }
 
-    fn get_mut_node_mut(
-        &self,
-        np_ref: &mut X::ObjectRef,
-    ) -> Result<X::CacheValueRefMut, TreeError> {
+    fn get_mut_node_mut(&self, np_ref: &mut X::ObjectRef) -> Result<X::CacheValueRefMut, Error> {
         if let Some(node) = self.dml.try_get_mut(np_ref) {
             return Ok(node);
         }
@@ -260,7 +293,7 @@ where
     fn get_mut_node(
         &self,
         np_ref: &mut RwLock<X::ObjectRef>,
-    ) -> Result<X::CacheValueRefMut, TreeError> {
+    ) -> Result<X::CacheValueRefMut, Error> {
         self.get_mut_node_mut(np_ref.get_mut())
     }
 
@@ -324,7 +357,7 @@ where
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn tree_dump(&self) -> Result<impl serde::Serialize, TreeError>
+    pub fn tree_dump(&self) -> Result<NodeInfo, Error>
     where
         X::ObjectRef: HasStoragePreference,
     {
@@ -340,7 +373,7 @@ where
     pub(crate) fn get_with_info<K: Borrow<[u8]>>(
         &self,
         key: K,
-    ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, TreeError> {
+    ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, Error> {
         let key = key.borrow();
         let mut msgs = Vec::new();
         let mut node = self.get_root_node()?;
@@ -379,7 +412,7 @@ where
         &self,
         key: K,
         pref: StoragePreference,
-    ) -> Result<Option<KeyInfo>, TreeError> {
+    ) -> Result<Option<KeyInfo>, Error> {
         let key = key.borrow();
         let mut node = self.get_mut_root_node()?;
         // Iterate to leaf
@@ -396,7 +429,7 @@ where
 
 // impl<X, R, M> Tree<X, M, Arc<Inner<X::ObjectRef, X::Info, M>>>
 // where
-//     X: HandlerDml<Object = Node<Message<M>, R>, ObjectRef = R>,
+//     X: Dml<Object = Node<Message<M>, R>, ObjectRef = R>,
 //     R: ObjectRef,
 //     M: MessageAction,
 // {
@@ -406,14 +439,14 @@ where
 //     }
 // }
 
-impl<X, R, M, I> TreeBaseLayer<M> for Tree<X, M, I>
+impl<X, R, M, I> TreeLayer<M> for Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
+    I: Borrow<Inner<X::ObjectRef, M>>,
 {
-    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, TreeError> {
+    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error> {
         self.get_with_info(key)
             .map(|res| res.map(|(_info, data)| data))
     }
@@ -423,12 +456,12 @@ where
         key: K,
         msg: SlicedCowBytes,
         storage_preference: StoragePreference,
-    ) -> Result<(), TreeError>
+    ) -> Result<(), Error>
     where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
         if key.borrow().is_empty() {
-            return Err(TreeError::EmptyKey);
+            return Err(Error::EmptyKey);
         }
         let mut parent = None;
         let mut node = {
@@ -471,35 +504,27 @@ where
         Ok(())
     }
 
-    fn depth(&self) -> Result<u32, TreeError> {
+    fn depth(&self) -> Result<u32, Error> {
         Ok(self.get_root_node()?.level() + 1)
     }
-}
 
-impl<X, R, M, I> TreeLayer<M> for Tree<X, M, I>
-where
-    X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
-    M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
-{
     type Pointer = X::ObjectPointer;
 
     type Range = RangeIterator<X, M, I>;
 
-    fn range<K, T>(&self, range: T) -> Result<Self::Range, TreeError>
+    fn range<K, T>(&self, range: T) -> Result<Self::Range, Error>
     where
         T: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
         Self: Clone,
     {
         if !is_inclusive_non_empty(&range) {
-            return Err(TreeError::InvalidRange);
+            return Err(Error::InvalidRange);
         }
         Ok(RangeIterator::new(range, self.clone()))
     }
 
-    fn sync(&self) -> Result<Self::Pointer, TreeError> {
+    fn sync(&self) -> Result<Self::Pointer, Error> {
         trace!("sync: Enter");
         let obj_ptr = self
             .dml
@@ -512,13 +537,13 @@ where
 impl<X, R, M, I> ErasedTreeSync for Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
-    I: Borrow<Inner<R, X::Info, M>>,
+    I: Borrow<Inner<R, M>>,
 {
     type Pointer = X::ObjectPointer;
     type ObjectRef = R;
-    fn erased_sync(&self) -> Result<Self::Pointer, TreeError> {
+    fn erased_sync(&self) -> Result<Self::Pointer, Error> {
         TreeLayer::sync(self)
     }
     fn erased_try_lock_root(
@@ -538,4 +563,7 @@ mod packed;
 mod range;
 mod split;
 
-pub use self::{node::Node, range::RangeIterator};
+pub use self::{
+    node::{Node, NodeInfo},
+    range::RangeIterator,
+};

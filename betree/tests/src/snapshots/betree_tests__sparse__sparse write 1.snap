@@ -2829,6 +2829,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": null,
+        "pivot_key": {
+          "LeftOuter": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              67
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 0143"
       },
@@ -2841,6 +2860,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0143",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              67
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 015B"
       },
@@ -2853,6 +2891,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 015B",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              91
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 0173"
       },
@@ -2865,6 +2922,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0173",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              115
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 018B"
       },
@@ -2877,6 +2953,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 018B",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              139
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 01A3"
       },
@@ -2889,6 +2984,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01A3",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              163
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 01BB"
       },
@@ -2901,6 +3015,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01BB",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              187
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 01D3"
       },
@@ -2913,6 +3046,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01D3",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              211
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": "0000 0000 0000 0000 0000 01EB"
       },
@@ -2925,6 +3077,25 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 01EB",
+        "pivot_key": {
+          "Right": [
+            [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              235
+            ],
+            1
+          ]
+        },
         "storage": 0,
         "to": null
       }

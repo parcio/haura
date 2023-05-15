@@ -270,7 +270,7 @@ mod tests {
             return Err(TestResult::discard());
         }
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(disk_size, format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(disk_size, format!("{id}")))
             .collect();
         let vdev = Mirror::new(disks.into_boxed_slice(), String::from("mirror"));
         Ok(vdev)
@@ -319,7 +319,7 @@ mod tests {
         }
         let non_failing_disk_idx = non_failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         for (idx, disk) in disks.iter().enumerate() {
             if idx != non_failing_disk_idx as usize {
@@ -343,7 +343,7 @@ mod tests {
         }
         let non_failing_disk_idx = non_failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         for (idx, disk) in disks.iter().enumerate() {
             if idx != non_failing_disk_idx as usize {
@@ -367,7 +367,7 @@ mod tests {
         }
         let non_failing_disk_idx = non_failing_disk_idx % num_disks;
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         for (idx, disk) in disks.iter().enumerate() {
             if idx != non_failing_disk_idx as usize {
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn writes_fail_with_all_failing_disks() {
         let disks: Vec<_> = (0..10)
-            .map(|id| FailingLeafVdev::new(Block(256), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(256), format!("{id}")))
             .collect();
         let data = vec![1; Block(1u32).to_bytes() as usize].into_boxed_slice();
 
@@ -410,7 +410,7 @@ mod tests {
         let read_non_failing_disk_idx = (read_non_failing_disk_idx % num_disks) as usize;
 
         let disks: Vec<_> = (0..num_disks)
-            .map(|id| FailingLeafVdev::new(Block(512), format!("{}", id)))
+            .map(|id| FailingLeafVdev::new(Block(512), format!("{id}")))
             .collect();
         let vdev = Mirror::new(disks.into_boxed_slice(), String::from("mirror"));
 

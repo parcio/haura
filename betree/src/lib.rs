@@ -44,5 +44,7 @@ mod arbitrary;
 
 pub use self::{
     database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
-    storage_pool::{AtomicStoragePreference, StoragePoolConfiguration, StoragePreference, PreferredAccessType},
+    storage_pool::{
+        AtomicStoragePreference, PreferredAccessType, StoragePoolConfiguration, StoragePreference,
+    },
 };

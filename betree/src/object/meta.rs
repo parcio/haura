@@ -5,11 +5,11 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     object::ObjectId,
     tree::MessageAction,
-    StoragePreference, PreferredAccessType,
+    PreferredAccessType, StoragePreference,
 };
 
 use std::{
-    convert::{TryInto, TryFrom},
+    convert::{TryFrom, TryInto},
     io::{self, Cursor},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -161,7 +161,8 @@ impl MetaMessage {
             message.pref = Some(StoragePreference::from_u8(cursor.read_u8()?));
         }
         if content_flags & 16 != 0 {
-            message.access_pattern = Some(PreferredAccessType::try_from(cursor.read_u8()?).unwrap_or_default());
+            message.access_pattern =
+                Some(PreferredAccessType::try_from(cursor.read_u8()?).unwrap_or_default());
         }
 
         Ok(message)

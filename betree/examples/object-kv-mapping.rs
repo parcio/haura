@@ -48,7 +48,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn print_dataset(ds: &Dataset<DatabaseConfiguration>) -> Result<()> {
+fn print_dataset(ds: &Dataset) -> Result<()> {
     for (k, v) in ds.range::<_, &[u8]>(..)?.flatten() {
         println!("{:?} -> {:?}", &k[..], &v[..]);
     }

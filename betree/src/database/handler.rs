@@ -1,14 +1,14 @@
 use super::{
-    dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation, Object,
-    ObjectPointer, ObjectRef, StorageInfo, TreeInner,
+    dead_list_key, errors::*, AtomicStorageInfo, DatasetId, DeadListData, Generation, StorageInfo,
+    TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{self, CopyOnWriteEvent, HandlerDml},
+    data_management::{CopyOnWriteEvent, Dml, HasStoragePreference, ObjectReference},
     storage_pool::DiskOffset,
-    tree::{DefaultMessageAction, Tree, TreeBaseLayer},
+    tree::{DefaultMessageAction, Node, Tree, TreeLayer},
     vdev::Block,
     StoragePreference,
 };
@@ -36,11 +36,9 @@ pub fn update_allocation_bitmap_msg(
 
 /// The database handler, holding management data for interactions
 /// between the database and data management layers.
-pub struct Handler {
-    pub(crate) root_tree_inner:
-        AtomicOption<Arc<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
-    pub(crate) root_tree_snapshot:
-        RwLock<Option<TreeInner<ObjectRef, DatasetId, DefaultMessageAction>>>,
+pub struct Handler<OR: ObjectReference> {
+    pub(crate) root_tree_inner: AtomicOption<Arc<TreeInner<OR, DefaultMessageAction>>>,
+    pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
     pub(crate) free_space: HashMap<(u8, u16), AtomicStorageInfo>,
@@ -58,18 +56,10 @@ pub struct Handler {
 //     pub(crate) invalidated: AtomicBool,
 // }
 
-impl Handler {
-    fn current_root_tree<'a, X>(
-        &'a self,
-        dmu: &'a X,
-    ) -> impl TreeBaseLayer<DefaultMessageAction> + 'a
+impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
+    fn current_root_tree<'a, X>(&'a self, dmu: &'a X) -> impl TreeLayer<DefaultMessageAction> + 'a
     where
-        X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
-            Info = DatasetId,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         Tree::from_inner(
             self.root_tree_inner.get().unwrap().as_ref(),
@@ -82,14 +72,9 @@ impl Handler {
     fn last_root_tree<'a, X>(
         &'a self,
         dmu: &'a X,
-    ) -> Option<impl TreeBaseLayer<DefaultMessageAction> + 'a>
+    ) -> Option<impl TreeLayer<DefaultMessageAction> + 'a>
     where
-        X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
-            Info = DatasetId,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         OwningRef::new(self.root_tree_snapshot.read())
             .try_map(|lock| lock.as_ref().ok_or(()))
@@ -102,26 +87,18 @@ impl Handler {
     }
 }
 
-impl data_management::HandlerTypes for Handler {
-    type Generation = Generation;
-    type Info = DatasetId;
-}
-
 pub(super) fn segment_id_to_key(segment_id: SegmentId) -> [u8; 9] {
     let mut key = [0; 9];
     BigEndian::write_u64(&mut key[1..], segment_id.0);
     key
 }
 
-impl data_management::Handler<ObjectRef> for Handler {
-    type Object = Object;
-    type Error = Error;
-
-    fn current_generation(&self) -> Self::Generation {
+impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
+    pub fn current_generation(&self) -> Generation {
         self.current_generation.read()
     }
 
-    fn update_allocation_bitmap<X>(
+    pub fn update_allocation_bitmap<X>(
         &self,
         offset: DiskOffset,
         size: Block<u32>,
@@ -129,12 +106,7 @@ impl data_management::Handler<ObjectRef> for Handler {
         dmu: &X,
     ) -> Result<()>
     where
-        X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
-            Info = DatasetId,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         self.allocations.fetch_add(1, Ordering::Release);
         let key = segment_id_to_key(SegmentId::get(offset));
@@ -167,14 +139,9 @@ impl data_management::Handler<ObjectRef> for Handler {
         Ok(())
     }
 
-    fn get_allocation_bitmap<X>(&self, id: SegmentId, dmu: &X) -> Result<SegmentAllocator>
+    pub fn get_allocation_bitmap<X>(&self, id: SegmentId, dmu: &X) -> Result<SegmentAllocator>
     where
-        X: HandlerDml<
-            Object = Object,
-            ObjectRef = ObjectRef,
-            ObjectPointer = ObjectPointer,
-            Info = DatasetId,
-        >,
+        X: Dml<Object = Node<OR>, ObjectRef = OR, ObjectPointer = OR::ObjectPointer>,
     {
         let now = std::time::Instant::now();
         let mut bitmap = [0u8; SEGMENT_SIZE_BYTES];
@@ -212,13 +179,13 @@ impl data_management::Handler<ObjectRef> for Handler {
         Ok(allocator)
     }
 
-    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo> {
+    pub fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo> {
         self.free_space
             .get(&(class, disk_id))
             .map(|elem| elem.into())
     }
 
-    fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo> {
+    pub fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo> {
         self.free_space_tier
             .get(class as usize)
             .map(|elem| elem.into())
@@ -227,7 +194,7 @@ impl data_management::Handler<ObjectRef> for Handler {
     /// Marks blocks from removed objects to be removed if they are no longer needed.
     /// Checks for the existence of snapshots which included this data, if snapshots are found continue to hold this key as "dead" key.
     // copy on write is a bit of an unlucky name
-    fn copy_on_write(
+    pub fn copy_on_write(
         &self,
         offset: DiskOffset,
         size: Block<u32>,
