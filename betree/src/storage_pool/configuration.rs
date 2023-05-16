@@ -1,6 +1,6 @@
 //! Storage Pool configuration.
 #[cfg(feature = "nvm")]
-use pmdk::libpmem;
+use pmdk;
 
 use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
@@ -324,9 +324,9 @@ impl LeafVdev {
                 let mut is_pmem : i32 = 0;
                 let mut mapped_len : u64 = 0;
                 let mut file = match path.to_str() {
-                    Some(filepath_str) => match libpmem::PMem::open(format!("{}\0",filepath_str).as_str(), &mut mapped_len, &mut is_pmem) {
+                    Some(filepath_str) => match pmdk::PMem::open(format!("{}\0",filepath_str).as_str(), &mut mapped_len, &mut is_pmem) {
                         Ok(handle) => handle,
-                        Err(e) => match libpmem::PMem::create(format!("{}\0",filepath_str).as_str(), *len as u64, &mut mapped_len, &mut is_pmem) {
+                        Err(e) => match pmdk::PMem::create(format!("{}\0",filepath_str).as_str(), *len as u64, &mut mapped_len, &mut is_pmem) {
                             Ok(handle) => handle,
                             Err(e) => {
                                 return Err(io::Error::new(io::ErrorKind::Other,

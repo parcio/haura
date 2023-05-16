@@ -1,4 +1,4 @@
-use pmdk::libpmem;
+use pmdk;
 use super::{
     errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead,
@@ -179,20 +179,21 @@ impl VdevLeafWrite for PMemFile {
         let block_cnt = Block::from_bytes(data.as_ref().len() as u64).as_u64();
         self.stats.written.fetch_add(block_cnt, Ordering::Relaxed);
 
-        match self.file.write(offset.to_bytes() as usize, data.as_ref(), data.as_ref().len())
-            .map_err(|_| VdevError::Write(self.id.clone()))
-        {
-            Ok(()) => {
-                if is_repair {
-                    self.stats.repaired.fetch_add(block_cnt, Ordering::Relaxed);
-                }
-                Ok(())
-            }
-            Err(e) => {
-                self.stats
-                    .failed_writes
-                    .fetch_add(block_cnt, Ordering::Relaxed);
-                Err(e)
+        unsafe {
+            match self.file.write(offset.to_bytes() as usize, data.as_ref(), data.as_ref().len())
+                .map_err(|_| VdevError::Write(self.id.clone())) {
+                    Ok(()) => {
+                        if is_repair {
+                            self.stats.repaired.fetch_add(block_cnt, Ordering::Relaxed);
+                        }
+                        Ok(())
+                    }
+                    Err(e) => {
+                        self.stats
+                            .failed_writes
+                            .fetch_add(block_cnt, Ordering::Relaxed);
+                        Err(e)
+                    }
             }
         }
     }
