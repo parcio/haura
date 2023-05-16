@@ -33,7 +33,7 @@ impl File {
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("Unsupported file type: {:?}", file_type),
+                format!("Unsupported file type: {file_type:?}"),
             ));
         };
         Ok(File {

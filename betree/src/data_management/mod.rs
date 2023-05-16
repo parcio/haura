@@ -1,13 +1,22 @@
 //! This module provides the Data Management Layer
 //! which handles user-defined objects and includes caching and write back.
+//!
+//! The main point of interest is the [Dmu] which provides most of the functions
+//! you are probably interested in. The [Dmu] implements the [Dml] trait, which
+//! is a convenience trait to hide away most generics form other modules by
+//! using associated types.
+//!
+//! # Name collisions
+//!
+//! Take care that in the context of the [Dml] we refer to nodes in a tree as
+//! `Object` in things like [ObjectPointer] and [ObjectReference]. These are not large
+//! data blobs as in the [crate::object] module.
 
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId},
     cache::AddSize,
-    database::StorageInfo,
+    migration::DmlMsg,
     size::{Size, StaticSize},
-    storage_pool::DiskOffset,
-    vdev::Block,
+    storage_pool::{DiskOffset, StoragePoolLayer},
     StoragePreference,
 };
 use parking_lot::Mutex;
@@ -15,7 +24,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use stable_deref_trait::StableDeref;
 use std::{
     collections::HashMap,
-    error,
     fmt::Debug,
     hash::Hash,
     io::{self, Write},
@@ -45,31 +53,17 @@ impl<
 {
 }
 
-/// A reference to an object managed by a `Dml`.
-pub trait ObjectRef: Serialize + DeserializeOwned + StaticSize + Debug + 'static {
+/// A reference to an object managed by a [Dml].
+///
+/// While this trait only has one known implementor [impls::ObjRef], it is
+/// useful to hide away ugly types such as the ObjectPointer within the [Dml]
+/// trait.
+pub trait ObjectReference: Serialize + DeserializeOwned + StaticSize + Debug + 'static {
     /// The ObjectPointer for this ObjectRef.
     type ObjectPointer;
     /// Return a reference to an `Self::ObjectPointer`
     /// if this object reference is in the unmodified state.
     fn get_unmodified(&self) -> Option<&Self::ObjectPointer>;
-}
-
-/// Defines some base types for a `Dml`.
-pub trait DmlBase: Sized {
-    /// A reference to an object managed by this `Dmu`.
-    type ObjectRef: ObjectRef<ObjectPointer = Self::ObjectPointer>;
-    /// The pointer type to an on-disk object.
-    type ObjectPointer: Serialize + DeserializeOwned + Clone;
-    /// The info type which is tagged to each object.
-    type Info: PodType;
-}
-
-/// Defines some base types for a `Handler`.
-pub trait HandlerTypes: Sized {
-    /// The generation of an object.
-    type Generation: PodType;
-    /// The info tagged to an object.
-    type Info: PodType;
 }
 
 /// Implementing types have an allocation preference, which can be invalidated
@@ -107,7 +101,7 @@ pub trait HasStoragePreference {
     // fn flood_storage_preference(&self, pref: StoragePreference);
 }
 
-/// An object managed by a `Dml`.
+/// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
     fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
@@ -125,16 +119,33 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         F: FnMut(&mut R) -> Result<(), E>;
 }
 
-/// A `Dml` for a specific `Handler`.
-pub trait HandlerDml: DmlBase {
+/// The standard interface for the `Data Management Layer`. This layer *always*
+/// utilizes the underlying storage layer and a cache.
+///
+/// Aside from this overarching trait there are a number of traits which a [Dml]
+/// needs to implement to work with certain parts of the existing stack. They
+/// are by convention called `DmlWith...`. While it is not necesary to split
+/// them into separate traits, these additional traits make the code *more*
+/// readable in this instance and are therefore kept even though we only
+/// implement them once in the current state.
+pub trait Dml: Sized {
+    /// A reference to an object managed by this `Dmu`.
+    type ObjectRef: ObjectReference<ObjectPointer = Self::ObjectPointer>;
+    /// The pointer type to an on-disk object.
+    type ObjectPointer: Serialize + DeserializeOwned + Clone;
+    /// The info type which is tagged to each object.
+    type Info: PodType;
     /// The object type managed by this Dml.
     type Object: Object<Self::ObjectRef>;
-
     /// A reference to a cached object.
     type CacheValueRef: StableDeref<Target = Self::Object> + AddSize + 'static;
-
     /// A mutable reference to a cached object.
     type CacheValueRefMut: StableDeref<Target = Self::Object> + DerefMut + AddSize + 'static;
+    /// The underlying Storage Pool.
+    type Spl: StoragePoolLayer;
+
+    /// Return a reference to the underlying storage pool manager.
+    fn spl(&self) -> &Self::Spl;
 
     /// Provides immutable access to the object identified by the given
     /// `ObjectRef`.  Fails if the object was modified and has been evicted.
@@ -175,89 +186,9 @@ pub trait HandlerDml: DmlBase {
     /// Removes the object referenced by `or` and returns it.
     fn get_and_remove(&self, or: Self::ObjectRef) -> Result<Self::Object, Error>;
 
-    /// Evicts excessive cache entries.
-    fn evict(&self) -> Result<(), Error>;
-
-    #[cfg(feature = "experimental-api")]
-    /// Clear the entire cache of evictable objects
-    fn clear_cache(&self) -> Result<(), Error>;
-
     /// Turns an ObjectPointer into an ObjectReference.
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef;
 
-    fn verify_cache(&self);
-}
-
-pub enum CopyOnWriteEvent {
-    Preserved,
-    Removed,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum CopyOnWriteReason {
-    Remove,
-    Steal,
-}
-
-/// Handler for a `Dml`.
-pub trait Handler<R: ObjectRef>: HandlerTypes {
-    /// The object type managed by this handler.
-    type Object: Object<R>;
-    /// The error type of this handler.
-    type Error: error::Error + Send;
-
-    /// Returns the current generation.
-    fn current_generation(&self) -> Self::Generation;
-
-    /// Updates the allocation bitmap due to an allocation or deallocation.
-    fn update_allocation_bitmap<X>(
-        &self,
-        offset: DiskOffset,
-        size: Block<u32>,
-        action: Action,
-        dmu: &X,
-    ) -> Result<(), Self::Error>
-    where
-        X: HandlerDml<
-            Object = Self::Object,
-            ObjectRef = R,
-            ObjectPointer = R::ObjectPointer,
-            Info = Self::Info,
-        >,
-        R::ObjectPointer: Serialize + DeserializeOwned;
-
-    /// Retrieves the allocation bitmap for specific segment.
-    fn get_allocation_bitmap<X>(
-        &self,
-        id: SegmentId,
-        dmu: &X,
-    ) -> Result<SegmentAllocator, Self::Error>
-    where
-        X: HandlerDml<
-            Object = Self::Object,
-            ObjectRef = R,
-            ObjectPointer = R::ObjectPointer,
-            Info = Self::Info,
-        >,
-        R::ObjectPointer: Serialize + DeserializeOwned;
-
-    /// Returns the amount of free space (in blocks) for a given top-level vdev.
-    fn get_free_space(&self, class: u8, disk_id: u16) -> Option<StorageInfo>;
-    /// Returns the amount of free space (in blocks) over a whole storage tier.
-    fn get_free_space_tier(&self, class: u8) -> Option<StorageInfo>;
-    /// Will be called when an object has been made mutable.
-    /// May be used to mark the data blocks for delayed deallocation.
-    fn copy_on_write(
-        &self,
-        offset: DiskOffset,
-        size: Block<u32>,
-        generation: Self::Generation,
-        info: Self::Info,
-    ) -> CopyOnWriteEvent;
-}
-
-/// The Data Mangement Layer
-pub trait Dml: HandlerDml {
     /// Writes back an object and all its dependencies.
     /// `acquire_or_lock` shall return a lock guard
     /// that provides mutable access to the object reference.
@@ -276,8 +207,39 @@ pub trait Dml: HandlerDml {
     /// Finishes the prefetching.
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error>;
 
+    /// Which format the cache statistics are represented in. For example a simple struct.
+    type CacheStats: serde::Serialize;
+    /// Cache-dependent statistics.
+    fn cache_stats(&self) -> Self::CacheStats;
     /// Drops the cache entries.
     fn drop_cache(&self);
+    /// Run cache-internal self-validation.
+    fn verify_cache(&self);
+    /// Evicts excessive cache entries.
+    fn evict(&self) -> Result<(), Error>;
+}
+
+/// Legible result of a copy-on-write call. This describes wether the given
+/// offset has been removed or preserved depending on if existing snapshots
+/// require them.
+pub enum CopyOnWriteEvent {
+    /// The current state still pertains to the given offset.
+    Preserved,
+    /// The given offset has been deallocated.
+    Removed,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+/// The reason as to why copy on write has been called.
+///
+/// This is mostly relevant to the reporting of activity via the reporting trait.
+pub enum CopyOnWriteReason {
+    /// The copy on write call originated from a removal operation.
+    Remove,
+    /// The copy on write call originated from a stealing transition moving the
+    /// just written back object from the InWriteback state back to the modified
+    /// state.
+    Steal,
 }
 
 /// Denotes if an implementor of the [Dml] can utilize an allocation handler.
@@ -285,20 +247,6 @@ pub trait DmlWithHandler {
     type Handler;
 
     fn handler(&self) -> &Self::Handler;
-}
-
-/// Denotes if an implementor of the [Dml] can utilize a storage pool layer.
-pub trait DmlWithSpl {
-    type Spl;
-
-    fn spl(&self) -> &Self::Spl;
-}
-
-/// Denotes if an implementor of the [Dml] uses a cache.
-pub trait DmlWithCache {
-    type CacheStats: serde::Serialize;
-
-    fn cache_stats(&self) -> Self::CacheStats;
 }
 
 /// Denotes if an implementor of the [Dml] can also handle storage hints emitted
@@ -313,19 +261,17 @@ pub trait DmlWithStorageHints {
 /// Extension of an DMU to signal that it supports a message based report format.
 /// Implemented via channels the DMU is allowed to send any number of messages to an consuming sink.
 /// It is advised to use `unbound` channels for this purpose.
-pub trait DmlWithReport<Msg> {
+pub trait DmlWithReport {
     /// Attach a reporting channel to the DML
-    fn with_report(self, tx: Sender<Msg>) -> Self;
+    fn with_report(self, tx: Sender<DmlMsg>) -> Self;
     /// Set a reporting channel to the DML
-    fn set_report(&mut self, tx: Sender<Msg>);
+    fn set_report(&mut self, tx: Sender<DmlMsg>);
 }
 
 mod delegation;
+mod dmu;
 pub(crate) mod errors;
 pub(crate) mod impls;
-// mod handler_test;
+mod object_ptr;
 
-pub use self::{
-    errors::{Error, ErrorKind},
-    impls::Dmu,
-};
+pub use self::{dmu::Dmu, errors::Error, object_ptr::ObjectPointer};

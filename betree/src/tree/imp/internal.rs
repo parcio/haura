@@ -4,7 +4,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::{Size, SizeMut, StaticSize},
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
+    storage_pool::AtomicSystemStoragePreference,
     tree::{KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
@@ -54,7 +54,7 @@ pub(super) struct InternalNode<T> {
 
 // NOTE: Waiting for OnceCell to be stabilized...
 // https://doc.rust-lang.org/stable/std/cell/struct.OnceCell.html
-const EMPTY_NODE: InternalNode<()> = InternalNode {
+static EMPTY_NODE: InternalNode<()> = InternalNode {
     level: 0,
     entries_size: 0,
     system_storage_preference: AtomicSystemStoragePreference::none(),

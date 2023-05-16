@@ -11,7 +11,6 @@ use futures::{executor::block_on, prelude::*, TryFuture};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt;
 
-
 pub mod errors;
 pub use self::errors::*;
 use errors::Result as StoragePoolResult;
@@ -103,14 +102,16 @@ mod disk_offset;
 pub use self::disk_offset::DiskOffset;
 
 pub mod configuration;
-pub use self::configuration::{StoragePoolConfiguration, TierConfiguration, LeafVdev, Vdev, PreferredAccessType};
+pub use self::configuration::{
+    LeafVdev, PreferredAccessType, StoragePoolConfiguration, TierConfiguration, Vdev,
+};
 
 mod unit;
 pub use self::unit::StoragePoolUnit;
 
 mod storage_preference;
+pub(crate) use storage_preference::AtomicSystemStoragePreference;
 pub use storage_preference::{AtomicStoragePreference, StoragePreference};
-pub(crate) use storage_preference::{AtomicSystemStoragePreference, StoragePreferenceBound};
 
 /// The amount of storage classes.
 pub const NUM_STORAGE_CLASSES: usize = 4;

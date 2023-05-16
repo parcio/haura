@@ -3,7 +3,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     size::Size,
-    storage_pool::{AtomicSystemStoragePreference, StoragePreferenceBound},
+    storage_pool::AtomicSystemStoragePreference,
     tree::{imp::packed, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
@@ -470,7 +470,7 @@ mod tests {
         let size_delta = leaf_node.insert(key, key_info, msg.0, DefaultMessageAction);
         let size_after = leaf_node.size();
         assert_eq!((size_before as isize + size_delta) as usize, size_after);
-        assert_eq!(serialized_size(&leaf_node) as usize, size_after);
+        assert_eq!({ serialized_size(&leaf_node) }, size_after);
     }
 
     const MIN_LEAF_SIZE: usize = 512;
@@ -485,8 +485,8 @@ mod tests {
         }
 
         let (sibling, _, size_delta) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
-        assert_eq!(serialized_size(&leaf_node) as usize, leaf_node.size());
-        assert_eq!(serialized_size(&sibling) as usize, sibling.size());
+        assert_eq!({ serialized_size(&leaf_node) }, leaf_node.size());
+        assert_eq!({ serialized_size(&sibling) }, sibling.size());
         assert_eq!(
             (size_before as isize + size_delta) as usize,
             leaf_node.size()

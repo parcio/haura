@@ -11,12 +11,12 @@ use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
 pub use self::{
     default_message_action::DefaultMessageAction,
-    imp::{Inner, Node, RangeIterator, Tree},
-    layer::{TreeBaseLayer, TreeLayer},
+    imp::{Inner, Node, Tree},
+    layer::TreeLayer,
     message_action::MessageAction,
 };
 
-pub use self::errors::TreeError;
+pub use self::errors::Error;
 
 type Key = CowBytes;
 type Value = SlicedCowBytes;

@@ -6,10 +6,10 @@ use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
 use libc;
 use serde::{Deserialize, Serialize};
-use speedy::{Writable, Readable};
+use speedy::{Readable, Writable};
 use std::{
-    fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator, os::unix::io::AsRawFd, path::PathBuf,
-    slice, convert::TryFrom,
+    convert::TryFrom, fmt, fmt::Write, fs::OpenOptions, io, iter::FromIterator,
+    os::unix::io::AsRawFd, path::PathBuf, slice,
 };
 
 /// Access pattern descriptor to differentiate and optimize drive usage. Useful
@@ -226,8 +226,8 @@ impl TierConfiguration {
                     LeafVdev::File(path) => write!(s, "{} ", path.display()).unwrap(),
                     LeafVdev::FileWithOpts { path, direct } => {
                         write!(s, "{} (direct: {:?}) ", path.display(), direct).unwrap()
-                    }
-                    LeafVdev::Memory { mem } => write!(s, "memory({}) ", mem).unwrap(),
+                    },
+                    LeafVdev::Memory { mem } => write!(s, "memory({mem}) ").unwrap(),
                     #[cfg(feature = "nvm")]
                     LeafVdev::PMemFile{path, len} => write!(s, "{} {}", path.display(), len).unwrap(),
                 }
@@ -260,7 +260,7 @@ impl Vdev {
                 let leaves: Box<[Leaf]> = leaves?.into_boxed_slice();
                 Ok(Dev::Mirror(vdev::Mirror::new(
                     leaves,
-                    format!("mirror-{}", n),
+                    format!("mirror-{n}"),
                 )))
             }
             Vdev::Parity1 { parity1: ref vec } => {
@@ -268,7 +268,7 @@ impl Vdev {
                 let leaves = leaves?.into_boxed_slice();
                 Ok(Dev::Parity1(vdev::Parity1::new(
                     leaves,
-                    format!("parity-{}", n),
+                    format!("parity-{n}"),
                 )))
             }
             Vdev::Leaf(ref leaf) => leaf.build().map(Dev::Leaf),
@@ -295,7 +295,7 @@ impl LeafVdev {
                 if direct {
                     file.custom_flags(libc::O_DIRECT);
                 }
-                let file = file.open(&path)?;
+                let file = file.open(path)?;
 
                 if unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) }
                     != 0
@@ -310,7 +310,7 @@ impl LeafVdev {
             }
             LeafVdev::Memory { mem } => Ok(Leaf::Memory(vdev::Memory::new(
                 mem,
-                format!("memory-{}", mem),
+                format!("memory-{mem}"),
             )?)),
             #[cfg(feature = "nvm")]
             LeafVdev::PMemFile { .. } => {

@@ -1,13 +1,12 @@
 use super::{
     ds_data_key, errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree,
-    Generation, MessageTree, StorageInfo,
+    Generation, MessageTree, RootDmu, StorageInfo,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{DmlWithHandler, Handler},
-    database::DatabaseBuilder,
+    data_management::{Dml, DmlWithHandler},
     migration::DatabaseMsg,
-    tree::{self, DefaultMessageAction, MessageAction, Tree, TreeBaseLayer, TreeLayer},
+    tree::{self, DefaultMessageAction, MessageAction, Tree, TreeLayer},
     StoragePreference,
 };
 use parking_lot::RwLock;
@@ -15,11 +14,8 @@ use std::{borrow::Borrow, collections::HashSet, ops::RangeBounds, sync::Arc};
 
 /// The internal data set type.  This is the non-user facing variant which is
 /// then wrapped in the [Dataset] type.
-pub struct DatasetInner<Config, Message = DefaultMessageAction>
-where
-    Config: DatabaseBuilder,
-{
-    pub(super) tree: MessageTree<Config::Dmu, Message>,
+pub struct DatasetInner<Message = DefaultMessageAction> {
+    pub(super) tree: MessageTree<RootDmu, Message>,
     pub(crate) id: DatasetId,
     name: Box<[u8]>,
     pub(super) open_snapshots: HashSet<Generation>,
@@ -27,14 +23,11 @@ where
 }
 
 /// The data set type.
-pub struct Dataset<Config, Message = DefaultMessageAction>
-where
-    Config: DatabaseBuilder,
-{
-    inner: Arc<RwLock<DatasetInner<Config, Message>>>,
+pub struct Dataset<Message = DefaultMessageAction> {
+    inner: Arc<RwLock<DatasetInner<Message>>>,
 }
 
-impl<Config: DatabaseBuilder, Message> Clone for Dataset<Config, Message> {
+impl<Message> Clone for Dataset<Message> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -42,28 +35,25 @@ impl<Config: DatabaseBuilder, Message> Clone for Dataset<Config, Message> {
     }
 }
 
-impl<Config, Message> From<DatasetInner<Config, Message>> for Dataset<Config, Message>
-where
-    Config: DatabaseBuilder,
-{
-    fn from(inner: DatasetInner<Config, Message>) -> Self {
+impl<Message> From<DatasetInner<Message>> for Dataset<Message> {
+    fn from(inner: DatasetInner<Message>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(inner)),
         }
     }
 }
 
-impl<Config: DatabaseBuilder + Clone> Database<Config> {
+impl Database {
     fn lookup_dataset_id(&self, name: &[u8]) -> Result<DatasetId> {
         let mut key = Vec::with_capacity(1 + name.len());
         key.push(1);
         key.extend_from_slice(name);
-        let data = self.root_tree.get(key)?.ok_or(ErrorKind::DoesNotExist)?;
+        let data = self.root_tree.get(key)?.ok_or(Error::DoesNotExist)?;
         Ok(DatasetId::unpack(&data))
     }
 
     /// A convenience instantiation of [Database::open_custom_dataset] with the default message set.
-    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
+    pub fn open_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
         self.open_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
@@ -73,7 +63,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     }
 
     /// A convenience instantiation of [Database::open_or_create_custom_dataset] with the default message set.
-    pub fn open_or_create_dataset(&mut self, name: &[u8]) -> Result<Dataset<Config>> {
+    pub fn open_or_create_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
         self.open_or_create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
     }
 
@@ -84,7 +74,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         &mut self,
         name: &[u8],
         _storage_preference: StoragePreference,
-    ) -> Result<Dataset<Config, M>> {
+    ) -> Result<Dataset<M>> {
         let id = self.lookup_dataset_id(name)?;
         self.open_dataset_with_id_and_name(id, name)
     }
@@ -94,7 +84,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     pub(crate) fn open_dataset_with_id<M: MessageAction + Default + 'static>(
         &mut self,
         id: DatasetId,
-    ) -> Result<Dataset<Config, M>> {
+    ) -> Result<Dataset<M>> {
         self.open_dataset_with_id_and_name(id, &[])
     }
 
@@ -102,10 +92,10 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         &mut self,
         id: DatasetId,
         name: &[u8],
-    ) -> Result<Dataset<Config, M>> {
+    ) -> Result<Dataset<M>> {
         let ds_data = fetch_ds_data(&self.root_tree, id)?;
         if self.open_datasets.contains_key(&id) {
-            bail!(ErrorKind::InUse)
+            return Err(Error::InUse);
         }
         let storage_preference = StoragePreference::NONE;
         let ds_tree = Tree::open(
@@ -127,7 +117,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         let erased_tree = Box::new(ds_tree.clone());
         self.open_datasets.insert(id, erased_tree);
 
-        let ds: Dataset<Config, M> = DatasetInner {
+        let ds: Dataset<M> = DatasetInner {
             tree: ds_tree,
             id,
             name: Box::from(name),
@@ -154,8 +144,8 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         storage_preference: StoragePreference,
     ) -> Result<()> {
         match self.lookup_dataset_id(name) {
-            Ok(_) => bail!(ErrorKind::AlreadyExists),
-            Err(Error(ErrorKind::DoesNotExist, _)) => {}
+            Ok(_) => return Err(Error::AlreadyExists),
+            Err(Error::DoesNotExist) => {}
             Err(e) => return Err(e),
         };
         let ds_id = self.allocate_ds_id()?;
@@ -193,10 +183,10 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
-    ) -> Result<Dataset<Config, M>> {
+    ) -> Result<Dataset<M>> {
         match self.lookup_dataset_id(name) {
             Ok(_) => self.open_custom_dataset(name, storage_preference),
-            Err(Error(ErrorKind::DoesNotExist, _)) => self
+            Err(Error::DoesNotExist) => self
                 .create_custom_dataset::<M>(name, storage_preference)
                 .and_then(|()| self.open_custom_dataset(name, storage_preference)),
             Err(e) => Err(e),
@@ -234,7 +224,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     /// Closes the given data set.
     pub fn close_dataset<Message: MessageAction + 'static>(
         &mut self,
-        ds: Dataset<Config, Message>,
+        ds: Dataset<Message>,
     ) -> Result<()> {
         if let Some(tx) = &self.db_tx {
             let _ = tx
@@ -265,7 +255,7 @@ impl<Config: DatabaseBuilder + Clone> Database<Config> {
     }
 }
 
-impl<Message: MessageAction + 'static, Config: DatabaseBuilder> DatasetInner<Config, Message> {
+impl<Message: MessageAction + 'static> DatasetInner<Message> {
     /// Inserts a message for the given key.
     pub fn insert_msg<K: Borrow<[u8]> + Into<CowBytes>>(
         &self,
@@ -317,10 +307,8 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> DatasetInner<Con
     }
 }
 
-use super::errors::ErrorKind;
-
 // Member access on internal type
-impl<Message, Config: DatabaseBuilder> Dataset<Config, Message> {
+impl<Message> Dataset<Message> {
     pub(crate) fn id(&self) -> DatasetId {
         self.inner.read().id
     }
@@ -341,14 +329,14 @@ impl<Message, Config: DatabaseBuilder> Dataset<Config, Message> {
 
     pub(crate) fn call_tree<F, R>(&self, call: F) -> R
     where
-        F: FnOnce(&MessageTree<Config::Dmu, Message>) -> R,
+        F: FnOnce(&MessageTree<RootDmu, Message>) -> R,
     {
         call(&self.inner.read().tree)
     }
 }
 
 // Mirroring of the [DatasetInner] API
-impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, Message> {
+impl<Message: MessageAction + 'static> Dataset<Message> {
     /// Inserts a message for the given key.
     pub fn insert_msg<K: Borrow<[u8]> + Into<CowBytes>>(
         &self,
@@ -400,7 +388,7 @@ impl<Message: MessageAction + 'static, Config: DatabaseBuilder> Dataset<Config, 
     }
 }
 
-impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
+impl DatasetInner<DefaultMessageAction> {
     /// Inserts the given key-value pair.
     ///
     /// Note that any existing value will be overwritten.
@@ -410,10 +398,9 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         data: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        ensure!(
-            data.len() <= tree::MAX_MESSAGE_SIZE,
-            ErrorKind::MessageTooLarge
-        );
+        if data.len() > tree::MAX_MESSAGE_SIZE {
+            return Err(Error::MessageTooLarge);
+        }
         self.insert_msg_with_pref(
             key,
             DefaultMessageAction::insert_msg(data),
@@ -438,10 +425,9 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         offset: u32,
         storage_preference: StoragePreference,
     ) -> Result<()> {
-        ensure!(
-            offset as usize + data.len() <= tree::MAX_MESSAGE_SIZE,
-            ErrorKind::MessageTooLarge
-        );
+        if offset as usize + data.len() > tree::MAX_MESSAGE_SIZE {
+            return Err(Error::MessageTooLarge);
+        }
         // TODO: In case of overfilling the underlying storage we should notify in _any_ case that the writing is not successfull, for this
         // we need to know wether the space to write out has been expanded. For this we need further information which we ideally do not want
         // to read out from the disk here.
@@ -475,9 +461,9 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         key: K,
         pref: StoragePreference,
     ) -> Result<Option<()>> {
-        use crate::{data_management::DmlWithSpl, storage_pool::StoragePoolLayer};
+        use crate::storage_pool::StoragePoolLayer;
         if self.tree.dmu().spl().disk_count(pref.as_u8()) == 0 {
-            bail!(ErrorKind::DoesNotExist)
+            return Err(Error::MigrationNotPossible);
         }
         Ok(self.tree.apply_with_info(key, pref)?.map(|_| ()))
     }
@@ -495,7 +481,7 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
         if let Some(info) = self.tree.dmu().handler().get_free_space_tier(pref.as_u8()) {
             Ok(info)
         } else {
-            bail!(ErrorKind::DoesNotExist)
+            Err(Error::DoesNotExist)
         }
     }
 
@@ -534,7 +520,7 @@ impl<Config: DatabaseBuilder> DatasetInner<Config, DefaultMessageAction> {
 }
 
 // Mirroring the [DatasetInner] API
-impl<Config: DatabaseBuilder> Dataset<Config, DefaultMessageAction> {
+impl Dataset<DefaultMessageAction> {
     /// Inserts the given key-value pair.
     ///
     /// Note that any existing value will be overwritten.

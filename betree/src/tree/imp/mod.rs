@@ -5,12 +5,12 @@ use self::{
 };
 use super::{
     errors::*,
-    layer::{ErasedTreeSync, TreeBaseLayer, TreeLayer},
+    layer::{ErasedTreeSync, TreeLayer},
 };
 use crate::{
     cache::AddSize,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, DmlBase, HandlerDml, HasStoragePreference, ObjectRef},
+    data_management::{Dml, HasStoragePreference, ObjectReference},
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
     tree::MessageAction,
@@ -57,7 +57,7 @@ const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// The actual tree type.
-pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
+pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     inner: I,
     dml: X,
     evict: bool,
@@ -65,7 +65,7 @@ pub struct Tree<X: DmlBase, M, I: Borrow<Inner<X::ObjectRef, X::Info, M>>> {
     storage_preference: StoragePreference,
 }
 
-impl<X: Clone + DmlBase, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clone
+impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, X::Info, M>>> Clone
     for Tree<X, M, I>
 {
     fn clone(&self) -> Self {
@@ -112,8 +112,8 @@ impl<R, I, M> Inner<R, I, M> {
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>> + From<Inner<X::ObjectRef, X::Info, M>>,
 {
@@ -164,8 +164,8 @@ where
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer>,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer>,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
@@ -207,8 +207,8 @@ where
 
 impl<X, R, M, I> Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
@@ -223,7 +223,7 @@ where
         &self.inner.borrow().msg_action
     }
 
-    fn get_mut_root_node(&self) -> Result<X::CacheValueRefMut, TreeError> {
+    fn get_mut_root_node(&self) -> Result<X::CacheValueRefMut, Error> {
         if let Some(node) = self.dml.try_get_mut(&self.inner.borrow().root_node.read()) {
             return Ok(node);
         }
@@ -232,11 +232,11 @@ where
             .get_mut(&mut self.inner.borrow().root_node.write(), self.tree_id())?)
     }
 
-    fn get_root_node(&self) -> Result<X::CacheValueRef, TreeError> {
+    fn get_root_node(&self) -> Result<X::CacheValueRef, Error> {
         self.get_node(&self.inner.borrow().root_node)
     }
 
-    fn get_node(&self, np_ref: &RwLock<X::ObjectRef>) -> Result<X::CacheValueRef, TreeError> {
+    fn get_node(&self, np_ref: &RwLock<X::ObjectRef>) -> Result<X::CacheValueRef, Error> {
         if let Some(node) = self.dml.try_get(&np_ref.read()) {
             return Ok(node);
         }
@@ -250,7 +250,7 @@ where
     fn get_mut_node_mut(
         &self,
         np_ref: &mut X::ObjectRef,
-    ) -> Result<X::CacheValueRefMut, TreeError> {
+    ) -> Result<X::CacheValueRefMut, Error> {
         if let Some(node) = self.dml.try_get_mut(np_ref) {
             return Ok(node);
         }
@@ -260,7 +260,7 @@ where
     fn get_mut_node(
         &self,
         np_ref: &mut RwLock<X::ObjectRef>,
-    ) -> Result<X::CacheValueRefMut, TreeError> {
+    ) -> Result<X::CacheValueRefMut, Error> {
         self.get_mut_node_mut(np_ref.get_mut())
     }
 
@@ -324,7 +324,7 @@ where
 
     #[allow(missing_docs)]
     #[cfg(feature = "internal-api")]
-    pub fn tree_dump(&self) -> Result<impl serde::Serialize, TreeError>
+    pub fn tree_dump(&self) -> Result<impl serde::Serialize, Error>
     where
         X::ObjectRef: HasStoragePreference,
     {
@@ -340,7 +340,7 @@ where
     pub(crate) fn get_with_info<K: Borrow<[u8]>>(
         &self,
         key: K,
-    ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, TreeError> {
+    ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, Error> {
         let key = key.borrow();
         let mut msgs = Vec::new();
         let mut node = self.get_root_node()?;
@@ -379,7 +379,7 @@ where
         &self,
         key: K,
         pref: StoragePreference,
-    ) -> Result<Option<KeyInfo>, TreeError> {
+    ) -> Result<Option<KeyInfo>, Error> {
         let key = key.borrow();
         let mut node = self.get_mut_root_node()?;
         // Iterate to leaf
@@ -396,7 +396,7 @@ where
 
 // impl<X, R, M> Tree<X, M, Arc<Inner<X::ObjectRef, X::Info, M>>>
 // where
-//     X: HandlerDml<Object = Node<Message<M>, R>, ObjectRef = R>,
+//     X: Dml<Object = Node<Message<M>, R>, ObjectRef = R>,
 //     R: ObjectRef,
 //     M: MessageAction,
 // {
@@ -406,14 +406,14 @@ where
 //     }
 // }
 
-impl<X, R, M, I> TreeBaseLayer<M> for Tree<X, M, I>
+impl<X, R, M, I> TreeLayer<M> for Tree<X, M, I>
 where
-    X: HandlerDml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    X: Dml<Object = Node<R>, ObjectRef = R>,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
 {
-    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, TreeError> {
+    fn get<K: Borrow<[u8]>>(&self, key: K) -> Result<Option<SlicedCowBytes>, Error> {
         self.get_with_info(key)
             .map(|res| res.map(|(_info, data)| data))
     }
@@ -423,12 +423,12 @@ where
         key: K,
         msg: SlicedCowBytes,
         storage_preference: StoragePreference,
-    ) -> Result<(), TreeError>
+    ) -> Result<(), Error>
     where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
         if key.borrow().is_empty() {
-            return Err(TreeError::EmptyKey);
+            return Err(Error::EmptyKey);
         }
         let mut parent = None;
         let mut node = {
@@ -471,35 +471,27 @@ where
         Ok(())
     }
 
-    fn depth(&self) -> Result<u32, TreeError> {
+    fn depth(&self) -> Result<u32, Error> {
         Ok(self.get_root_node()?.level() + 1)
     }
-}
 
-impl<X, R, M, I> TreeLayer<M> for Tree<X, M, I>
-where
-    X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
-    M: MessageAction,
-    I: Borrow<Inner<X::ObjectRef, X::Info, M>>,
-{
     type Pointer = X::ObjectPointer;
 
     type Range = RangeIterator<X, M, I>;
 
-    fn range<K, T>(&self, range: T) -> Result<Self::Range, TreeError>
+    fn range<K, T>(&self, range: T) -> Result<Self::Range, Error>
     where
         T: RangeBounds<K>,
         K: Borrow<[u8]> + Into<CowBytes>,
         Self: Clone,
     {
         if !is_inclusive_non_empty(&range) {
-            return Err(TreeError::InvalidRange);
+            return Err(Error::InvalidRange);
         }
         Ok(RangeIterator::new(range, self.clone()))
     }
 
-    fn sync(&self) -> Result<Self::Pointer, TreeError> {
+    fn sync(&self) -> Result<Self::Pointer, Error> {
         trace!("sync: Enter");
         let obj_ptr = self
             .dml
@@ -512,13 +504,13 @@ where
 impl<X, R, M, I> ErasedTreeSync for Tree<X, M, I>
 where
     X: Dml<Object = Node<R>, ObjectRef = R>,
-    R: ObjectRef<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    R: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
     M: MessageAction,
     I: Borrow<Inner<R, X::Info, M>>,
 {
     type Pointer = X::ObjectPointer;
     type ObjectRef = R;
-    fn erased_sync(&self) -> Result<Self::Pointer, TreeError> {
+    fn erased_sync(&self) -> Result<Self::Pointer, Error> {
         TreeLayer::sync(self)
     }
     fn erased_try_lock_root(

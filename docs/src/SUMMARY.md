@@ -15,3 +15,5 @@
     - [Usage in JULEA](./julea-betree/usage.md)
   - [julea-sys](./julea-sys.md)
     - [Build](./julea-sys/build.md)
+- [RFC](./rfc.md)
+  - [1-PivotKey](./rfc/1-pivotkey.md)

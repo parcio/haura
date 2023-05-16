@@ -1,6 +1,6 @@
 use crate::{
     cow_bytes::CowBytes,
-    database::{DatabaseBuilder, DatasetId},
+    database::DatasetId,
     object::{ObjectId, ObjectInfo, ObjectStore, ObjectStoreId},
     storage_pool::DiskOffset,
     vdev::Block,
@@ -73,13 +73,13 @@ impl Display for GlobalObjectId {
 /// might be distributed on multiple storage tiers and must not adhere to the
 /// storage preference given.
 #[derive(Clone)]
-pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
+pub enum DatabaseMsg {
     // Relevant for Promotion and/or Demotion
     DatasetOpen(DatasetId),
     DatasetClose(DatasetId),
 
     /// Announce and deliver an accessible copy of active object stores.
-    ObjectstoreOpen(ObjectStoreId, ObjectStore<Config>),
+    ObjectstoreOpen(ObjectStoreId, ObjectStore),
     ObjectstoreClose(ObjectStoreId),
 
     /// Informs of openend object, adjoint with extra information for access.
@@ -96,24 +96,16 @@ pub enum DatabaseMsg<Config: DatabaseBuilder + Clone> {
     ObjectDiscover(GlobalObjectId, ObjectInfo, CowBytes),
 }
 
-pub trait ConstructReport {
-    fn build_fetch(info: OpInfo) -> Self;
-    fn build_write(info: OpInfo) -> Self;
-    fn fetch(offset: DiskOffset, size: Block<u32>) -> Self;
-    fn write(offset: DiskOffset, size: Block<u32>, previous_offset: Option<DiskOffset>) -> Self;
-    fn remove(offset: DiskOffset, size: Block<u32>) -> Self;
-}
-
-impl ConstructReport for DmlMsg {
-    fn build_fetch(info: OpInfo) -> Self {
+impl DmlMsg {
+    pub fn build_fetch(info: OpInfo) -> Self {
         Self::Fetch(info)
     }
 
-    fn build_write(info: OpInfo) -> Self {
+    pub fn build_write(info: OpInfo) -> Self {
         Self::Write(info)
     }
 
-    fn fetch(offset: DiskOffset, size: Block<u32>) -> Self {
+    pub fn fetch(offset: DiskOffset, size: Block<u32>) -> Self {
         Self::build_fetch(OpInfo {
             offset,
             size,
@@ -122,7 +114,11 @@ impl ConstructReport for DmlMsg {
         })
     }
 
-    fn write(offset: DiskOffset, size: Block<u32>, previous_offset: Option<DiskOffset>) -> Self {
+    pub fn write(
+        offset: DiskOffset,
+        size: Block<u32>,
+        previous_offset: Option<DiskOffset>,
+    ) -> Self {
         Self::build_write(OpInfo {
             offset,
             size,
@@ -131,7 +127,7 @@ impl ConstructReport for DmlMsg {
         })
     }
 
-    fn remove(offset: DiskOffset, size: Block<u32>) -> Self {
+    pub fn remove(offset: DiskOffset, size: Block<u32>) -> Self {
         Self::Remove(OpInfo {
             offset,
             size,

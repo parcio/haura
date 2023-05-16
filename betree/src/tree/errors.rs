@@ -1,7 +1,8 @@
+#![allow(missing_docs, unused_doc_comments)]
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum TreeError {
+pub enum Error {
     #[error("Storage operation could not be performed")]
     DmuError {
         #[from]

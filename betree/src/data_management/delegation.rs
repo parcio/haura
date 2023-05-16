@@ -1,24 +1,23 @@
-use super::{Dml, DmlBase, Error, HandlerDml};
+use super::{Dml, Error};
 use std::ops::{Deref, DerefMut};
 
-impl<T> DmlBase for T
+impl<T> Dml for T
 where
     T: Deref,
-    T::Target: DmlBase,
+    T::Target: Dml,
 {
-    type ObjectRef = <T::Target as DmlBase>::ObjectRef;
-    type ObjectPointer = <T::Target as DmlBase>::ObjectPointer;
-    type Info = <T::Target as DmlBase>::Info;
-}
+    type ObjectRef = <T::Target as Dml>::ObjectRef;
+    type ObjectPointer = <T::Target as Dml>::ObjectPointer;
+    type Info = <T::Target as Dml>::Info;
+    type Object = <T::Target as Dml>::Object;
+    type CacheValueRef = <T::Target as Dml>::CacheValueRef;
+    type CacheValueRefMut = <T::Target as Dml>::CacheValueRefMut;
+    type CacheStats = <T::Target as Dml>::CacheStats;
+    type Spl = <T::Target as Dml>::Spl;
 
-impl<T> HandlerDml for T
-where
-    T: Deref,
-    T::Target: HandlerDml,
-{
-    type Object = <T::Target as HandlerDml>::Object;
-    type CacheValueRef = <T::Target as HandlerDml>::CacheValueRef;
-    type CacheValueRefMut = <T::Target as HandlerDml>::CacheValueRefMut;
+    fn spl(&self) -> &Self::Spl {
+        (**self).spl()
+    }
 
     fn try_get(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRef> {
         (**self).try_get(or)
@@ -64,25 +63,14 @@ where
         (**self).evict()
     }
 
-    #[cfg(feature = "experimental-api")]
-    fn clear_cache(&self) -> Result<(), Error> {
-        (**self).clear_cache()
-    }
-
     fn verify_cache(&self) {
         (**self).verify_cache()
     }
 
     fn ref_from_ptr(r: Self::ObjectPointer) -> Self::ObjectRef {
-        <T::Target as HandlerDml>::ref_from_ptr(r)
+        <T::Target as Dml>::ref_from_ptr(r)
     }
-}
 
-impl<T> Dml for T
-where
-    T: Deref,
-    T::Target: Dml,
-{
     fn write_back<F, G>(&self, acquire_or_lock: F) -> Result<Self::ObjectPointer, Error>
     where
         F: FnMut() -> G,
@@ -99,6 +87,10 @@ where
 
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
         (**self).finish_prefetch(p)
+    }
+
+    fn cache_stats(&self) -> Self::CacheStats {
+        (**self).cache_stats()
     }
 
     fn drop_cache(&self) {

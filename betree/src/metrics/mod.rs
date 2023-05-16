@@ -1,8 +1,8 @@
 //! A naive metrics system, logging newline-delimited JSON to a configurable file.
 
 use crate::{
-    data_management::{DmlWithCache, DmlWithHandler, DmlWithSpl, Handler},
-    database::{DatabaseBuilder, StorageInfo},
+    data_management::{Dml, DmlWithHandler},
+    database::{RootDmu, StorageInfo},
     storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
 };
 use serde::{Deserialize, Serialize};
@@ -29,11 +29,8 @@ pub struct MetricsConfiguration {
 
 pub(crate) fn metrics_init<Config>(
     cfg: &MetricsConfiguration,
-    dmu: Arc<Config::Dmu>,
-) -> io::Result<thread::JoinHandle<()>>
-where
-    Config: DatabaseBuilder,
-{
+    dmu: Arc<RootDmu>,
+) -> io::Result<thread::JoinHandle<()>> {
     let cfg = cfg.clone();
 
     let file = fs::OpenOptions::new()
@@ -47,17 +44,14 @@ where
 }
 
 #[derive(Serialize)]
-struct Metrics<Config: DatabaseBuilder> {
+struct Metrics {
     epoch_ms: u128,
-    cache: <Config::Dmu as DmlWithCache>::CacheStats,
-    storage: <Config::Spu as StoragePoolLayer>::Metrics,
+    cache: <RootDmu as Dml>::CacheStats,
+    storage: <<RootDmu as Dml>::Spl as StoragePoolLayer>::Metrics,
     usage: Vec<StorageInfo>,
 }
 
-fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<Config::Dmu>)
-where
-    Config: DatabaseBuilder,
-{
+fn metrics_loop<Config>(cfg: MetricsConfiguration, output: fs::File, dmu: Arc<RootDmu>) {
     let mut output = io::BufWriter::new(output);
     let sleep_duration = Duration::from_millis(cfg.interval_ms as u64);
     loop {
@@ -66,7 +60,7 @@ where
 
         let spu = dmu.spl();
 
-        let metrics: Metrics<Config> = Metrics {
+        let metrics: Metrics = Metrics {
             epoch_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_millis())

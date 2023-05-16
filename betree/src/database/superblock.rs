@@ -38,11 +38,11 @@ impl<P: DeserializeOwned> Superblock<P> {
         let correct_checksum = checksum(&b[..b.len() - checksum_size]);
         let actual_checksum = deserialize(&b[b.len() - checksum_size..])?;
         if correct_checksum != actual_checksum {
-            bail!("Invalid checksum");
+            return Err(Error::InvalidSuperblock);
         }
         let this: Self = deserialize(b)?;
         if this.magic != MAGIC {
-            bail!("Invalid magic");
+            return Err(Error::InvalidSuperblock);
         }
         Ok(this)
     }

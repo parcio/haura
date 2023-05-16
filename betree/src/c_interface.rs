@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},
+    database::{Database, Dataset, Error, Snapshot},
     object::{ObjectHandle, ObjectStore},
     storage_pool::{StoragePoolConfiguration, TierConfiguration},
     tree::DefaultMessageAction,
@@ -28,20 +28,20 @@ pub struct err_t(Error);
 #[repr(C)]
 pub struct storage_pref_t(StoragePreference);
 /// The database type
-pub struct db_t(Database<DatabaseConfiguration>);
+pub struct db_t(Database);
 /// The data set type
-pub struct ds_t(Dataset<DatabaseConfiguration>);
+pub struct ds_t(Dataset);
 /// The snapshot type
-pub struct ss_t(Snapshot<DatabaseConfiguration>);
+pub struct ss_t(Snapshot);
 /// The data set/snapshot name iterator type
 pub struct name_iter_t(Box<dyn Iterator<Item = Result<SlicedCowBytes, Error>>>);
 /// The range iterator type
 pub struct range_iter_t(Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes), Error>>>);
 
 /// The object store wrapper type
-pub struct obj_store_t(ObjectStore<DatabaseConfiguration>);
+pub struct obj_store_t(ObjectStore);
 /// The handle of an object in the corresponding object store
-pub struct obj_t<'os>(ObjectHandle<'os, DatabaseConfiguration>);
+pub struct obj_t<'os>(ObjectHandle<'os>);
 
 pub static STORAGE_PREF_NONE: storage_pref_t = storage_pref_t(StoragePreference::NONE);
 pub static STORAGE_PREF_FASTEST: storage_pref_t = storage_pref_t(StoragePreference::FASTEST);
@@ -109,7 +109,7 @@ impl HandleResult for StoragePoolConfiguration {
     }
 }
 
-impl HandleResult for Database<DatabaseConfiguration> {
+impl HandleResult for Database {
     type Result = *mut db_t;
     fn success(self) -> *mut db_t {
         b(db_t(self))
@@ -119,7 +119,7 @@ impl HandleResult for Database<DatabaseConfiguration> {
     }
 }
 
-impl HandleResult for Dataset<DatabaseConfiguration> {
+impl HandleResult for Dataset {
     type Result = *mut ds_t;
     fn success(self) -> *mut ds_t {
         b(ds_t(self))
@@ -129,7 +129,7 @@ impl HandleResult for Dataset<DatabaseConfiguration> {
     }
 }
 
-impl HandleResult for Snapshot<DatabaseConfiguration> {
+impl HandleResult for Snapshot {
     type Result = *mut ss_t;
     fn success(self) -> *mut ss_t {
         b(ss_t(self))
@@ -159,7 +159,7 @@ impl HandleResult for Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes),
     }
 }
 
-impl HandleResult for ObjectStore<DatabaseConfiguration> {
+impl HandleResult for ObjectStore {
     type Result = *mut obj_store_t;
     fn success(self) -> *mut obj_store_t {
         b(obj_store_t(self))
@@ -169,7 +169,7 @@ impl HandleResult for ObjectStore<DatabaseConfiguration> {
     }
 }
 
-impl<'os> HandleResult for ObjectHandle<'os, DatabaseConfiguration> {
+impl<'os> HandleResult for ObjectHandle<'os> {
     type Result = *mut obj_t<'os>;
     fn success(self) -> *mut obj_t<'os> {
         b(obj_t(self))
@@ -596,7 +596,7 @@ pub unsafe extern "C" fn betree_dataset_upsert(
     let ds = &(*ds).0;
     let key = from_raw_parts(key as *const u8, key_len as usize);
     let data = from_raw_parts(data as *const u8, data_len as usize);
-    ds.upsert_with_pref(key, data, offset as u32, storage_pref.0)
+    ds.upsert_with_pref(key, data, offset, storage_pref.0)
         .handle_result(err)
 }
 
@@ -705,7 +705,7 @@ pub unsafe extern "C" fn betree_snapshot_range(
 #[no_mangle]
 pub unsafe extern "C" fn betree_print_error(err: *mut err_t) {
     let err = &(*err).0;
-    if write!(&mut stderr(), "{}", err.display_chain()).is_err() {
+    if write!(&mut stderr(), "{}", err).is_err() {
         abort();
     }
 }
