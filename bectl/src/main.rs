@@ -9,7 +9,7 @@ use betree_storage_stack::{
     cow_bytes::CowBytes,
     database::{Database, DatabaseConfiguration, Superblock},
     tree::{DefaultMessageAction, TreeLayer},
-    StoragePreference,
+    StoragePreference, storage_pool::DiskOffset,
 };
 use chrono::{DateTime, Utc};
 use figment::providers::Format;
@@ -207,7 +207,7 @@ fn bectl_main() -> Result<(), Error> {
                 let dmu = root.dmu();
                 let handler = dmu.handler();
 
-                let space = handler.get_free_space(0,0);
+                let space = handler.free_space_disk(DiskOffset::construct_disk_id(0, 0));
                 println!("{:?}", space);
             }
 
