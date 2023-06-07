@@ -1,6 +1,6 @@
 //! Storage Pool configuration.
 #[cfg(feature = "nvm")]
-use pmdk;
+use pmem;
 
 use crate::vdev::{self, Dev, Leaf};
 use itertools::Itertools;
@@ -121,10 +121,7 @@ pub enum Vdev {
 #[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum LeafVdev {
     #[cfg(feature = "nvm")]
-    PMemFile {
-        path: PathBuf,
-        len: usize
-    },    
+    PMemFile { path: PathBuf, len: usize },
     /// Backed by a file or disk.
     File(PathBuf),
     /// Customisable file vdev.
@@ -226,10 +223,12 @@ impl TierConfiguration {
                     LeafVdev::File(path) => write!(s, "{} ", path.display()).unwrap(),
                     LeafVdev::FileWithOpts { path, direct } => {
                         write!(s, "{} (direct: {:?}) ", path.display(), direct).unwrap()
-                    },
+                    }
                     LeafVdev::Memory { mem } => write!(s, "memory({mem}) ").unwrap(),
                     #[cfg(feature = "nvm")]
-                    LeafVdev::PMemFile{path, len} => write!(s, "{} {}", path.display(), len).unwrap(),
+                    LeafVdev::PMemFile { path, len } => {
+                        write!(s, "{} {}", path.display(), len).unwrap()
+                    }
                 }
             }
         }
@@ -318,30 +317,43 @@ impl LeafVdev {
                     LeafVdev::File(path) => unreachable!(),
                     LeafVdev::FileWithOpts { .. } => unreachable!(),
                     LeafVdev::Memory { .. } => unreachable!(),
-                    LeafVdev::PMemFile {path, len} => (path, len),
+                    LeafVdev::PMemFile { path, len } => (path, len),
                 };
 
-                let mut is_pmem : i32 = 0;
-                let mut mapped_len : u64 = 0;
+                let mut is_pmem: i32 = 0;
+                let mut mapped_len: u64 = 0;
                 let mut file = match path.to_str() {
-                    Some(filepath_str) => match pmdk::PMem::open(format!("{}\0",filepath_str).as_str(), &mut mapped_len, &mut is_pmem) {
-                        Ok(handle) => handle,
-                        Err(e) => match pmdk::PMem::create(format!("{}\0",filepath_str).as_str(), *len as u64, &mut mapped_len, &mut is_pmem) {
+                    Some(filepath_str) => {
+                        match pmem::PMem::open(
+                            format!("{}\0", filepath_str).as_str(),
+                            &mut mapped_len,
+                            &mut is_pmem,
+                        ) {
                             Ok(handle) => handle,
-                            Err(e) => {
-                                return Err(io::Error::new(io::ErrorKind::Other,
+                            Err(e) => match pmem::PMem::create(
+                                format!("{}\0", filepath_str).as_str(),
+                                *len as u64,
+                                &mut mapped_len,
+                                &mut is_pmem,
+                            ) {
+                                Ok(handle) => handle,
+                                Err(e) => {
+                                    return Err(io::Error::new(io::ErrorKind::Other,
                                             format!("Failed to create or open handle for pmem file. Path: {}", filepath_str)));
-                            }
+                                }
+                            },
                         }
-                    },
+                    }
                     None => {
-                        return Err(io::Error::new(io::ErrorKind::Other,
-                                              format!("Invalid file path: {:?}", path)));
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("Invalid file path: {:?}", path),
+                        ));
                     }
                 };
 
                 if (mapped_len != *len as u64) {
-                     return Err(io::Error::new(io::ErrorKind::Other,
+                    return Err(io::Error::new(io::ErrorKind::Other,
                                     format!("The file already exists with a differnt length. Provided length: {}, File's length: {}",
                                             len, mapped_len)));
                 }
@@ -349,7 +361,7 @@ impl LeafVdev {
                 Ok(Leaf::PMemFile(vdev::PMemFile::new(
                     file,
                     path.to_string_lossy().into_owned(),
-                    mapped_len
+                    mapped_len,
                 )?))
             }
         }
@@ -413,10 +425,9 @@ impl LeafVdev {
                 writeln!(f, "{:indent$}memory({})", "", mem, indent = indent)
             }
             #[cfg(feature = "nvm")]
-            LeafVdev::PMemFile {path, len} => {
+            LeafVdev::PMemFile { path, len } => {
                 writeln!(f, "{:indent$}{}", "", path.display(), indent = indent)
             }
-
         }
     }
 }

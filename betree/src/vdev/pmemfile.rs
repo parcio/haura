@@ -1,4 +1,4 @@
-use pmdk;
+use pmem;
 use super::{
     errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead,
@@ -19,7 +19,7 @@ use std::{
 /// `LeafVdev` that is backed by a file.
 #[derive(Debug)]
 pub struct PMemFile {
-    file: pmdk::PMem,
+    file: pmem::PMem,
     id: String,
     size: Block<u64>,
     stats: AtomicStatistics,
@@ -27,7 +27,7 @@ pub struct PMemFile {
 
 impl PMemFile {
     /// Creates a new `PMEMFile`.
-    pub fn new(file: pmdk::PMem, id: String, len: u64) -> io::Result<Self> {
+    pub fn new(file: pmem::PMem, id: String, len: u64) -> io::Result<Self> {
         let size = Block::from_bytes(len);
         Ok(PMemFile {
             file,

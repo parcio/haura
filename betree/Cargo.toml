@@ -58,7 +58,7 @@ crossbeam-channel = "0.5.5"
 lfu_cache = { git = "https://github.com/julea-io/lfu-cache", rev = "haura-v5" }
 rand = { version = "0.8", features = ["std_rng"] }
 
-pmdk = { path = "./pmdk", optional = true }
+pmem = { path = "./pmem", optional = true }
 
 [dev-dependencies]
 rand_xorshift = "0.3"
@@ -80,5 +80,4 @@ figment_config = ["figment"]
 # therefore safeguarded into it's own feature
 latency_metrics = []
 experimental-api = []
-nvm = ["pmdk"]
-
+nvm = ["pmem"]
