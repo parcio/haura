@@ -1,0 +1,7 @@
+# libpmemobj - Transactional Hashmap
+
+This directory contains a simple implementation of a hashmap based on an example
+provided under https://github.com/pmem/pmdk/.
+
+This directory is licensed under BSD-3-Clause by the Intel Corporation the
+license of which can be found under `./LICENSE`.

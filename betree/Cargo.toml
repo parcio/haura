@@ -59,6 +59,7 @@ lfu_cache = { git = "https://github.com/julea-io/lfu-cache", rev = "haura-v5" }
 rand = { version = "0.8", features = ["std_rng"] }
 
 pmem = { path = "./pmem", optional = true }
+pmem_hashmap = { path = "./pmem-hashmap", optional = true }
 
 [dev-dependencies]
 rand_xorshift = "0.3"
@@ -80,4 +81,4 @@ figment_config = ["figment"]
 # therefore safeguarded into it's own feature
 latency_metrics = []
 experimental-api = []
-nvm = ["pmem"]
+nvm = ["pmem", "pmem_hashmap"]
