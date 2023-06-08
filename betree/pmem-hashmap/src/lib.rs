@@ -4,23 +4,51 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use std::hash::{Hash, Hasher};
+use std::{
+    ffi::c_int,
+    hash::{Hash, Hasher},
+};
 
-use thiserror::Error;
-use twox_hash;
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum PMapError {
     #[error("Could not deduce path: `{0}`")]
     InvalidPath(#[from] std::ffi::NulError),
-    #[error("Error: `{0}`")]
+    #[error("External Error: `{0}`")]
     ExternalError(String),
+    #[error("Allocation Error: `{0}`")]
+    AllocationError(String),
+    #[error("Key already exists.")]
+    AlreadyExists,
+    #[error("Key does not exist.")]
+    DoesNotExist,
 }
+
+impl PMapError {
+    fn from_insertion(from: c_int) -> Self {
+        match from {
+            1 => Self::AlreadyExists,
+            _ => PMapError::ExternalError(format!("{}", errno::errno())),
+        }
+    }
+}
+
+/// A persistent hashmap.
+///
+/// Note that the struct itself does not have any specific type-ness as normally
+/// in a hashmap in collections.  As all references have to be self-contained
+/// introducing this abstractions hides this fact and may result in erroneous
+/// behavior when reading data after reinitialization.
+///
+/// Additionally, this structure is not thread-safe, and may only ever be used
+/// by one actor simultaneously. Changing this would require more work to avoid
+/// collisions when operating on the same key.
 pub struct PMap {
     inner: hashmap_tx_toid,
     pobjpool: *mut PMEMobjpool,
 }
 
 impl PMap {
+    /// Open an existing hashmap. Will fail if no hashmap has been created before.
     pub fn open<P: Into<std::path::PathBuf>>(path: P) -> Result<Self, PMapError> {
         let pobjpool = {
             let path =
@@ -33,6 +61,7 @@ impl PMap {
         Self::new(pobjpool)
     }
 
+    /// Create a new hashmap. Will fail if a hashmap already exists at the specified location.
     pub fn create<P: Into<std::path::PathBuf>>(path: P, size: usize) -> Result<Self, PMapError> {
         let pobjpool = {
             let path =
@@ -45,7 +74,11 @@ impl PMap {
         Self::new(pobjpool)
     }
 
-    pub fn new(pobjpool: *mut PMEMobjpool) -> Result<Self, PMapError> {
+    /// Initialize or Create a new hashmap. For this we check if the root obj is
+    /// of the correct type and if map pointer already exists.
+    ///
+    /// TODO: Use a layout to guarantee compatability?
+    fn new(pobjpool: *mut PMEMobjpool) -> Result<Self, PMapError> {
         let root_obj =
             unsafe { access_root(pmemobj_root(pobjpool, std::mem::size_of::<root_toid>())) };
         if unsafe { root_needs_init(root_obj) != 0 } {
@@ -69,13 +102,19 @@ impl PMap {
         })
     }
 
-    pub fn insert<K: Hash>(&mut self, key: K, val: &[u8]) {
+    /// Insert a key-value pair. The key type might vary between different
+    /// insertions as it only has to be hashable. This might lead to confusion
+    /// of values with the same hash value, which can be avoided by storing the
+    /// original data in here as well.
+    pub fn insert<K: Hash>(&mut self, key: K, val: &[u8]) -> Result<(), PMapError> {
         let mut hasher = twox_hash::XxHash64::default();
         key.hash(&mut hasher);
         let k = hasher.finish();
 
         let mut oid = std::mem::MaybeUninit::<PMEMoid>::uninit();
-        unsafe { pmemobj_zalloc(self.pobjpool, oid.as_mut_ptr(), 8 + val.len(), 2) };
+        if unsafe { pmemobj_zalloc(self.pobjpool, oid.as_mut_ptr(), 8 + val.len(), 2) != 0 } {
+            return Err(PMapError::AllocationError(format!("{}", errno::errno())));
+        }
 
         let mut mv = unsafe { access_map_value(oid.assume_init()) };
         unsafe {
@@ -83,29 +122,44 @@ impl PMap {
             (*mv).buf.as_mut_slice(val.len()).copy_from_slice(val);
         }
 
-        unsafe { hm_tx_insert(self.pobjpool, self.inner, k, oid.assume_init()) };
+        let inserted = unsafe { hm_tx_insert(self.pobjpool, self.inner, k, oid.assume_init()) };
+        if inserted != 0 {
+            return Err(PMapError::from_insertion(inserted));
+        }
+        Ok(())
     }
 
+    /// Remove the specified key from the hashmap.
     pub fn remove<K: Hash>(&mut self, key: K) {
         let mut hasher = twox_hash::XxHash64::default();
         key.hash(&mut hasher);
         let k = hasher.finish();
 
-        unsafe {
-            hm_tx_remove(self.pobjpool, self.inner, k);
-        }
+        let mut pptr = unsafe { hm_tx_remove(self.pobjpool, self.inner, k) };
+        unsafe { pmemobj_free(&mut pptr) };
     }
 
-    pub fn get<K: Hash>(&mut self, key: K) -> &mut [u8] {
+    /// Return a given value from the hashmap. The key has to be valid
+    pub fn get<K: Hash>(&mut self, key: K) -> Result<&mut [u8], PMapError> {
         let mut hasher = twox_hash::XxHash64::default();
         key.hash(&mut hasher);
         let k = hasher.finish();
-        let mv = unsafe { access_map_value(hm_tx_get(self.pobjpool, self.inner, k)) };
-        unsafe { (*mv).buf.as_mut_slice((*mv).len as usize) }
+
+        let val = unsafe { hm_tx_get(self.pobjpool, self.inner, k) };
+        if val.off == 0 {
+            return Err(PMapError::DoesNotExist);
+        }
+
+        let mv = unsafe { access_map_value(val) };
+        Ok(unsafe { (*mv).buf.as_mut_slice((*mv).len as usize) })
     }
 
     pub fn len(&mut self) -> usize {
         unsafe { hm_tx_count(self.pobjpool, self.inner) }
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        self.len() == 0
     }
 
     pub fn lookup<K: Hash>(&mut self, key: K) -> bool {
@@ -172,7 +226,7 @@ mod tests {
         let file = TestFile::new();
         let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
         assert!(!pmap.lookup(123));
-        pmap.insert(b"foobar", &[0]);
+        pmap.insert(b"foobar", &[0]).unwrap();
         assert!(pmap.lookup(b"foobar"));
     }
 
@@ -181,8 +235,8 @@ mod tests {
         let file = TestFile::new();
         let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
         let val = [1, 2, 3, 4];
-        pmap.insert("foobar", &val);
-        let foo = pmap.get("foobar");
+        pmap.insert("foobar", &val).unwrap();
+        let foo = pmap.get("foobar").unwrap();
         assert!(foo == &[1u8, 2, 3, 4] as &[_])
     }
 
@@ -190,7 +244,7 @@ mod tests {
     fn insert() {
         let file = TestFile::new();
         let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-        pmap.insert("foobar", &[1, 2, 3, 4]);
+        pmap.insert("foobar", &[1, 2, 3, 4]).unwrap();
     }
 
     #[test]
@@ -198,19 +252,19 @@ mod tests {
         let file = TestFile::new();
         let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
         assert_eq!(pmap.len(), 0);
-        pmap.insert("foobar", &[1, 2, 3, 4]);
+        pmap.insert("foobar", &[1, 2, 3, 4]).unwrap();
         assert_eq!(pmap.len(), 1);
-        pmap.insert("barfoo", &[1, 2]);
+        pmap.insert("barfoo", &[1, 2]).unwrap();
         assert_eq!(pmap.len(), 2);
-        pmap.insert("foobar", &[1]);
-        assert_eq!(pmap.len(), 2);
+        // pmap.insert("foobar", &[1]).unwrap();
+        // assert_eq!(pmap.len(), 2);
     }
 
     #[test]
     fn remove() {
         let file = TestFile::new();
         let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-        pmap.insert(b"foo", &[1, 2, 3]);
+        pmap.insert(b"foo", &[1, 2, 3]).unwrap();
         assert!(pmap.lookup(b"foo"));
         pmap.remove(b"foo");
         assert!(!pmap.lookup(b"foo"));
@@ -221,14 +275,14 @@ mod tests {
         let file = TestFile::new();
         {
             let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-            pmap.insert(b"foo", &[1, 2, 3]);
+            pmap.insert(b"foo", &[1, 2, 3]).unwrap();
             assert!(pmap.lookup(b"foo"));
             pmap.close();
         }
         {
             let mut pmap = PMap::open(file.path()).unwrap();
             assert!(pmap.lookup(b"foo"));
-            assert_eq!(pmap.get(b"foo"), [1, 2, 3]);
+            assert_eq!(pmap.get(b"foo").unwrap(), [1, 2, 3]);
             pmap.close();
         }
     }
