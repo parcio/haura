@@ -21,6 +21,7 @@ fn main() {
         .canonicalize()
         .expect("Could not determine path to c_impl");
     println!("cargo:rustc-link-search={}", path.to_str().unwrap());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", path.to_str().unwrap());
 
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
