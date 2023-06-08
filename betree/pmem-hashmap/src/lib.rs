@@ -1,3 +1,26 @@
+//! This crate provides a persistent hashmap which may utilize underlying
+//! persistent memory. The hashmap is implmented via transactions on persistent
+//! memory which allows for failure-free reconstruction on errors. Furthermore,
+//! only byte ranges are supported with arbitrary keys as long as they are
+//! hashable.
+//!
+//! ## Example
+//!
+//! ``` rust
+//! # const TO_MEBIBYTE: usize = 1024 * 1024;
+//! use pmem_hashmap::PMap;
+//! fn main() {
+//!     let mut pmap = PMap::create("/tmp/demo", 32 * TO_MEBIBYTE).unwrap();
+//!     let key = b"Hello from \xF0\x9F\xA6\x80!";
+//!     pmap.insert(key, &[72, 101, 119, 111]);
+//!     assert_eq!(pmap.get(key).unwrap(), [72, 101, 119, 111]);
+//!     pmap.close();
+//!     # std::process::Command::new("rm")
+//!     #            .arg("/tmp/demo")
+//!     #            .output()
+//!     #            .expect("Could not delete");
+//! }
+//! ```
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
@@ -21,6 +44,8 @@ pub enum PMapError {
     AlreadyExists,
     #[error("Key does not exist.")]
     DoesNotExist,
+    #[error("Pool size too small")]
+    TooSmall,
 }
 
 impl PMapError {
@@ -63,6 +88,9 @@ impl PMap {
 
     /// Create a new hashmap. Will fail if a hashmap already exists at the specified location.
     pub fn create<P: Into<std::path::PathBuf>>(path: P, size: usize) -> Result<Self, PMapError> {
+        if size < 8 * 1024 * 1024 {
+            return Err(PMapError::TooSmall);
+        }
         let pobjpool = {
             let path =
                 std::ffi::CString::new(path.into().to_string_lossy().into_owned())?.into_raw();
