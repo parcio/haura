@@ -52,7 +52,7 @@ impl PMapError {
     fn from_insertion(from: c_int) -> Self {
         match from {
             1 => Self::AlreadyExists,
-            _ => PMapError::ExternalError(format!("{}", errno::errno())),
+            _ => Self::ExternalError(format!("{}", errno::errno())),
         }
     }
 }
@@ -135,10 +135,7 @@ impl PMap {
     /// of values with the same hash value, which can be avoided by storing the
     /// original data in here as well.
     pub fn insert<K: Hash>(&mut self, key: K, val: &[u8]) -> Result<(), PMapError> {
-        let mut hasher = twox_hash::XxHash64::default();
-        key.hash(&mut hasher);
-        let k = hasher.finish();
-
+        let k = self.hash(key);
         let mut oid = std::mem::MaybeUninit::<PMEMoid>::uninit();
         if unsafe { pmemobj_zalloc(self.pobjpool, oid.as_mut_ptr(), 8 + val.len(), 2) != 0 } {
             return Err(PMapError::AllocationError(format!("{}", errno::errno())));
@@ -159,20 +156,18 @@ impl PMap {
 
     /// Remove the specified key from the hashmap.
     pub fn remove<K: Hash>(&mut self, key: K) {
-        let mut hasher = twox_hash::XxHash64::default();
-        key.hash(&mut hasher);
-        let k = hasher.finish();
+        let k = self.hash(key);
+        self.remove_hashed(k)
+    }
 
+    /// Raw "hashed" removal, which skips the first hashing round.
+    pub fn remove_hashed(&mut self, k: u64) {
         let mut pptr = unsafe { hm_tx_remove(self.pobjpool, self.inner, k) };
         unsafe { pmemobj_free(&mut pptr) };
     }
 
-    /// Return a given value from the hashmap. The key has to be valid
-    pub fn get<K: Hash>(&mut self, key: K) -> Result<&mut [u8], PMapError> {
-        let mut hasher = twox_hash::XxHash64::default();
-        key.hash(&mut hasher);
-        let k = hasher.finish();
-
+    /// Raw "hashed" access, which skips the first hashing round.
+    pub fn get_hashed(&mut self, k: u64) -> Result<&mut [u8], PMapError> {
         let val = unsafe { hm_tx_get(self.pobjpool, self.inner, k) };
         if val.off == 0 {
             return Err(PMapError::DoesNotExist);
@@ -180,6 +175,12 @@ impl PMap {
 
         let mv = unsafe { access_map_value(val) };
         Ok(unsafe { (*mv).buf.as_mut_slice((*mv).len as usize) })
+    }
+
+    /// Return a given value from the hashmap. The key has to be valid
+    pub fn get<K: Hash>(&mut self, key: K) -> Result<&mut [u8], PMapError> {
+        let k = self.hash(key);
+        self.get_hashed(k)
     }
 
     pub fn len(&mut self) -> usize {
@@ -191,14 +192,18 @@ impl PMap {
     }
 
     pub fn lookup<K: Hash>(&mut self, key: K) -> bool {
-        let mut hasher = twox_hash::XxHash64::default();
-        key.hash(&mut hasher);
-        let k = hasher.finish();
+        let k = self.hash(key);
         unsafe { hm_tx_lookup(self.pobjpool, self.inner, k) == 1 }
     }
 
     pub fn close(self) {
         unsafe { pmemobj_close(self.pobjpool) };
+    }
+
+    pub fn hash<K: Hash>(&self, key: K) -> u64 {
+        let mut hasher = twox_hash::XxHash64::default();
+        key.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
