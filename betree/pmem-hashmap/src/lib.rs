@@ -30,6 +30,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 use std::{
     ffi::c_int,
     hash::{Hash, Hasher},
+    ptr::NonNull,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -69,8 +70,12 @@ impl PMapError {
 /// collisions when operating on the same key.
 pub struct PMap {
     inner: hashmap_tx_toid,
-    pobjpool: *mut PMEMobjpool,
+    pobjpool: NonNull<PMEMobjpool>,
 }
+
+/// We can guarantee that no thread-local shaenanigans are done within our
+/// library.
+unsafe impl Send for PMap {}
 
 impl PMap {
     /// Open an existing hashmap. Will fail if no hashmap has been created before.
@@ -80,10 +85,11 @@ impl PMap {
                 std::ffi::CString::new(path.into().to_string_lossy().into_owned())?.into_raw();
             unsafe { pmemobj_open(path, std::ptr::null()) }
         };
-        if pobjpool.is_null() {
-            return Err(PMapError::ExternalError(format!("{}", errno::errno())));
+        if let Some(valid) = NonNull::new(pobjpool) {
+            Self::new(valid)
+        } else {
+            Err(PMapError::ExternalError(format!("{}", errno::errno())))
         }
-        Self::new(pobjpool)
     }
 
     /// Create a new hashmap. Will fail if a hashmap already exists at the specified location.
@@ -96,23 +102,28 @@ impl PMap {
                 std::ffi::CString::new(path.into().to_string_lossy().into_owned())?.into_raw();
             unsafe { pmemobj_create(path, std::ptr::null(), size, 0o666) }
         };
-        if pobjpool.is_null() {
-            return Err(PMapError::ExternalError(format!("{}", errno::errno())));
+        if let Some(valid) = NonNull::new(pobjpool) {
+            Self::new(valid)
+        } else {
+            Err(PMapError::ExternalError(format!("{}", errno::errno())))
         }
-        Self::new(pobjpool)
     }
 
     /// Initialize or Create a new hashmap. For this we check if the root obj is
     /// of the correct type and if map pointer already exists.
     ///
     /// TODO: Use a layout to guarantee compatability?
-    fn new(pobjpool: *mut PMEMobjpool) -> Result<Self, PMapError> {
-        let root_obj =
-            unsafe { access_root(pmemobj_root(pobjpool, std::mem::size_of::<root_toid>())) };
+    fn new(pobjpool: NonNull<PMEMobjpool>) -> Result<Self, PMapError> {
+        let root_obj = unsafe {
+            access_root(pmemobj_root(
+                pobjpool.as_ptr(),
+                std::mem::size_of::<root_toid>(),
+            ))
+        };
         if unsafe { root_needs_init(root_obj) != 0 } {
             if unsafe {
                 hm_tx_create(
-                    pobjpool,
+                    pobjpool.as_ptr(),
                     &mut (*root_obj).map,
                     std::ptr::null::<std::ffi::c_void>() as *mut std::ffi::c_void,
                 )
@@ -121,7 +132,7 @@ impl PMap {
                 return Err(PMapError::ExternalError(format!("{}", errno::errno())));
             }
         } else {
-            unsafe { hm_tx_init(pobjpool, (*root_obj).map) };
+            unsafe { hm_tx_init(pobjpool.as_ptr(), (*root_obj).map) };
         }
 
         Ok(Self {
@@ -136,8 +147,15 @@ impl PMap {
     /// original data in here as well.
     pub fn insert<K: Hash>(&mut self, key: K, val: &[u8]) -> Result<(), PMapError> {
         let k = self.hash(key);
+        self.insert_hashed(k, val)
+    }
+
+    /// Raw "pre-hashed" insertion, which skips the first hashing round.
+    pub fn insert_hashed(&mut self, k: u64, val: &[u8]) -> Result<(), PMapError> {
         let mut oid = std::mem::MaybeUninit::<PMEMoid>::uninit();
-        if unsafe { pmemobj_zalloc(self.pobjpool, oid.as_mut_ptr(), 8 + val.len(), 2) != 0 } {
+        if unsafe {
+            pmemobj_zalloc(self.pobjpool.as_ptr(), oid.as_mut_ptr(), 8 + val.len(), 2) != 0
+        } {
             return Err(PMapError::AllocationError(format!("{}", errno::errno())));
         }
 
@@ -147,7 +165,8 @@ impl PMap {
             (*mv).buf.as_mut_slice(val.len()).copy_from_slice(val);
         }
 
-        let inserted = unsafe { hm_tx_insert(self.pobjpool, self.inner, k, oid.assume_init()) };
+        let inserted =
+            unsafe { hm_tx_insert(self.pobjpool.as_ptr(), self.inner, k, oid.assume_init()) };
         if inserted != 0 {
             return Err(PMapError::from_insertion(inserted));
         }
@@ -155,20 +174,24 @@ impl PMap {
     }
 
     /// Remove the specified key from the hashmap.
-    pub fn remove<K: Hash>(&mut self, key: K) {
+    pub fn remove<K: Hash>(&mut self, key: K) -> Result<(), PMapError> {
         let k = self.hash(key);
         self.remove_hashed(k)
     }
 
-    /// Raw "hashed" removal, which skips the first hashing round.
-    pub fn remove_hashed(&mut self, k: u64) {
-        let mut pptr = unsafe { hm_tx_remove(self.pobjpool, self.inner, k) };
+    /// Raw "pre-hashed" removal, which skips the first hashing round.
+    pub fn remove_hashed(&mut self, k: u64) -> Result<(), PMapError> {
+        let mut pptr = unsafe { hm_tx_remove(self.pobjpool.as_ptr(), self.inner, k) };
+        if pptr.off == 0 {
+            return Err(PMapError::DoesNotExist);
+        }
         unsafe { pmemobj_free(&mut pptr) };
+        Ok(())
     }
 
-    /// Raw "hashed" access, which skips the first hashing round.
+    /// Raw "pre-hashed" access, which skips the first hashing round.
     pub fn get_hashed(&mut self, k: u64) -> Result<&mut [u8], PMapError> {
-        let val = unsafe { hm_tx_get(self.pobjpool, self.inner, k) };
+        let val = unsafe { hm_tx_get(self.pobjpool.as_ptr(), self.inner, k) };
         if val.off == 0 {
             return Err(PMapError::DoesNotExist);
         }
@@ -184,7 +207,7 @@ impl PMap {
     }
 
     pub fn len(&mut self) -> usize {
-        unsafe { hm_tx_count(self.pobjpool, self.inner) }
+        unsafe { hm_tx_count(self.pobjpool.as_ptr(), self.inner) }
     }
 
     pub fn is_empty(&mut self) -> bool {
@@ -193,11 +216,11 @@ impl PMap {
 
     pub fn lookup<K: Hash>(&mut self, key: K) -> bool {
         let k = self.hash(key);
-        unsafe { hm_tx_lookup(self.pobjpool, self.inner, k) == 1 }
+        unsafe { hm_tx_lookup(self.pobjpool.as_ptr(), self.inner, k) == 1 }
     }
 
     pub fn close(self) {
-        unsafe { pmemobj_close(self.pobjpool) };
+        unsafe { pmemobj_close(self.pobjpool.as_ptr()) };
     }
 
     pub fn hash<K: Hash>(&self, key: K) -> u64 {
