@@ -26,6 +26,8 @@ pub mod cow_bytes;
 pub mod data_management;
 pub mod database;
 pub mod range_validation;
+#[cfg(feature = "nvm")]
+pub mod replication;
 pub mod size;
 pub mod storage_pool;
 pub mod tree;
