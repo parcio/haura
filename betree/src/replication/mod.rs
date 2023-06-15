@@ -35,6 +35,7 @@ const PREFIX_LRU_ROOT: u8 = 2;
 use std::{
     hash::Hash,
     ops::{Deref, DerefMut},
+    path::PathBuf,
     ptr::NonNull,
 };
 
@@ -42,6 +43,7 @@ use pmem_hashmap::{PMap, PMapError};
 
 mod lru;
 use lru::Plru;
+use serde::{Deserialize, Serialize};
 
 use self::lru::LruKey;
 
@@ -91,6 +93,15 @@ pub struct PersistentCache {
     pmap: PMap,
     // Persistent Pointer
     lru: Persistent<Plru>,
+}
+
+/// Configuration for a persistent cache.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PersistentCacheConfig {
+    /// Path to underlying file representing cache.
+    pub path: PathBuf,
+    /// Cache capacity in bytes.
+    pub bytes: usize,
 }
 
 impl PersistentCache {

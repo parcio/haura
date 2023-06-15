@@ -31,7 +31,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     iter::FromIterator,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -134,6 +134,11 @@ pub struct DatabaseConfiguration {
     pub compression: CompressionConfiguration,
     /// Size of cache in TODO
     pub cache_size: usize,
+
+    #[cfg(feature = "nvm")]
+    /// Whether to use a persistent cache and where it should be located.
+    pub persistent_cache: Option<crate::replication::PersistentCacheConfig>,
+
     /// Whether to check for and open an existing database, or overwrite it
     pub access_mode: AccessMode,
 
@@ -156,6 +161,8 @@ impl Default for DatabaseConfiguration {
             default_storage_class: 0,
             compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
+            #[cfg(feature = "nvm")]
+            persistent_cache_path: None,
             access_mode: AccessMode::OpenIfExists,
             sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
