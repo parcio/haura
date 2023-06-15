@@ -322,7 +322,7 @@ mod tests {
         let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
         pmap.insert(b"foo", &[1, 2, 3]).unwrap();
         assert!(pmap.lookup(b"foo"));
-        pmap.remove(b"foo");
+        pmap.remove(b"foo").unwrap();
         assert!(!pmap.lookup(b"foo"));
     }
 
