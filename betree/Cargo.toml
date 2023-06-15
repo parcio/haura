@@ -67,6 +67,7 @@ quickcheck = "1"
 quickcheck_macros = "1"
 clap = "2.33"
 criterion = "0.3"
+tempfile = "3.6.0"
 
 [features]
 default = ["init_env_logger", "figment_config"]
