@@ -14,7 +14,6 @@
 //!     let key = b"Hello from \xF0\x9F\xA6\x80!";
 //!     pmap.insert(key, &[72, 101, 119, 111]);
 //!     assert_eq!(pmap.get(key).unwrap(), [72, 101, 119, 111]);
-//!     pmap.close();
 //!     # std::process::Command::new("rm")
 //!     #            .arg("/tmp/demo")
 //!     #            .output()
@@ -206,27 +205,39 @@ impl PMap {
         self.get_hashed(k)
     }
 
+    /// Return the amount of elements contains in this hashmap.
     pub fn len(&mut self) -> usize {
         unsafe { hm_tx_count(self.pobjpool.as_ptr(), self.inner) }
     }
 
+    /// Whether or not the hashmap is empty.
     pub fn is_empty(&mut self) -> bool {
         self.len() == 0
     }
 
+    /// Search for a key and report its existence.
     pub fn lookup<K: Hash>(&mut self, key: K) -> bool {
         let k = self.hash(key);
         unsafe { hm_tx_lookup(self.pobjpool.as_ptr(), self.inner, k) == 1 }
     }
 
-    pub fn close(self) {
+    /// Close the underlying persistent memory file. This step is necessary to
+    /// ensure functionality on the next opening.
+    fn close(&mut self) {
         unsafe { pmemobj_close(self.pobjpool.as_ptr()) };
     }
 
+    /// Manually hash a key on its own.
     pub fn hash<K: Hash>(&self, key: K) -> u64 {
         let mut hasher = twox_hash::XxHash64::default();
         key.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+impl Drop for PMap {
+    fn drop(&mut self) {
+        self.close()
     }
 }
 
@@ -333,13 +344,11 @@ mod tests {
             let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
             pmap.insert(b"foo", &[1, 2, 3]).unwrap();
             assert!(pmap.lookup(b"foo"));
-            pmap.close();
         }
         {
             let mut pmap = PMap::open(file.path()).unwrap();
             assert!(pmap.lookup(b"foo"));
             assert_eq!(pmap.get(b"foo").unwrap(), [1, 2, 3]);
-            pmap.close();
         }
     }
 }
