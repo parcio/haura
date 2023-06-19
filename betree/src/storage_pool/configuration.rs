@@ -321,7 +321,7 @@ impl LeafVdev {
                 };
 
                 let mut is_pmem: i32 = 0;
-                let mut mapped_len: u64 = 0;
+                let mut mapped_len: usize = 0;
                 let mut file = match path.to_str() {
                     Some(filepath_str) => {
                         match pmem::PMem::open(
@@ -352,7 +352,7 @@ impl LeafVdev {
                     }
                 };
 
-                if (mapped_len != *len as u64) {
+                if mapped_len != *len {
                     return Err(io::Error::new(io::ErrorKind::Other,
                                     format!("The file already exists with a differnt length. Provided length: {}, File's length: {}",
                                             len, mapped_len)));
@@ -361,7 +361,7 @@ impl LeafVdev {
                 Ok(Leaf::PMemFile(vdev::PMemFile::new(
                     file,
                     path.to_string_lossy().into_owned(),
-                    mapped_len,
+                    mapped_len as u64,
                 )?))
             }
         }

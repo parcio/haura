@@ -9,4 +9,4 @@ authors = ["Sajad Karim <sajad.karim@ovgu.de>", "Johannes Wünsche <johannes@spa
 
 
 [build-dependencies]
-bindgen = "0.58.1"
+bindgen = "0.65"
