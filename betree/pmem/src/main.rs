@@ -26,17 +26,9 @@ maximus, vestibulum nunc nec, rutrum leo. \0";
 const TEXT2: &str = "hello world!";
 
 fn basic_read_write_test() -> Result<(), std::io::Error> {
-    let mut is_pmem: i32 = 0;
-    let mut mapped_len: usize = 0;
-
-    let pmem = match PMem::create(
-        &DEST_FILEPATH,
-        64 * 1024 * 1024,
-        &mut mapped_len,
-        &mut is_pmem,
-    ) {
+    let pmem = match PMem::create(&DEST_FILEPATH, 64 * 1024 * 1024) {
         Ok(value) => value,
-        Err(_) => PMem::open(&DEST_FILEPATH, &mut mapped_len, &mut is_pmem)?,
+        Err(_) => PMem::open(&DEST_FILEPATH)?,
     };
 
     // Writing the long text (TEXT1)
@@ -71,7 +63,7 @@ fn basic_read_write_test() -> Result<(), std::io::Error> {
     let mut buffer3 = vec![0; TEXT.chars().count()];
     pmem.read(1000, &mut buffer3, TEXT.chars().count())?;
 
-    pmem.close(&mapped_len);
+    drop(pmem);
 
     // Comparing the read text with the actual one
     let read_string = match std::str::from_utf8(&buffer) {
