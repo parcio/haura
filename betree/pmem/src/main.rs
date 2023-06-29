@@ -1,97 +1,100 @@
+use std::sync::Arc;
+
 use pmem::PMem;
 
-const BUFFER_SIZE: usize = 4096;
-const DEST_FILEPATH: &str = "/pmem0/pmempool0\0";
-const TEXT: &str = " Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-Donec dictum, massa sit amet tempus blandit, mi purus suscipit arcu, a egestas
-erat orci et ipsum. Phasellus vel urna non urna cursus imperdiet. Aliquam turpis
-ex, maximus id tortor eget, tincidunt feugiat metus. Ut ultrices auctor massa,
-quis convallis lectus vulputate et. Maecenas at mi orci. Donec id leo vitae
-risus tempus imperdiet ut a elit. Mauris quis dolor urna. Mauris dictum enim vel
-turpis aliquam tincidunt. Pellentesque et eros ac quam lobortis hendrerit non ut
-nulla. Quisque maximus magna tristique risus lacinia, et facilisis erat
-molestie.
+const BUFFER_SIZE: usize = 4 * 1024;
+const SIZE: usize = 64 * 1024 * 1024 * 1024;
+const ITER: usize = SIZE / BUFFER_SIZE;
+const JOBS: usize = 8;
+const OPS_PER_JOB: usize = ITER / JOBS;
+const REM_OPS: usize = ITER % JOBS;
+enum CMD {
+    READ,
+    WRITE,
+    WAIT,
+}
 
-Morbi eget sapien accumsan, rhoncus metus in, interdum libero. Nam gravida mi et
-viverra porttitor. Sed malesuada odio semper sapien bibendum ornare. Curabitur
-scelerisque lacinia ex, a rhoncus magna viverra eu. Maecenas sed libero vel ex
-dictum congue at sed nulla. Lorem ipsum dolor sit amet, consectetur adipiscing
-elit. Aliquam erat volutpat. Proin condimentum augue eu nulla consequat
-efficitur. Vivamus sodales pretium erat, id iaculis risus pellentesque sit amet.
-Integer tempus porta diam ac facilisis. Duis ex eros, mattis nec ultrices vel,
-varius vel lectus. Proin varius sapien est, nec euismod ex varius nec. Quisque
-in sem sit amet metus scelerisque ornare at a nisi. Maecenas ac scelerisque
-metus. In ut velit placerat, fringilla eros non, semper risus. Cras sed ante
-maximus, vestibulum nunc nec, rutrum leo. \0";
-const TEXT2: &str = "hello world!";
-
-fn basic_read_write_test() -> Result<(), std::io::Error> {
-    let pmem = match PMem::create(&DEST_FILEPATH, 64 * 1024 * 1024) {
+fn basic_read_write_test(path: &str) -> Result<(), std::io::Error> {
+    let pmem = Arc::new(match PMem::create(path, SIZE) {
         Ok(value) => value,
-        Err(_) => PMem::open(&DEST_FILEPATH)?,
-    };
+        Err(_) => PMem::open(path)?,
+    });
 
-    // Writing the long text (TEXT1)
-    let mut text_array = [0u8; BUFFER_SIZE];
-    TEXT.bytes()
-        .zip(text_array.iter_mut())
-        .for_each(|(b, ptr)| *ptr = b);
-    unsafe { pmem.write(0, &text_array, TEXT.chars().count())? };
+    let threads: Vec<_> = (0..JOBS)
+        .map(|id| {
+            let p = Arc::clone(&pmem);
+            let (tx, rx) = std::sync::mpsc::sync_channel::<CMD>(0);
+            (
+                tx,
+                std::thread::spawn(move || {
+                    assert!(core_affinity::set_for_current(core_affinity::CoreId {
+                        id: id
+                    }));
+                    let mut buf = vec![0u8; BUFFER_SIZE];
+                    while let Ok(msg) = rx.recv() {
+                        match msg {
+                            CMD::READ => {
+                                for it in 0..OPS_PER_JOB {
+                                    p.read((it * BUFFER_SIZE) + (id * BUFFER_SIZE), &mut buf)
+                                }
+                                if id < REM_OPS {
+                                    p.read(
+                                        JOBS * OPS_PER_JOB * BUFFER_SIZE + (id * BUFFER_SIZE),
+                                        &mut buf,
+                                    )
+                                }
+                            }
+                            CMD::WRITE => unsafe {
+                                for it in 0..OPS_PER_JOB {
+                                    p.write((it * BUFFER_SIZE) + (id * BUFFER_SIZE), &buf)
+                                }
+                                if id < REM_OPS {
+                                    p.write(
+                                        JOBS * OPS_PER_JOB * BUFFER_SIZE + (id * BUFFER_SIZE),
+                                        &buf,
+                                    )
+                                }
+                            },
+                            CMD::WAIT => {}
+                        }
+                    }
+                }),
+            )
+        })
+        .collect();
 
-    // Writing the short text (TEXT2)
-    TEXT2
-        .bytes()
-        .zip(text_array.iter_mut())
-        .for_each(|(b, ptr)| *ptr = b);
-    unsafe { pmem.write(TEXT.chars().count(), &text_array, TEXT2.chars().count())? };
+    // Write
+    let start = std::time::Instant::now();
+    for id in 0..JOBS {
+        threads[id].0.send(CMD::WRITE).unwrap();
+    }
+    for id in 0..JOBS {
+        threads[id % JOBS].0.send(CMD::WAIT).unwrap();
+    }
 
-    // Reading the long text (TEXT1)
-    let mut buffer = vec![0; TEXT.chars().count()];
-    pmem.read(0, &mut buffer, TEXT.chars().count())?;
+    println!(
+        "Write: Achieved {} GiB/s",
+        SIZE as f32 / 1024f32 / 1024f32 / 1024f32 / start.elapsed().as_secs_f32()
+    );
 
-    // Reading the short text (TEXT2)
-    let mut buffer2 = vec![0; TEXT2.chars().count()];
-    pmem.read(TEXT.chars().count(), &mut buffer2, TEXT2.chars().count())?;
+    // Read
+    let start = std::time::Instant::now();
+    for id in 0..JOBS {
+        threads[id % JOBS].0.send(CMD::READ).unwrap();
+    }
+    for id in 0..JOBS {
+        threads[id % JOBS].0.send(CMD::WAIT).unwrap();
+    }
 
-    // Writing the long text (TEXT1) starting offset 1000
-    TEXT.bytes()
-        .zip(text_array.iter_mut())
-        .for_each(|(b, ptr)| *ptr = b);
-    unsafe { pmem.write(1000, &text_array, TEXT.chars().count())? };
+    println!(
+        "Read: Achieved {} GiB/s",
+        SIZE as f32 / 1024f32 / 1024f32 / 1024f32 / start.elapsed().as_secs_f32()
+    );
 
-    // Reading the recently text
-    let mut buffer3 = vec![0; TEXT.chars().count()];
-    pmem.read(1000, &mut buffer3, TEXT.chars().count())?;
-
-    drop(pmem);
-
-    // Comparing the read text with the actual one
-    let read_string = match std::str::from_utf8(&buffer) {
-        Ok(string) => string,
-        Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-    };
-
-    assert_eq!(TEXT, read_string);
-
-    let read_string2 = match std::str::from_utf8(&buffer2) {
-        Ok(string) => string,
-        Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-    };
-
-    assert_eq!(TEXT2, read_string2);
-
-    let read_string3 = match std::str::from_utf8(&buffer3) {
-        Ok(string) => string,
-        Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-    };
-
-    assert_eq!(TEXT, read_string3);
-
-    println!("Successfully written and read text to/from PMDK!");
     Ok(())
 }
 
 fn main() -> Result<(), std::io::Error> {
-    basic_read_write_test()?;
+    basic_read_write_test("PATH_TO_YOUR_PMEM")?;
     Ok(())
 }

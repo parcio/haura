@@ -4,11 +4,14 @@ use super::{
 };
 use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
-use libc::{c_ulong, ioctl};
 use pmem;
-use std::{fs, io, os::unix::io::AsRawFd, sync::atomic::Ordering};
+use std::{io, sync::atomic::Ordering};
 
-/// `LeafVdev` that is backed by a file.
+/// PMem specific logic that uses persistent `memcpy` instead of usual file
+/// interactions. Errors are special in this case in that we are guaranteed that
+/// operations will succeed from the API as long as pointers are valid and the
+/// memory pool is still alive. We guarantee that from our side by keeping the
+/// internal object alive via this struct not allowing further ownership.
 #[derive(Debug)]
 pub struct PMemFile {
     file: pmem::PMem,
@@ -30,19 +33,6 @@ impl PMemFile {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn get_block_device_size(file: &fs::File) -> io::Result<Block<u64>> {
-    const BLKGETSIZE64: c_ulong = 2148012658;
-    let mut size: u64 = 0;
-    let result = unsafe { ioctl(file.as_raw_fd(), BLKGETSIZE64, &mut size) };
-
-    if result == 0 {
-        Ok(Block::from_bytes(size))
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
 #[async_trait]
 impl VdevRead for PMemFile {
     async fn read<C: Checksum>(
@@ -55,17 +45,7 @@ impl VdevRead for PMemFile {
         let buf = {
             let mut buf = Buf::zeroed(size).into_full_mut();
 
-            if let Err(e) = self.file.read(
-                offset.to_bytes() as usize,
-                buf.as_mut(),
-                size.to_bytes() as usize,
-            ) {
-                self.stats
-                    .failed_reads
-                    .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(e)
-            }
-
+            self.file.read(offset.to_bytes() as usize, buf.as_mut());
             buf.into_full_buf()
         };
 
@@ -98,19 +78,8 @@ impl VdevRead for PMemFile {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let mut buf = Buf::zeroed(size).into_full_mut();
 
-        match self.file.read(
-            offset.to_bytes() as usize,
-            buf.as_mut(),
-            size.to_bytes() as usize,
-        ) {
-            Ok(()) => Ok(vec![buf.into_full_buf()]),
-            Err(e) => {
-                self.stats
-                    .failed_reads
-                    .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(e)
-            }
-        }
+        self.file.read(offset.to_bytes() as usize, buf.as_mut());
+        Ok(vec![buf.into_full_buf()])
     }
 }
 
@@ -147,20 +116,8 @@ impl VdevLeafRead for PMemFile {
     async fn read_raw<T: AsMut<[u8]> + Send>(&self, mut buf: T, offset: Block<u64>) -> Result<T> {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
-
-        match self.file.read(
-            offset.to_bytes() as usize,
-            buf.as_mut(),
-            size.to_bytes() as usize,
-        ) {
-            Ok(()) => Ok(buf),
-            Err(e) => {
-                self.stats
-                    .failed_reads
-                    .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(e)
-            }
-        }
+        self.file.read(offset.to_bytes() as usize, buf.as_mut());
+        Ok(buf)
     }
 
     fn checksum_error_occurred(&self, size: Block<u32>) {
@@ -182,33 +139,15 @@ impl VdevLeafWrite for PMemFile {
         self.stats.written.fetch_add(block_cnt, Ordering::Relaxed);
 
         unsafe {
-            match self
-                .file
-                .write(
-                    offset.to_bytes() as usize,
-                    data.as_ref(),
-                    data.as_ref().len(),
-                )
-                .map_err(|_| VdevError::Write(self.id.clone()))
-            {
-                Ok(()) => {
-                    if is_repair {
-                        self.stats.repaired.fetch_add(block_cnt, Ordering::Relaxed);
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    self.stats
-                        .failed_writes
-                        .fetch_add(block_cnt, Ordering::Relaxed);
-                    Err(e)
-                }
-            }
+            self.file.write(offset.to_bytes() as usize, data.as_ref());
         }
+        if is_repair {
+            self.stats.repaired.fetch_add(block_cnt, Ordering::Relaxed);
+        }
+        Ok(())
     }
 
     fn flush(&self) -> Result<()> {
-        //Ok(self.file.sync_data()?)
         Ok(())
     }
 }
