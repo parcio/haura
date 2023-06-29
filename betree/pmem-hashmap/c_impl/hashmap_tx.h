@@ -13,6 +13,12 @@
 #define HASHMAP_TX_TYPE_OFFSET 1004
 #endif
 
+int empty_constr(PMEMobjpool *pop, void *ptr, void *arg);
+
+int haura_alloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size, uint64_t type_num,
+                void *arg);
+void *haura_direct(PMEMoid oid);
+
 struct hashmap_tx;
 TOID_DECLARE(struct hashmap_tx, HASHMAP_TX_TYPE_OFFSET + 0);
 

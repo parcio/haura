@@ -23,8 +23,12 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![feature(allocator_api)]
+#![feature(btreemap_alloc)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
+pub mod allocator;
 
 use std::{
     ffi::c_int,
@@ -75,6 +79,7 @@ pub struct PMap {
 /// We can guarantee that no thread-local shaenanigans are done within our
 /// library.
 unsafe impl Send for PMap {}
+unsafe impl Sync for PMap {}
 
 impl PMap {
     /// Open an existing hashmap. Will fail if no hashmap has been created before.
@@ -158,7 +163,7 @@ impl PMap {
             return Err(PMapError::AllocationError(format!("{}", errno::errno())));
         }
 
-        let mut mv = unsafe { access_map_value(oid.assume_init()) };
+        let mv = unsafe { access_map_value(oid.assume_init()) };
         unsafe {
             (*mv).len = val.len() as u64;
             (*mv).buf.as_mut_slice(val.len()).copy_from_slice(val);
@@ -189,7 +194,7 @@ impl PMap {
     }
 
     /// Raw "pre-hashed" access, which skips the first hashing round.
-    pub fn get_hashed(&mut self, k: u64) -> Result<&mut [u8], PMapError> {
+    pub fn get_hashed(&self, k: u64) -> Result<&mut [u8], PMapError> {
         let val = unsafe { hm_tx_get(self.pobjpool.as_ptr(), self.inner, k) };
         if val.off == 0 {
             return Err(PMapError::DoesNotExist);
@@ -200,7 +205,7 @@ impl PMap {
     }
 
     /// Return a given value from the hashmap. The key has to be valid
-    pub fn get<K: Hash>(&mut self, key: K) -> Result<&mut [u8], PMapError> {
+    pub fn get<K: Hash>(&self, key: K) -> Result<&mut [u8], PMapError> {
         let k = self.hash(key);
         self.get_hashed(k)
     }

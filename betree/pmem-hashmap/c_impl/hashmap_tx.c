@@ -410,3 +410,12 @@ int hm_tx_cmd(PMEMobjpool *pop, TOID(struct hashmap_tx) hashmap, unsigned cmd,
     return -EINVAL;
   }
 }
+
+int empty_constr(PMEMobjpool *pop, void *ptr, void *arg) { return 0; }
+
+int haura_alloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size, uint64_t type_num,
+                void *arg) {
+  return pmemobj_alloc(pop, oidp, size, type_num, &empty_constr, arg);
+}
+
+void *haura_direct(PMEMoid oid) { return pmemobj_direct(oid); }
