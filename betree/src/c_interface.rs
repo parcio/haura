@@ -961,16 +961,17 @@ pub unsafe extern "C" fn betree_object_write_at(
         .handle_result(err)
 }
 
-/*
-/// Return the objects size in bytes.
+/// Return the objects size in bytes. If the size could not be determined
+/// it is assumed the object is zero-sized.
 #[no_mangle]
-pub unsafe extern "C" fn betree_object_status(obj: *const obj_t, err: *mut *mut err_t) -> c_ulong {
+pub unsafe extern "C" fn betree_object_size(obj: *const obj_t, err: *mut *mut err_t) -> c_ulong {
     let obj = &(*obj).0;
     let info = obj.info();
-    obj.
-    obj.size()
+    info.and_then(|ok_opt| Ok(ok_opt.map(|obj_info| obj_info.size).unwrap_or(0)))
+        .unwrap_or(0)
 }
 
+/*
 /// Returns the last modification timestamp in microseconds since the Unix epoch.
 #[no_mangle]
 pub unsafe extern "C" fn betree_object_mtime_us(obj: *const obj_t) -> c_ulong {

@@ -166,8 +166,6 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
                 .write(data, offset.block_offset())
                 .await;
 
-            // TODO: what about multiple writes to same offset?
-            // NOTE: This is currently covered in the tests and fails as expected
             inner.write_back_queue.mark_completed(&offset).await;
             res
         })?;
@@ -180,6 +178,28 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
             .send(())
             .expect("Couldn't unlock enqueued write task");
 
+        ret
+    }
+
+    fn begin_write_offload<F>(&self, offset: DiskOffset, f: F) -> vdev::Result<()>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let inner = self.inner.clone();
+        let (enqueue_done, wait_for_enqueue) = futures::channel::oneshot::channel();
+        let write = self.inner.pool.spawn_with_handle(async move {
+            wait_for_enqueue.await.unwrap();
+            f();
+
+            inner.write_back_queue.mark_completed(&offset).await;
+            Ok(())
+        })?;
+
+        let ret = self.inner.write_back_queue.enqueue(offset, Box::pin(write));
+
+        enqueue_done
+            .send(())
+            .expect("Couldn't unlock enqueued write task");
         ret
     }
 

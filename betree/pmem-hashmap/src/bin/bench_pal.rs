@@ -12,8 +12,8 @@ fn bench_pal_sub(rank: usize, barrier: Arc<std::sync::Barrier>, tx: std::sync::m
         Arc::new(Pal::create(format!("/home/wuensche/pmem/foobar{rank}"), SIZE, 0o666).unwrap());
 
     enum CMD {
-        Read(Vec<PalPtr>),
-        Write(Vec<PalPtr>),
+        Read(Vec<PalPtr<u8>>),
+        Write(Vec<PalPtr<u8>>),
         Wait,
     }
 

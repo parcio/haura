@@ -70,7 +70,7 @@ criterion = "0.3"
 tempfile = "3.6.0"
 
 [features]
-default = ["init_env_logger", "figment_config"]
+default = ["init_env_logger", "figment_config", "nvm"]
 
 # unlock unstable API for consumption by bectl and other debugging tools
 internal-api = []

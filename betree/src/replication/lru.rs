@@ -1,110 +1,92 @@
-use pmem_hashmap::{PMap, PMapError};
+use super::{Persistent, PREFIX_LRU};
+use pmem_hashmap::{allocator::PalPtr, PMap, PMapError};
+use std::{marker::PhantomData, mem::size_of, ptr::NonNull};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// Key pointing to an LRU node in a persistent cache.
-pub struct LruKey(u64);
-
-impl LruKey {
-    /// Fetch and cast a pmem pointer to a [PlruNode].
-    ///
-    /// Safety
-    /// ======
-    /// The internals of this method are highly unsafe. Concurrent usage and
-    /// removal are urgently discouraged.
-    fn fetch(&self, map: &mut PMap) -> Result<&mut PlruNode, PMapError> {
-        map.get(self.key()).and_then(|node_raw| unsafe {
-            Ok(std::mem::transmute::<&mut [u8; PLRU_NODE_SIZE], _>(
-                node_raw.try_into().unwrap(),
-            ))
-        })
-    }
-
-    /// Wrap a hashed value in an [LruKey].
-    pub fn from(hash: u64) -> Self {
-        LruKey(hash)
-    }
-
-    fn key(&self) -> [u8; size_of::<u64>() + 1] {
-        let mut key = [0; size_of::<u64>() + 1];
-        key[0] = PREFIX_LRU;
-        key[1..].copy_from_slice(&self.0.to_le_bytes());
-        key
-    }
-}
+/// Fetch and cast a pmem pointer to a [PlruNode].
+///
+/// Safety
+/// ======
+/// The internals of this method are highly unsafe. Concurrent usage and
+/// removal are urgently discouraged.
+// fn fetch<T>(ptr: &PalPtr<PlruNode<T>>) -> Result<&mut PlruNode<T>, PMapError> {
+//     Ok(unsafe {
+//         std::mem::transmute::<&mut [u8; PLRU_NODE_SIZE], _>(
+//             core::slice::from_raw_parts_mut(ptr.load_mut(), PLRU_NODE_SIZE)
+//                 .try_into()
+//                 .unwrap(),
+//         )
+//     })
+// }
 
 /// Persistent LRU
 #[repr(C)]
-pub struct Plru {
-    head: Option<LruKey>,
-    tail: Option<LruKey>,
+pub struct Plru<T> {
+    head: Option<PalPtr<PlruNode<T>>>,
+    tail: Option<PalPtr<PlruNode<T>>>,
     // in Blocks? Return evicted element when full
     capacity: u64,
     count: u64,
     size: u64,
+    // Satisfy the rust compiler by adding a zero sized phantom here
+    // Also, avoid the drop checker by using a raw ptr
+    key_type: PhantomData<*const T>,
 }
 
-impl Plru {
-    pub fn create(map: &mut PMap, capacity: u64) -> Result<Persistent<Self>, PMapError> {
-        let this = Self {
+// hack ⛏
+const PLRU_ROOT_LENGTH_READ_COMMENT: usize = size_of::<Plru<()>>();
+
+impl<T> Plru<T> {
+    pub fn init(capacity: u64) -> Plru<T> {
+        Self {
             head: None,
             tail: None,
             capacity,
             size: 0,
             count: 0,
-        };
-        map.insert([super::PREFIX_LRU_ROOT], unsafe {
-            &std::mem::transmute::<_, [u8; size_of::<Plru>()]>(this)
-        })?;
-        Self::open(map)
-    }
-
-    pub fn open(map: &mut PMap) -> Result<Persistent<Self>, PMapError> {
-        // Fetch from map, check if valid, transmute to type, and reaffirm
-        // non-null-ness. The unchecked transition is always correct as we unpack an already ensured
-        unsafe {
-            Ok(Persistent(NonNull::new_unchecked(std::mem::transmute(
-                map.get([super::PREFIX_LRU_ROOT])?.as_mut_ptr(),
-            ))))
+            key_type: PhantomData::default(),
         }
     }
 
-    pub fn touch(&mut self, map: &mut PMap, node_ptr: LruKey) -> Result<(), PMapError> {
-        if self.head == Some(node_ptr) {
+    pub fn touch(&mut self, node_ptr: &mut PalPtr<PlruNode<T>>) -> Result<(), PMapError> {
+        if self.head.as_ref() == Some(node_ptr) {
             return Ok(());
         }
 
-        let node = node_ptr.fetch(map).unwrap();
-        self.cut_node_and_stitch(map, node)?;
+        self.cut_node_and_stitch(node_ptr)?;
 
         // Fixate new head
-        let old_head_ptr = self.head.expect("Invalid State");
-        let old_head = old_head_ptr.fetch(map).unwrap();
-        old_head.fwd = Some(node_ptr);
-        node.back = self.head;
-        self.head = Some(node_ptr);
+        let mut old_head_ptr = self.head.as_mut().expect("Invalid State");
+        let old_head: &mut PlruNode<T> = old_head_ptr.load_mut();
+        old_head.fwd = Some(node_ptr.clone());
+        let node: &mut PlruNode<T> = node_ptr.load_mut();
+        node.back = self.head.clone();
+        self.head = Some(node_ptr.clone());
 
         Ok(())
     }
 
     /// Add a new entry into the LRU. Will fail if already present.
-    pub fn insert(&mut self, map: &mut PMap, node_ptr: LruKey, size: u64) -> Result<(), PMapError> {
-        let node = PlruNode {
-            fwd: None,
-            back: self.head,
-            size,
-            data: node_ptr.0,
-        };
+    pub fn insert(
+        &mut self,
+        mut node_ptr: PalPtr<PlruNode<T>>,
+        hash: u64,
+        size: u64,
+        baggage: T,
+    ) -> Result<(), PMapError> {
+        let new_node = node_ptr.load_mut();
+        new_node.fwd = None;
+        new_node.back = self.head.clone();
+        new_node.size = size;
+        new_node.key = baggage;
+        new_node.hash = hash;
 
-        map.insert(node_ptr.key(), &unsafe {
-            std::mem::transmute::<_, [u8; PLRU_NODE_SIZE]>(node)
-        })?;
-        if let Some(head_ptr) = self.head {
-            let head = head_ptr.fetch(map)?;
-            head.fwd = Some(node_ptr);
+        if let Some(ref mut head_ptr) = self.head.as_mut() {
+            let head: &mut PlruNode<T> = head_ptr.load_mut();
+            head.fwd = Some(node_ptr.clone());
             self.head = Some(node_ptr);
         } else {
             // no head existed yet -> newly initialized list
-            self.head = Some(node_ptr);
+            self.head = Some(node_ptr.clone());
             self.tail = Some(node_ptr);
         }
         self.size += size;
@@ -114,33 +96,35 @@ impl Plru {
 
     /// Checks whether an eviction is necessary and which entry to evict.
     /// This call does not perform the removal itself.
-    pub fn evict(&mut self) -> Option<DataKey> {
-        if let (Some(tail), true) = (self.tail, self.size > self.capacity) {
-            return Some(DataKey(tail.0));
+    pub fn evict(&self, size: u64) -> Result<Option<(u64, &T)>, PMapError> {
+        if let (Some(ref tail), true) = (self.tail.as_ref(), self.size + size > self.capacity) {
+            let node = tail.load();
+            return Ok(Some((node.hash, &node.key)));
         }
-        None
+        Ok(None)
     }
 
-    fn cut_node_and_stitch(
-        &mut self,
-        map: &mut PMap,
-        node: &mut PlruNode,
-    ) -> Result<(), PMapError> {
-        let node_ptr = LruKey(node.data);
-        if let Some(forward_ptr) = node.fwd {
-            let forward = forward_ptr.fetch(map)?;
-            forward.back = node.back;
+    fn cut_node_and_stitch(&mut self, node_ptr: &mut PalPtr<PlruNode<T>>) -> Result<(), PMapError> {
+        let node: &mut PlruNode<T> = node_ptr.load_mut();
+        if let Some(ref mut forward_ptr) = node.fwd.as_mut() {
+            let forward: &mut PlruNode<T> = forward_ptr.load_mut();
+            forward.back = node.back.clone();
         }
-        if self.tail == Some(node_ptr) {
-            self.tail = node.fwd;
+        if let Some(ref mut back_ptr) = node.back.as_mut() {
+            let back: &mut PlruNode<T> = back_ptr.load_mut();
+            back.fwd = node.fwd.clone();
         }
-        if let Some(back_ptr) = node.back {
-            let back = back_ptr.fetch(map)?;
-            back.fwd = node.fwd;
+        drop(node);
+        let node = node_ptr.load();
+
+        if self.head.as_ref() == Some(node_ptr) {
+            self.head = node.back.clone();
         }
-        if self.head == Some(node_ptr) {
-            self.head = node.back;
+        if self.tail.as_ref() == Some(node_ptr) {
+            self.tail = node.fwd.clone();
         }
+
+        let node: &mut PlruNode<T> = node_ptr.load_mut();
         node.fwd = None;
         node.back = None;
 
@@ -148,22 +132,14 @@ impl Plru {
     }
 
     /// Remove a node from cache and deallocate.
-    pub fn remove(&mut self, map: &mut PMap, node_ptr: LruKey) -> Result<(), PMapError> {
-        let node = node_ptr.fetch(map)?;
-        self.cut_node_and_stitch(map, node)?;
-        let size = node.size;
-        map.remove(node_ptr.key())?;
-        self.size -= size;
+    pub fn remove(&mut self, node_ptr: &mut PalPtr<PlruNode<T>>) -> Result<(), PMapError> {
+        self.cut_node_and_stitch(node_ptr)?;
+        let node: &PlruNode<T> = node_ptr.load();
+        self.size -= node.size;
         self.count -= 1;
         Ok(())
     }
 }
-
-use std::{mem::size_of, ptr::NonNull};
-
-use super::{DataKey, Persistent, PREFIX_LRU};
-
-const PLRU_NODE_SIZE: usize = size_of::<PlruNode>();
 
 /// Ephemeral Wrapper around a byte array for sane access code.
 ///
@@ -175,22 +151,56 @@ const PLRU_NODE_SIZE: usize = size_of::<PlruNode>();
 ///    .. │   ├────>
 ///       └───┘ back
 ///
+/// Size Constraint
+/// ===============
+/// This structure allows for a generic member which is to be returned when
+/// evictions are happening. The size available to the entire object is 256
+/// bytes of which the custom type can occupy at most 208 bytes.
+///
 /// Safety
 /// ======
 /// Using this wrapper requires transmuting the underlying byte array, which
 /// invalidates, when used on references, all borrow checker guarantees. Use
 /// with extrem caution, and be sure what you are doing.
 #[repr(C)]
-pub struct PlruNode {
-    fwd: Option<LruKey>,
-    back: Option<LruKey>,
+pub struct PlruNode<T> {
+    fwd: Option<PalPtr<PlruNode<T>>>,
+    back: Option<PalPtr<PlruNode<T>>>,
     size: u64,
-    data: u64,
+    hash: u64,
+    key: T,
+}
+pub(super) const PLRU_NODE_SIZE: usize = 256;
+
+impl<T> PlruNode<T> {
+    const SIZE_CONSTRAINT: () = assert!(
+        std::mem::size_of::<PlruNode<T>>() < PLRU_NODE_SIZE,
+        "Size of attached data to LRU entry surpasses size constraint."
+    );
+
+    pub fn new(
+        fwd: Option<PalPtr<PlruNode<T>>>,
+        back: Option<PalPtr<PlruNode<T>>>,
+        size: u64,
+        hash: u64,
+        key: T,
+    ) -> Self {
+        // has to remain to ensure that the code path is evaluated by rustc
+        let _ = Self::SIZE_CONSTRAINT;
+        Self {
+            fwd,
+            back,
+            size,
+            hash,
+            key,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pmem_hashmap::allocator::Pal;
     use std::{path::PathBuf, process::Command};
     use tempfile::Builder;
 
@@ -228,66 +238,156 @@ mod tests {
     #[test]
     fn new() {
         let file = TestFile::new();
-        let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-        let _ = Plru::create(&mut pmap, 32 * 1024 * 1024).unwrap();
+        let pal = Pal::create(file.path(), 32 * 1024 * 1024, 0o666).unwrap();
+        let mut root = pal.root(size_of::<Plru<()>>()).unwrap();
+        root.init(
+            &Plru::<()>::init(32 * 1024 * 1024),
+            std::mem::size_of::<Plru<()>>(),
+        );
+        let plru = root.load_mut();
     }
 
     #[test]
     fn insert() {
         let file = TestFile::new();
-        let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-        let mut lru = Plru::create(&mut pmap, 32 * 1024 * 1024).unwrap();
-        lru.insert(&mut pmap, LruKey(100), 321).unwrap();
-        assert_eq!(lru.head, Some(LruKey(100)));
-        lru.insert(&mut pmap, LruKey(101), 322).unwrap();
-        assert_eq!(lru.head, Some(LruKey(101)));
-        lru.insert(&mut pmap, LruKey(102), 323).unwrap();
-        assert_eq!(lru.head, Some(LruKey(102)));
+        let pal = Pal::create(file.path(), 32 * 1024 * 1024, 0o666).unwrap();
+        let mut root = pal.root(size_of::<Plru<()>>()).unwrap();
+        root.init(
+            &Plru::<()>::init(32 * 1024 * 1024),
+            std::mem::size_of::<Plru<()>>(),
+        );
+        let plru = root.load_mut();
+
+        // Insert 3 entries
+        for id in 0..3 {
+            let node_ptr = pal.allocate(PLRU_NODE_SIZE).unwrap();
+            plru.insert(node_ptr.clone(), id, 312, ()).unwrap();
+            assert_eq!(plru.head, Some(node_ptr));
+        }
+        assert_eq!(plru.count, 3);
     }
 
     #[test]
     fn touch() {
         let file = TestFile::new();
-        let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-        let mut lru = Plru::create(&mut pmap, 32 * 1024 * 1024).unwrap();
-        lru.insert(&mut pmap, LruKey(100), 321).unwrap();
-        lru.insert(&mut pmap, LruKey(101), 322).unwrap();
-        lru.insert(&mut pmap, LruKey(102), 323).unwrap();
+        let pal = Pal::create(file.path(), 32 * 1024 * 1024, 0o666).unwrap();
+        let mut root = pal.root(size_of::<Plru<()>>()).unwrap();
+        root.init(
+            &Plru::<()>::init(32 * 1024 * 1024),
+            std::mem::size_of::<Plru<()>>(),
+        );
+        let plru = root.load_mut();
+
+        // Insert 3 entries
+        let mut ptr = vec![];
+        for id in 0..3 {
+            let node_ptr = pal.allocate(PLRU_NODE_SIZE).unwrap();
+            ptr.push(node_ptr.clone());
+            plru.insert(node_ptr.clone(), id, 312, ()).unwrap();
+            assert_eq!(plru.head, Some(node_ptr));
+        }
+        assert_eq!(plru.count, 3);
+
+        for ptr in ptr.iter_mut() {
+            plru.touch(ptr);
+            assert_eq!(plru.head, Some(ptr).cloned());
+        }
     }
 
     #[test]
     fn evict() {
         let file = TestFile::new();
-        let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-        let mut lru = Plru::create(&mut pmap, 32 * 1024 * 1024).unwrap();
-        lru.insert(&mut pmap, LruKey(100), 16 * 1024 * 1024)
-            .unwrap();
-        lru.insert(&mut pmap, LruKey(101), 15 * 1024 * 1024)
-            .unwrap();
-        lru.insert(&mut pmap, LruKey(102), 8 * 1024 * 1024).unwrap();
-        assert_eq!(
-            lru.evict().and_then(|opt| Some(LruKey(opt.0))),
-            Some(LruKey(100))
+        let pal = Pal::create(file.path(), 32 * 1024 * 1024, 0o666).unwrap();
+        let mut root = pal.root(size_of::<Plru<()>>()).unwrap();
+        root.init(
+            &Plru::<()>::init(32 * 1024 * 1024),
+            std::mem::size_of::<Plru<()>>(),
         );
-        lru.remove(&mut pmap, LruKey(100)).unwrap();
-        lru.insert(&mut pmap, LruKey(100), 1 * 1024 * 1024).unwrap();
-        assert_eq!(lru.evict().and_then(|opt| Some(LruKey(opt.0))), None);
-        lru.insert(&mut pmap, LruKey(103), 9 * 1024 * 1024).unwrap();
-        assert_eq!(
-            lru.evict().and_then(|opt| Some(LruKey(opt.0))),
-            Some(LruKey(101))
-        );
+        let plru = root.load_mut();
+
+        // Insert 3 entries
+        let mut ptr = vec![];
+        for id in 0..3 {
+            let node_ptr = pal.allocate(PLRU_NODE_SIZE).unwrap();
+            ptr.push(node_ptr.clone());
+            plru.insert(node_ptr.clone(), id, 15 * 1024 * 1024, ())
+                .unwrap();
+            assert_eq!(plru.head, Some(node_ptr));
+        }
+        assert_eq!(plru.count, 3);
+
+        assert_eq!(plru.evict(0).unwrap(), Some((0, &())));
+        plru.remove(&mut ptr[0]).unwrap();
+        plru.insert(ptr[0].clone(), 3, 1 * 1024 * 1024, ()).unwrap();
+        assert_eq!(plru.evict(0).unwrap(), None);
     }
 
     #[test]
     fn remove() {
         let file = TestFile::new();
-        let mut pmap = PMap::create(file.path(), 32 * 1024 * 1024).unwrap();
-        let mut lru = Plru::create(&mut pmap, 32 * 1024 * 1024).unwrap();
-        lru.insert(&mut pmap, LruKey(100), 16 * 1024 * 1024)
-            .unwrap();
-        lru.remove(&mut pmap, LruKey(100)).unwrap();
-        assert_eq!(lru.head, None);
-        assert_eq!(lru.tail, None);
+        let pal = Pal::create(file.path(), 32 * 1024 * 1024, 0o666).unwrap();
+        let mut root = pal.root(size_of::<Plru<()>>()).unwrap();
+        root.init(
+            &Plru::<()>::init(32 * 1024 * 1024),
+            std::mem::size_of::<Plru<()>>(),
+        );
+        let plru = root.load_mut();
+
+        // Insert 3 entries
+        let mut ptr = vec![];
+        for id in 0..3 {
+            let node_ptr = pal.allocate(PLRU_NODE_SIZE).unwrap();
+            ptr.push(node_ptr.clone());
+            plru.insert(node_ptr.clone(), id, 15 * 1024 * 1024, ())
+                .unwrap();
+            assert_eq!(plru.head, Some(node_ptr));
+        }
+        assert_eq!(plru.count, 3);
+
+        for ptr in ptr.iter_mut() {
+            plru.remove(ptr);
+        }
+        assert_eq!(plru.head, None);
+        assert_eq!(plru.tail, None);
+    }
+
+    #[test]
+    fn reinit() {
+        let file = TestFile::new();
+        let mut ptr = vec![];
+        {
+            let mut pal = Pal::create(file.path(), 32 * 1024 * 1024, 0o666).unwrap();
+            let mut root = pal.root(size_of::<Plru<()>>()).unwrap();
+            root.init(
+                &Plru::<()>::init(32 * 1024 * 1024),
+                std::mem::size_of::<Plru<()>>(),
+            );
+            let plru = root.load_mut();
+
+            // Insert 3 entries
+            for id in 0..3 {
+                let node_ptr = pal.allocate(PLRU_NODE_SIZE).unwrap();
+                ptr.push(node_ptr.clone());
+                plru.insert(node_ptr.clone(), id, 15 * 1024 * 1024, ())
+                    .unwrap();
+                assert_eq!(plru.head, Some(node_ptr));
+            }
+            assert_eq!(plru.count, 3);
+            pal.close();
+        }
+        {
+            let mut pal = Pal::open(file.path()).unwrap();
+            let mut root: PalPtr<Plru<()>> = pal.root(size_of::<Plru<()>>()).unwrap();
+            let plru = root.load_mut();
+
+            assert_eq!(plru.head, Some(ptr.last().unwrap().clone()));
+            assert_eq!(plru.tail, Some(ptr.first().unwrap().clone()));
+            for ptr in ptr.iter_mut().rev() {
+                assert_eq!(plru.head, Some(ptr.clone()));
+                plru.remove(ptr);
+            }
+            assert_eq!(plru.count, 0);
+            pal.close();
+        }
     }
 }

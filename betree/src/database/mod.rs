@@ -21,6 +21,10 @@ use crate::{
     vdev::Block,
     StoragePreference,
 };
+
+#[cfg(feature = "nvm")]
+use crate::replication::PersistentCache;
+
 use bincode::{deserialize, serialize_into};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use crossbeam_channel::Sender;
@@ -162,7 +166,7 @@ impl Default for DatabaseConfiguration {
             compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
             #[cfg(feature = "nvm")]
-            persistent_cache_path: None,
+            persistent_cache: None,
             access_mode: AccessMode::OpenIfExists,
             sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
@@ -233,6 +237,12 @@ impl DatabaseConfiguration {
             }
         }
 
+        #[cfg(feature = "nvm")]
+        let pcache = self.persistent_cache.as_ref().map(|config| {
+            PersistentCache::create(&config.path, config.bytes)
+                .unwrap_or_else(|_| PersistentCache::open(&config.path).unwrap())
+        });
+
         Dmu::new(
             self.compression.to_builder(),
             XxHashBuilder,
@@ -241,6 +251,8 @@ impl DatabaseConfiguration {
             strategy,
             ClockCache::new(self.cache_size),
             handler,
+            #[cfg(feature = "nvm")]
+            pcache,
         )
     }
 

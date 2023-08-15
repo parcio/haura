@@ -2,12 +2,17 @@
 
 use crate::size::{Size, StaticSize};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{error::Error, fmt, hash::Hasher, iter::once};
+use std::{
+    error::Error,
+    fmt,
+    hash::{Hash, Hasher},
+    iter::once,
+};
 use twox_hash;
 
 /// A checksum to verify data integrity.
 pub trait Checksum:
-    Serialize + DeserializeOwned + Size + Clone + Send + Sync + fmt::Debug + 'static
+    Serialize + DeserializeOwned + Size + Clone + Send + Sync + fmt::Debug + Hash + 'static
 {
     /// Builds a new `Checksum`.
     type Builder: Builder<Self>;
@@ -67,7 +72,7 @@ impl Error for ChecksumError {
 /// `XxHash` contains a digest of `xxHash`
 /// which is an "extremely fast non-cryptographic hash algorithm"
 /// (<https://github.com/Cyan4973/xxHash>)
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct XxHash(u64);
 
 impl StaticSize for XxHash {

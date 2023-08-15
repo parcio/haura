@@ -304,11 +304,17 @@ static int fio_haura_setup(struct thread_data *td) {
     /* Haura needs some additional space to provide extra data like object
      * pointers and metadata. This is more of a hack, but nonetheless. */
     creat(td->files[idx]->file_name, 0644);
-    if (truncate(td->files[idx]->file_name, td->o.size + (50 * 1024 * 1024))) {
+
+    // FIXME: If only one file is specified the file_size_high argument is 0.
+    // A fallback in this case is to use the usual size.
+    if (truncate(td->files[idx]->file_name, td->o.size * 2)) {
       fprintf(
           stderr,
           "Could not retruncate file to provide enough storage for Haura.\n");
     }
+    // Set the already allocated size so that fio avoids the internal initial
+    // layouting
+    td->files[idx]->real_file_size = td->o.size * 2;
   }
 
   td->io_ops_data = malloc(sizeof(size_t));
@@ -355,6 +361,11 @@ static int fio_haura_setup(struct thread_data *td) {
           ((u_int32_t *)buf)[off] = random();
         }
         while (max_io_size > total_written) {
+          if (betree_object_size(global_data.objs[idx], &error) >=
+              max_io_size) {
+            printf("haura: skipping prepopulation of object %lu", idx + 1);
+            break;
+          }
 
           unsigned long written = 0;
           betree_object_write_at(global_data.objs[idx], buf, block_size,

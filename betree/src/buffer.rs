@@ -56,6 +56,8 @@ fn split_range_at(
 struct AlignedStorage {
     ptr: *mut u8,
     capacity: Block<u32>,
+    // avoid deallocation
+    is_persistent: bool,
 }
 
 impl Default for AlignedStorage {
@@ -63,6 +65,7 @@ impl Default for AlignedStorage {
         AlignedStorage {
             ptr: ptr::null_mut(),
             capacity: Block(0),
+            is_persistent: false,
         }
     }
 }
@@ -127,7 +130,7 @@ impl AlignedStorage {
 
 impl Drop for AlignedStorage {
     fn drop(&mut self) {
-        if !self.ptr.is_null() {
+        if !self.ptr.is_null() && !self.is_persistent {
             unsafe {
                 let layout = Layout::from_size_align_unchecked(
                     self.capacity.to_bytes() as usize,
@@ -143,11 +146,12 @@ impl From<Box<[u8]>> for AlignedStorage {
     fn from(b: Box<[u8]>) -> Self {
         // It can be useful to re-enable this line to easily locate places where unnecessary
         // copying takes place, but it's not suited to stay enabled unconditionally.
-        // assert!(is_aligned(&b));
+        assert!(is_aligned(&b));
         if is_aligned(&b) {
             AlignedStorage {
                 capacity: Block::from_bytes(b.len() as u32),
                 ptr: unsafe { (*Box::into_raw(b)).as_mut_ptr() },
+                is_persistent: false,
             }
         } else {
             assert!(
@@ -410,6 +414,44 @@ impl Buf {
                 range: right,
             },
         )
+    }
+
+    /// Display the entire underlying buffer without respect to the semantic
+    /// size of the data contained.
+    pub fn as_slice_with_padding(&self) -> &[u8] {
+        unsafe {
+            let buf = &*self.buf.buf.get();
+            slice::from_raw_parts(buf.ptr, buf.capacity.to_bytes() as usize)
+        }
+    }
+}
+
+#[cfg(feature = "nvm")]
+use pmem_hashmap::allocator::PalPtr;
+
+#[cfg(feature = "nvm")]
+impl Buf {
+    /// Special case transformation from a pointer to persistent memory. Always
+    /// assumed to be length-aligned to [BLOCK_SIZE].
+    ///
+    /// The alignment works differently and is not as freely configurable as can
+    /// be done with "normal" rust allocations. Therefore, only the length of
+    /// the ptr is checked *not* the actual location. These are guaranteed to
+    /// lie at 64 byte cache line boundaries.
+    pub fn from_persistent_ptr(mut ptr: PalPtr<u8>, size: u32) -> Self {
+        assert_eq!(size as usize % BLOCK_SIZE, 0);
+        let padded_size = Block::round_up_from_bytes(size);
+        let aligned_buf = AlignedBuf {
+            buf: Arc::new(UnsafeCell::new(AlignedStorage {
+                ptr: std::ptr::addr_of_mut!(*ptr.load_mut()),
+                capacity: padded_size,
+                is_persistent: true,
+            })),
+        };
+        Self {
+            range: aligned_buf.full_range(),
+            buf: aligned_buf,
+        }
     }
 }
 

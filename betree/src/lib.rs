@@ -5,6 +5,8 @@
 // code as the alternative would be allowing each single method only provided on
 // a maybe needed in the future basis.
 #![allow(dead_code)]
+#![feature(allocator_api)]
+#![feature(btreemap_alloc)]
 
 #[macro_use]
 extern crate error_chain;

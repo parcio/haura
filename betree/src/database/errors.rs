@@ -17,7 +17,7 @@ pub enum Error {
         #[from]
         source: crate::storage_pool::Error,
     },
-    #[error("A tree operation encountered an error. This is likely an internal error.")]
+    #[error("A tree operation encountered an error. This is likely an internal error. `{source}`")]
     TreeError {
         #[from]
         source: crate::tree::Error,
@@ -56,7 +56,7 @@ pub enum Error {
     InUse,
     #[error("Message surpasses the maximum length. If you cannot shrink your value, use an object store instead.")]
     MessageTooLarge,
-    #[error("Could not serialize the given data. This is an internal error.")]
+    #[error("Could not serialize the given data. This is an internal error. `{source}`")]
     SerializeFailed {
         #[from]
         source: serde_json::Error,

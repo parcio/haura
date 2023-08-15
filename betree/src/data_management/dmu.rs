@@ -5,9 +5,11 @@ use super::{
     object_ptr::ObjectPointer,
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
+#[cfg(feature = "nvm")]
+use crate::replication::PersistentCache;
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
-    buffer::Buf,
+    buffer::{Buf, BufWrite},
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
     compression::CompressionBuilder,
@@ -60,6 +62,8 @@ where
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
+    #[cfg(feature = "nvm")]
+    persistent_cache: Option<Arc<RwLock<PersistentCache<DiskOffset, Option<DiskOffset>>>>>,
 }
 
 impl<E, SPL> Dmu<E, SPL>
@@ -76,6 +80,9 @@ where
         alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
         handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
+        #[cfg(feature = "nvm")] persistent_cache: Option<
+            PersistentCache<DiskOffset, Option<DiskOffset>>,
+        >,
     ) -> Self {
         let allocation_data = (0..pool.storage_class_count())
             .map(|class| {
@@ -103,6 +110,8 @@ where
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
             report_tx: None,
+            #[cfg(feature = "nvm")]
+            persistent_cache: persistent_cache.map(|cache| Arc::new(RwLock::new(cache))),
         }
     }
 
@@ -162,6 +171,19 @@ where
         let obj = CacheValueRef::write(entry);
 
         if let ObjRef::Unmodified(ptr, ..) = replace(or, ObjRef::Modified(mid, pk)) {
+            // Deallocate old-region and remove from cache
+            if let Some(pcache_mtx) = &self.persistent_cache {
+                let pcache = pcache_mtx.read();
+                let res = pcache.get(ptr.offset().clone()).is_ok();
+                drop(pcache);
+                if res {
+                    // FIXME: Offload this lock to a different thread
+                    // This operation is only tangantely important for the
+                    // operation here and not time critical.
+                    let mut pcache = pcache_mtx.write();
+                    pcache.remove(ptr.offset().clone()).unwrap();
+                }
+            }
             self.copy_on_write(ptr, CopyOnWriteReason::Steal, or.index().clone());
         }
         Ok(Some(obj))
@@ -226,6 +248,24 @@ where
         let offset = op.offset();
         let generation = op.generation();
 
+        #[cfg(feature = "nvm")]
+        let compressed_data = {
+            let mut buf = None;
+            if let Some(ref pcache_mtx) = self.persistent_cache {
+                let mut cache = pcache_mtx.read();
+                if let Ok(buffer) = cache.get_buf(offset) {
+                    // buf = Some(Buf::from_zero_padded(buffer.to_vec()))
+                    buf = Some(buffer)
+                }
+            }
+            if let Some(b) = buf {
+                b
+            } else {
+                self.pool
+                    .read(op.size(), op.offset(), op.checksum().clone())?
+            }
+        };
+        #[cfg(not(feature = "nvm"))]
         let compressed_data = self
             .pool
             .read(op.size(), op.offset(), op.checksum().clone())?;
@@ -329,7 +369,51 @@ where
 
         let mid = match key {
             ObjectKey::InWriteback(_) => unreachable!(),
-            ObjectKey::Unmodified { .. } => return Ok(()),
+            ObjectKey::Unmodified {
+                offset,
+                generation: _,
+            } => {
+                // If data is unmodified still move to pcache, as it might be worth saving (if not already contained)
+                #[cfg(feature = "nvm")]
+                if let Some(ref pcache_mtx) = self.persistent_cache {
+                    {
+                        // Encapsulate concurrent read access
+                        let pcache = pcache_mtx.read();
+                        if pcache.get(offset).is_ok() {
+                            return Ok(());
+                        }
+                    }
+                    // We need to compress data here to ensure compatability
+                    // with the other branch going through the write back
+                    // procedure.
+                    let compression = &self.default_compression;
+                    let compressed_data = {
+                        let mut state = compression.new_compression()?;
+                        {
+                            object.value().read().pack(&mut state)?;
+                            drop(object);
+                        }
+                        state.finish()
+                    };
+                    let away = Arc::clone(pcache_mtx);
+                    // Arc to storage pool
+                    let pool = self.pool.clone();
+                    self.pool.begin_write_offload(offset, move || {
+                        let mut pcache = away.write();
+                        let _ = pcache.remove(offset);
+                        pcache
+                            .prepare_insert(offset, compressed_data, None)
+                            .insert(|maybe_offset, buf| {
+                                if let Some(offset) = maybe_offset {
+                                    pool.begin_write(buf, *offset)?;
+                                }
+                                Ok(())
+                            })
+                            .unwrap();
+                    })?;
+                }
+                return Ok(());
+            }
             ObjectKey::Modified(mid) => mid,
         };
 
@@ -341,6 +425,8 @@ where
         drop(cache);
         let object = CacheValueRef::write(entry);
 
+        // Eviction at this points only writes a singular node as all children
+        // need to be unmodified beforehand.
         self.handle_write_back(object, mid, true, pk)?;
         Ok(())
     }
@@ -412,7 +498,37 @@ where
             state.finish()
         };
 
-        self.pool.begin_write(compressed_data, offset)?;
+        #[cfg(feature = "nvm")]
+        let skip_write_back = self.persistent_cache.is_some();
+        #[cfg(not(feature = "nvm"))]
+        let skip_write_back = false;
+
+        if !skip_write_back {
+            self.pool.begin_write(compressed_data, offset)?;
+        } else {
+            // Cheap copy
+            let bar = compressed_data.clone();
+            #[cfg(feature = "nvm")]
+            if let Some(ref pcache_mtx) = self.persistent_cache {
+                let away = Arc::clone(pcache_mtx);
+                // Arc to storage pool
+                let pool = self.pool.clone();
+                self.pool.begin_write_offload(offset, move || {
+                    let mut pcache = away.write();
+                    let _ = pcache.remove(offset);
+                    pcache
+                        .prepare_insert(offset, bar, None)
+                        .insert(|maybe_offset, buf| {
+                            if let Some(offset) = maybe_offset {
+                                pool.begin_write(buf, *offset)?;
+                            }
+                            Ok(())
+                        })
+                        .unwrap();
+                })?;
+            }
+            self.pool.begin_write(compressed_data, offset)?;
+        }
 
         let obj_ptr = ObjectPointer {
             offset,
@@ -499,11 +615,7 @@ where
             {
                 warn!(
                     "Storage tier {class} does not have enough space remaining. {} blocks of {}",
-                    self.handler
-                        .free_space_tier(class)
-                        .unwrap()
-                        .free
-                        .as_u64(),
+                    self.handler.free_space_tier(class).unwrap().free.as_u64(),
                     size.as_u64()
                 );
                 continue;
