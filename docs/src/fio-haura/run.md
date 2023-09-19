@@ -11,6 +11,11 @@ source the given environment file in `fio-haura/`.
 $ source ./env.sh
 ```
 
+Additionally, since Haura's configuration is more complex then what is provided
+in fio clients a configuration has to be loaded. The configurations path has to
+be stored in the environment under `BETREE_CONFIG`. See the [bectl's Basic Usage
+chapter](../bectl/usage.md) for more information.
+
 ## Running fio
 
 `fio` can be configured with CLI options and jobfiles, they both have the same
