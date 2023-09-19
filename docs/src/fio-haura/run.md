@@ -26,7 +26,7 @@ $ fio \
     --random_distribution=zipf \
     --bs=4k \
     --ioengine=external:src/fio-engine-haura.o \
-    --numjobs=2 \
+    --numjobs=1 \
     --runtime=30 \
     --time_based \
     --group_reporting \
@@ -55,6 +55,9 @@ reached.
 > - Increase the underlying block size while retaining the same `io_size`
 > - Choose a random distribution with a higher skew to specific regions (e.g.
 >   zipf) to avoid frequent evictions of nodes from the internal cache
+> - Reduce the number of jobs; More jobs put more pressure on the cache leading
+>   to more frequent evictions which lead to more writeback operations worsening
+>   fragmentation
 > 
 > As a general rule this leads to two things: reduce the amount of write
 > operations, enlarge the allocation space.
