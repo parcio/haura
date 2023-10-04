@@ -32,9 +32,6 @@ pub struct Plru<T> {
     key_type: PhantomData<*const T>,
 }
 
-// hack ⛏
-const PLRU_ROOT_LENGTH_READ_COMMENT: usize = size_of::<Plru<()>>();
-
 impl<T> Plru<T> {
     pub fn init(capacity: u64) -> Plru<T> {
         Self {

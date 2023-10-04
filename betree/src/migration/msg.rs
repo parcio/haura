@@ -35,6 +35,11 @@ pub enum DmlMsg {
     // Discover(DiskOffset),
 }
 
+pub enum ReplicationMsg {
+    Evict(PivotKey),
+    Insert(PivotKey),
+}
+
 use serde::Serialize;
 
 #[derive(Hash, PartialEq, Eq, Clone, Debug)]

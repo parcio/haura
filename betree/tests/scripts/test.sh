@@ -18,6 +18,6 @@ fi
 
 echo "Using ${num_thread} threads."
 
-cargo test -- --test-threads "$num_thread"
+cargo +nightly test -- --test-threads "$num_thread"
 
 ./scripts/cleanup-test.sh

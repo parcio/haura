@@ -1,7 +1,7 @@
 //! A node identification key.
 //!
 //! See [PivotKey] for more documentation.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{cow_bytes::CowBytes, database::DatasetId};
 
@@ -28,7 +28,7 @@ use crate::{cow_bytes::CowBytes, database::DatasetId};
 ///     │       │       │       │
 ///     ▼       ▼       ▼       ▼
 /// ```
-#[derive(Hash, Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Hash, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PivotKey {
     LeftOuter(CowBytes, DatasetId),
     Right(CowBytes, DatasetId),

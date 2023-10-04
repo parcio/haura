@@ -7,6 +7,9 @@ use super::{
 };
 #[cfg(feature = "nvm")]
 use crate::replication::PersistentCache;
+#[cfg(feature = "nvm")]
+use pmem_hashmap::allocator::PalPtr;
+
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId},
     buffer::{Buf, BufWrite},
@@ -63,7 +66,8 @@ where
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
     #[cfg(feature = "nvm")]
-    persistent_cache: Option<Arc<RwLock<PersistentCache<DiskOffset, Option<DiskOffset>>>>>,
+    persistent_cache:
+        Option<Arc<RwLock<PersistentCache<DiskOffset, (Option<DiskOffset>, PalPtr<u8>)>>>>,
 }
 
 impl<E, SPL> Dmu<E, SPL>
@@ -333,6 +337,7 @@ where
         // If this fails, call copy_on_write as object has been modified again
 
         let evict_result = cache.evict(|&key, entry, cache_contains_key| {
+            let init_pk = entry.tag();
             let object = entry.value_mut().get_mut();
             let can_be_evicted = match key {
                 ObjectKey::InWriteback(_) => false,
@@ -357,7 +362,7 @@ where
                     .is_ok(),
             };
             if can_be_evicted {
-                Some(object.size())
+                Some(object.size());
             } else {
                 None
             }
@@ -387,6 +392,7 @@ where
                     // with the other branch going through the write back
                     // procedure.
                     let compression = &self.default_compression;
+                    let pk = bincode::serialize(object.tag()).unwrap();
                     let compressed_data = {
                         let mut state = compression.new_compression()?;
                         {
