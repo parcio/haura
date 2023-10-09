@@ -11,24 +11,61 @@ source the given environment file in `fio-haura/`.
 $ source ./env.sh
 ```
 
+Additionally, since Haura's configuration is more complex then what is provided
+in fio clients a configuration has to be loaded. The configurations path has to
+be stored in the environment under `BETREE_CONFIG`. See the [bectl's Basic Usage
+chapter](../bectl/usage.md) for more information.
+
 ## Running fio
 
 `fio` can be configured with CLI options and jobfiles, they both have the same
-capabilities, therefore for brevity we will use CLI options here.
+capabilities, therefore for brevity we will use CLI options here. You can find
+multiple jobfiles which can be used with fio to specify these options in a more
+manageable way in `fio-haura/jobfiles`.
 
 As an example to perform a simple IOPS test, you can use:
 ```sh
-$ fio --direct=1 --rw=randwrite --bs=4k --ioengine=external:src/fio-engine-haura.o --runtime=10 --numjobs=4 --time_based --group_reporting --name=iops-test-job --eta-newline=1 --size=4G --thread
+$ fio \
+    --direct=1 \
+    --rw=randwrite \
+    --random_distribution=zipf \
+    --bs=4k \
+    --ioengine=external:src/fio-engine-haura.o \
+    --numjobs=1 \
+    --runtime=30 \
+    --time_based \
+    --group_reporting \
+    --name=iops-test-job \
+    --eta-newline=1 \
+    --size=4G \
+    --io_size=2G
 ```
 
-This starts an IO benchmark using `--direct` access in a `--rw=randread` pattern
-using a blocksize of `--bs=4k` for each access. Furthermore, haura is specified
-as `--ioengine=external:src/fio-engine-haura.o` and runs for `--runtime=10`
-seconds with `--numjobs=4`. The total size of IO operations for each thread is
-`--size=4GB` which is the upper limit if runtime is not reached.
+This starts an IO benchmark using `--direct` access in a `--rw=randwrite`
+pattern using a blocksize of `--bs=4k` for each access. Furthermore, haura is
+specified as `--ioengine=external:src/fio-engine-haura.o` and runs for
+`--runtime=30` seconds with `--numjobs=1`. The total size of IO operations for
+each thread is `--io_size=2GB` which is the upper limit if runtime is not
+reached.
 
-Most important is the use of `--thread`. Haura ***does not support multiple
-processes*** therefore it will error if specifying `numjobs` without `--thread`.
+> #### ❗ Random Workloads Caution
+>
+> When using random workloads which surpass the size of the internal cache or
+> explicitly sync'ing to disk, extensive fragmentation might appear. This leads
+> to situations where (even though enough space is theoretically available) no
+> continuous space can be allocated, resulting in out of space errors.
+> 
+> To counteract this it is advised to:
+> - Increase the size of the cache
+> - Increase the underlying block size while retaining the same `io_size`
+> - Choose a random distribution with a higher skew to specific regions (e.g.
+>   zipf) to avoid frequent evictions of nodes from the internal cache
+> - Reduce the number of jobs; More jobs put more pressure on the cache leading
+>   to more frequent evictions which lead to more writeback operations worsening
+>   fragmentation
+> 
+> As a general rule this leads to two things: reduce the amount of write
+> operations, enlarge the allocation space.
 
 `fio` prints a summary of the results at then end which should look similar to this output:
 
@@ -69,18 +106,34 @@ Run status group 0 (all jobs):
   WRITE: bw=8729KiB/s (8938kB/s), 8729KiB/s-8729KiB/s (8938kB/s-8938kB/s), io=85.4MiB (89.6MB), run=10024-10024msec
 ```
 
+## Haura-specific flags
+
+The engine implemented comes with some additional flags to modify the
+configuration of the started Haura instance. These flags only deactivates the
+translation of certain conditions usually created in fio benchmarks to Haura
+itself. Which can be useful for example when using tiered storage setups which
+cannot be described with fio.
+
+```txt
+--disrespect-fio-files
+
+    Avoid transferring fio file configuration to haura. Can be 
+    used to use specific disks regardless of fio specification.
+
+--disrespect-fio-direct
+
+    Use direct mode only as specified in haura configuration.
+
+--disrespect-fio-options
+
+    Disregard all fio options in Haura. This only uses the I/O 
+    workflow as executed by fio. Take care to ensure 
+    comparability with results of other engines.
+```
+
 ## More examples
 
-Have a look at the examples directory of `fio` for more usage examples and job
-files.
+Have a look at the examples directory of `fio` for more usage examples and jobfiles.
 
-> Disclaimer: Benchmarks performing *only* read queries are incorrect.
-> 
-> ---
-> 
-> As haura is implemented as an object/key-value store performing read tests in
-> an unstaged job, for example a simple read IOPS test is rather pointless, as
-> search queries will simply fail for all keys and only cached nodes are
-> traversed copying no data and fetching no data from disk. The implementation
-> of objects then does not assume that sparse areas are actually empty but
-> rather void of information (all zeroed) resulting in insanely good values.
+> When performing read-only benchmarks the benchmarks include some prepopulation
+> which might take depending on the storage medium some time to complete.
