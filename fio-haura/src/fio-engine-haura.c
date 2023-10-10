@@ -304,10 +304,8 @@ static int fio_haura_setup(struct thread_data *td) {
     /* Haura needs some additional space to provide extra data like object
      * pointers and metadata. This is more of a hack, but nonetheless. */
     creat(td->files[idx]->file_name, 0644);
-    if (truncate(td->files[idx]->file_name, td->o.size + (50 * 1024 * 1024))) {
-      fprintf(
-          stderr,
-          "Could not retruncate file to provide enough storage for Haura.\n");
+    if (truncate(td->files[idx]->file_name, max(td->o.file_size_high, td->o.size) + (50 * 1024 * 1024))) {
+       fprintf(stderr,"Could not retruncate file to provide enough storage for Haura.\n");
     }
   }
 
