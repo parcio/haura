@@ -421,6 +421,7 @@ where
             let next_node = match node.apply_with_info(key, pref) {
                 ApplyResult::NextNode(np) => self.get_mut_node_mut(np)?,
                 ApplyResult::Leaf(info) => break info,
+                ApplyResult::NVMLeaf(info) => break info,
             };
             node = next_node;
         });
@@ -559,6 +560,7 @@ mod derivate_ref;
 mod flush;
 mod internal;
 mod leaf;
+mod nvmleaf;
 mod node;
 mod packed;
 mod range;
