@@ -45,7 +45,7 @@ where
     pub(super) fn split_node(
         &self,
         mut node: X::CacheValueRefMut,
-        parent: &mut TakeChildBuffer<ChildBuffer<R>>,
+        parent: &mut TakeChildBuffer<R>,
     ) -> Result<(X::CacheValueRefMut, isize), Error> {
         self.dml.verify_cache();
 

@@ -20,7 +20,7 @@ use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(super) struct InternalNode<T> {
+pub(super) struct InternalNode<N: 'static> {
     level: u32,
     entries_size: usize,
     #[serde(skip)]
@@ -28,7 +28,7 @@ pub(super) struct InternalNode<T> {
     #[serde(skip)]
     pref: AtomicStoragePreference,
     pub(super) pivot: Vec<CowBytes>,
-    children: Vec<T>,
+    children: Vec<ChildBuffer<N>>,
 }
 
 // @tilpner:
@@ -78,7 +78,7 @@ fn internal_node_base_size() -> usize {
         as usize
 }
 
-impl<T: Size> Size for InternalNode<T> {
+impl<N: StaticSize> Size for InternalNode<N> {
     fn size(&self) -> usize {
         internal_node_base_size() + self.entries_size
     }
@@ -100,7 +100,7 @@ impl<T: Size> Size for InternalNode<T> {
     }
 }
 
-impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
+impl<N: HasStoragePreference> HasStoragePreference for InternalNode<N> {
     fn current_preference(&self) -> Option<StoragePreference> {
         self.pref
             .as_option()
@@ -132,10 +132,10 @@ impl<T: HasStoragePreference> HasStoragePreference for InternalNode<T> {
     }
 }
 
-impl<T> InternalNode<T> {
-    pub fn new(left_child: T, right_child: T, pivot_key: CowBytes, level: u32) -> Self
+impl<N> InternalNode<N> {
+    pub fn new(left_child: ChildBuffer<N>, right_child: ChildBuffer<N>, pivot_key: CowBytes, level: u32) -> Self
     where
-        T: Size,
+        N: StaticSize,
     {
         InternalNode {
             level,
@@ -148,7 +148,7 @@ impl<T> InternalNode<T> {
     }
 
     /// Returns the number of children.
-    pub fn fanout(&self) -> usize {
+    pub fn fanout(&self) -> usize  where N: ObjectReference {
         self.children.len()
     }
 
@@ -168,17 +168,17 @@ impl<T> InternalNode<T> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &ChildBuffer<N>> + '_ where N: ObjectReference{
         self.children.iter()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
         self.children.iter_mut()
     }
 
     pub fn iter_with_bounds(
         &self,
-    ) -> impl Iterator<Item = (Option<&CowBytes>, &T, Option<&CowBytes>)> + '_ {
+    ) -> impl Iterator<Item = (Option<&CowBytes>, &ChildBuffer<N>, Option<&CowBytes>)> + '_  where N: ObjectReference{
         self.children.iter().enumerate().map(move |(idx, child)| {
             let maybe_left = if idx == 0 {
                 None
@@ -193,15 +193,15 @@ impl<T> InternalNode<T> {
     }
 }
 
-impl<N> InternalNode<ChildBuffer<N>> {
-    pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>) {
+impl<N> InternalNode<N> {
+    pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>)  where N: ObjectReference {
         let child = &self.children[self.idx(key)];
 
         let msg = child.get(key).cloned();
         (&child.node_pointer, msg)
     }
 
-    pub fn pivot_get(&self, pk: &PivotKey) -> PivotGetResult<N> {
+    pub fn pivot_get(&self, pk: &PivotKey) -> PivotGetResult<N>  where N: ObjectReference{
         // Exact pivot matches are required only
         debug_assert!(!pk.is_root());
         let pivot = pk.bytes().unwrap();
@@ -228,7 +228,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
             )
     }
 
-    pub fn pivot_get_mut(&mut self, pk: &PivotKey) -> PivotGetMutResult<N> {
+    pub fn pivot_get_mut(&mut self, pk: &PivotKey) -> PivotGetMutResult<N>  where N: ObjectReference{
         // Exact pivot matches are required only
         debug_assert!(!pk.is_root());
         let pivot = pk.bytes().unwrap();
@@ -258,7 +258,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
         }
     }
 
-    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N {
+    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N  where N: ObjectReference {
         let idx = self.idx(key);
         let child = &mut self.children[idx];
 
@@ -306,6 +306,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
     where
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
+        N: ObjectReference
     {
         self.pref.invalidate();
         let idx = self.idx(key.borrow());
@@ -323,6 +324,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
     where
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
+        N: ObjectReference
     {
         self.pref.invalidate();
         let mut added_size = 0;
@@ -342,7 +344,7 @@ impl<N> InternalNode<ChildBuffer<N>> {
         added_size
     }
 
-    pub fn drain_children(&mut self) -> impl Iterator<Item = N> + '_ {
+    pub fn drain_children(&mut self) -> impl Iterator<Item = N> + '_  where N: ObjectReference {
         self.pref.invalidate();
         self.entries_size = 0;
         self.children
@@ -351,13 +353,14 @@ impl<N> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
+impl<N: StaticSize + HasStoragePreference> InternalNode<N> {
     pub fn range_delete(
         &mut self,
         start: &[u8],
         end: Option<&[u8]>,
         dead: &mut Vec<N>,
-    ) -> (usize, &mut N, Option<&mut N>) {
+    ) -> (usize, &mut N, Option<&mut N>) 
+    where N: ObjectReference {
         self.pref.invalidate();
         let size_before = self.entries_size;
         let start_idx = self.idx(start);
@@ -406,7 +409,7 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<N: ObjectReference> InternalNode<ChildBuffer<N>> {
+impl<N: ObjectReference> InternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.pref.invalidate();
         let split_off_idx = self.fanout() / 2;
@@ -476,11 +479,12 @@ impl<N: ObjectReference> InternalNode<ChildBuffer<N>> {
     }
 }
 
-impl<N: HasStoragePreference> InternalNode<ChildBuffer<N>>
+impl<N: HasStoragePreference> InternalNode<N>
 where
-    ChildBuffer<N>: Size,
+    N: StaticSize,
+    N: ObjectReference
 {
-    pub fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
+    pub fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<N>> {
         let child_idx = self.idx(key);
         if self.children[child_idx].is_empty(key) {
             Some(TakeChildBuffer {
@@ -497,7 +501,7 @@ where
         min_flush_size: usize,
         max_node_size: usize,
         min_fanout: usize,
-    ) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
+    ) -> Option<TakeChildBuffer<N>> where N: ObjectReference{
         let child_idx = {
             let size = self.size();
             let fanout = self.fanout();
@@ -525,12 +529,12 @@ where
     }
 }
 
-pub(super) struct TakeChildBuffer<'a, T: 'a> {
-    node: &'a mut InternalNode<T>,
+pub(super) struct TakeChildBuffer<'a, N: 'a + 'static> {
+    node: &'a mut InternalNode<N>,
     child_idx: usize,
 }
 
-impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
+impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
     pub(super) fn split_child(
         &mut self,
         sibling_np: N,
@@ -553,15 +557,15 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N
     }
 }
 
-impl<'a, T> TakeChildBuffer<'a, T>
+impl<'a, N> TakeChildBuffer<'a, N>
 where
-    InternalNode<T>: Size,
+    N: StaticSize,
 {
     pub(super) fn size(&self) -> usize {
         Size::size(&*self.node)
     }
 
-    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<T> {
+    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N> where N: ObjectReference {
         if self.child_idx + 1 < self.node.children.len() {
             PrepareMergeChild {
                 node: self.node,
@@ -578,14 +582,14 @@ where
     }
 }
 
-pub(super) struct PrepareMergeChild<'a, T: 'a> {
-    node: &'a mut InternalNode<T>,
+pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
+    node: &'a mut InternalNode<N>,
     pivot_key_idx: usize,
     other_child_idx: usize,
 }
 
-impl<'a, N> PrepareMergeChild<'a, ChildBuffer<N>> {
-    pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N> {
+impl<'a, N> PrepareMergeChild<'a, N> {
+    pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N> where N: ObjectReference {
         &mut self.node.children[self.other_child_idx].node_pointer
     }
     pub(super) fn is_right_sibling(&self) -> bool {
@@ -599,7 +603,7 @@ pub(super) struct MergeChildResult<NP> {
     pub(super) size_delta: isize,
 }
 
-impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
+impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
     pub(super) fn merge_children(self) -> MergeChildResult<N> {
         let mut right_sibling = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.pivot.remove(self.pivot_key_idx);
@@ -621,7 +625,7 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
     }
 }
 
-impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
+impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
     fn get_children(&mut self) -> (&mut ChildBuffer<N>, &mut ChildBuffer<N>) {
         let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
         (&mut left[0], &mut right[0])
@@ -642,11 +646,11 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, ChildBuffer<N>> {
     }
 }
 
-impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, ChildBuffer<N>> {
-    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N> {
+impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, N> {
+    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N> where N: ObjectReference{
         &mut self.node.children[self.child_idx].node_pointer
     }
-    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) {
+    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) where N: ObjectReference{
         let (buffer, size_delta) = self.node.children[self.child_idx].take();
         self.node.entries_size -= size_delta;
         (buffer, -(size_delta as isize))

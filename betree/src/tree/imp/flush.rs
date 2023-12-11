@@ -52,7 +52,7 @@ where
         &self,
         mut node: X::CacheValueRefMut,
         mut parent: Option<
-            DerivateRef<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>,
+            DerivateRef<X::CacheValueRefMut, TakeChildBuffer<'static, R>>,
         >,
     ) -> Result<(), Error> {
         loop {

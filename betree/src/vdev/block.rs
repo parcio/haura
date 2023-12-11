@@ -9,7 +9,8 @@ use std::{
 
 /// A unit which represents a number of bytes which are a multiple of
 /// `BLOCK_SIZE`.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 #[serde(transparent)]
 pub struct Block<T: Uint>(pub T);
 

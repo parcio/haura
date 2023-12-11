@@ -14,7 +14,7 @@
 
 use crate::{
     cache::AddSize,
-    database::DatasetId,
+    database::{DatasetId, RootSpu},
     migration::DmlMsg,
     size::{Size, StaticSize},
     storage_pool::{DiskOffset, GlobalDiskId, StoragePoolLayer},
@@ -114,6 +114,8 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
     fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at(
+        checksum: crate::checksum::XxHash,
+        pool: RootSpu,
         disk_offset: DiskOffset,
         d_id: DatasetId,
         data: Box<[u8]>,

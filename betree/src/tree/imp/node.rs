@@ -11,9 +11,9 @@ use super::{
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, Object, ObjectReference},
-    database::DatasetId,
+    database::{DatasetId,RootSpu},
     size::{Size, SizeMut, StaticSize},
-    storage_pool::DiskOffset,
+    storage_pool::{DiskOffset, StoragePoolLayer},
     tree::{pivot_key::LocalPivotKey, MessageAction},
     StoragePreference,
 };
@@ -26,6 +26,16 @@ use std::{
     mem::replace,
 };
 
+use rkyv::{
+    archived_root,
+    ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
+    vec::{ArchivedVec, VecResolver},
+    with::{ArchiveWith, DeserializeWith, SerializeWith},
+    Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
+};
+
+//pub(crate) type RootSpu = crate::storage_pool::StoragePoolUnit<crate::checksum::XxHash>;
+
 /// The tree node type.
 #[derive(Debug)]
 pub struct Node<N: 'static>(Inner<N>);
@@ -34,7 +44,7 @@ pub struct Node<N: 'static>(Inner<N>);
 pub(super) enum Inner<N: 'static> {
     PackedLeaf(PackedMap),
     Leaf(LeafNode),
-    Internal(InternalNode<ChildBuffer<N>>),
+    Internal(InternalNode<N>),
 }
 
 impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
@@ -78,7 +88,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
     }
 }
 
-impl<R: ObjectReference + HasStoragePreference> Object<R> for Node<R> {
+impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
     fn pack<W: Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()),
@@ -91,7 +101,7 @@ impl<R: ObjectReference + HasStoragePreference> Object<R> for Node<R> {
         }
     }
 
-    fn unpack_at(_offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
+    fn unpack_at(checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
         if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
             match deserialize::<InternalNode<_>>(&data[4..]) {
                 Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
@@ -149,14 +159,14 @@ impl<N: StaticSize> Size for Node<N> {
 }
 
 impl<N: StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
+    pub(super) fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<N>> where N: ObjectReference {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => internal.try_walk(key),
         }
     }
 
-    pub(super) fn try_find_flush_candidate(&mut self) -> Option<TakeChildBuffer<ChildBuffer<N>>> {
+    pub(super) fn try_find_flush_candidate(&mut self) -> Option<TakeChildBuffer<N>> where N: ObjectReference {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => internal.try_find_flush_candidate(
@@ -184,7 +194,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Internal(_) => "internal",
         }
     }
-    pub(super) fn fanout(&self) -> Option<usize> {
+    pub(super) fn fanout(&self) -> Option<usize> where N: ObjectReference {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref internal) => Some(internal.fanout()),
@@ -209,7 +219,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         replace(self, Self::empty_leaf())
     }
 
-    pub(super) fn has_too_low_fanout(&self) -> bool {
+    pub(super) fn has_too_low_fanout(&self) -> bool where N: ObjectReference {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => false,
             Internal(ref internal) => internal.fanout() < MIN_FANOUT,
@@ -250,7 +260,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         }
     }
 
-    pub(super) fn root_needs_merge(&self) -> bool {
+    pub(super) fn root_needs_merge(&self) -> bool  where N: ObjectReference {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => false,
             Internal(ref internal) => internal.fanout() == 1,
@@ -330,7 +340,7 @@ impl<N: HasStoragePreference> Node<N> {
         &self,
         key: &[u8],
         msgs: &mut Vec<(KeyInfo, SlicedCowBytes)>,
-    ) -> GetResult<N> {
+    ) -> GetResult<N> where N: ObjectReference {
         match self.0 {
             PackedLeaf(ref map) => GetResult::Data(map.get(key)),
             Leaf(ref leaf) => GetResult::Data(leaf.get_with_info(key)),
@@ -351,6 +361,7 @@ impl<N: HasStoragePreference> Node<N> {
         right_pivot_key: &mut Option<CowBytes>,
         all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
     ) -> GetRangeResult<Box<dyn Iterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))> + 'a>, N>
+    where N: ObjectReference
     {
         match self.0 {
             PackedLeaf(ref map) => GetRangeResult::Data(Box::new(map.get_all())),
@@ -372,7 +383,7 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn pivot_get(&self, pk: &PivotKey) -> Option<PivotGetResult<N>> {
+    pub(super) fn pivot_get(&self, pk: &PivotKey) -> Option<PivotGetResult<N>> where N: ObjectReference {
         if pk.is_root() {
             return Some(PivotGetResult::Target(None));
         }
@@ -382,7 +393,7 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn pivot_get_mut(&mut self, pk: &PivotKey) -> Option<PivotGetMutResult<N>> {
+    pub(super) fn pivot_get_mut(&mut self, pk: &PivotKey) -> Option<PivotGetMutResult<N>> where N: ObjectReference {
         if pk.is_root() {
             return Some(PivotGetMutResult::Target(None));
         }
@@ -404,6 +415,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     where
         K: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
+        N: ObjectReference
     {
         let size_delta = self.ensure_unpacked();
         let keyinfo = KeyInfo { storage_preference };
@@ -419,6 +431,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     where
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
+        N: ObjectReference
     {
         let size_delta = self.ensure_unpacked();
         size_delta
@@ -433,7 +446,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         &mut self,
         key: &[u8],
         pref: StoragePreference,
-    ) -> ApplyResult<N> {
+    ) -> ApplyResult<N> where N: ObjectReference {
         // FIXME: This is bad for performance, what we want to do here is modify
         // the preference in place determine the new preference and write the
         // PACKED leaf as is again. This violates the restriction that they may
@@ -452,7 +465,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 }
 
 impl<N: HasStoragePreference> Node<N> {
-    pub(super) fn child_pointer_iter_mut(&mut self) -> Option<impl Iterator<Item = &mut N> + '_> {
+    pub(super) fn child_pointer_iter_mut(&mut self) -> Option<impl Iterator<Item = &mut N> + '_> where N: ObjectReference {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => Some(
@@ -463,14 +476,14 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn child_pointer_iter(&self) -> Option<impl Iterator<Item = &RwLock<N>> + '_> {
+    pub(super) fn child_pointer_iter(&self) -> Option<impl Iterator<Item = &RwLock<N>> + '_>  where N: ObjectReference  {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref internal) => Some(internal.iter().map(|child| &child.node_pointer)),
         }
     }
 
-    pub(super) fn drain_children(&mut self) -> Option<impl Iterator<Item = N> + '_> {
+    pub(super) fn drain_children(&mut self) -> Option<impl Iterator<Item = N> + '_>  where N: ObjectReference  {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => Some(internal.drain_children()),
