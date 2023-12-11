@@ -5,7 +5,7 @@ use super::{
 use crate::{
     bounded_future_queue::BoundedFutureQueue,
     buffer::Buf,
-    checksum::Checksum,
+    checksum::{Checksum, XxHash},
     vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
     PreferredAccessType, StoragePreference,
 };

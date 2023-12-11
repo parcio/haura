@@ -9,7 +9,8 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 /// A pointer to an on-disk serialized object.
 pub struct ObjectPointer<D> {
     pub(super) decompression_tag: DecompressionTag,

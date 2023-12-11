@@ -66,6 +66,7 @@ impl<E, SPL> Dmu<E, SPL>
 where
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
+    crate::checksum::XxHash: From<<SPL as StoragePoolLayer>::Checksum>
 {
     /// Returns a new `Dmu`.
     pub fn new(
@@ -130,6 +131,8 @@ where
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
+    crate::storage_pool::StoragePoolUnit<crate::checksum::XxHash>: From<SPL>,
+    crate::checksum::XxHash: From<<SPL as StoragePoolLayer>::Checksum>
 {
     /// Stealing an [ObjectRef] can have multiple effects.  First, the
     /// corresponding node is moved in cache to the [ObjectKey::Modified] state.
@@ -232,7 +235,7 @@ where
 
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack_at(op.offset(), op.info(), data)?
+            Object::unpack_at(op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data)?
         };
         let key = ObjectKey::Unmodified { offset, generation };
         self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key));
@@ -681,6 +684,8 @@ where
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
+    crate::storage_pool::StoragePoolUnit<crate::checksum::XxHash>: From<SPL>,
+    crate::checksum::XxHash: From<<SPL as StoragePoolLayer>::Checksum>
 {
     type ObjectPointer = ObjectPointer<SPL::Checksum>;
     type ObjectRef = ObjRef<Self::ObjectPointer>;
@@ -940,7 +945,7 @@ where
                 .decompression_tag()
                 .new_decompression()?
                 .decompress(&compressed_data)?;
-            Object::unpack_at(ptr.offset(), ptr.info(), data)?
+                Object::unpack_at(ptr.checksum().clone().into() , self.pool.clone().into(), ptr.offset(), ptr.info(), data)?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),
@@ -983,6 +988,8 @@ where
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
+    crate::storage_pool::StoragePoolUnit<crate::checksum::XxHash>: From<SPL>,
+    crate::checksum::XxHash: From<<SPL as StoragePoolLayer>::Checksum>
 {
     type Handler = Handler<ObjRef<ObjectPointer<SPL::Checksum>>>;
 
@@ -999,6 +1006,8 @@ where
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
+    crate::storage_pool::StoragePoolUnit<crate::checksum::XxHash>: From<SPL>,
+    crate::checksum::XxHash: From<<SPL as StoragePoolLayer>::Checksum>
 {
     fn storage_hints(&self) -> Arc<Mutex<HashMap<PivotKey, StoragePreference>>> {
         Arc::clone(&self.storage_hints)
@@ -1017,6 +1026,8 @@ where
     >,
     SPL: StoragePoolLayer,
     SPL::Checksum: StaticSize,
+    crate::storage_pool::StoragePoolUnit<crate::checksum::XxHash>: From<SPL>,
+    crate::checksum::XxHash: From<<SPL as StoragePoolLayer>::Checksum>
 {
     fn with_report(mut self, tx: Sender<DmlMsg>) -> Self {
         self.report_tx = Some(tx);
