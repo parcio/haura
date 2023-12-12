@@ -1,6 +1,7 @@
 //! Implementation of tree structures.
 use self::{
     derivate_ref::DerivateRef,
+    derivate_ref_nvm::DerivateRefNVM,
     node::{ApplyResult, GetResult, PivotGetMutResult, PivotGetResult},
 };
 use super::{
@@ -22,6 +23,8 @@ use leaf::FillUpResult;
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
+
+use node::TakeChildBufferWrapper;
 
 /// Additional information for a single entry. Concerns meta information like
 /// the desired storage level of a key.
@@ -469,7 +472,7 @@ where
         let mut node = {
             let mut node = self.get_mut_root_node()?;
             loop {
-                match DerivateRef::try_new(node, |node| node.try_walk(key.borrow())) {
+                match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
                         if let Some(child) = self.try_get_mut_node(child_buffer.node_pointer_mut())
                         {
@@ -478,7 +481,29 @@ where
                         } else {
                             break child_buffer.into_owner();
                         }
-                    }
+                    },
+                    /*Ok(mut child_buffer) => {
+                        match(child_buffer) {
+                            TakeChildBufferWrapper::TakeChildBuffer(mut inner_child_buffer) => {
+                                if let Some(child) = self.try_get_mut_node(inner_child_buffer.as_mut().unwrap().node_pointer_mut())
+                                {
+                                    node = child;
+                                    parent = Some(child_buffer);
+                                } else {
+                                    break child_buffer.into_owner();
+                                }       
+                            },
+                            TakeChildBufferWrapper::NVMTakeChildBuffer(mut inner_child_buffer) => {
+                                if let Some(child) = self.try_get_mut_node(inner_child_buffer.as_mut().unwrap().node_pointer_mut())
+                                {
+                                    node = child;
+                                    parent = Some(child_buffer);
+                                } else {
+                                    break child_buffer.into_owner();
+                                }       
+                            },
+                        };
+                    }*/
                     Err(node) => break node,
                 };
             }
@@ -495,7 +520,7 @@ where
             unimplemented!();
         }
 
-        self.rebalance_tree(node, parent)?;
+        //self.rebalance_tree(node, parent)?;
 
         // All non-root trees will start the eviction process.
         // TODO: Is the eviction on root trees harmful? Evictions started by
@@ -556,9 +581,12 @@ where
 }
 
 mod child_buffer;
+mod nvm_child_buffer;
 mod derivate_ref;
+mod derivate_ref_nvm;
 mod flush;
 mod internal;
+mod nvminternal;
 mod leaf;
 mod nvmleaf;
 mod node;

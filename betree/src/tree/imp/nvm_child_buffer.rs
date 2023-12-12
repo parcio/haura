@@ -64,63 +64,53 @@ impl<N: ObjectReference> ArchiveWith<RwLock<N>> for EncodeNodePointer {
 impl<N: ObjectReference, S: ScratchSpace + Serializer + ?Sized> SerializeWith<RwLock<N>, S> for EncodeNodePointer 
 where <S as Fallible>::Error: std::fmt::Debug {
     fn serialize_with(field: &RwLock<N>, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
+        unimplemented!("TODO..");
+        /*
         let mut serialized_data = Vec::new();
-
         match field.read().serialize_unmodified(&mut serialized_data){
             Ok(data) => debug!("Successfully serialized childbuffer's node_pointer"),
             Err(e) => panic!("Failed to serialize childbuffer's node_pointer"),
         };
-
         Ok(NodePointerResolver {
             len: serialized_data.len(),
             inner: ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)?,
         })
+        */
     }
 }
 
 impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, RwLock<N>, D> for EncodeNodePointer {
     fn deserialize_with(field: &Archived<Vec<u8>>, _: &mut D) -> Result<RwLock<N>, D::Error> {
+        unimplemented!("TODO..");
+        /*
         match <N as ObjectReference>::deserialize_and_set_unmodified(field.as_slice()) {
             Ok(obj) => Ok(RwLock::new(obj)) ,
             Err(e) => panic!("Failed to deserialize childbuffer's node_pointer"),
-        }
+        }*/
     }
 }
 
-impl Size for (KeyInfo, SlicedCowBytes) {
+/*impl Size for (KeyInfo, SlicedCowBytes) {
     fn size(&self) -> usize {
         let (_keyinfo, data) = self;
         KeyInfo::static_size() + data.size()
     }
-}
+}*/
 
 impl<N: HasStoragePreference> HasStoragePreference for NVMChildBuffer<N> {
-    fn current_preference(&mut self) -> Option<StoragePreference> {
+    fn current_preference(&self) -> Option<StoragePreference> {
         self.messages_preference
             .as_option()
             .map(|msg_pref| {
                 StoragePreference::choose_faster(
                     msg_pref,
-                    self.node_pointer.write().correct_preference(),
+                    self.node_pointer.read().correct_preference(),
                 )
             })
             .map(|p| self.system_storage_preference.weak_bound(&p))
     }
 
-    fn recalculate(&mut self) -> StoragePreference {
-        let mut pref = StoragePreference::NONE;
-
-        for (keyinfo, _v) in self.buffer.values() {
-            pref.upgrade(keyinfo.storage_preference)
-        }
-
-        self.messages_preference.set(pref);
-
-        // pref can't be lower than that of child nodes
-        StoragePreference::choose_faster(pref, self.node_pointer.write().correct_preference())
-    }
-
-    fn recalculate_lazy(&mut self) -> StoragePreference {
+    fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
         for (keyinfo, _v) in self.buffer.values() {
@@ -186,7 +176,7 @@ impl<N: StaticSize> Size for NVMChildBuffer<N> {
         Self::static_size() + self.buffer_entries_size + N::static_size()
     }
 
-    fn actual_size(&mut self) -> Option<usize> {
+    fn actual_size(&self) -> Option<usize> {
         Some(
             Self::static_size()
                 + N::static_size()
