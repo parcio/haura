@@ -1,7 +1,7 @@
 //! Implementation of the [InternalNode] node type.
 use super::{
     child_buffer::ChildBuffer,
-    node::{PivotGetMutResult, PivotGetResult},
+    node::{PivotGetMutResult, PivotGetResult,TakeChildBufferWrapper, ChildBufferWrapper, ChildBufferWrapperStruct},
     PivotKey,
 };
 use crate::{
@@ -174,6 +174,20 @@ impl<N> InternalNode<N> {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
         self.children.iter_mut()
+    }
+
+    pub fn iter_mut_nvm(&mut self) -> ChildBufferWrapperStruct<'_, N> where N: ObjectReference {
+    /*pub fn iter_mut_nvm(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
+        let auto = ChildBufferWrapper::ChildBuffer(self.children.iter_mut());
+        let mut st = ChildBufferWrapperStruct{
+            data: auto
+        };
+
+        let it = st.next();
+        //ChildBufferWrapper::ChildBuffer(self.children.iter_mut())
+        it.unwrap()*/
+        //self.children.iter_mut()
+        unimplemented!("..")
     }
 
     pub fn iter_with_bounds(
@@ -496,7 +510,7 @@ where
         }
     }
 
-    pub fn try_find_flush_candidate(
+/*  pub fn try_find_flush_candidate(
         &mut self,
         min_flush_size: usize,
         max_node_size: usize,
@@ -526,6 +540,39 @@ where
             node: self,
             child_idx,
         })
+    }
+*/
+    pub fn try_find_flush_candidate(
+        &mut self,
+        min_flush_size: usize,
+        max_node_size: usize,
+        min_fanout: usize,
+    ) -> Option<TakeChildBufferWrapper<N>> where N: ObjectReference{
+        let child_idx = {
+            let size = self.size();
+            let fanout = self.fanout();
+            let (child_idx, child) = self
+                .children
+                .iter()
+                .enumerate()
+                .max_by_key(|&(_, child)| child.buffer_size())
+                .unwrap();
+
+            debug!("Largest child's buffer size: {}", child.buffer_size());
+
+            if child.buffer_size() >= min_flush_size
+                && (size - child.buffer_size() <= max_node_size || fanout < 2 * min_fanout)
+            {
+                Some(child_idx)
+            } else {
+                None
+            }
+        };
+        let res = child_idx.map(move |child_idx| TakeChildBuffer {
+            node: self,
+            child_idx,
+        });
+        Some(TakeChildBufferWrapper::TakeChildBuffer(res))
     }
 }
 
@@ -557,6 +604,25 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
     }
 }
 
+impl<'a, N: StaticSize + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
+    pub(super) fn split_child(
+        &mut self,
+        sibling_np: N,
+        pivot_key: CowBytes,
+        select_right: bool,
+    ) -> isize where N: ObjectReference {
+        // split_at invalidates both involved children (old and new), but as the new child
+        // is added to self, the overall entries don't change, so this node doesn't need to be
+        // invalidated
+        match self {
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                obj.as_mut().unwrap().split_child(sibling_np, pivot_key, select_right)
+            },
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => unimplemented!(".."),
+        }
+    }
+}
+
 impl<'a, N> TakeChildBuffer<'a, N>
 where
     N: StaticSize,
@@ -578,6 +644,29 @@ where
                 pivot_key_idx: self.child_idx - 1,
                 other_child_idx: self.child_idx - 1,
             }
+        }
+    }
+}
+
+impl<'a, N> TakeChildBufferWrapper<'a, N>
+where
+    N: StaticSize,
+{
+    pub(super) fn size(&self) -> usize {
+        match self {
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                obj.as_ref().unwrap().size()
+            },
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => unimplemented!(""),
+        }
+    }
+
+    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N> where N: ObjectReference {
+        match self {
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                obj.as_mut().unwrap().prepare_merge()
+            },
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => unimplemented!(""),
         }
     }
 }
@@ -654,6 +743,31 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, N> {
         let (buffer, size_delta) = self.node.children[self.child_idx].take();
         self.node.entries_size -= size_delta;
         (buffer, -(size_delta as isize))
+    }
+}
+
+impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
+    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N>  where N: ObjectReference{
+        match self {
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                obj.as_mut().unwrap().node_pointer_mut()
+            },
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                unimplemented!("")
+            },
+        }
+
+    }
+    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) where N: ObjectReference{
+        match self {
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                obj.as_mut().unwrap().take_buffer()
+            },
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                unimplemented!("")
+            },
+        }
+
     }
 }
 

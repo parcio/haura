@@ -1,7 +1,7 @@
 //! Implementation of the [NVMInternalNode] node type.
 use super::{
     nvm_child_buffer::NVMChildBuffer,
-    node::{PivotGetMutResult, PivotGetResult},
+    node::{PivotGetMutResult, PivotGetResult, TakeChildBufferWrapper},
     PivotKey,
 };
 use crate::{
@@ -622,7 +622,7 @@ where
         min_flush_size: usize,
         max_node_size: usize,
         min_fanout: usize,
-    ) -> Option<NVMTakeChildBuffer<N>>  where N: ObjectReference{
+    ) -> Option<TakeChildBufferWrapper<N>>  where N: ObjectReference{
         let child_idx = {
             let size = self.size();
             let fanout = self.fanout();
@@ -644,10 +644,11 @@ where
                 None
             }
         };
-        child_idx.map(move |child_idx| NVMTakeChildBuffer {
+        let res = child_idx.map(move |child_idx| NVMTakeChildBuffer {
             node: self,
             child_idx,
-        })
+        });
+        Some(TakeChildBufferWrapper::NVMTakeChildBuffer(res))
     }
 }
 
