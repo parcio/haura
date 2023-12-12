@@ -530,8 +530,8 @@ where
 }
 
 pub(super) struct TakeChildBuffer<'a, N: 'a + 'static> {
-    node: &'a mut InternalNode<N>,
-    child_idx: usize,
+    pub node: &'a mut InternalNode<N>,
+    pub child_idx: usize,
 }
 
 impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
@@ -540,7 +540,7 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
         sibling_np: N,
         pivot_key: CowBytes,
         select_right: bool,
-    ) -> isize {
+    ) -> isize where N: ObjectReference {
         // split_at invalidates both involved children (old and new), but as the new child
         // is added to self, the overall entries don't change, so this node doesn't need to be
         // invalidated
@@ -604,7 +604,7 @@ pub(super) struct MergeChildResult<NP> {
 }
 
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    pub(super) fn merge_children(self) -> MergeChildResult<N> {
+    pub(super) fn merge_children(self) -> MergeChildResult<N>  where N: ObjectReference {
         let mut right_sibling = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.pivot.remove(self.pivot_key_idx);
         let size_delta =
@@ -626,12 +626,12 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 }
 
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    fn get_children(&mut self) -> (&mut ChildBuffer<N>, &mut ChildBuffer<N>) {
+    fn get_children(&mut self) -> (&mut ChildBuffer<N>, &mut ChildBuffer<N>)  where N: ObjectReference {
         let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
         (&mut left[0], &mut right[0])
     }
 
-    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize {
+    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize  where N: ObjectReference {
         {
             // Move messages around
             let (left_child, right_child) = self.get_children();
@@ -647,7 +647,7 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 }
 
 impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, N> {
-    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N> where N: ObjectReference{
+    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N> where N: ObjectReference {
         &mut self.node.children[self.child_idx].node_pointer
     }
     pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) where N: ObjectReference{
