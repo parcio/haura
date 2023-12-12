@@ -1,5 +1,5 @@
 //! Encapsulating logic for splitting of normal and root nodes.
-use super::{child_buffer::ChildBuffer, internal::TakeChildBuffer, Inner, Node, Tree};
+use super::{child_buffer::ChildBuffer, internal::TakeChildBuffer, Inner, Node, Tree, node::TakeChildBufferWrapper};
 use crate::{
     cache::AddSize,
     data_management::{Dml, HasStoragePreference, ObjectReference},
@@ -74,4 +74,38 @@ where
 
         Ok((node, size_delta))
     }
+
+    pub(super) fn split_node_nvm(
+        &self,
+        mut node: X::CacheValueRefMut,
+        parent: &mut TakeChildBufferWrapper<R>,
+    ) -> Result<(X::CacheValueRefMut, isize), Error> {
+        self.dml.verify_cache();
+
+        let before = node.size();
+        let (sibling, pivot_key, size_delta, lpk) = node.split();
+        let pk = lpk.to_global(self.tree_id());
+        let select_right = sibling.size() > node.size();
+        debug!(
+            "split {}: {} -> ({}, {}), {}",
+            node.kind(),
+            before,
+            node.size(),
+            sibling.size(),
+            select_right,
+        );
+        node.add_size(size_delta);
+        let sibling_np = if select_right {
+            let (sibling, np) = self.dml.insert_and_get_mut(sibling, self.tree_id(), pk);
+            node = sibling;
+            np
+        } else {
+            self.dml.insert(sibling, self.tree_id(), pk)
+        };
+
+        let size_delta = parent.split_child(sibling_np, pivot_key, select_right);
+
+        Ok((node, size_delta))
+    }
+
 }

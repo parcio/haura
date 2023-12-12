@@ -520,7 +520,7 @@ where
             unimplemented!();
         }
 
-        //self.rebalance_tree(node, parent)?;
+        self.rebalance_tree(node, parent)?;
 
         // All non-root trees will start the eviction process.
         // TODO: Is the eviction on root trees harmful? Evictions started by
