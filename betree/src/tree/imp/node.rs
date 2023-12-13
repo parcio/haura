@@ -286,6 +286,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // recalculates the correct storage_preference for the contained keys.
             Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
+            panic!("............................................UN..INTERNAL");
+
             let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
 
@@ -320,6 +322,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
             }.complete_object_refs(d_id))))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
+            panic!(".............................................UN.LEAF");
+
             let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
 
@@ -607,12 +611,12 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             },
         };
         debug!("Root split pivot key: {:?}", pivot_key);
-        *self = Node(Internal(InternalNode::new(    //TODO: NVM?
-            ChildBuffer::new(allocate_obj(
+        *self = Node(NVMInternal(NVMInternalNode::new(    //TODO: NVM?
+            NVMChildBuffer::new(allocate_obj(
                 left_sibling,
                 LocalPivotKey::LeftOuter(pivot_key.clone()),
             )),
-            ChildBuffer::new(allocate_obj(
+            NVMChildBuffer::new(allocate_obj(
                 right_sibling,
                 LocalPivotKey::Right(pivot_key.clone()),
             )),
@@ -1025,6 +1029,12 @@ pub enum NodeInfo {
         system_storage: StoragePreference,
         entry_count: usize,
     },
+    NVMInternal {
+        level: u32,
+        storage: StoragePreference,
+        system_storage: StoragePreference,
+        children: Vec<ChildInfo>,
+    },
 }
 
 pub struct ByteString(Vec<u8>);
@@ -1122,7 +1132,38 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
                 level: self.level(),
                 entry_count: nvmleaf.entries().len(),
             },
-            NVMInternal(ref nvminternal) => unimplemented!("..") /*NodeInfo::NVMInternal {
+            NVMInternal(ref nvminternal) => NodeInfo::Internal {
+                storage: self.correct_preference(),
+                system_storage: self.system_storage_preference(),
+                level: self.level(),
+                children: {
+                    nvminternal.iter_with_bounds()
+                        .map(|(maybe_left, child_buf, maybe_right)| {
+                            let (child, storage_preference, pivot_key) = {
+                                let mut np = child_buf.as_ref().unwrap().node_pointer.write();
+                                let pivot_key = np.index().clone();
+                                let storage_preference = np.correct_preference();
+                                let child = dml.get(&mut np).unwrap();
+                                (child, storage_preference, pivot_key)
+                            };
+
+                            let node_info = child.node_info(dml);
+                            drop(child);
+
+                            dml.evict().unwrap();
+
+                            ChildInfo {
+                                from: maybe_left.map(|cow| ByteString(cow.to_vec())),
+                                to: maybe_right.map(|cow| ByteString(cow.to_vec())),
+                                storage: storage_preference,
+                                pivot_key,
+                                child: node_info,
+                            }
+                        })
+                        .collect()
+                },
+            },           
+            /*NodeInfo::NVMInternal {
                 pool: None,
                 disk_offset: None,
                 meta_data: InternalNodeMetaData { 
