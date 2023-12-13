@@ -618,7 +618,9 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                 obj.as_mut().unwrap().split_child(sibling_np, pivot_key, select_right)
             },
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => unimplemented!(".."),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                obj.as_mut().unwrap().split_child(sibling_np, pivot_key, select_right)
+            },
         }
     }
 }
@@ -657,7 +659,9 @@ where
             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                 obj.as_ref().unwrap().size()
             },
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => unimplemented!(""),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                obj.as_ref().unwrap().size()
+            },
         }
     }
 
@@ -666,7 +670,10 @@ where
             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                 obj.as_mut().unwrap().prepare_merge()
             },
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => unimplemented!(""),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                unimplemented!("..");
+                //obj.as_mut().unwrap().prepare_merge()
+            },
         }
     }
 }
@@ -753,7 +760,7 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
                 obj.as_mut().unwrap().node_pointer_mut()
             },
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                unimplemented!("")
+                obj.as_mut().unwrap().node_pointer_mut()
             },
         }
 
@@ -764,7 +771,7 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
                 obj.as_mut().unwrap().take_buffer()
             },
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                unimplemented!("")
+                obj.as_mut().unwrap().take_buffer()
             },
         }
 
