@@ -18,7 +18,7 @@ use crate::{
     database::{DatasetId,RootSpu},
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
-    tree::{pivot_key::LocalPivotKey, MessageAction},
+    tree::{pivot_key::LocalPivotKey, MessageAction, imp::{/*leaf::ArchivedNVMLeafNode,*/ nvminternal::{InternalNodeMetaData, ArchivedInternalNodeMetaData, ArchivedInternalNodeData, InternalNodeData}}},
     StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
@@ -28,6 +28,7 @@ use std::{
     collections::BTreeMap,
     io::{self, Write},
     mem::replace,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH}
 };
 
 use rkyv::{
@@ -153,8 +154,11 @@ impl<'a, N> Iterator for ChildBufferWrapperStruct<'a, N> {
 
 #[derive(Debug)]
 enum NodeInnerType {
-    NVMLeaf = 1,
-    NVMInternal = 2,
+    Packed = 1,
+    Leaf,
+    Internal,
+    NVMLeaf,
+    NVMInternal,
 }
 
 impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
@@ -207,12 +211,19 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 }
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
-    fn pack<W: Write>(&self, mut writer: W) -> Result<(), io::Error> {
+    fn pack<W: Write>(&self, mut writer: W, metadata_size: &mut usize) -> Result<(), io::Error> {
         match self.0 {
-            PackedLeaf(ref map) => writer.write_all(map.inner()),
-            Leaf(ref leaf) => PackedMap::pack(leaf, writer),
+            PackedLeaf(ref map) => {
+                //writer.write_all((NodeInnerType::Packed as u32).to_be_bytes().as_ref())?;
+                writer.write_all(map.inner())
+            },
+            Leaf(ref leaf) => {
+                writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
+                PackedMap::pack(leaf, writer)
+            },
             Internal(ref internal) => {
-                writer.write_all(&[0xFFu8, 0xFF, 0xFF, 0xFF] as &[u8])?;
+                writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
+                //writer.write_all(&[0xFFu8, 0xFF, 0xFF, 0xFF] as &[u8])?;
                 serialize_into(writer, internal)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             },
@@ -232,7 +243,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 writer.write_all(&bytes_meta_data.as_ref())?;
                 writer.write_all(&bytes_data.as_ref())?;
 
-                //*metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); TODO: fix this
+                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this
 
                 Ok(())
             },
@@ -252,7 +263,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 writer.write_all(&bytes_meta_data.as_ref())?;
                 writer.write_all(&bytes_data.as_ref())?;
 
-                //*metadata_size = 4 + 8 + 8 + bytes_meta_data.len();
+                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len();
 
                 debug!("NVMInternal node packed successfully"); 
 
@@ -261,19 +272,93 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         }
     }
 
-    fn unpack_at(checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
-        if data[..4] == [0xFFu8, 0xFF, 0xFF, 0xFF] {
+    fn unpack_at(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
+        if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
             match deserialize::<InternalNode<_>>(&data[4..]) {
                 Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
-        } else {
+        } else if data[0..4] == (NodeInnerType::Leaf as u32).to_be_bytes() {
             // storage_preference is not preserved for packed leaves,
             // because they will not be written back to disk until modified,
             // and every modification requires them to be unpacked.
             // The leaf contents are scanned cheaply during unpacking, which
             // recalculates the correct storage_preference for the contained keys.
-            Ok(Node(PackedLeaf(PackedMap::new(data.into_vec()))))
+            Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
+        } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
+            let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
+            let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
+
+            let meta_data_start = 4 + 8 + 8;
+            let meta_data_end = meta_data_start + meta_data_len;   
+
+            let data_start = meta_data_end;
+            let data_end = data_start + data_len;   
+
+            let archivedinternalnodemetadata: &ArchivedInternalNodeMetaData = rkyv::check_archived_root::<InternalNodeMetaData>(&data[meta_data_start..meta_data_end]).unwrap();
+            //let archivedinternalnode: &ArchivedInternalNode<NVMChildBuffer<_>>  = unsafe { archived_root::<NVMInternalNode<NVMChildBuffer<R>>>(&data[12..len+12]) };
+            let meta_data: InternalNodeMetaData = archivedinternalnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+            let archivedinternalnodedata: &ArchivedInternalNodeData<_> = rkyv::check_archived_root::<InternalNodeData<R>>(&data[data_start..data_end]).unwrap();
+            //let archivedinternalnode: &ArchivedInternalNode<NVMChildBuffer<_>>  = unsafe { archived_root::<NVMInternalNode<NVMChildBuffer<R>>>(&data[12..len+12]) };
+            let data: InternalNodeData<_> = archivedinternalnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            
+            Ok(Node(NVMInternal (NVMInternalNode {
+                pool: Some(pool),
+                disk_offset: Some(_offset),
+                meta_data : meta_data,
+                data: Some(data),
+                meta_data_size: meta_data_len,
+                data_size: data_len,
+                data_start: data_start,
+                data_end: data_end,
+                node_size: size,
+                checksum: Some(checksum),                
+                need_to_load_data_from_nvm: true,
+                time_for_nvm_last_fetch: SystemTime::now(),
+                nvm_fetch_counter: 0,
+
+            }.complete_object_refs(d_id))))
+        } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
+            let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
+            let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
+
+            let meta_data_start = 4 + 8 + 8;
+            let meta_data_end = meta_data_start + meta_data_len;   
+
+            let data_start = meta_data_end;
+            let data_end = data_start + data_len;   
+
+            let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(&data[meta_data_start..meta_data_end]).unwrap();
+            //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
+            let meta_data:NVMLeafNodeMetaData = archivedleafnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+            let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
+            //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
+            let data:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+            let mut abc = NVMLeafNode {
+                pool: Some(pool),
+                disk_offset: Some(_offset),
+                meta_data : meta_data,
+                data : Some(data),
+                meta_data_size: meta_data_len,
+                data_size: data_len,
+                data_start: data_start,
+                data_end: data_end,
+                node_size: size,
+                checksum: Some(checksum),
+                need_to_load_data_from_nvm: true,
+                time_for_nvm_last_fetch: SystemTime::now(),
+                nvm_fetch_counter: 0,
+
+            };
+            //abc.load_missing_part();
+
+            debug!("NVMLeaf node packed successfully"); 
+            Ok(Node(NVMLeaf(abc)))
+        } else {
+            panic!("Unkown bytes to unpack. [0..4]: {}", u32::from_be_bytes(data[..4].try_into().unwrap()));
         }
     }
 
@@ -468,7 +553,8 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     }
 
     pub(super) fn empty_leaf() -> Self {
-        Node(Leaf(LeafNode::new()))
+        //Node(Leaf(LeafNode::new()))
+        Node(NVMLeaf(NVMLeafNode::new()))
     }
 
     pub(super) fn level(&self) -> u32 {

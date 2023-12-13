@@ -288,13 +288,20 @@ where
         let offset = op.offset();
         let generation = op.generation();
 
+        let mut bytes_to_read = op.size();
+        let meta_data_len = 0; //op.metadata_size();
+        if (meta_data_len != 0) {
+            bytes_to_read = Block::round_up_from_bytes(meta_data_len as u32);
+        }
+
         let compressed_data = self
             .pool
-            .read(op.size(), op.offset(), op.checksum().clone())?;
+            .read(bytes_to_read, op.offset(), op.checksum().clone())?;
 
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = decompression_state.decompress(&compressed_data)?;
+            let data = decompression_state.decompress(compressed_data)?;
             Object::unpack_at(
+                op.size(),
                 op.checksum().clone().into(),
                 self.pool.clone().into(),
                 op.offset(),
@@ -448,13 +455,14 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
+        let mut metadata_size = 0;
         let compression = &self.default_compression;
         let compressed_data = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
             let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
             {
-                object.pack(&mut buf)?;
+                object.pack(&mut state, &mut metadata_size)?;
                 drop(object);
             }
             state.finish(buf.into_buf())?
@@ -490,6 +498,7 @@ where
             decompression_tag: compression.decompression_tag(),
             generation,
             info,
+            metadata_size,
         };
 
         let was_present;
@@ -1051,6 +1060,7 @@ where
                 .new_decompression()?
                 .decompress(compressed_data)?;
             Object::unpack_at(
+                ptr.size(),
                 ptr.checksum().clone().into(),
                 self.pool.clone().into(),
                 ptr.offset(),

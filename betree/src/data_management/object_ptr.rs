@@ -19,6 +19,7 @@ pub struct ObjectPointer<D> {
     pub(super) size: Block<u32>,
     pub(super) info: DatasetId,
     pub(super) generation: Generation,
+    pub(super) metadata_size: usize,
 }
 
 impl<D> HasStoragePreference for ObjectPointer<D> {
@@ -52,6 +53,7 @@ impl<D: StaticSize> StaticSize for ObjectPointer<D> {
             + Generation::static_size()
             + <DiskOffset as StaticSize>::static_size()
             + Block::<u32>::static_size()
+            + std::mem::size_of::<usize>()
     }
 }
 
@@ -81,4 +83,9 @@ impl<D> ObjectPointer<D> {
     pub fn info(&self) -> DatasetId {
         self.info
     }
+
+    pub fn metadata_size(&self) -> usize {
+        self.metadata_size
+    }
+
 }

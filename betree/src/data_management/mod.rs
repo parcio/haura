@@ -111,9 +111,10 @@ pub trait HasStoragePreference {
 /// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
-    fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
+    fn pack<W: Write>(&self, writer: W, metadata_size: &mut usize) -> Result<(), io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at(
+        size: crate::vdev::Block<u32>,
         checksum: crate::checksum::XxHash,
         pool: RootSpu,
         disk_offset: DiskOffset,

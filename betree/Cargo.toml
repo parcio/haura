@@ -61,6 +61,7 @@ rand = { version = "0.8", features = ["std_rng"] }
 pmdk = { path = "./pmdk", optional = true }
 rustc-hash = "1.1.0"
 gxhash = "3.1.1"
+rkyv = { version = "0.7.43", features = ["validation"] }
 
 [dev-dependencies]
 rand_xorshift = "0.3"
