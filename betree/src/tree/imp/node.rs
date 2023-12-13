@@ -62,6 +62,8 @@ use std::iter::Map;
 
 trait CBIteratorTrait<'a, N> {
     fn get_iterator(&'a mut self) -> Box<dyn Iterator<Item = &'a mut N> + 'a>;
+    fn get_iterator2(&'a self) -> Box<dyn Iterator<Item = &'a  N> + 'a>;
+    fn get_iterator3(self) -> Box<dyn Iterator<Item = N> + 'a>;
 }
 
 impl<'a, N> CBIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>> {
@@ -69,6 +71,17 @@ impl<'a, N> CBIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>> {
         //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
         Box::new(self.iter_mut())
     }
+
+    fn get_iterator2(&'a self) -> Box<dyn Iterator<Item = &'a ChildBuffer<N>> + 'a> {
+        //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
+        Box::new(self.iter())
+    }
+
+    fn get_iterator3(self) -> Box<dyn Iterator<Item = ChildBuffer<N>> + 'a> {
+        //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
+        Box::new(self.into_iter())
+    }
+
 }
 
 impl<'a, N> CBIteratorTrait<'a, Option<NVMChildBuffer<N>>> for Vec<Option<NVMChildBuffer<N>>> {
@@ -76,12 +89,34 @@ impl<'a, N> CBIteratorTrait<'a, Option<NVMChildBuffer<N>>> for Vec<Option<NVMChi
         //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
         Box::new(self.iter_mut())
     }
+
+    fn get_iterator2(&'a self) -> Box<dyn Iterator<Item = &'a Option<NVMChildBuffer<N>>> + 'a> {
+        //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
+        Box::new(self.iter())
+    }
+
+    fn get_iterator3(self) -> Box<dyn Iterator<Item = Option<NVMChildBuffer<N>>> + 'a> {
+        //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
+        Box::new(self.into_iter())
+    }
+
 }
 
 pub(super) enum ChildBufferIterator<'a, N> {
     ChildBuffer(Option<Box<dyn Iterator<Item = &'a mut N> + 'a>>),
     NVMChildBuffer(Option<Box<dyn Iterator<Item = &'a mut N> + 'a>>),
 }
+
+pub(super) enum ChildBufferIterator3<'a, N> {
+    ChildBuffer(Option<Box<dyn Iterator<Item = N> + 'a>>),
+    NVMChildBuffer(Option<Box<dyn Iterator<Item = N> + 'a>>),
+}
+
+pub(super) enum ChildBufferIterator2<'a, N> {
+    ChildBuffer(Option<Box<dyn Iterator<Item = &'a RwLock<N>> + 'a>>),
+    NVMChildBuffer(Option<Box<dyn Iterator<Item = &'a RwLock<N>> + 'a>>),
+}
+
 
 /*pub(super) enum ChildBufferIterator<'a, N: 'static> {
     ChildBuffer(Option<Map<impl Iterator<Item = &'a mut ChildBuffer<N>>, fn(&'a mut ChildBuffer<N>) -> &'a mut ChildBuffer<N>>>),
@@ -263,7 +298,11 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         f(np)?;
                     }
                 },
-                ChildBufferIterator::NVMChildBuffer(obj) => unimplemented!(".."),
+                ChildBufferIterator::NVMChildBuffer(obj) => {
+                    for np in obj.unwrap().into_iter() {
+                        f(np)?;
+                    }
+                },
             }            
         }
         Ok(())
@@ -729,21 +768,40 @@ impl<N: HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn child_pointer_iter(&self) -> Option<impl Iterator<Item = &RwLock<N>> + '_>  where N: ObjectReference  {
+    pub(super) fn child_pointer_iter(&self) -> Option<ChildBufferIterator2<'_, N>>  where N: ObjectReference  {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref internal) => Some(internal.iter().map(|child| &child.node_pointer)),
+            Internal(ref internal) => {
+                
+                let a = Some(internal.iter().map(|child| &child.node_pointer));
+                let auto = ChildBufferIterator2::ChildBuffer(Some(Box::new(a.unwrap())));
+                Some(auto)
+            },
             NVMLeaf(ref nvmleaf) => None,
-            NVMInternal(ref nvminternal) => unimplemented!(""),// Some(nvminternal.iter().map(|child| &child.as_ref().unwrap().node_pointer)),
+            NVMInternal(ref nvminternal) => 
+            {
+                
+                let a = Some(nvminternal.iter().map(|child| &child.as_ref().unwrap().node_pointer));
+                let auto = ChildBufferIterator2::ChildBuffer(Some(Box::new(a.unwrap())));
+                Some(auto)
+            },//unimplemented!(""),// Some(nvminternal.iter().map(|child| &child.as_ref().unwrap().node_pointer)),
         }
     }
 
-    pub(super) fn drain_children(&mut self) -> Option<impl Iterator<Item = N> + '_>  where N: ObjectReference  {
+    pub(super) fn drain_children(&mut self) -> Option<ChildBufferIterator3<'_, N>>   where N: ObjectReference  {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => Some(internal.drain_children()),
+            Internal(ref mut internal) => {
+                let a = Some(internal.drain_children());
+                let auto = ChildBufferIterator3::ChildBuffer(Some(Box::new(a.unwrap())));
+                Some(auto)
+            },
             NVMLeaf(ref nvmleaf) => None,
-            NVMInternal(ref nvminternal) => unimplemented!(""), //Some(nvminternal.drain_children()),
+            NVMInternal(ref mut nvminternal) =>{
+                let a = Some(nvminternal.drain_children());
+                let auto = ChildBufferIterator3::NVMChildBuffer(Some(Box::new(a.unwrap())));
+                Some(auto)
+            }, //unimplemented!(""), //Some(nvminternal.drain_children()),
         }
     }
 }
