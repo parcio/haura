@@ -7,6 +7,11 @@ license = "MIT OR Apache-2.0"
 authors = ["Sajad Karim <sajad.karim@ovgu.de>", "Johannes Wünsche <johannes@spacesnek.rocks>"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-
 [build-dependencies]
-bindgen = "0.58.1"
+bindgen = "0.65"
+
+[dependencies]
+core_affinity = "0.8.0"
+
+[dev-dependencies]
+tempfile = "3.6.0"
