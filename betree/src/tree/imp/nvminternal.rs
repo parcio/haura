@@ -54,7 +54,7 @@ pub(super) struct NVMInternalNode<N: 'static> {
 
 impl<N> std::fmt::Debug for NVMInternalNode<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "sdf")
+        write!(f, "...")
     }
 }
 
@@ -123,24 +123,22 @@ static EMPTY_NODE: NVMInternalNode<()> = NVMInternalNode {
     data_end: 0,
     node_size: crate::vdev::Block(0),
     checksum: None,
-    need_to_load_data_from_nvm: true,
+    need_to_load_data_from_nvm: false,
     time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH, // SystemTime::::from(DateTime::parse_from_rfc3339("1996-12-19T16:39:57-00:00").unwrap()),
     nvm_fetch_counter: 0,
 };
 
 #[inline]
 fn internal_node_base_size() -> usize {
-    /*// NOTE: The overhead introduced by using `serialized_size` is negligible
-    // and only about 3ns, but we can use OnceCell once (🥁) it is available.
-    serialized_size(&EMPTY_NODE)
-        .expect("Known node layout could not be estimated. This is an error in bincode.")
-        // We know that this is valid as the maximum size in bytes is below u32
-        as usize*/
+    /* TODO: fix this
+    let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+    serializer_meta_data.serialize_value(&EMPTY_NODE.meta_data).unwrap();
+    let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
 
-    // let mut serializer = rkyv::ser::serializers::AllocSerializer::<0>::default();
-    // serializer.serialize_value(&EMPTY_NODE).unwrap();
-    // let bytes = serializer.into_serializer().into_inner();
-    // bytes.len()
+    let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+    serializer_data.serialize_value(&EMPTY_NODE.data).unwrap();
+    let bytes_data = serializer_data.into_serializer().into_inner();
+    */
     0
 }
 
@@ -150,6 +148,10 @@ impl<N: StaticSize> Size for NVMInternalNode<N> {
     }
 
     fn actual_size(&self) -> Option<usize> {
+        assert!(
+            !self.need_to_load_data_from_nvm,
+            "Some data for the NVMInternal node still has to be loaded into the cache."
+        );
         Some(
             internal_node_base_size()
                 + self.meta_data.pivot.iter().map(Size::size).sum::<usize>()
@@ -181,6 +183,11 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
 
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
+
+        assert!(
+            !self.need_to_load_data_from_nvm,
+            "Some data for the NVMInternal node still has to be loaded into the cache."
+        );
 
         for child in &self.data.as_ref().unwrap().children {
             pref.upgrade(child.as_ref().unwrap().correct_preference())
@@ -237,7 +244,7 @@ impl<N> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: true,
+            need_to_load_data_from_nvm: false,
             time_for_nvm_last_fetch: SystemTime::now(),
             nvm_fetch_counter: 0,
         }
@@ -260,6 +267,10 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
+        assert!(
+            !self.need_to_load_data_from_nvm,
+            "Some data for the NVMInternal node still has to be loaded into the cache."
+        );
         self.data.as_ref().unwrap().children.len()
     }
 
@@ -284,6 +295,12 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
+        panic!("TODO: Karim.. could find any caller to this method");
+        assert!(
+            !self.need_to_load_data_from_nvm,
+            "Some data for the NVMInternal node still has to be loaded into the cache."
+        );
+
         self.data.as_ref().unwrap().children.iter()
     }
 
@@ -291,6 +308,7 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
+        //TODO: Karim.. load remaining data...
         self.data.as_mut().unwrap().children.iter_mut()
     }
 
@@ -306,6 +324,11 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
+        panic!("..");
+        assert!(
+            !self.need_to_load_data_from_nvm,
+            "Some data for the NVMInternal node still has to be loaded into the cache."
+        );
         self.data
             .as_ref()
             .unwrap()
@@ -661,7 +684,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: true,
+            need_to_load_data_from_nvm: false,
             time_for_nvm_last_fetch: SystemTime::now(),
             nvm_fetch_counter: 0,
         };
@@ -1031,7 +1054,7 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
-                need_to_load_data_from_nvm: true,
+                need_to_load_data_from_nvm: self.need_to_load_data_from_nvm,
             }
         }
     }
@@ -1078,7 +1101,7 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
-                need_to_load_data_from_nvm: true,
+                need_to_load_data_from_nvm: false,
             }
         }
     }
@@ -1120,7 +1143,7 @@ mod tests {
         /*let size_before = node.size() as isize;
         let added_size = node.insert(key.0, keyinfo, msg.0, DefaultMessageAction);
         assert_eq!(size_before + added_size, node.size() as isize);*/
- //TODO: Sajad Kari, fix it
+        //TODO: Sajad Kari, fix it
 
         check_size(&mut node);
     }
@@ -1142,7 +1165,7 @@ mod tests {
             node.size() as isize,
             "size delta mismatch"
         );*/
- //Sajad Karim, fix it
+        //Sajad Karim, fix it
 
         check_size(&mut node);
     }
@@ -1221,7 +1244,7 @@ mod tests {
         check_size(&mut node);
         check_size(&mut right_sibling);
         */
- //Sajad Karim ,fix the issue
+        //Sajad Karim ,fix the issue
 
         TestResult::passed()
     }
@@ -1243,7 +1266,7 @@ mod tests {
         node.data.children.append(&mut right_sibling.data.children);
 
         assert_eq!(node, twin);*/
- //Sajad Karim ,fix the issue
+        //Sajad Karim ,fix the issue
 
         TestResult::passed()
     }
@@ -1257,7 +1280,7 @@ mod tests {
         assert!(node.fanout() >= 2);
         assert!(right_sibling.fanout() >= 2);
         assert_eq!(LocalPivotKey::Right(pivot), pivot_key);*/
- //Sajad Karim, fix the issue
+        //Sajad Karim, fix the issue
         TestResult::passed()
     }
 

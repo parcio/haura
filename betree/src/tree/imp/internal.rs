@@ -1,7 +1,7 @@
 //! Implementation of the [InternalNode] node type.
 use super::{
     child_buffer::ChildBuffer,
-    node::{PivotGetMutResult, PivotGetResult,TakeChildBufferWrapper, ChildBufferWrapper, ChildBufferWrapperStruct},
+    node::{PivotGetMutResult, PivotGetResult,TakeChildBufferWrapper},
     PivotKey,
 };
 use crate::{
@@ -175,7 +175,7 @@ impl<N> InternalNode<N> {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
         self.children.iter_mut()
     }
-
+/*
     pub fn iter_mut_nvm(&mut self) -> ChildBufferWrapperStruct<'_, N> where N: ObjectReference {
     /*pub fn iter_mut_nvm(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
         let auto = ChildBufferWrapper::ChildBuffer(self.children.iter_mut());
@@ -189,7 +189,7 @@ impl<N> InternalNode<N> {
         //self.children.iter_mut()
         unimplemented!("..")
     }
-
+*/
     pub fn iter_with_bounds(
         &self,
     ) -> impl Iterator<Item = (Option<&CowBytes>, &ChildBuffer<N>, Option<&CowBytes>)> + '_  where N: ObjectReference{

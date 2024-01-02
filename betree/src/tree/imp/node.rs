@@ -130,7 +130,7 @@ pub(super) enum ChildBufferIterator2<'a, N> {
 //    std::option::Option<std::iter::Map<impl Iterator<Item = &mut std::option::Option<NVMChildBuffer<N>>> + '_
 }*/
 
-
+/*
 pub(super) enum ChildBufferWrapper<'a, N: 'static> {
     ChildBuffer(core::slice::IterMut<'a, ChildBuffer<N>>),
     NVMChildBuffer(core::slice::IterMut<'a, NVMChildBuffer<N>>),
@@ -151,7 +151,7 @@ impl<'a, N> Iterator for ChildBufferWrapperStruct<'a, N> {
         }
     }
 }
-
+*/
 #[derive(Debug)]
 enum NodeInnerType {
     Packed = 1,
@@ -263,7 +263,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 writer.write_all(&bytes_meta_data.as_ref())?;
                 writer.write_all(&bytes_data.as_ref())?;
 
-                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len();
+                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len();//TODO: fix this
+
 
                 debug!("NVMInternal node packed successfully"); 
 
@@ -286,8 +287,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // recalculates the correct storage_preference for the contained keys.
             Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
-            panic!("............................................UN..INTERNAL");
-
             let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
 
@@ -309,7 +308,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 pool: Some(pool),
                 disk_offset: Some(_offset),
                 meta_data : meta_data,
-                data: Some(data),
+                data: None,//Some(data),
                 meta_data_size: meta_data_len,
                 data_size: data_len,
                 data_start: data_start,
@@ -322,8 +321,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
             }.complete_object_refs(d_id))))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
-            panic!(".............................................UN.LEAF");
-
             let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
 
@@ -337,11 +334,13 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
             let meta_data:NVMLeafNodeMetaData = archivedleafnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
+            
             let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
             //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
             let data:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            
 
-            let mut abc = NVMLeafNode {
+            let mut nvmleaf = NVMLeafNode {
                 pool: Some(pool),
                 disk_offset: Some(_offset),
                 meta_data : meta_data,
@@ -352,15 +351,15 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),
-                need_to_load_data_from_nvm: true,
+                need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::now(),
                 nvm_fetch_counter: 0,
 
             };
-            //abc.load_missing_part();
+            //nvmleaf.load_missing_part();
 
             debug!("NVMLeaf node packed successfully"); 
-            Ok(Node(NVMLeaf(abc)))
+            Ok(Node(NVMLeaf(nvmleaf)))
         } else {
             panic!("Unkown bytes to unpack. [0..4]: {}", u32::from_be_bytes(data[..4].try_into().unwrap()));
         }
