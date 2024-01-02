@@ -64,8 +64,6 @@ impl<N: ObjectReference> ArchiveWith<RwLock<N>> for EncodeNodePointer {
 impl<N: ObjectReference, S: ScratchSpace + Serializer + ?Sized> SerializeWith<RwLock<N>, S> for EncodeNodePointer 
 where <S as Fallible>::Error: std::fmt::Debug {
     fn serialize_with(field: &RwLock<N>, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
-        unimplemented!("TODO..");
-        /*
         let mut serialized_data = Vec::new();
         match field.read().serialize_unmodified(&mut serialized_data){
             Ok(data) => debug!("Successfully serialized childbuffer's node_pointer"),
@@ -75,18 +73,15 @@ where <S as Fallible>::Error: std::fmt::Debug {
             len: serialized_data.len(),
             inner: ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)?,
         })
-        */
     }
 }
 
 impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, RwLock<N>, D> for EncodeNodePointer {
     fn deserialize_with(field: &Archived<Vec<u8>>, _: &mut D) -> Result<RwLock<N>, D::Error> {
-        unimplemented!("TODO..");
-        /*
         match <N as ObjectReference>::deserialize_and_set_unmodified(field.as_slice()) {
             Ok(obj) => Ok(RwLock::new(obj)) ,
             Err(e) => panic!("Failed to deserialize childbuffer's node_pointer"),
-        }*/
+        }
     }
 }
 

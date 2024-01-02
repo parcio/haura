@@ -513,6 +513,8 @@ where
         let added_size = node.insert(key, msg, self.msg_action(), op_preference);
         node.add_size(added_size);
 
+        // TODO: Load all remaining data for NVM.... becase root_needs_merge iterates through all the children.. Also it just looks for children.len().. should keep this data in metadata as well?
+        
         if parent.is_none() && node.root_needs_merge() {
             // TODO Merge, this is not implemented with the 'rebalance_tree'
             // method. Since the root has a fanout of 1 at this point, merge all

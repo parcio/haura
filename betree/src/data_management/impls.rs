@@ -74,6 +74,29 @@ where
             ObjRef::Unmodified(_, pk) | ObjRef::Modified(_, pk) | ObjRef::InWriteback(_, pk) => pk,
         }
     }
+
+    fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
+
+        if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
+
+            bincode::serialize_into(w, p)
+                    .map_err(|e| {
+                        debug!("Failed to serialize ObjectPointer.");
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+                    })?;
+        }
+        Ok(())
+    }
+
+    fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
+        match bincode::deserialize::<ObjectPointer<D>>(bytes) {
+            Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
+            Err(e) => {
+                debug!("Failed to deserialize ObjectPointer.");
+                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+            )},
+        }
+    }
 }
 
 impl<D> ObjRef<ObjectPointer<D>> {
