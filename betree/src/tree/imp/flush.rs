@@ -224,7 +224,24 @@ where
                     // 1.2. If successful we flush in the following steps to this node.
                     Ok(selected_child_buffer) => selected_child_buffer,
                 };
-            let mut child = self.get_mut_node(child_buffer.node_pointer_mut())?;
+
+                let mut child;
+
+            let auto ;
+            match child_buffer.node_pointer_mut() {
+                TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                    println!("2...........................................");
+                    auto = obj.as_mut().unwrap().node_pointer_mut();
+                    child = self.get_mut_node(auto)?;
+                },
+                TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                    let (a,b) = obj.as_mut().unwrap().node_pointer_mut();
+                    child = self.get_mut_node(&mut a.write().as_mut().unwrap().as_mut().unwrap().children[b].as_mut().unwrap().node_pointer)?;
+                },
+            };
+
+
+            
             // 2. Iterate down to child if too large
             if !child.is_leaf() && child.is_too_large() {
                 warn!("Aborting flush, child is too large already");
