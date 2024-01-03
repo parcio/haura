@@ -58,7 +58,7 @@ where S: StoragePoolLayer + 'static*/
     pub pool: Option<RootSpu>,
     pub disk_offset: Option<DiskOffset>,
     pub meta_data: NVMLeafNodeMetaData,
-    pub data: Option<NVMLeafNodeData>,
+    pub data: std::sync::Arc<std::sync::RwLock<Option<NVMLeafNodeData>>>,//Option<NVMLeafNodeData>,
     //pub data: NVMLeafNodeData,
     pub meta_data_size: usize,
     pub data_size: usize,
@@ -128,7 +128,7 @@ where S: StoragePoolLayer + 'static*/
     fn actual_size(&self) -> Option<usize> {
         Some(
             packed::HEADER_FIXED_LEN
-                + self.data.as_ref().unwrap()
+                + self.data.read().as_ref().unwrap().as_ref().unwrap()
                     .entries
                     .iter()
                     .map(|(key, (_keyinfo, value))| packed::ENTRY_LEN + key.len() + value.len())
@@ -148,7 +148,7 @@ impl HasStoragePreference for NVMLeafNode
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        for (keyinfo, _v) in self.data.as_ref().unwrap().entries.values() {
+        for (keyinfo, _v) in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.values() {
             pref.upgrade(keyinfo.storage_preference);
         }
 
@@ -216,9 +216,9 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
                 system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
                 entries_size
             },
-            data: Some(NVMLeafNodeData { 
+            data: std::sync::Arc::new(std::sync::RwLock::new(Some(NVMLeafNodeData { 
                 entries: entries
-            }),
+            }))),
             meta_data_size: 0,
             data_size: 0,
             data_start: 0,
@@ -245,9 +245,9 @@ impl NVMLeafNode
                 system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
                 entries_size: 0,
             },
-            data: Some(NVMLeafNodeData { 
+            data: std::sync::Arc::new(std::sync::RwLock::new(Some(NVMLeafNodeData { 
                 entries: BTreeMap::new()
-            }),
+            }))),
             meta_data_size: 0,
             data_size: 0,
             data_start: 0,
@@ -260,9 +260,9 @@ impl NVMLeafNode
         }
     }    
 
-    pub(in crate::tree) fn load_all_entries(&mut self) -> Result<(), std::io::Error> {
+    pub(in crate::tree) fn load_all_entries(&self) -> Result<(), std::io::Error> {
         if self.need_to_load_data_from_nvm && self.disk_offset.is_some() {
-            self.need_to_load_data_from_nvm = false; // TODO: What if all the entries are fetched one by one? handle this part as well.
+            //self.need_to_load_data_from_nvm = false; // TODO: What if all the entries are fetched one by one? handle this part as well.
             let compressed_data = self.pool.as_ref().unwrap().read(self.node_size, self.disk_offset.unwrap(), self.checksum.unwrap());
             match compressed_data {
                 Ok(buffer) => {
@@ -271,7 +271,11 @@ impl NVMLeafNode
                     let archivedleafnodedata: &ArchivedNVMLeafNodeData = rkyv::check_archived_root::<NVMLeafNodeData>(&bytes[self.data_start..self.data_end]).unwrap();
                     let node:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-                    self.data = Some(node);
+                    if let Ok(mut _data) = self.data.write()
+                    {
+                     *_data = Some(node);
+                    }
+
                     return Ok(());
                 },
                 Err(e) => {
@@ -284,24 +288,30 @@ impl NVMLeafNode
     }
 
     pub(in crate::tree) fn set_data(&mut self, obj: NVMLeafNodeData) {
-        self.data = Some(obj);
+        self.data = std::sync::Arc::new(std::sync::RwLock::new(Some(obj)));
     }
 
     /// Returns the value for the given key.
     pub fn get(&self, key: &[u8]) -> Option<SlicedCowBytes> {
-        self.data.as_ref().unwrap().entries.get(key).map(|(_info, data)| data).cloned()
+        self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).map(|(_info, data)| data).cloned()
     }
 
     pub(in crate::tree) fn get_with_info(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
-        self.data.as_ref().unwrap().entries.get(key).cloned()
+        self.load_all_entries();
+        self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).cloned()
     }
 
-    pub(in crate::tree) fn entries(&self) -> &BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
-        &self.data.as_ref().unwrap().entries
+    pub(in crate::tree) fn entries(&self) -> &std::sync::Arc<std::sync::RwLock<Option<NVMLeafNodeData>>> {
+        self.load_all_entries();
+        &self.data
     }
+    // pub(in crate::tree) fn entries(&self) -> &BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
+    //     &self.data.read().as_ref().unwrap().as_ref().unwrap().entries
+    // }
 
     pub(in crate::tree) fn entry_info(&mut self, key: &[u8]) -> Option<&mut KeyInfo> {
-        self.data.as_mut().unwrap().entries.get_mut(key).map(|e| &mut e.0)
+        unimplemented!("seems to be an orpahn method!")
+        //self.data.write().as_mut().unwrap().as_mut().unwrap().entries.get_mut(key).map(|e| &mut e.0)
     }
 
     /// Split the node and transfer entries to a given other node `right_sibling`.
@@ -319,7 +329,7 @@ impl NVMLeafNode
         let mut sibling_size = 0;
         let mut sibling_pref = StoragePreference::NONE;
         let mut split_key = None;
-        for (k, (keyinfo, v)) in self.data.as_ref().unwrap().entries.iter().rev() {
+        for (k, (keyinfo, v)) in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.iter().rev() {
             sibling_size += packed::ENTRY_LEN + k.len() + v.len();
             sibling_pref.upgrade(keyinfo.storage_preference);
 
@@ -330,7 +340,7 @@ impl NVMLeafNode
         }
         let split_key = split_key.unwrap();
 
-        right_sibling.data.as_mut().unwrap().entries = self.data.as_mut().unwrap().entries.split_off(&split_key);
+        right_sibling.data.write().as_mut().unwrap().as_mut().unwrap().entries = self.data.write().as_mut().unwrap().as_mut().unwrap().entries.split_off(&split_key);
         self.meta_data.entries_size -= sibling_size;
         right_sibling.meta_data.entries_size = sibling_size;
         right_sibling.meta_data.storage_preference.set(sibling_pref);
@@ -340,7 +350,7 @@ impl NVMLeafNode
 
         let size_delta = -(sibling_size as isize);
 
-        let pivot_key = self.data.as_ref().unwrap().entries.keys().next_back().cloned().unwrap();
+        let pivot_key = self.data.read().as_ref().unwrap().as_ref().unwrap().entries.keys().next_back().cloned().unwrap();
         (pivot_key, size_delta)
     }
 
@@ -349,7 +359,7 @@ impl NVMLeafNode
         K: Borrow<[u8]>,
     {
         self.meta_data.storage_preference.invalidate();
-        self.data.as_mut().unwrap().entries.get_mut(key.borrow()).map(|entry| {
+        self.data.write().as_mut().unwrap().as_mut().unwrap().entries.get_mut(key.borrow()).map(|entry| {
             entry.0.storage_preference = pref;
             entry.0.clone()
         })
@@ -380,7 +390,7 @@ impl NVMLeafNode
             self.meta_data.storage_preference.upgrade(keyinfo.storage_preference);
 
             if let Some((old_info, old_data)) =
-                self.data.as_mut().unwrap().entries.insert(key.into(), (keyinfo.clone(), data))
+                self.data.write().as_mut().unwrap().as_mut().unwrap().entries.insert(key.into(), (keyinfo.clone(), data))
             {
                 // There was a previous value in entries, which was now replaced
                 self.meta_data.entries_size -= old_data.len();
@@ -394,7 +404,7 @@ impl NVMLeafNode
                 self.meta_data.entries_size += packed::ENTRY_LEN;
                 self.meta_data.entries_size += key_size;
             }
-        } else if let Some((old_info, old_data)) = self.data.as_mut().unwrap().entries.remove(key.borrow()) {
+        } else if let Some((old_info, old_data)) = self.data.write().as_mut().unwrap().as_mut().unwrap().entries.remove(key.borrow()) {
             // The value was removed by msg, this may be a downgrade opportunity.
             // The preference of the removed entry can't be stricter than the current node
             // preference, by invariant. That leaves "less strict" and "as strict" as the
@@ -449,9 +459,9 @@ impl NVMLeafNode
                 system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
                 entries_size: 0
             },
-            data: Some(NVMLeafNodeData { 
+            data:  std::sync::Arc::new(std::sync::RwLock::new(Some(NVMLeafNodeData { 
                 entries: BTreeMap::new()
-            }),
+            }))),
             meta_data_size: 0,
             data_size: 0,
             data_start: 0,
@@ -479,7 +489,7 @@ impl NVMLeafNode
     /// the size change, positive for the left node, negative for the right
     /// node.
     pub fn merge(&mut self, right_sibling: &mut Self) -> isize {
-        self.data.as_mut().unwrap().entries.append(&mut right_sibling.data.as_mut().unwrap().entries);
+        self.data.write().as_mut().unwrap().as_mut().unwrap().entries.append(&mut right_sibling.data.write().as_mut().unwrap().as_mut().unwrap().entries);
         let size_delta = right_sibling.meta_data.entries_size;
         self.meta_data.entries_size += right_sibling.meta_data.entries_size;
 
