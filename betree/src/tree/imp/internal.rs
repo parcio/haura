@@ -753,31 +753,6 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, N> {
     }
 }
 
-impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
-    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N>  where N: ObjectReference{
-        match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                obj.as_mut().unwrap().node_pointer_mut()
-            },
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                obj.as_mut().unwrap().node_pointer_mut()
-            },
-        }
-
-    }
-    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) where N: ObjectReference{
-        match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                obj.as_mut().unwrap().take_buffer()
-            },
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                obj.as_mut().unwrap().take_buffer()
-            },
-        }
-
-    }
-}
-
 #[cfg(test)]
 mod tests {
     

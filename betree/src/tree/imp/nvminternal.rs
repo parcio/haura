@@ -213,6 +213,46 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
     }
 }
 
+impl<N: ObjectReference> NVMInternalNode<N> {
+    pub(in crate::tree) fn load_all_data(&mut self) -> Result<(), std::io::Error> {
+        // This method ensures the data part is fully loaded before performing an operation that requires all the entries.
+        // However, a better approach can be to load the pairs that are required (so it is a TODO!)
+        // Also since at this point I am loading all the data so assuming that 'None' suggests all the data is already fetched.
+        if self.need_to_load_data_from_nvm && self.disk_offset.is_some() {
+            self.need_to_load_data_from_nvm = false;
+            let compressed_data = self.pool.as_ref().unwrap().read(
+                self.node_size,
+                self.disk_offset.unwrap(),
+                self.checksum.unwrap(),
+            );
+            match compressed_data {
+                Ok(buffer) => {
+                    let bytes: Box<[u8]> = buffer.into_boxed_slice();
+
+                    let archivedinternalnodedata: &ArchivedInternalNodeData<_> =
+                        rkyv::check_archived_root::<InternalNodeData<N>>(
+                            &bytes[self.data_start..self.data_end],
+                        )
+                        .unwrap();
+
+                    let node: InternalNodeData<_> = archivedinternalnodedata
+                        .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+                    self.data = Some(node);
+
+                    return Ok(());
+                }
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl<N> NVMInternalNode<N> {
     pub fn new(
         left_child: NVMChildBuffer<N>,
@@ -324,7 +364,6 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
-        panic!("..");
         assert!(
             !self.need_to_load_data_from_nvm,
             "Some data for the NVMInternal node still has to be loaded into the cache."
@@ -497,6 +536,8 @@ impl<N> NVMInternalNode<N> {
         M: MessageAction,
         N: ObjectReference,
     {
+        self.load_all_data();
+
         self.meta_data.pref.invalidate();
         let idx = self.idx(key.borrow());
 

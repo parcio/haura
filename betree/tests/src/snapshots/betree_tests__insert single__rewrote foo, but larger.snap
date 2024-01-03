@@ -3526,7 +3526,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": null,
         "pivot_key": {
@@ -3557,7 +3557,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 0017",
         "pivot_key": {
@@ -3588,7 +3588,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 002F",
         "pivot_key": {
@@ -3619,7 +3619,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 0047",
         "pivot_key": {
@@ -3650,7 +3650,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 005F",
         "pivot_key": {
@@ -3681,7 +3681,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 0077",
         "pivot_key": {
@@ -3712,7 +3712,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 008F",
         "pivot_key": {
@@ -3743,7 +3743,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 00A7",
         "pivot_key": {
@@ -3774,7 +3774,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 00BF",
         "pivot_key": {
@@ -3805,7 +3805,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 00D7",
         "pivot_key": {
@@ -3836,7 +3836,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "leaf"
+          "type": "nvmleaf"
         },
         "from": "0000 0000 0000 0000 0000 00EF",
         "pivot_key": {
@@ -3865,6 +3865,6 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
     "level": 1,
     "storage": 0,
     "system_storage": 254,
-    "type": "internal"
+    "type": "nvminternal"
   }
 }

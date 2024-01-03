@@ -260,6 +260,29 @@ impl NVMLeafNode
         }
     }    
 
+    pub(in crate::tree) fn load_all_entries(&mut self) -> Result<(), std::io::Error> {
+        if self.need_to_load_data_from_nvm && self.disk_offset.is_some() {
+            self.need_to_load_data_from_nvm = false; // TODO: What if all the entries are fetched one by one? handle this part as well.
+            let compressed_data = self.pool.as_ref().unwrap().read(self.node_size, self.disk_offset.unwrap(), self.checksum.unwrap());
+            match compressed_data {
+                Ok(buffer) => {
+                    let bytes: Box<[u8]> = buffer.into_boxed_slice();
+
+                    let archivedleafnodedata: &ArchivedNVMLeafNodeData = rkyv::check_archived_root::<NVMLeafNodeData>(&bytes[self.data_start..self.data_end]).unwrap();
+                    let node:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+                    self.data = Some(node);
+                    return Ok(());
+                },
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub(in crate::tree) fn set_data(&mut self, obj: NVMLeafNodeData) {
         self.data = Some(obj);
     }
@@ -344,6 +367,8 @@ impl NVMLeafNode
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
+        self.load_all_entries();
+        
         let size_before = self.meta_data.entries_size as isize;
         let key_size = key.borrow().len();
         let mut data = self.get(key.borrow());
