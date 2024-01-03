@@ -258,6 +258,28 @@ where
                 Some(PivotGetResult::Target(Some(np))) => break Some(self.get_node(np)?),
                 Some(PivotGetResult::Target(None)) => break Some(node),
                 Some(PivotGetResult::NextNode(np)) => self.get_node(np)?,
+                Some(PivotGetResult::NVMTarget{np, idx}) => {
+                    if let Ok(data) = np.read() {
+                        let child;
+                        if pivot.is_left() {
+                            child = &data.as_ref().unwrap().children[idx];
+                        } else {
+                            child = &data.as_ref().unwrap().children[idx + 1];
+                        }
+
+                        break Some((self.get_node(&child.as_ref().unwrap().node_pointer))?)
+                    } else {
+                        unimplemented!("unexpected behaviour!")
+                    }
+                },
+                Some(PivotGetResult::NVMNextNode {np, idx}) => {
+                    if let Ok(data) = np.read() {
+                        let child = &data.as_ref().unwrap().children[idx];
+                        self.get_node(&child.as_ref().unwrap().node_pointer)?
+                    } else {
+                        unimplemented!("unexpected behaviour!")
+                    }
+                },
                 None => break None,
             };
             node = next_node;
@@ -277,6 +299,51 @@ where
                 }
                 Some(PivotGetMutResult::Target(None)) => break Some(node),
                 Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
+                Some(PivotGetMutResult::NVMTarget {
+                    idx,
+                    first_bool,
+                    second_bool,
+                    np,
+                }) => {
+                    match (first_bool, second_bool) {
+                        (true, true) => {
+                            if let Ok(mut data) = np.write() {
+                                break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?)
+                            } else {
+                                unimplemented!("..")                                
+                            }
+                        }
+                        (true, false) => {
+                            if let Ok(mut data) = np.write() {
+                                break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx + 1].as_mut().unwrap().node_pointer.get_mut())?)
+                            } else {
+                                unimplemented!("..")                                
+                            }
+                        }
+                        (false, _) => {
+                            unimplemented!("..")      // Hint... merge the calls.                          
+                        }
+                    }
+                },
+                Some(PivotGetMutResult::NVMNextNode {
+                    idx,
+                    first_bool,
+                    second_bool,
+                    np
+                }) => {
+                    match (first_bool, second_bool) {
+                        (false, _) => {
+                            if let Ok(mut data) = np.write() {
+                                break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?)
+                            } else {
+                                unimplemented!("..")                                
+                            }
+                        }
+                        (true, _) => {
+                            unimplemented!("..")      // Hint... merge the calls.                          
+                        }
+                    }
+                },
                 None => break None,
             };
             node = next_node;
@@ -385,6 +452,16 @@ where
             let next_node = match node.get(key, &mut msgs) {
                 GetResult::NextNode(np) => self.get_node(np)?,
                 GetResult::Data(data) => break data,
+                GetResult::NVMNextNode {
+                    child_np,
+                    idx
+                } => {
+                    if let Ok(data) = child_np.read() {
+                        self.get_node(&data.as_ref().unwrap().children[idx].as_ref().unwrap().node_pointer)?
+                    } else { 
+                        unimplemented!("..")
+                    }
+                },
             };
             node = next_node;
         };
@@ -425,6 +502,16 @@ where
                 ApplyResult::NextNode(np) => self.get_mut_node_mut(np)?,
                 ApplyResult::Leaf(info) => break info,
                 ApplyResult::NVMLeaf(info) => break info,
+                ApplyResult::NVMNextNode {
+                    node,
+                    idx
+                } => {
+                    if let Ok(mut data) = node.write() {
+                        self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?
+                    } else {
+                        unimplemented!("")
+                    }
+                },
             };
             node = next_node;
         });
@@ -474,7 +561,24 @@ where
             loop {
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-                        if let Some(child) = self.try_get_mut_node(child_buffer.node_pointer_mut())
+
+
+
+                        let mut auto;
+                        match child_buffer.node_pointer_mut() {
+                            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                                println!("2...........................................");
+                                auto = self.try_get_mut_node(obj.as_mut().unwrap().node_pointer_mut());
+                            },
+                            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                                let (a,b) = obj.as_mut().unwrap().node_pointer_mut();
+                                auto = self.try_get_mut_node(&mut a.write().as_mut().unwrap().as_mut().unwrap().children[b].as_mut().unwrap().node_pointer);
+                            },
+                        };
+
+
+
+                        if let Some(child) = auto
                         {
                             node = child;
                             parent = Some(child_buffer);

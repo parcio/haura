@@ -200,6 +200,38 @@ where
                         }
                         self.get_node(np)?
                     }
+                    GetRangeResult::NVMNextNode {
+                        prefetch_option,
+                        np,
+                    } => {
+                        let previous_prefetch = if let Some(prefetch_np) = prefetch_option {
+                            let idx = prefetch_np.1;
+
+                            if let Ok(data) = prefetch_np.0.read() {
+                                let auto = data.as_ref().unwrap().children.get(idx).map(|child| &child.as_ref().unwrap().node_pointer);
+
+                                let f = self.dml.prefetch(&auto.unwrap().read())?;
+                                replace(prefetch, f)
+                            } else {
+                                prefetch.take() //this should never occur!
+                            }
+                        } else {
+                            prefetch.take()
+                        };
+
+                        if let Some(previous_prefetch) = previous_prefetch {
+                            self.dml.finish_prefetch(previous_prefetch)?;
+                        }
+
+                        if let Ok(nvmdata) = np.read()
+                        {
+                            let ref _np = nvmdata.as_ref().unwrap().children[0].as_ref().unwrap().node_pointer;
+                
+                            self.get_node(_np)?
+                        } else {
+                            unimplemented!("should not happen!");
+                        }
+                    }
                     GetRangeResult::NVMData {
                         np
                     } => {
