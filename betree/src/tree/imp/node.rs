@@ -269,7 +269,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
 
                 let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-                serializer_data.serialize_value(leaf.data.as_ref().unwrap()).unwrap();
+                serializer_data.serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
                 let bytes_data = serializer_data.into_serializer().into_inner();
 
                 writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
@@ -389,14 +389,14 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 pool: Some(pool),
                 disk_offset: Some(_offset),
                 meta_data : meta_data,
-                data : Some(data),
+                data : std::sync::Arc::new(std::sync::RwLock::new(None)),//Some(data),
                 meta_data_size: meta_data_len,
                 data_size: data_len,
                 data_start: data_start,
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),
-                need_to_load_data_from_nvm: false,
+                need_to_load_data_from_nvm: true, //false,
                 time_for_nvm_last_fetch: SystemTime::now(),
                 nvm_fetch_counter: 0,
 
@@ -740,6 +740,9 @@ pub(super) enum PivotGetMutResult<'a, N: 'a> {
 
 pub(super) enum GetRangeResult<'a, T, N: 'a> {
     Data(T),
+    NVMData {
+        np: &'a std::sync::Arc<std::sync::RwLock<Option<NVMLeafNodeData>>>,
+    },
     NextNode {
         np: &'a RwLock<N>,
         prefetch_option: Option<&'a RwLock<N>>,
@@ -799,9 +802,12 @@ impl<N: HasStoragePreference> Node<N> {
                     np,
                 }
             },
-            NVMLeaf(ref nvmleaf) => GetRangeResult::Data(Box::new(
-                nvmleaf.entries().iter().map(|(k, v)| (&k[..], v.clone())),
-            )),
+            NVMLeaf(ref nvmleaf) => {
+                let np = nvmleaf.entries();
+                GetRangeResult::NVMData {
+                    np
+                }
+            },
             NVMInternal(ref nvminternal) => {
                 let prefetch_option = if nvminternal.level() == 1 {
                     nvminternal.get_next_node(key)
@@ -1204,7 +1210,7 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
                 storage: self.correct_preference(),
                 system_storage: self.system_storage_preference(),
                 level: self.level(),
-                entry_count: nvmleaf.entries().len(),
+                entry_count: nvmleaf.entries().read().as_ref().unwrap().as_ref().unwrap().entries.len(),
             },
             NVMInternal(ref nvminternal) => NodeInfo::NVMInternal {
                 storage: self.correct_preference(),

@@ -200,6 +200,24 @@ where
                         }
                         self.get_node(np)?
                     }
+                    GetRangeResult::NVMData {
+                        np
+                    } => {
+                        if let Ok(nvmdata) = np.read()
+                        {
+                            let ref auto = nvmdata.as_ref().unwrap().entries;
+                            let range = auto.iter().map(|(k, v)| (&k[..], v.clone()));
+
+                            self.apply_messages(
+                                &left_pivot_key,
+                                &right_pivot_key,
+                                messages,
+                                range,
+                                data,
+                            );
+                        };
+                        break Ok(right_pivot_key);
+                    }
                     GetRangeResult::Data(leaf_entries) => {
                         self.apply_messages(
                             &left_pivot_key,
