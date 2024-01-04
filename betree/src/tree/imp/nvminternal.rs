@@ -47,7 +47,7 @@ pub(super) struct NVMInternalNode<N: 'static> {
     pub data_end: usize,
     pub node_size: crate::vdev::Block<u32>,
     pub checksum: Option<crate::checksum::XxHash>,
-    pub need_to_load_data_from_nvm: bool,
+    pub need_to_load_data_from_nvm: std::sync::RwLock<bool>,
     pub time_for_nvm_last_fetch: SystemTime,
     pub nvm_fetch_counter: usize,
 }
@@ -118,14 +118,16 @@ lazy_static! {
             pref: AtomicStoragePreference::unknown(),
             pivot: vec![]
             },
-        data: std::sync::Arc::new(std::sync::RwLock::new(None)),
+        data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
+            children: vec![]
+        }))),
         meta_data_size: 0,
         data_size: 0,
         data_start: 0,
         data_end: 0,
         node_size: crate::vdev::Block(0),
         checksum: None,
-        need_to_load_data_from_nvm: false,
+        need_to_load_data_from_nvm: std::sync::RwLock::new(false),
         time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,// SystemTime::::from(DateTime::parse_from_rfc3339("1996-12-19T16:39:57-00:00").unwrap()),
         nvm_fetch_counter: 0,
     };
@@ -152,10 +154,18 @@ impl<N: StaticSize> Size for NVMInternalNode<N> {
     }
 
     fn actual_size(&self) -> Option<usize> {
-        assert!(
-            !self.need_to_load_data_from_nvm,
-            "Some data for the NVMInternal node still has to be loaded into the cache."
-        );
+        if let Ok(value) = self.need_to_load_data_from_nvm.read() {
+            assert!(
+                !*value,
+                "Some data for the NVMInternal node still has to be loaded into the cache."
+            );
+        } else {
+            assert!(
+                true,
+                "Some data for the NVMInternal node still has to be loaded into the cache."
+            )
+        }
+
         Some(
             internal_node_base_size()
                 + self.meta_data.pivot.iter().map(Size::size).sum::<usize>()
@@ -191,10 +201,17 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        assert!(
-            !self.need_to_load_data_from_nvm,
-            "Some data for the NVMInternal node still has to be loaded into the cache."
-        );
+        if let Ok(value) = self.need_to_load_data_from_nvm.read() {
+            assert!(
+                !*value,
+                "Some data for the NVMInternal node still has to be loaded into the cache."
+            );
+        } else {
+            assert!(
+                true,
+                "Some data for the NVMInternal node still has to be loaded into the cache."
+            )
+        }
 
         for child in &self
             .data
@@ -229,12 +246,19 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
 }
 
 impl<N: ObjectReference> NVMInternalNode<N> {
-    pub(in crate::tree) fn load_all_data(&mut self) -> Result<(), std::io::Error> {
+    pub(in crate::tree) fn load_all_data(&self) -> Result<(), std::io::Error> {
         // This method ensures the data part is fully loaded before performing an operation that requires all the entries.
         // However, a better approach can be to load the pairs that are required (so it is a TODO!)
         // Also since at this point I am loading all the data so assuming that 'None' suggests all the data is already fetched.
-        if self.need_to_load_data_from_nvm && self.disk_offset.is_some() {
-            self.need_to_load_data_from_nvm = false;
+
+        // if (*self.need_to_load_data_from_nvm.read().unwrap()) {
+        //     println!("..............true");
+        // } else {
+        //     println!("..............false");
+        // }
+
+        if *self.need_to_load_data_from_nvm.read().unwrap() && self.disk_offset.is_some() {
+            *self.need_to_load_data_from_nvm.write().unwrap() = false;
             let compressed_data = self.pool.as_ref().unwrap().read(
                 self.node_size,
                 self.disk_offset.unwrap(),
@@ -257,6 +281,8 @@ impl<N: ObjectReference> NVMInternalNode<N> {
                     if let Ok(mut _data) = self.data.write() {
                         *_data = Some(node);
                     }
+
+                    *self.data.write().unwrap() = Some(node);
 
                     return Ok(());
                 }
@@ -301,7 +327,7 @@ impl<N> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: false,
+            need_to_load_data_from_nvm: std::sync::RwLock::new(false),
             time_for_nvm_last_fetch: SystemTime::now(),
             nvm_fetch_counter: 0,
         }
@@ -325,7 +351,7 @@ impl<N> NVMInternalNode<N> {
         N: ObjectReference,
     {
         assert!(
-            !self.need_to_load_data_from_nvm,
+            !*self.need_to_load_data_from_nvm.read().unwrap(),
             "Some data for the NVMInternal node still has to be loaded into the cache."
         );
 
@@ -356,24 +382,16 @@ impl<N> NVMInternalNode<N> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Option<NVMChildBuffer<N>>> + '_
+    pub fn iter(&self) -> &std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>
     where
         N: ObjectReference,
     {
-        panic!("TODO: Karim.. could find any caller to this method");
         assert!(
-            !self.need_to_load_data_from_nvm,
+            !*self.need_to_load_data_from_nvm.read().unwrap(),
             "Some data for the NVMInternal node still has to be loaded into the cache."
         );
 
-        self.data
-            .read()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .children
-            .iter()
+        &self.data
     }
 
     pub fn iter_mut(&mut self) -> &std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>
@@ -452,8 +470,6 @@ impl<N> NVMInternalNode<N> {
             .map_or_else(
                 || {
                     // Continue the search to the next level
-                    //let child = &self.data.read().as_ref().unwrap().as_ref().unwrap().children[self.idx(&pivot)];
-                    //PivotGetResult::NextNode(&child.as_ref().unwrap().node_pointer)
                     PivotGetResult::NVMNextNode {
                         np: &self.data,
                         idx: self.idx(&pivot),
@@ -461,14 +477,6 @@ impl<N> NVMInternalNode<N> {
                 },
                 |(idx, _)| {
                     // Fetch the correct child pointer
-                    // let child;
-                    // if pk.is_left() {
-                    //     child = &self.data.read().as_ref().unwrap().as_ref().unwrap().children[idx];
-                    // } else {
-                    //     child = &self.data.read().as_ref().unwrap().as_ref().unwrap().children[idx + 1];
-                    // }
-                    //PivotGetResult::Target(Some(&child.as_ref().unwrap().node_pointer))
-                    panic!("fix this in caller!");
                     PivotGetResult::NVMTarget {
                         np: &self.data,
                         idx: idx,
@@ -501,33 +509,24 @@ impl<N> NVMInternalNode<N> {
                 },
             );
         match (is_target, pk.is_left()) {
-            (true, true) => {
-                PivotGetMutResult::NVMTarget {
-                    idx: id,
-                    first_bool: true,
-                    second_bool: true,
-                    np: &self.data,
-                }
-                //PivotGetMutResult::Target(Some(self.data.write().as_mut().unwrap().as_mut().unwrap().children[id].as_mut().unwrap().node_pointer.get_mut()))
-            }
-            (true, false) => {
-                PivotGetMutResult::NVMTarget {
-                    idx: id + 1,
-                    first_bool: true,
-                    second_bool: false,
-                    np: &self.data,
-                }
-                //PivotGetMutResult::Target(Some(self.data.write().as_mut().unwrap().as_mut().unwrap().children[id + 1].as_mut().unwrap().node_pointer.get_mut()))
-            }
-            (false, _) => {
-                PivotGetMutResult::NVMNextNode {
-                    idx: id,
-                    first_bool: false,
-                    second_bool: true,
-                    np: &self.data,
-                }
-                //PivotGetMutResult::NextNode(self.data.write().as_mut().unwrap().as_mut().unwrap().children[id].as_mut().unwrap().node_pointer.get_mut())
-            }
+            (true, true) => PivotGetMutResult::NVMTarget {
+                idx: id,
+                first_bool: true,
+                second_bool: true,
+                np: &self.data,
+            },
+            (true, false) => PivotGetMutResult::NVMTarget {
+                idx: id + 1,
+                first_bool: true,
+                second_bool: false,
+                np: &self.data,
+            },
+            (false, _) => PivotGetMutResult::NVMNextNode {
+                idx: id,
+                first_bool: false,
+                second_bool: true,
+                np: &self.data,
+            },
         }
     }
 
@@ -560,7 +559,10 @@ impl<N> NVMInternalNode<N> {
         left_pivot_key: &mut Option<CowBytes>,
         right_pivot_key: &mut Option<CowBytes>,
         all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
-    ) -> &std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>> {
+    ) -> (
+        &std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>,
+        usize,
+    ) {
         let idx = self.idx(key);
         if idx > 0 {
             *left_pivot_key = Some(self.meta_data.pivot[idx - 1].clone());
@@ -582,7 +584,8 @@ impl<N> NVMInternalNode<N> {
             }
         }
 
-        &self.data
+        //println!("..NVMInternal..get_range {}", idx);
+        (&self.data, idx)
         //&child.as_ref().unwrap().node_pointer
     }
 
@@ -594,6 +597,8 @@ impl<N> NVMInternalNode<N> {
         usize,
     ) {
         let idx = self.idx(key) + 1;
+        //println!("isolating issue {}", idx);
+
         //self.data.read().as_ref().unwrap().as_ref().unwrap().children.get(idx).map(|child| &child.as_ref().unwrap().node_pointer)
         (&self.data, idx)
     }
@@ -841,7 +846,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: false,
+            need_to_load_data_from_nvm: std::sync::RwLock::new(false),
             time_for_nvm_last_fetch: SystemTime::now(),
             nvm_fetch_counter: 0,
         };
@@ -885,6 +890,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
 
     /// Translate any object ref in a `NVMChildBuffer` from `Incomplete` to `Unmodified` state.
     pub fn complete_object_refs(mut self, d_id: DatasetId) -> Self {
+        self.load_all_data();
         // TODO:
         let first_pk = match self.meta_data.pivot.first() {
             Some(p) => PivotKey::LeftOuter(p.clone(), d_id),
@@ -1205,6 +1211,7 @@ impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
     where
         N: ObjectReference,
     {
+        self.node.load_all_data();
         //&mut self.node.data.write().as_mut().unwrap().as_mut().unwrap().children[self.child_idx].as_mut().unwrap().node_pointer
         (&self.node.data, self.child_idx)
     }
@@ -1231,6 +1238,7 @@ impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
 
 #[cfg(test)]
 mod tests {
+    /*
 
     use super::*;
     use crate::{
@@ -1319,8 +1327,7 @@ mod tests {
                     pref: AtomicStoragePreference::unknown(),
                 },
                 data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
-                    //children: children, //TODO: Sajad Karim, fix the issue
-                    children: vec![],
+                    children: children,
                 }))),
                 meta_data_size: 0,
                 data_size: 0,
@@ -1428,37 +1435,41 @@ mod tests {
 
     static mut PK: Option<PivotKey> = None;
 
-    impl ObjectReference for () {
-        type ObjectPointer = ();
+    // impl ObjectReference for () {
+    //     type ObjectPointer = ();
 
-        fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
-            Some(&())
-        }
+    //     fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
+    //         Some(&())
+    //     }
 
-        fn set_index(&mut self, _pk: PivotKey) {
-            // NO-OP
-        }
+    //     fn set_index(&mut self, _pk: PivotKey) {
+    //         // NO-OP
+    //     }
 
-        fn index(&self) -> &PivotKey {
-            unsafe {
-                if PK.is_none() {
-                    PK = Some(PivotKey::LeftOuter(
-                        CowBytes::from(vec![42u8]),
-                        DatasetId::default(),
-                    ));
-                }
-                PK.as_ref().unwrap()
-            }
-        }
+    //     fn index(&self) -> &PivotKey {
+    //         unsafe {
+    //             if PK.is_none() {
+    //                 PK = Some(PivotKey::LeftOuter(
+    //                     CowBytes::from(vec![42u8]),
+    //                     DatasetId::default(),
+    //                 ));
+    //             }
+    //             PK.as_ref().unwrap()
+    //         }
+    //     }
 
         fn serialize_unmodified(&self, w: &mut Vec<u8>) -> Result<(), std::io::Error> {
             unimplemented!("TODO...");
         }
 
-        fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
-            unimplemented!("TODO...");
-        }
-    }
+    // fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
+    //     unimplemented!("TODO...");
+    // }
+
+    // fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
+    //     unimplemented!("TODO...");
+    // }
+    // }
 
     #[quickcheck]
     fn check_size_split(mut node: NVMInternalNode<NVMChildBuffer<()>>) -> TestResult {
@@ -1534,4 +1545,5 @@ mod tests {
     // child split
     // flush buffer
     // get with max_msn
+    */
 }

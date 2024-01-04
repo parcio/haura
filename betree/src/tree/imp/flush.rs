@@ -225,21 +225,20 @@ where
                     Ok(selected_child_buffer) => selected_child_buffer,
                 };
 
-                let mut child;
+            // TODO: Karim... add comments...
+            //let mut child = self.get_mut_node(child_buffer.node_pointer_mut())?;
+            let mut child;
 
-            let auto ;
             match child_buffer.node_pointer_mut() {
                 TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                    println!("2...........................................");
-                    auto = obj.as_mut().unwrap().node_pointer_mut();
-                    child = self.get_mut_node(auto)?;
+                    child = self.get_mut_node(obj.as_mut().unwrap().node_pointer_mut())?;
                 },
                 TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                    let (a,b) = obj.as_mut().unwrap().node_pointer_mut();
-                    child = self.get_mut_node(&mut a.write().as_mut().unwrap().as_mut().unwrap().children[b].as_mut().unwrap().node_pointer)?;
+                    let (_node,idx) = obj.as_mut().unwrap().node_pointer_mut();
+                    child = self.get_mut_node(&mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer)?;
                 },
             };
-
+            // TODO: Karim... End of new code
 
             
             // 2. Iterate down to child if too large
