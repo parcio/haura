@@ -63,6 +63,7 @@ pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
 impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
     pub fn node_pointer_mut(&mut self) -> &mut TakeChildBufferWrapper<'a, N>  where N: ObjectReference{
         self
+        // TODO: Karim... add comments...
         // match self {
         //     TakeChildBufferWrapper::TakeChildBuffer(obj) => {
         //         println!("2...........................................");
@@ -137,8 +138,7 @@ impl<'a, N> CBIteratorTrait<'a, Option<NVMChildBuffer<N>>> for Vec<Option<NVMChi
 */
 pub(super) enum ChildBufferIterator<'a, N: 'a + 'static> {
     ChildBuffer(Option<Box<dyn Iterator<Item = &'a mut N> + 'a>>),
-    NVMChildBuffer(Option<Box<dyn Iterator<Item = &'a mut N> + 'a>>),
-    NVMChildBuffer_(&'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>),
+    NVMChildBuffer(&'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>),
 }
 
 pub(super) enum ChildBufferIterator3<'a, N> {
@@ -356,14 +356,16 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 pool: Some(pool),
                 disk_offset: Some(_offset),
                 meta_data : meta_data,
-                data: std::sync::Arc::new(std::sync::RwLock::new(None)), //Some(data),
+                data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
+                    children: vec![]
+                }))), //Some(data),
                 meta_data_size: meta_data_len,
                 data_size: data_len,
                 data_start: data_start,
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),                
-                need_to_load_data_from_nvm: true, //false,
+                need_to_load_data_from_nvm: std::sync::RwLock::new(true), //false,
                 time_for_nvm_last_fetch: SystemTime::now(),
                 nvm_fetch_counter: 0,
 
@@ -394,14 +396,16 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 pool: Some(pool),
                 disk_offset: Some(_offset),
                 meta_data : meta_data,
-                data : std::sync::Arc::new(std::sync::RwLock::new(None)),//Some(data),
+                data : std::sync::Arc::new(std::sync::RwLock::new(Some(NVMLeafNodeData { 
+                    entries: BTreeMap::new()
+                }))),//Some(data),
                 meta_data_size: meta_data_len,
                 data_size: data_len,
                 data_start: data_start,
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),
-                need_to_load_data_from_nvm: true, //false,
+                need_to_load_data_from_nvm: std::sync::RwLock::new(true), //false,
                 time_for_nvm_last_fetch: SystemTime::now(),
                 nvm_fetch_counter: 0,
 
@@ -437,33 +441,20 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                             f(np)?;
                         }
                     } else {
-                        println!("xxxxx");
                         ()
                     }
                 },
                 ChildBufferIterator::NVMChildBuffer(obj) => {
-                    if let Some(iter) = obj {
-                        for np in iter {
-                            f(np)?;
-                        }
-                    } else {
-                        println!("xxxxx1");
-                        ()
-                    }
-                },
-                ChildBufferIterator::NVMChildBuffer_(obj) => {
-
                     if let Ok(mut data) = obj.write() {
-                        let node = data.as_mut().unwrap().children.iter_mut();
+                        let child_itr = data.as_mut().unwrap().children.iter_mut();
 
-                        let core_value = node
+                        let itr = child_itr
                             .map(|child| child.as_mut().unwrap().node_pointer.get_mut());
 
-                        for np in core_value {
+                        for np in itr {
                             f(np)?;
                         }
                     } else {
-                        println!("xxxxx1");
                         ()
                     }
                 },
@@ -742,7 +733,7 @@ pub(super) enum GetResult<'a, N: 'a + 'static> {
     Data(Option<(KeyInfo, SlicedCowBytes)>),
     NextNode(&'a RwLock<N>),
     NVMNextNode {
-        child_np: &'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>,
+        np: &'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>,
         idx: usize,
     },
 }
@@ -797,7 +788,7 @@ pub(super) enum GetRangeResult<'a, T, N: 'a + 'static> {
         prefetch_option: Option<&'a RwLock<N>>,
     },
     NVMNextNode {
-        np: &'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>,
+        np: (&'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>, usize),
         prefetch_option: Option<(&'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>, usize)>,
     },
 }
@@ -820,13 +811,12 @@ impl<N: HasStoragePreference> Node<N> {
             },
             NVMLeaf(ref nvmleaf) => GetResult::Data(nvmleaf.get_with_info(key)),
             NVMInternal(ref nvminternal) => {
-                let (child_np, msg, idx) = nvminternal.get(key);
+                let (np, msg, idx) = nvminternal.get(key);
                 if let Some(msg) = msg {
                     msgs.push(msg);
                 }
-                panic!("fix issue in the caller!");
                 GetResult::NVMNextNode {
-                    child_np, 
+                    np, 
                     idx
                 }
             },
@@ -842,15 +832,25 @@ impl<N: HasStoragePreference> Node<N> {
     ) -> GetRangeResult<Box<dyn Iterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))> + 'a>, N>
     where N: ObjectReference
     {
+        //println!("..get_range");
+
         match self.0 {
-            PackedLeaf(ref map) => GetRangeResult::Data(Box::new(map.get_all())),
-            Leaf(ref leaf) => GetRangeResult::Data(Box::new(
+            PackedLeaf(ref map) => {
+                //println!("..PackedLeaf");
+                GetRangeResult::Data(Box::new(map.get_all()))
+            },
+            Leaf(ref leaf) => {
+                //println!("..Leaf");
+                GetRangeResult::Data(Box::new(
                 leaf.entries().iter().map(|(k, v)| (&k[..], v.clone())),
-            )),
+            ))},
             Internal(ref internal) => {
+                println!("..Internal");
                 let prefetch_option = if internal.level() == 1 {
+                    //println!("..Internal................1");
                     internal.get_next_node(key)
                 } else {
+                    //println!("..Internal................2");
                     None
                 };
                 let np = internal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
@@ -860,17 +860,24 @@ impl<N: HasStoragePreference> Node<N> {
                 }
             },
             NVMLeaf(ref nvmleaf) => {
+                //println!("..NVMLeaf");
                 let np = nvmleaf.entries();
                 GetRangeResult::NVMData {
                     np
                 }
             },
             NVMInternal(ref nvminternal) => {
+                //println!("..NVMInternal");
+                nvminternal.load_all_data();
+                
                 let prefetch_option = if nvminternal.level() == 1 {
+                    //println!("..NVMInternal................1");
                     Some(nvminternal.get_next_node(key))
                 } else {
+                    //println!("..NVMInternal................2");
                     None
                 };
+
                 let np = nvminternal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
                 GetRangeResult::NVMNextNode {
                     np,
@@ -983,7 +990,6 @@ impl<N: HasStoragePreference> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => { 
-                println!("child_pointer_iter_mut internal.....................................................");
                 let core_value = internal
                     .iter_mut()
                     .map(|child| child.node_pointer.get_mut());
@@ -992,21 +998,11 @@ impl<N: HasStoragePreference> Node<N> {
             },
             NVMLeaf(ref nvmleaf) => None,
             NVMInternal(ref mut nvminternal) =>  {
-                println!("child_pointer_iter_mut nvminternal.....................................................");
 
                 let core_value = nvminternal
                     .iter_mut();
 
-                Some(ChildBufferIterator::NVMChildBuffer_(core_value))
-                // if let Ok(mut data) = core_value.write() {
-                //     let core_value2 = data.as_mut().unwrap().children.iter_mut()
-                //         .map(|child| child.as_mut().unwrap().node_pointer.get_mut());
-
-                //     //Some(ChildBufferIterator::NVMChildBuffer(Some(Box::new(core_value2))))
-                //     unimplemented!("..")
-                // } else {
-                //     None
-                // }
+                Some(ChildBufferIterator::NVMChildBuffer(core_value))
             },
         }
     }
@@ -1015,17 +1011,17 @@ impl<N: HasStoragePreference> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref internal) => {
-                println!("child_pointer_iter internal.....................................................");
                 let core_value = internal.iter().map(|child| &child.node_pointer);
                 Some(ChildBufferIterator2::ChildBuffer(Some(Box::new(core_value))))
             },
             NVMLeaf(ref nvmleaf) => None,
             NVMInternal(ref nvminternal) => 
             {
-                println!("child_pointer_iter nvminternal.....................................................");
-                let core_value = nvminternal.iter().map(|child| &child.as_ref().unwrap().node_pointer);
-                Some(ChildBufferIterator2::ChildBuffer(Some(Box::new(core_value))))
-            },//unimplemented!(""),// Some(nvminternal.iter().map(|child| &child.as_ref().unwrap().node_pointer)),
+                unimplemented!("Could not find any caller for this method! Therefore not fixing it for NVM-related changes..");
+
+                // TODO: return &std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>
+                //Some(ChildBufferIterator2::ChildBuffer(nvminternal.iter()))
+            },
         }
     }
 

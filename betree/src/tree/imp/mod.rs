@@ -269,7 +269,8 @@ where
 
                         break Some((self.get_node(&child.as_ref().unwrap().node_pointer))?)
                     } else {
-                        unimplemented!("unexpected behaviour!")
+                        panic!("This case should not occur!");
+                        break None
                     }
                 },
                 Some(PivotGetResult::NVMNextNode {np, idx}) => {
@@ -277,7 +278,8 @@ where
                         let child = &data.as_ref().unwrap().children[idx];
                         self.get_node(&child.as_ref().unwrap().node_pointer)?
                     } else {
-                        unimplemented!("unexpected behaviour!")
+                        panic!("This case should not occur!");
+                        break None
                     }
                 },
                 None => break None,
@@ -310,18 +312,21 @@ where
                             if let Ok(mut data) = np.write() {
                                 break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?)
                             } else {
-                                unimplemented!("..")                                
+                                panic!("This case should not occur!");
+                                break None
                             }
                         }
                         (true, false) => {
                             if let Ok(mut data) = np.write() {
                                 break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx + 1].as_mut().unwrap().node_pointer.get_mut())?)
                             } else {
-                                unimplemented!("..")                                
+                                panic!("This case should not occur!");
+                                break None
                             }
                         }
                         (false, _) => {
-                            unimplemented!("..")      // Hint... merge the calls.                          
+                            panic!("This case should not occur!");
+                            break None
                         }
                     }
                 },
@@ -336,11 +341,13 @@ where
                             if let Ok(mut data) = np.write() {
                                 break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?)
                             } else {
-                                unimplemented!("..")                                
+                                panic!("This case should not occur!");
+                                break None
                             }
                         }
                         (true, _) => {
-                            unimplemented!("..")      // Hint... merge the calls.                          
+                            panic!("This case should not occur!");
+                            break None
                         }
                     }
                 },
@@ -453,13 +460,13 @@ where
                 GetResult::NextNode(np) => self.get_node(np)?,
                 GetResult::Data(data) => break data,
                 GetResult::NVMNextNode {
-                    child_np,
+                    np,
                     idx
                 } => {
-                    if let Ok(data) = child_np.read() {
+                    if let Ok(data) = np.read() {
                         self.get_node(&data.as_ref().unwrap().children[idx].as_ref().unwrap().node_pointer)?
                     } else { 
-                        unimplemented!("..")
+                        panic!("This case should not occur!");
                     }
                 },
             };
@@ -509,7 +516,8 @@ where
                     if let Ok(mut data) = node.write() {
                         self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?
                     } else {
-                        unimplemented!("")
+                        panic!("This case should not occur!");
+                        break None
                     }
                 },
             };
@@ -564,19 +572,21 @@ where
 
 
 
+
+                        // TODO: Karim... add comments...
+                        //if let Some(child) = self.try_get_mut_node(child_buffer.node_pointer_mut())
                         let mut auto;
+
                         match child_buffer.node_pointer_mut() {
                             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                                println!("2...........................................");
                                 auto = self.try_get_mut_node(obj.as_mut().unwrap().node_pointer_mut());
                             },
                             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                                let (a,b) = obj.as_mut().unwrap().node_pointer_mut();
-                                auto = self.try_get_mut_node(&mut a.write().as_mut().unwrap().as_mut().unwrap().children[b].as_mut().unwrap().node_pointer);
+                                let (_node,idx) = obj.as_mut().unwrap().node_pointer_mut();
+                                auto = self.try_get_mut_node(&mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer);
                             },
                         };
-
-
+                        // TODO: Karim... End of new code
 
                         if let Some(child) = auto
                         {
