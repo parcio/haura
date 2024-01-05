@@ -78,7 +78,7 @@ fn internal_node_base_size() -> usize {
         as usize
 }
 
-impl<N: StaticSize> Size for InternalNode<N> {
+impl<N: Size> Size for InternalNode<N> {
     fn size(&self) -> usize {
         internal_node_base_size() + self.entries_size
     }
@@ -857,10 +857,10 @@ mod tests {
             assert!(lower_key < &key);
         }
     }
-/*
+
     #[quickcheck]
     fn check_size_insert_single(
-        mut node: InternalNode<ChildBuffer<()>>,
+        mut node: InternalNode<()>,
         key: Key,
         keyinfo: KeyInfo,
         msg: DefaultMessageActionMsg,
@@ -874,7 +874,7 @@ mod tests {
 
     #[quickcheck]
     fn check_size_insert_msg_buffer(
-        mut node: InternalNode<ChildBuffer<()>>,
+        mut node: InternalNode<()>,
         buffer: BTreeMap<Key, (KeyInfo, DefaultMessageActionMsg)>,
     ) {
         let size_before = node.size() as isize;
@@ -895,7 +895,7 @@ mod tests {
 
     #[quickcheck]
     fn check_insert_msg_buffer(
-        mut node: InternalNode<ChildBuffer<()>>,
+        mut node: InternalNode<()>,
         buffer: BTreeMap<Key, (KeyInfo, DefaultMessageActionMsg)>,
     ) {
         let mut node_twin = node.clone();
@@ -946,10 +946,34 @@ mod tests {
                 PK.as_ref().unwrap()
             }
         }
+
+        fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
+            Ok(())
+            // if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
+    
+            //     bincode::serialize_into(w, p)
+            //             .map_err(|e| {
+            //                 debug!("Failed to serialize ObjectPointer.");
+            //                 std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+            //             })?;
+            // }
+            // Ok(())
+        }
+    
+        fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
+            unimplemented!("..")
+            // match bincode::deserialize::<ObjectPointer<D>>(bytes) {
+            //     Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
+            //     Err(e) => {
+            //         debug!("Failed to deserialize ObjectPointer.");
+            //         Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+            //     )},
+            // }
+        }
     }
 
     #[quickcheck]
-    fn check_size_split(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
+    fn check_size_split(mut node: InternalNode<()>) -> TestResult {
         if node.fanout() < 2 {
             return TestResult::discard();
         }
@@ -963,7 +987,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_split(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
+    fn check_split(mut node: InternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -984,7 +1008,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_split_key(mut node: InternalNode<ChildBuffer<()>>) -> TestResult {
+    fn check_split_key(mut node: InternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -994,7 +1018,7 @@ mod tests {
         assert_eq!(LocalPivotKey::Right(pivot), pivot_key);
         TestResult::passed()
     }
-
+/*
     // #[test]
     // fn check_constant() {
     //     let node: InternalNode<ChildBuffer<()>> = InternalNode {
