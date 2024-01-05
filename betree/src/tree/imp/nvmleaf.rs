@@ -716,11 +716,9 @@ mod tests {
         let bytes_data = serializer_data.into_serializer().into_inner();
 
         let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(&bytes_meta_data).unwrap();
-        //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
         let meta_data:NVMLeafNodeMetaData = archivedleafnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)).unwrap();
         
         let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&bytes_data).unwrap();
-        //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
         let data:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)).unwrap();
         
         assert_eq!(leaf_node.meta_data, meta_data);
@@ -763,6 +761,26 @@ mod tests {
         assert!(sibling.size() <= MAX_LEAF_SIZE);
         assert!(sibling.size() >= MIN_LEAF_SIZE);
         //assert!(leaf_node.size() >= MIN_LEAF_SIZE); //TODO: Karim fix this!
+
+
+        // TODO: Fix it.. For the time being the code at the bottom is used to fullfil the task.
+        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_meta_data.serialize_value(&sibling.meta_data).unwrap();
+        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_data.serialize_value(sibling.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+        let bytes_data = serializer_data.into_serializer().into_inner();
+
+        let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(&bytes_meta_data).unwrap();
+        let sibling_deserialized_meta_data:NVMLeafNodeMetaData = archivedleafnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)).unwrap();
+        
+        let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&bytes_data).unwrap();
+        let sibling_deserialized_data: NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)).unwrap();
+       
+        assert_eq!(sibling.meta_data, sibling_deserialized_meta_data);
+        assert_eq!(sibling.data.read().as_ref().unwrap().as_ref().unwrap(), &sibling_deserialized_data);
+
         TestResult::passed()
     }
 
