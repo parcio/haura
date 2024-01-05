@@ -922,55 +922,55 @@ mod tests {
         assert_eq!(added_size, added_size_twin);
     }
 
-    static mut PK: Option<PivotKey> = None;
+    //static mut PK: Option<PivotKey> = None;
 
-    impl ObjectReference for () {
-        type ObjectPointer = ();
+    // impl ObjectReference for () {
+    //     type ObjectPointer = ();
 
-        fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
-            Some(&())
-        }
+    //     fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
+    //         Some(&())
+    //     }
 
-        fn set_index(&mut self, _pk: PivotKey) {
-            // NO-OP
-        }
+    //     fn set_index(&mut self, _pk: PivotKey) {
+    //         // NO-OP
+    //     }
 
-        fn index(&self) -> &PivotKey {
-            unsafe {
-                if PK.is_none() {
-                    PK = Some(PivotKey::LeftOuter(
-                        CowBytes::from(vec![42u8]),
-                        DatasetId::default(),
-                    ));
-                }
-                PK.as_ref().unwrap()
-            }
-        }
+    //     fn index(&self) -> &PivotKey {
+    //         unsafe {
+    //             if PK.is_none() {
+    //                 PK = Some(PivotKey::LeftOuter(
+    //                     CowBytes::from(vec![42u8]),
+    //                     DatasetId::default(),
+    //                 ));
+    //             }
+    //             PK.as_ref().unwrap()
+    //         }
+    //     }
 
-        fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
-            Ok(())
-            // if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
+    //     fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
+    //         Ok(())
+    //         // if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
     
-            //     bincode::serialize_into(w, p)
-            //             .map_err(|e| {
-            //                 debug!("Failed to serialize ObjectPointer.");
-            //                 std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-            //             })?;
-            // }
-            // Ok(())
-        }
+    //         //     bincode::serialize_into(w, p)
+    //         //             .map_err(|e| {
+    //         //                 debug!("Failed to serialize ObjectPointer.");
+    //         //                 std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    //         //             })?;
+    //         // }
+    //         // Ok(())
+    //     }
     
-        fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
-            unimplemented!("..")
-            // match bincode::deserialize::<ObjectPointer<D>>(bytes) {
-            //     Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
-            //     Err(e) => {
-            //         debug!("Failed to deserialize ObjectPointer.");
-            //         Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-            //     )},
-            // }
-        }
-    }
+    //     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
+    //         unimplemented!("..")
+    //         // match bincode::deserialize::<ObjectPointer<D>>(bytes) {
+    //         //     Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
+    //         //     Err(e) => {
+    //         //         debug!("Failed to deserialize ObjectPointer.");
+    //         //         Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    //         //     )},
+    //         // }
+    //     }
+    // }
 
     #[quickcheck]
     fn check_size_split(mut node: InternalNode<()>) -> TestResult {
