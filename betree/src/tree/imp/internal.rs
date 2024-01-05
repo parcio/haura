@@ -431,7 +431,6 @@ impl<N: ObjectReference> InternalNode<N> {
         let __entries_size = self.pivot.iter().map(Size::size).sum::<usize>()
         + self.children.iter_mut().map(SizeMut::size).sum::<usize>();
 
-        println!("+++++++++.........................................{} {}", self.entries_size, __entries_size);
         self.pref.invalidate();
         let split_off_idx = self.fanout() / 2;
         let pivot = self.pivot.split_off(split_off_idx);
@@ -447,7 +446,6 @@ impl<N: ObjectReference> InternalNode<N> {
             + children.iter_mut().map(SizeMut::size).sum::<usize>();
 
         let size_delta = entries_size + pivot_key.size();
-        println!(".........................................{} {} {}", self.entries_size, entries_size, size_delta);
         self.entries_size -= size_delta;
 
         let right_sibling = InternalNode {
@@ -804,7 +802,7 @@ mod tests {
         }
     }
 
-    impl<T: Arbitrary + Size> Arbitrary for InternalNode<T> {
+    impl<T: Arbitrary + StaticSize> Arbitrary for InternalNode<T> {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
             let pivot_key_cnt = rng.gen_range(1..20);
@@ -817,11 +815,11 @@ mod tests {
                 pivot.push(pivot_key);
             }
 
-            let mut children: Vec<ChildBuffer<T>> = Vec::with_capacity(pivot_key_cnt + 1);
+            let mut children = Vec::with_capacity(pivot_key_cnt + 1);
             for _ in 0..pivot_key_cnt + 1 {
-                let child = T::arbitrary(g);
+                let child = ChildBuffer::new(T::arbitrary(g));
                 entries_size += child.size();
-                children.push(ChildBuffer::new(child));
+                children.push(child);
             }
 
             InternalNode {
@@ -846,8 +844,8 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_serialize_size(mut node: InternalNode<CowBytes>) {
-        //check_size(&mut node);
+    fn check_serialize_size(mut node: InternalNode<()>) {
+        check_size(&mut node);
     }
 
     #[quickcheck]
@@ -985,9 +983,9 @@ mod tests {
         }
         let size_before = node.size();
         let (mut right_sibling, _pivot, size_delta, _pivot_key) = node.split();
-        //assert_eq!(size_before as isize + size_delta, node.size() as isize);
-        //check_size(&mut node);
-        //check_size(&mut right_sibling);
+        assert_eq!(size_before as isize + size_delta, node.size() as isize);
+        check_size(&mut node);
+        check_size(&mut right_sibling);
 
         TestResult::passed()
     }

@@ -159,27 +159,25 @@ impl ObjectReference for () {
     }
 
     fn serialize_unmodified(&self, w: &mut Vec<u8>) -> Result<(), std::io::Error> {
+        if let p = self {
+            bincode::serialize_into(w, p)
+                .map_err(|e| {
+                    debug!("Failed to serialize ObjectPointer.");
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+                })
+                .unwrap();
+        }
         Ok(())
-        // if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
-
-        //     bincode::serialize_into(w, p)
-        //             .map_err(|e| {
-        //                 debug!("Failed to serialize ObjectPointer.");
-        //                 std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        //             })?;
-        // }
-        // Ok(())
     }
 
     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
-        unimplemented!("..")
-        // match bincode::deserialize::<ObjectPointer<D>>(bytes) {
-        //     Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
-        //     Err(e) => {
-        //         debug!("Failed to deserialize ObjectPointer.");
-        //         Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        //     )},
-        // }
+        match bincode::deserialize::<()>(bytes) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                debug!("Failed to deserialize ObjectPointer.");
+                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            }
+        }
     }
 }
 
@@ -208,7 +206,7 @@ fn internal_node_base_size() -> usize {
     4 + 8 + 8 + bytes_meta_data.len() + bytes_data.len()
 }
 
-impl<N: Size> Size for NVMInternalNode<N> {
+impl<N: StaticSize> Size for NVMInternalNode<N> {
     fn size(&self) -> usize {
         internal_node_base_size() + self.meta_data.entries_size
     }
@@ -1350,7 +1348,7 @@ mod tests {
         }
     }
 
-    impl<T: Arbitrary + Size> Arbitrary for NVMInternalNode<T> {
+    impl<T: Arbitrary + StaticSize> Arbitrary for NVMInternalNode<T> {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
             let pivot_key_cnt = rng.gen_range(1..20);
@@ -1366,9 +1364,9 @@ mod tests {
             let mut children: Vec<Option<NVMChildBuffer<T>>> =
                 Vec::with_capacity(pivot_key_cnt + 1);
             for _ in 0..pivot_key_cnt + 1 {
-                let child = T::arbitrary(g);
+                let child = NVMChildBuffer::new(T::arbitrary(g));
                 entries_size += child.size();
-                children.push(Some(NVMChildBuffer::new(child)));
+                children.push(Some(child));
             }
 
             NVMInternalNode {
@@ -1416,14 +1414,42 @@ mod tests {
         size
     }
 
-    fn check_size<T: Size + ObjectReference>(node: &mut NVMInternalNode<T>) {
-
-        /* TODO: Kairm.. fix it
-        assert_eq!(
+    fn check_size<T: Size + ObjectReference + std::cmp::PartialEq>(node: &mut NVMInternalNode<T>) {
+        // TODO: Fix it.. For the time being the code at the bottom is used to fullfil the task.
+        /* assert_eq!(
             node.size(),
             serialized_size_ex(node),
             "predicted size does not match serialized size"
         );*/
+
+        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_meta_data
+            .serialize_value(&node.meta_data)
+            .unwrap();
+        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_data
+            .serialize_value(node.data.read().as_ref().unwrap().as_ref().unwrap())
+            .unwrap();
+        let bytes_data = serializer_data.into_serializer().into_inner();
+
+        let archivedinternalnodemetadata: &ArchivedInternalNodeMetaData =
+            rkyv::check_archived_root::<InternalNodeMetaData>(&bytes_meta_data).unwrap();
+        let meta_data: InternalNodeMetaData = archivedinternalnodemetadata
+            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            .unwrap();
+
+        let archivedinternalnodedata: &ArchivedInternalNodeData<_> =
+            rkyv::check_archived_root::<InternalNodeData<T>>(&bytes_data).unwrap();
+        let data: InternalNodeData<_> = archivedinternalnodedata
+            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            .unwrap();
+
+        assert_eq!(node.meta_data, meta_data);
+        assert_eq!(node.data.read().as_ref().unwrap().as_ref().unwrap(), &data);
     }
 
     #[quickcheck]
@@ -1530,11 +1556,11 @@ mod tests {
             return TestResult::discard();
         }
         let size_before = node.size();
-        // let (mut right_sibling, _pivot, size_delta, _pivot_key) = node.split();
-        // assert_eq!(size_before as isize + size_delta, node.size() as isize);
+        let (mut right_sibling, _pivot, size_delta, _pivot_key) = node.split();
+        assert_eq!(size_before as isize + size_delta, node.size() as isize);
 
-        // check_size(&mut node);
-        // check_size(&mut right_sibling);
+        check_size(&mut node);
+        check_size(&mut right_sibling);
 
         TestResult::passed()
     }
@@ -1545,18 +1571,39 @@ mod tests {
             return TestResult::discard();
         }
         let twin = node.clone();
-        // let (mut right_sibling, pivot, _size_delta, _pivot_key) = node.split();
+        let (mut right_sibling, pivot, _size_delta, _pivot_key) = node.split();
 
-        // assert!(node.fanout() >= 2);
-        // assert!(right_sibling.fanout() >= 2);
+        assert!(node.fanout() >= 2);
+        assert!(right_sibling.fanout() >= 2);
 
-        // node.meta_data.entries_size += pivot.size() + right_sibling.meta_data.entries_size;
-        // node.meta_data.pivot.push(pivot);
-        // node.meta_data.pivot.append(&mut right_sibling.meta_data.pivot);
-        // node.data.write().as_mut().unwrap().as_mut().unwrap().children.append(&mut right_sibling.data.write().as_mut().unwrap().as_mut().unwrap().children);
+        node.meta_data.entries_size += pivot.size() + right_sibling.meta_data.entries_size;
+        node.meta_data.pivot.push(pivot);
+        node.meta_data
+            .pivot
+            .append(&mut right_sibling.meta_data.pivot);
+        node.data
+            .write()
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .children
+            .append(
+                &mut right_sibling
+                    .data
+                    .write()
+                    .as_mut()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .children,
+            );
 
-        // assert_eq!(node.meta_data, twin.meta_data);
-        // assert_eq!(node.data.read().as_ref().unwrap().as_ref().unwrap(), twin.data.read().as_ref().unwrap().as_ref().unwrap());
+        assert_eq!(node.meta_data, twin.meta_data);
+        assert_eq!(
+            node.data.read().as_ref().unwrap().as_ref().unwrap(),
+            twin.data.read().as_ref().unwrap().as_ref().unwrap()
+        );
 
         TestResult::passed()
     }
@@ -1566,10 +1613,10 @@ mod tests {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
-        // let (right_sibling, pivot, _size_delta, pivot_key) = node.split();
-        // assert!(node.fanout() >= 2);
-        // assert!(right_sibling.fanout() >= 2);
-        // assert_eq!(LocalPivotKey::Right(pivot), pivot_key);
+        let (right_sibling, pivot, _size_delta, pivot_key) = node.split();
+        assert!(node.fanout() >= 2);
+        assert!(right_sibling.fanout() >= 2);
+        assert_eq!(LocalPivotKey::Right(pivot), pivot_key);
         TestResult::passed()
     }
 
