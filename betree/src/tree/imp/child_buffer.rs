@@ -112,15 +112,15 @@ mod ser_np {
     }
 }
 
-impl<N: StaticSize> Size for ChildBuffer<N> {
+impl<N: Size> Size for ChildBuffer<N> {
     fn size(&self) -> usize {
-        Self::static_size() + self.buffer_entries_size + N::static_size()
+        Self::static_size() + self.buffer_entries_size + self.node_pointer.read().size()
     }
 
     fn actual_size(&self) -> Option<usize> {
         Some(
             Self::static_size()
-                + N::static_size()
+                + self.node_pointer.read().size()
                 + self
                     .buffer
                     .iter()

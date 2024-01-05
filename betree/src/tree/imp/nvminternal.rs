@@ -148,23 +148,16 @@ fn internal_node_base_size() -> usize {
     0
 }
 
-impl<N: StaticSize> Size for NVMInternalNode<N> {
+impl<N: Size> Size for NVMInternalNode<N> {
     fn size(&self) -> usize {
         internal_node_base_size() + self.meta_data.entries_size
     }
 
     fn actual_size(&self) -> Option<usize> {
-        if let Ok(value) = self.need_to_load_data_from_nvm.read() {
-            assert!(
-                !*value,
-                "Some data for the NVMInternal node still has to be loaded into the cache."
-            );
-        } else {
-            assert!(
-                true,
-                "Some data for the NVMInternal node still has to be loaded into the cache."
-            )
-        }
+        assert!(
+            !*self.need_to_load_data_from_nvm.read().unwrap(),
+            "Some data for the NVMInternal node still has to be loaded into the cache."
+        );
 
         Some(
             internal_node_base_size()
@@ -201,17 +194,10 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        if let Ok(value) = self.need_to_load_data_from_nvm.read() {
-            assert!(
-                !*value,
-                "Some data for the NVMInternal node still has to be loaded into the cache."
-            );
-        } else {
-            assert!(
-                true,
-                "Some data for the NVMInternal node still has to be loaded into the cache."
-            )
-        }
+        assert!(
+            !*self.need_to_load_data_from_nvm.read().unwrap(),
+            "Some data for the NVMInternal node still has to be loaded into the cache."
+        );
 
         for child in &self
             .data
@@ -1238,7 +1224,6 @@ impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
 
 #[cfg(test)]
 mod tests {
-    /*
 
     use super::*;
     use crate::{
@@ -1281,7 +1266,15 @@ mod tests {
                     pref: self.meta_data.pref.clone(),
                 },
                 data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
-                    children: self.data.as_ref().unwrap().children.to_vec(),
+                    children: self
+                        .data
+                        .read()
+                        .as_ref()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .children
+                        .to_vec(),
                 }))),
                 meta_data_size: 0,
                 data_size: 0,
@@ -1289,7 +1282,9 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
-                need_to_load_data_from_nvm: self.need_to_load_data_from_nvm,
+                need_to_load_data_from_nvm: std::sync::RwLock::new(false),
+                time_for_nvm_last_fetch: SystemTime::now(),
+                nvm_fetch_counter: 0,
             }
         }
     }
@@ -1307,11 +1302,12 @@ mod tests {
                 pivot.push(pivot_key);
             }
 
-            let mut children: Vec<Option<T>> = Vec::with_capacity(pivot_key_cnt + 1);
+            let mut children: Vec<Option<NVMChildBuffer<T>>> =
+                Vec::with_capacity(pivot_key_cnt + 1);
             for _ in 0..pivot_key_cnt + 1 {
                 let child = T::arbitrary(g);
                 entries_size += child.size();
-                children.push(Some(child));
+                children.push(Some(NVMChildBuffer::new(child)));
             }
 
             NVMInternalNode {
@@ -1335,23 +1331,27 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
-                need_to_load_data_from_nvm: false,
+                need_to_load_data_from_nvm: std::sync::RwLock::new(false),
+                time_for_nvm_last_fetch: SystemTime::now(),
+                nvm_fetch_counter: 0,
             }
         }
     }
 
+    /* TODO: rkyv!!!!
     fn check_size<T: Serialize + Size>(node: &mut NVMInternalNode<T>) {
-        /*assert_eq!( //TODO: Sajad Karim, fix it
+        assert_eq!(
             node.size() as u64,
             serialized_size(node).unwrap(),
             "predicted size does not match serialized size"
-        );*/
+        );
     }
 
     #[quickcheck]
     fn check_serialize_size(mut node: NVMInternalNode<CowBytes>) {
         check_size(&mut node);
     }
+    */
 
     #[quickcheck]
     fn check_idx(node: NVMInternalNode<()>, key: Key) {
@@ -1369,25 +1369,24 @@ mod tests {
 
     #[quickcheck]
     fn check_size_insert_single(
-        mut node: NVMInternalNode<NVMChildBuffer<()>>,
+        mut node: NVMInternalNode<()>,
         key: Key,
         keyinfo: KeyInfo,
         msg: DefaultMessageActionMsg,
     ) {
-        /*let size_before = node.size() as isize;
+        let size_before = node.size() as isize;
         let added_size = node.insert(key.0, keyinfo, msg.0, DefaultMessageAction);
-        assert_eq!(size_before + added_size, node.size() as isize);*/
-        //TODO: Sajad Kari, fix it
+        assert_eq!(size_before + added_size, node.size() as isize);
 
-        check_size(&mut node);
+        //check_size(&mut node); TODO: rykv!!
     }
 
     #[quickcheck]
     fn check_size_insert_msg_buffer(
-        mut node: NVMInternalNode<NVMChildBuffer<()>>,
+        mut node: NVMInternalNode<()>,
         buffer: BTreeMap<Key, (KeyInfo, DefaultMessageActionMsg)>,
     ) {
-        /*let size_before = node.size() as isize;
+        let size_before = node.size() as isize;
         let added_size = node.insert_msg_buffer(
             buffer
                 .into_iter()
@@ -1398,18 +1397,17 @@ mod tests {
             size_before + added_size,
             node.size() as isize,
             "size delta mismatch"
-        );*/
-        //Sajad Karim, fix it
+        );
 
-        check_size(&mut node);
+        //check_size(&mut node); TODO: rykv!!
     }
 
     #[quickcheck]
     fn check_insert_msg_buffer(
-        mut node: NVMInternalNode<NVMChildBuffer<()>>,
+        mut node: NVMInternalNode<()>,
         buffer: BTreeMap<Key, (KeyInfo, DefaultMessageActionMsg)>,
     ) {
-        /*let mut node_twin = node.clone();
+        let mut node_twin = node.clone();
         let added_size = node.insert_msg_buffer(
             buffer
                 .iter()
@@ -1420,8 +1418,17 @@ mod tests {
         let mut added_size_twin = 0;
         for (Key(key), (keyinfo, msg)) in buffer {
             let idx = node_twin.idx(&key);
-            added_size_twin +=
-                node_twin.data.children[idx].insert(key, keyinfo, msg.0, DefaultMessageAction);
+            added_size_twin += node_twin
+                .data
+                .write()
+                .as_mut()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .children[idx]
+                .as_mut()
+                .unwrap()
+                .insert(key, keyinfo, msg.0, DefaultMessageAction);
         }
         if added_size_twin > 0 {
             node_twin.meta_data.entries_size += added_size_twin as usize;
@@ -1429,67 +1436,31 @@ mod tests {
             node_twin.meta_data.entries_size -= -added_size_twin as usize;
         }
 
-        assert_eq!(node, node_twin);
-        assert_eq!(added_size, added_size_twin);*/ //Sajad Karim, fix the issue
+        //assert_eq!(node, node_twin); TODO: fix!
+        assert_eq!(added_size, added_size_twin);
     }
 
     static mut PK: Option<PivotKey> = None;
 
-    // impl ObjectReference for () {
-    //     type ObjectPointer = ();
-
-    //     fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
-    //         Some(&())
-    //     }
-
-    //     fn set_index(&mut self, _pk: PivotKey) {
-    //         // NO-OP
-    //     }
-
-    //     fn index(&self) -> &PivotKey {
-    //         unsafe {
-    //             if PK.is_none() {
-    //                 PK = Some(PivotKey::LeftOuter(
-    //                     CowBytes::from(vec![42u8]),
-    //                     DatasetId::default(),
-    //                 ));
-    //             }
-    //             PK.as_ref().unwrap()
-    //         }
-    //     }
-
-        fn serialize_unmodified(&self, w: &mut Vec<u8>) -> Result<(), std::io::Error> {
-            unimplemented!("TODO...");
-        }
-
-    // fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
-    //     unimplemented!("TODO...");
-    // }
-
-    // fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
-    //     unimplemented!("TODO...");
-    // }
-    // }
-
     #[quickcheck]
-    fn check_size_split(mut node: NVMInternalNode<NVMChildBuffer<()>>) -> TestResult {
-        /*if node.fanout() < 2 {
+    fn check_size_split(mut node: NVMInternalNode<()>) -> TestResult {
+        if node.fanout() < 2 {
             return TestResult::discard();
         }
         let size_before = node.size();
         let (mut right_sibling, _pivot, size_delta, _pivot_key) = node.split();
         assert_eq!(size_before as isize + size_delta, node.size() as isize);
-        check_size(&mut node);
-        check_size(&mut right_sibling);
-        */
-        //Sajad Karim ,fix the issue
+
+        // TODO fix...
+        //check_size(&mut node);
+        //check_size(&mut right_sibling);
 
         TestResult::passed()
     }
 
     #[quickcheck]
-    fn check_split(mut node: NVMInternalNode<NVMChildBuffer<()>>) -> TestResult {
-        /*if node.fanout() < 4 {
+    fn check_split(mut node: NVMInternalNode<()>) -> TestResult {
+        if node.fanout() < 4 {
             return TestResult::discard();
         }
         let twin = node.clone();
@@ -1500,25 +1471,41 @@ mod tests {
 
         node.meta_data.entries_size += pivot.size() + right_sibling.meta_data.entries_size;
         node.meta_data.pivot.push(pivot);
-        node.meta_data.pivot.append(&mut right_sibling.meta_data.pivot);
-        node.data.children.append(&mut right_sibling.data.children);
+        node.meta_data
+            .pivot
+            .append(&mut right_sibling.meta_data.pivot);
+        node.data
+            .write()
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .children
+            .append(
+                &mut right_sibling
+                    .data
+                    .write()
+                    .as_mut()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .children,
+            );
 
-        assert_eq!(node, twin);*/
-        //Sajad Karim ,fix the issue
+        //assert_eq!(node, twin); //TODO fix
 
         TestResult::passed()
     }
 
     #[quickcheck]
-    fn check_split_key(mut node: NVMInternalNode<NVMChildBuffer<()>>) -> TestResult {
-        /*if node.fanout() < 4 {
+    fn check_split_key(mut node: NVMInternalNode<()>) -> TestResult {
+        if node.fanout() < 4 {
             return TestResult::discard();
         }
         let (right_sibling, pivot, _size_delta, pivot_key) = node.split();
         assert!(node.fanout() >= 2);
         assert!(right_sibling.fanout() >= 2);
-        assert_eq!(LocalPivotKey::Right(pivot), pivot_key);*/
-        //Sajad Karim, fix the issue
+        assert_eq!(LocalPivotKey::Right(pivot), pivot_key);
         TestResult::passed()
     }
 
@@ -1545,5 +1532,4 @@ mod tests {
     // child split
     // flush buffer
     // get with max_msn
-    */
 }

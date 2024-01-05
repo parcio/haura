@@ -48,7 +48,7 @@ impl<T> Option<T> {
 }
 
 /// A leaf node of the tree holds pairs of keys values which are plain data.
-//#[derive(Clone)]
+#[derive(Clone)]
 //#[archive(check_bytes)]
 //#[cfg_attr(test, derive(PartialEq))]
 pub(super) struct NVMLeafNode/*<S> 
@@ -66,7 +66,7 @@ where S: StoragePoolLayer + 'static*/
     pub data_end: usize,
     pub node_size: crate::vdev::Block<u32>,
     pub checksum: Option<crate::checksum::XxHash>,
-    pub need_to_load_data_from_nvm: std::sync::RwLock<bool>,
+    pub need_to_load_data_from_nvm: std::sync::Arc<std::sync::RwLock<bool>>,
     pub time_for_nvm_last_fetch: SystemTime,
     pub nvm_fetch_counter: usize,
 }
@@ -225,7 +225,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::RwLock::new(false),
+            need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(false)),
             time_for_nvm_last_fetch: SystemTime::now(),
             nvm_fetch_counter: 0,
 
@@ -254,7 +254,7 @@ impl NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::RwLock::new(false),
+            need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(false)),
             time_for_nvm_last_fetch: SystemTime::now(),
             nvm_fetch_counter: 0,
         }
@@ -470,7 +470,7 @@ impl NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::RwLock::new(false),
+            need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(false)),
             time_for_nvm_last_fetch: SystemTime::now(),
             nvm_fetch_counter: 0,
 
@@ -551,7 +551,6 @@ impl NVMLeafNode
 
 #[cfg(test)]
 mod tests {
-    /*
     use super::{CowBytes, NVMLeafNode, Size};
     use crate::{
         arbitrary::GenExt,
@@ -563,9 +562,19 @@ mod tests {
         },
         StoragePreference,
     };
+
+    use rkyv::{
+        archived_root,
+        ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
+        vec::{ArchivedVec, VecResolver},
+        with::{ArchiveWith, DeserializeWith, SerializeWith},
+        Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
+    };
+
+    
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
-
+    /*
     impl Arbitrary for KeyInfo {
         fn arbitrary(g: &mut Gen) -> Self {
             let sp = g.rng().gen_range(0..=3);
@@ -574,7 +583,7 @@ mod tests {
             }
         }
     }
-
+    */  
     impl Arbitrary for NVMLeafNode {
         fn arbitrary(g: &mut Gen) -> Self {
             let len = g.rng().gen_range(0..20);
@@ -592,14 +601,15 @@ mod tests {
                 .iter()
                 .map(|(k, v)| (&k[..], (KeyInfo::arbitrary(g), v.clone())))
                 .collect();
-            //node.recalculate(); // Sajad Karim, fix it
+            node.recalculate();
             node
         }
 
         fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-            let v: Vec<_> = self.data
-                .as_ref().unwrap().entries
+            let v: Vec<_> = self
+                .entries()
                 .clone()
+                .read().as_ref().unwrap().as_ref().unwrap().entries.clone()
                 .into_iter()
                 .map(|(k, (info, v))| (k, (info, CowBytes::from(v.to_vec()))))
                 .collect();
@@ -612,21 +622,30 @@ mod tests {
         }
     }
 
-    fn serialized_size(leaf_node: &NVMLeafNode) -> usize {
-        unimplemented!("Sajad Karim, fix it");
-        /*let mut data = Vec::new();
-        PackedMap::pack(leaf_node, &mut data).unwrap(); //TODO: Sajad Kari, fix it,
-        data.len()*/
+    fn serialized_size(leaf: &NVMLeafNode) -> usize {
+        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_meta_data.serialize_value(&leaf.meta_data).unwrap();
+        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_data.serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+        let bytes_data = serializer_data.into_serializer().into_inner();
+
+        let size = 4 + 8 + 8 + bytes_meta_data.len() + bytes_data.len();
+        size
     }
 
     #[quickcheck]
     fn check_actual_size(leaf_node: NVMLeafNode) {
-        //assert_eq!(leaf_node.actual_size(), Some(serialized_size(&leaf_node))); //Sajad Karim, fix it
+        println!("1...............{:?}", leaf_node.actual_size());
+        println!("2...............{}", serialized_size(&leaf_node));
+        panic!("..");
+        assert_eq!(leaf_node.actual_size(), Some(serialized_size(&leaf_node)));
     }
 
     #[quickcheck]
     fn check_serialize_size(leaf_node: NVMLeafNode) {
-        /*let size = leaf_node.size();
+        let size = leaf_node.size();
         let serialized = serialized_size(&leaf_node);
         if size != serialized {
             eprintln!(
@@ -637,17 +656,21 @@ mod tests {
                 serialized
             );
             assert_eq!(size, serialized);
-        }*/ //Sajad Karim, fix it
+        }
     }
+    
 
     #[quickcheck]
     fn check_serialization(leaf_node: NVMLeafNode) {
-        /*let mut data = Vec::new();
+        /* TODO
+        let mut data = Vec::new();
         PackedMap::pack(&leaf_node, &mut data).unwrap();
         let twin = PackedMap::new(data).unpack_leaf();
 
-        assert_eq!(leaf_node, twin);*/ //Sajad Karim, fix it
+        assert_eq!(leaf_node, twin);
+        */
     }
+    
 
     #[quickcheck]
     fn check_size_insert(
@@ -696,7 +719,7 @@ mod tests {
         let (mut sibling, ..) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
         leaf_node.recalculate();
         leaf_node.merge(&mut sibling);
-        //assert_eq!(this, leaf_node); //Sajad Karim, fix it
+        //assert_eq!(this, leaf_node); //TODO fix
         TestResult::passed()
-    }*/
+    }
 }

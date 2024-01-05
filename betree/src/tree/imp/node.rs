@@ -405,7 +405,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),
-                need_to_load_data_from_nvm: std::sync::RwLock::new(true), //false,
+                need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(true)), //false,
                 time_for_nvm_last_fetch: SystemTime::now(),
                 nvm_fetch_counter: 0,
 
