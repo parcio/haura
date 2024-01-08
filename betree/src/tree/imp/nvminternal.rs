@@ -56,7 +56,7 @@ pub(super) struct NVMInternalNode<N: 'static> {
 
 impl<N> std::fmt::Debug for NVMInternalNode<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "...")
+        write!(f, "TODO: Karim.. fix this...")
     }
 }
 
@@ -401,18 +401,6 @@ impl<N> NVMInternalNode<N> {
         }
     }
 
-    // pub(in crate::tree) fn get_data(&mut self) -> Result<& InternalNodeData<N>, std::io::Error> where N: ObjectReference {
-    //     self.load_all_data();
-
-    //     Ok(self.data.as_ref().unwrap())
-    // }
-
-    // pub(in crate::tree) fn get_data_mut(&mut self) -> Result<&mut InternalNodeData<N>, std::io::Error>  where N: ObjectReference {
-    //     self.load_all_data();
-
-    //     Ok(self.data.as_mut().unwrap())
-    // }
-
     /// Returns the number of children.
     pub fn fanout(&self) -> usize  where N: ObjectReference {
         assert!(!self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm, "Some data for the NVMInternal node still has to be loaded into the cache.");
@@ -473,6 +461,9 @@ impl<N> NVMInternalNode<N> {
 
 impl<N> NVMInternalNode<N> {
     pub fn get(&self, key: &[u8]) -> (&std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>> , Option<(KeyInfo, SlicedCowBytes)>, usize)  where N: ObjectReference{
+
+        //self.load_entry(idx); //TODO: enable it later..
+
         let mut msg: Option<(KeyInfo, SlicedCowBytes)> = None; 
 
         if let Ok(child) = self.data.read()

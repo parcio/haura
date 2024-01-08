@@ -4,6 +4,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+use std::slice;
 use std::os::raw::c_void;
 
 #[derive(Debug)]

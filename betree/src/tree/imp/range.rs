@@ -189,7 +189,6 @@ where
                         prefetch_option,
                         np,
                     } => {
-                        //println!("..GetRangeResult::NextNode");
                         let previous_prefetch = if let Some(prefetch_np) = prefetch_option {
                             let f = self.dml.prefetch(&prefetch_np.read())?;
                             replace(prefetch, f)
@@ -205,7 +204,6 @@ where
                         prefetch_option,
                         np,
                     } => {
-                        //println!("..GetRangeResult::NVMNextNode");
                         let previous_prefetch = if let Some(prefetch_np) = prefetch_option {
                             if let Ok(_node) = prefetch_np.0.read() {
                                 let _node_pointer = _node.as_ref().unwrap().children.get(prefetch_np.1).map(|child| &child.as_ref().unwrap().node_pointer);
@@ -240,7 +238,6 @@ where
                     GetRangeResult::NVMData {
                         np
                     } => {
-                        //println!("..GetRangeResult::NVMData");
                         if let Ok(nvmdata) = np.read()
                         {
                             let ref auto = nvmdata.as_ref().unwrap().entries;
@@ -257,7 +254,6 @@ where
                         break Ok(right_pivot_key);
                     }
                     GetRangeResult::Data(leaf_entries) => {
-                        //println!("..GetRangeResult::Data");
                         self.apply_messages(
                             &left_pivot_key,
                             &right_pivot_key,
@@ -268,7 +264,6 @@ where
                         break Ok(right_pivot_key);
                     }
                 };
-                //println!("..node = next_node;");
                 node = next_node;
             }
         };

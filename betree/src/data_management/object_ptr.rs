@@ -19,7 +19,7 @@ pub struct ObjectPointer<D> {
     pub(super) size: Block<u32>,
     pub(super) info: DatasetId,
     pub(super) generation: Generation,
-    pub(super) metadata_size: usize,
+    pub(super) metadata_size: usize, // TODO: Karim.. add comments
 }
 
 impl<D> HasStoragePreference for ObjectPointer<D> {

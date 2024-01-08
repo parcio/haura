@@ -99,9 +99,9 @@ impl<V: VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Parity1<V> {
         start: usize,
         end: usize
     ) -> Result<&'static [u8]> {
-        unimplemented!("..");
+        unimplemented!("This case should not occur!");
     }
-    
+
     async fn read<C: Checksum>(
         &self,
         size: Block<u32>,

@@ -229,8 +229,9 @@ where
         let offset = op.offset();
         let generation = op.generation();
 
+        // TODO: Karim.. add comments
         let mut bytes_to_read = op.size();
-        let meta_data_len = 0;//op.metadata_size();
+        let meta_data_len = 0;
         if (meta_data_len != 0) {
             bytes_to_read = Block::round_up_from_bytes(meta_data_len as u32);
         }
@@ -389,6 +390,7 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
+        // TODO: Karim.. add comments
         let mut metadata_size = 0;
         let compression = &self.default_compression;
         let compressed_data = {

@@ -128,7 +128,7 @@ where
         dml: X,
         storage_preference: StoragePreference,
     ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(false), tree_id, PivotKey::Root(tree_id));
+        let root_node = dml.insert(Node::empty_leaf(true), tree_id, PivotKey::Root(tree_id));
         Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 
@@ -258,6 +258,7 @@ where
                 Some(PivotGetResult::Target(Some(np))) => break Some(self.get_node(np)?),
                 Some(PivotGetResult::Target(None)) => break Some(node),
                 Some(PivotGetResult::NextNode(np)) => self.get_node(np)?,
+                // TODO: Karim.. add comments..
                 Some(PivotGetResult::NVMTarget{np, idx}) => {
                     if let Ok(data) = np.read() {
                         let child;
@@ -301,6 +302,7 @@ where
                 }
                 Some(PivotGetMutResult::Target(None)) => break Some(node),
                 Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
+                // TODO: Karim.. add comments..
                 Some(PivotGetMutResult::NVMTarget {
                     idx,
                     first_bool,
@@ -459,6 +461,7 @@ where
             let next_node = match node.get(key, &mut msgs) {
                 GetResult::NextNode(np) => self.get_node(np)?,
                 GetResult::Data(data) => break data,
+                // TODO: Karim.. add comments..
                 GetResult::NVMNextNode {
                     np,
                     idx
@@ -509,6 +512,7 @@ where
                 ApplyResult::NextNode(np) => self.get_mut_node_mut(np)?,
                 ApplyResult::Leaf(info) => break info,
                 ApplyResult::NVMLeaf(info) => break info,
+                // TODO: Karim.. add comments..
                 ApplyResult::NVMNextNode {
                     node,
                     idx
@@ -569,12 +573,7 @@ where
             loop {
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-
-
-
-
-                        // TODO: Karim... add comments...
-                        //if let Some(child) = self.try_get_mut_node(child_buffer.node_pointer_mut())
+                        // TODO: Karim.. add comments..
                         let mut auto;
 
                         match child_buffer.node_pointer_mut() {
@@ -586,7 +585,6 @@ where
                                 auto = self.try_get_mut_node(&mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer);
                             },
                         };
-                        // TODO: Karim... End of new code
 
                         if let Some(child) = auto
                         {
@@ -596,28 +594,6 @@ where
                             break child_buffer.into_owner();
                         }
                     },
-                    /*Ok(mut child_buffer) => {
-                        match(child_buffer) {
-                            TakeChildBufferWrapper::TakeChildBuffer(mut inner_child_buffer) => {
-                                if let Some(child) = self.try_get_mut_node(inner_child_buffer.as_mut().unwrap().node_pointer_mut())
-                                {
-                                    node = child;
-                                    parent = Some(child_buffer);
-                                } else {
-                                    break child_buffer.into_owner();
-                                }       
-                            },
-                            TakeChildBufferWrapper::NVMTakeChildBuffer(mut inner_child_buffer) => {
-                                if let Some(child) = self.try_get_mut_node(inner_child_buffer.as_mut().unwrap().node_pointer_mut())
-                                {
-                                    node = child;
-                                    parent = Some(child_buffer);
-                                } else {
-                                    break child_buffer.into_owner();
-                                }       
-                            },
-                        };
-                    }*/
                     Err(node) => break node,
                 };
             }

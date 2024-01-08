@@ -22,31 +22,6 @@ use rkyv::{
     Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
 };
 
-use std::os::raw::c_void;
-
-use extend::ext;
-
-#[ext]
-impl<T> Option<T> {
-    fn as_mut_lazy(&mut self) -> &mut T {
-        match *self {
-            Some(ref mut x) => x,
-            None => {
-                panic!("TODO... request storagepool for the data..")
-            },
-        }
-    }
-
-    fn as_ref_lazy(&self) -> &T {
-        match *self {
-            Some(ref x) => x,
-            None => {
-                panic!("TODO... request storagepool for the data..")
-            },
-        }
-    }
-}
-
 pub(crate) const NVMLEAF_TYPE_ID: usize = 4;
 pub(crate) const NVMLEAF_METADATA_OFFSET: usize = 8;
 pub(crate) const NVMLEAF_DATA_OFFSET: usize = 8;
@@ -101,19 +76,9 @@ pub struct NVMLeafNodeData {
 
 impl std::fmt::Debug for NVMLeafNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "todo...")
+        write!(f, "TODO: Karim.. fix this...")
     }
 }
-
-unsafe fn voidp_to_ref<'a, T>(p: *const c_void) -> &'a T
-{
-    unsafe { &*(p as *const T) }
-}
-
-fn print_type_of<T>(_: &T) {
-    println!("{}", std::any::type_name::<T>())
-}
-
 
 /// Case-dependent outcome of a rebalance operation.
 #[derive(Debug)]
@@ -398,6 +363,7 @@ impl NVMLeafNode
 
     /// Returns the value for the given key.
     pub fn get(&self, key: &[u8]) -> Option<SlicedCowBytes> {
+        self.load_entry(key);
         self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).map(|(_info, data)| data).cloned()
     }
 
@@ -410,9 +376,6 @@ impl NVMLeafNode
         self.load_all_entries();
         &self.data
     }
-    // pub(in crate::tree) fn entries(&self) -> &BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
-    //     &self.data.read().as_ref().unwrap().as_ref().unwrap().entries
-    // }
 
     pub(in crate::tree) fn entry_info(&mut self, key: &[u8]) -> Option<&mut KeyInfo> {
         unimplemented!("seems to be an orpahn method!")

@@ -18,7 +18,7 @@ use crate::{
     database::{DatasetId,RootSpu},
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
-    tree::{pivot_key::LocalPivotKey, MessageAction, imp::{/*leaf::ArchivedNVMLeafNode,*/ nvminternal::{InternalNodeMetaData, ArchivedInternalNodeMetaData, ArchivedInternalNodeData, InternalNodeData}}},
+    tree::{pivot_key::LocalPivotKey, MessageAction, imp::{nvminternal::{InternalNodeMetaData, ArchivedInternalNodeMetaData, ArchivedInternalNodeData, InternalNodeData}}},
     StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
@@ -31,6 +31,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH}
 };
 
+use std::iter::Map;
+
 use rkyv::{
     archived_root,
     ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
@@ -38,8 +40,6 @@ use rkyv::{
     with::{ArchiveWith, DeserializeWith, SerializeWith},
     Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
 };
-
-//pub(crate) type RootSpu = crate::storage_pool::StoragePoolUnit<crate::checksum::XxHash>;
 
 /// The tree node type.
 #[derive(Debug)]
@@ -59,23 +59,10 @@ pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
     NVMTakeChildBuffer(Option<NVMTakeChildBuffer<'a, N>>),
 }
 
-
 impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
     pub fn node_pointer_mut(&mut self) -> &mut TakeChildBufferWrapper<'a, N>  where N: ObjectReference{
-        self
         // TODO: Karim... add comments...
-        // match self {
-        //     TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-        //         println!("2...........................................");
-        //         obj.as_mut().unwrap().node_pointer_mut()
-        //     },
-        //     TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-        //         //let (a,b) = obj.as_mut().unwrap().node_pointer_mut();
-        //         //&mut self.node.data.write().as_mut().unwrap().as_mut().unwrap().children[self.child_idx].as_mut().unwrap().node_pointer
-        //         //obj.as_mut().unwrap().node_pointer_mut()
-        //         unimplemented!("..")
-        //     },
-        // }
+        self        
     }
 
     pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) where N: ObjectReference{
@@ -91,50 +78,48 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
     }
 }
 
-use std::iter::Map;
-
-/*trait CBIteratorTrait<'a, N> {
-    fn get_iterator(&'a mut self) -> Box<dyn Iterator<Item = &'a mut N> + 'a>;
-    fn get_iterator2(&'a self) -> Box<dyn Iterator<Item = &'a  N> + 'a>;
-    fn get_iterator3(self) -> Box<dyn Iterator<Item = N> + 'a>;
+trait ChildBufferIteratorTrait<'a, N> {
+    fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut N> + 'a>;
+    fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a  N> + 'a>;
+    fn cb_iter(self) -> Box<dyn Iterator<Item = N> + 'a>;
 }
 
-impl<'a, N> CBIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>> {
-    fn get_iterator(&'a mut self) -> Box<dyn Iterator<Item = &'a mut ChildBuffer<N>> + 'a> {
+impl<'a, N> ChildBufferIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>> {
+    fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut ChildBuffer<N>> + 'a> {
         //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
         Box::new(self.iter_mut())
     }
 
-    fn get_iterator2(&'a self) -> Box<dyn Iterator<Item = &'a ChildBuffer<N>> + 'a> {
+    fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a ChildBuffer<N>> + 'a> {
         //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
         Box::new(self.iter())
     }
 
-    fn get_iterator3(self) -> Box<dyn Iterator<Item = ChildBuffer<N>> + 'a> {
+    fn cb_iter(self) -> Box<dyn Iterator<Item = ChildBuffer<N>> + 'a> {
         //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
         Box::new(self.into_iter())
     }
 
 }
 
-impl<'a, N> CBIteratorTrait<'a, Option<NVMChildBuffer<N>>> for Vec<Option<NVMChildBuffer<N>>> {
-    fn get_iterator(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Option<NVMChildBuffer<N>>> + 'a> {
+impl<'a, N> ChildBufferIteratorTrait<'a, Option<NVMChildBuffer<N>>> for Vec<Option<NVMChildBuffer<N>>> {
+    fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Option<NVMChildBuffer<N>>> + 'a> {
         //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
         Box::new(self.iter_mut())
     }
 
-    fn get_iterator2(&'a self) -> Box<dyn Iterator<Item = &'a Option<NVMChildBuffer<N>>> + 'a> {
+    fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a Option<NVMChildBuffer<N>>> + 'a> {
         //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
         Box::new(self.iter())
     }
 
-    fn get_iterator3(self) -> Box<dyn Iterator<Item = Option<NVMChildBuffer<N>>> + 'a> {
+    fn cb_iter(self) -> Box<dyn Iterator<Item = Option<NVMChildBuffer<N>>> + 'a> {
         //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
         Box::new(self.into_iter())
     }
 
 }
-*/
+
 pub(super) enum ChildBufferIterator<'a, N: 'a + 'static> {
     ChildBuffer(Option<Box<dyn Iterator<Item = &'a mut N> + 'a>>),
     NVMChildBuffer(&'a std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>),
@@ -151,39 +136,6 @@ pub(super) enum ChildBufferIterator2<'a, N> {
 }
 
 
-/*pub(super) enum ChildBufferIterator<'a, N: 'static> {
-    ChildBuffer(Option<Map<impl Iterator<Item = &'a mut ChildBuffer<N>>, fn(&'a mut ChildBuffer<N>) -> &'a mut ChildBuffer<N>>>),
-    //NVMChildBuffer(Option<Map<impl Iterator<Item = &'a mut Option<NVMChildBuffer<N>>>, fn(&'a mut Option<NVMChildBuffer<N>>) -> &'a mut Option<NVMChildBuffer<N>>>),
-
-    //ChildBuffer(Option<std::iter::Map<impl Iterator<Item = &mut ChildBuffer<N>>,),
-    //NVMChildBuffer(core::slice::IterMut<'a, Option<NVMChildBuffer<N>>>),
-
-    //std::option::Option<std::iter::Map<impl Iterator<Item = &mut ChildBuffer<N>> + '_
-//    std::option::Option<std::iter::Map<impl Iterator<Item = &mut std::option::Option<NVMChildBuffer<N>>> + '_
-}*/
-
-/*
-pub(super) enum ChildBufferWrapper<'a, N: 'static> {
-    ChildBuffer(core::slice::IterMut<'a, ChildBuffer<N>>),
-    NVMChildBuffer(core::slice::IterMut<'a, NVMChildBuffer<N>>),
-}
-
-pub(super) struct ChildBufferWrapperStruct<'a, N: 'static> {
-    pub data: ChildBufferWrapper<'a , N>,
-}
-
-
-impl<'a, N> Iterator for ChildBufferWrapperStruct<'a, N> {
-    type Item = ChildBufferWrapperStruct<'a, N>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.data {
-            ChildBufferWrapper::ChildBuffer(_) =>  unimplemented!(""),
-            ChildBufferWrapper::NVMChildBuffer(_) => unimplemented!(""),
-        }
-    }
-}
-*/
 #[derive(Debug)]
 enum NodeInnerType {
     Packed = 1,
@@ -246,28 +198,18 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     fn pack<W: Write>(&self, mut writer: W, metadata_size: &mut usize) -> Result<(), io::Error> {
         match self.0 {
             PackedLeaf(ref map) => {
-                //println!("pack: PackedLeaf ...........................................");
-
-                //writer.write_all((NodeInnerType::Packed as u32).to_be_bytes().as_ref())?;
                 writer.write_all(map.inner())
             },
             Leaf(ref leaf) => {
-                //println!("pack: Leaf ...........................................");
-
                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
                 PackedMap::pack(leaf, writer)
             },
             Internal(ref internal) => {
-                //println!("pack: Internal ...........................................");
-
                 writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
-                //writer.write_all(&[0xFFu8, 0xFF, 0xFF, 0xFF] as &[u8])?;
                 serialize_into(writer, internal)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             },
             NVMLeaf(ref leaf) => {
-                //println!("pack: NVMLeaf ...........................................");
-
                 let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                 serializer_meta_data.serialize_value(&leaf.meta_data).unwrap();
                 let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
@@ -283,13 +225,13 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 writer.write_all(&bytes_meta_data.as_ref())?;
                 writer.write_all(&bytes_data.as_ref())?;
 
-                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this
+                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this.. magic nos!
+
+                debug!("NVMLeaf node packed successfully"); 
 
                 Ok(())
             },
             NVMInternal(ref nvminternal) => {
-                //println!("pack: NVMInternal ...........................................");
-
                 let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                 serializer_meta_data.serialize_value(&nvminternal.meta_data).unwrap();
                 let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
@@ -317,14 +259,11 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
     fn unpack_at(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
         if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
-            //println!("unpack: Internal ...........................................");
                 match deserialize::<InternalNode<_>>(&data[4..]) {
                 Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
                 Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             }
         } else if data[0..4] == (NodeInnerType::Leaf as u32).to_be_bytes() {
-            //println!("unpack: Leaf ...........................................");
-
             // storage_preference is not preserved for packed leaves,
             // because they will not be written back to disk until modified,
             // and every modification requires them to be unpacked.
@@ -332,8 +271,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // recalculates the correct storage_preference for the contained keys.
             Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
-            //println!("unpack: NVMInternal ...........................................");
-
             let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
 
@@ -370,8 +307,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                     nvm_fetch_counter: 0}),
             }.complete_object_refs(d_id))))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
-            //println!("unpack: NVMLeaf ...........................................");
-
             let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
 
@@ -384,13 +319,11 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(&data[meta_data_start..meta_data_end]).unwrap();
             //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
             let meta_data:NVMLeafNodeMetaData = archivedleafnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
             
             let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
             //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
             let data:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             
-
             let mut nvmleaf = NVMLeafNode {
                 pool: Some(pool),
                 disk_offset: Some(_offset),
@@ -409,9 +342,9 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                     time_for_nvm_last_fetch: SystemTime::now(),
                     nvm_fetch_counter: 0})),
             };
-            //nvmleaf.load_missing_part();
 
-            debug!("NVMLeaf node packed successfully"); 
+            debug!("NVMLeaf node un-packed successfully"); 
+
             Ok(Node(NVMLeaf(nvmleaf)))
         } else {
             panic!("Unkown bytes to unpack. [0..4]: {}", u32::from_be_bytes(data[..4].try_into().unwrap()));
@@ -432,6 +365,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     where
         F: FnMut(&mut R) -> Result<(), E>,
     {
+        //TODO: Karim.. add comments..
         if let Some(iter_type) = self.child_pointer_iter_mut() {
             match iter_type {
                 ChildBufferIterator::ChildBuffer(obj) => {
@@ -507,23 +441,6 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
         }
     }
 
-/*    pub(super) fn try_find_flush_candidate(&mut self) -> Option<TakeChildBuffer<N>> where N: ObjectReference {
-        match self.0 {
-            Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => internal.try_find_flush_candidate(
-                MIN_FLUSH_SIZE,
-                MAX_INTERNAL_NODE_SIZE,
-                MIN_FANOUT,
-            ),
-            NVMLeaf(ref nvmleaf) => None,
-            NVMInternal(ref nvminternal) =>             /*nvminternal.try_find_flush_candidate(
-                MIN_FLUSH_SIZE,
-                MAX_INTERNAL_NODE_SIZE,
-                MIN_FANOUT,
-            )*/,
-        }
-    }
-*/
     pub(super) fn try_find_flush_candidate(&mut self) -> Option<TakeChildBufferWrapper<N>> where N: ObjectReference {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
@@ -694,9 +611,9 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         };
         debug!("Root split pivot key: {:?}", pivot_key);
 
-
+        // TODO: Karim.. add comments..
         if(isnvm) {
-            *self = Node(NVMInternal(NVMInternalNode::new(    //TODO: NVM?
+            *self = Node(NVMInternal(NVMInternalNode::new(
                 NVMChildBuffer::new(allocate_obj(
                     left_sibling,
                     LocalPivotKey::LeftOuter(pivot_key.clone()),
@@ -709,7 +626,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                 cur_level + 1,
             )));    
         } else {
-            *self = Node(Internal(InternalNode::new(    //TODO: NVM?
+            *self = Node(Internal(InternalNode::new(
                 ChildBuffer::new(allocate_obj(
                     left_sibling,
                     LocalPivotKey::LeftOuter(pivot_key.clone()),
@@ -852,21 +769,17 @@ impl<N: HasStoragePreference> Node<N> {
                 }
             },
             NVMLeaf(ref nvmleaf) => {
-                //println!("..NVMLeaf");
                 let np = nvmleaf.entries();
                 GetRangeResult::NVMData {
                     np
                 }
             },
             NVMInternal(ref nvminternal) => {
-                //println!("..NVMInternal");
                 nvminternal.load_all_data();
                 
                 let prefetch_option = if nvminternal.level() == 1 {
-                    //println!("..NVMInternal................1");
                     Some(nvminternal.get_next_node(key))
                 } else {
-                    //println!("..NVMInternal................2");
                     None
                 };
 
@@ -1007,10 +920,8 @@ impl<N: HasStoragePreference> Node<N> {
                 Some(ChildBufferIterator2::ChildBuffer(Some(Box::new(core_value))))
             },
             NVMLeaf(ref nvmleaf) => None,
-            NVMInternal(ref nvminternal) => 
-            {
-                unimplemented!("Could not find any caller for this method! Therefore not fixing it for NVM-related changes..");
-
+            NVMInternal(ref nvminternal) => {
+                unimplemented!("TODO: Fix it later... could not find any caller!..");
                 // TODO: return &std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>
                 //Some(ChildBufferIterator2::ChildBuffer(nvminternal.iter()))
             },
@@ -1021,13 +932,11 @@ impl<N: HasStoragePreference> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => {
-                println!("drain_children internal.....................................................");
                 let core_value = internal.drain_children();
                 Some(ChildBufferIterator3::ChildBuffer(Some(Box::new(core_value))))
             },
             NVMLeaf(ref nvmleaf) => None,
             NVMInternal(ref mut nvminternal) =>{
-                println!("drain_children nvminternal.....................................................");
                 let core_value = nvminternal.drain_children();
                 Some(ChildBufferIterator3::NVMChildBuffer(Some(Box::new(core_value))))
             },
@@ -1271,7 +1180,7 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
                 level: self.level(),
                 entry_count: nvmleaf.entries().read().as_ref().unwrap().as_ref().unwrap().entries.len(),
             },
-            NVMInternal(ref nvminternal) => NodeInfo::NVMInternal {
+            Inner::NVMInternal(ref nvminternal) => NodeInfo::NVMInternal {
                 storage: self.correct_preference(),
                 system_storage: self.system_storage_preference(),
                 level: self.level(),

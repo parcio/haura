@@ -72,6 +72,7 @@ pub trait ObjectReference: Serialize + DeserializeOwned + StaticSize + Debug + '
     /// Retrieve the index of this node.
     fn index(&self) -> &PivotKey;
 
+    // TODO: Karim.. add comments
     fn serialize_unmodified(&self, w: &mut Vec<u8>) -> Result<(), std::io::Error>;
     fn deserialize_and_set_unmodified(bytes: & [u8]) -> Result<Self, std::io::Error>;
 }
