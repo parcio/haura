@@ -73,6 +73,15 @@ impl PMem {
         Ok(())
     }
 
+    pub unsafe fn get_slice(&self, offset: usize, len: usize) -> Result<&'static [u8], std::io::Error>{
+        if self.ptr.is_null() {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other,
+                        format!("File handle is missing for the PMEM file.")));
+        }
+
+        Ok(slice::from_raw_parts(voidp_to_ref::<u8>(self.ptr.add(offset)), len))
+    }
+
     pub unsafe fn write(&self, offset: usize, data: &[u8], len: usize) -> Result<(), std::io::Error>{
         if self.ptr.is_null() {
             return Err(std::io::Error::new(std::io::ErrorKind::Other,
