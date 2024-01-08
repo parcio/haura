@@ -104,6 +104,13 @@ pub trait VdevRead: Send + Sync {
         checksum: C,
     ) -> Result<Buf>;
 
+    async fn get_slice(
+        &self,
+        offset: Block<u64>,
+        start: usize,
+        end: usize
+    ) -> Result<&'static [u8]>;
+    
     /// Reads `size` blocks at `offset` and verifies the data with the
     /// `checksum`.
     /// In contrast to `read`, this function will read and verify data from

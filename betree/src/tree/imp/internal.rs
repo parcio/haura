@@ -302,13 +302,11 @@ impl<N> InternalNode<N> {
                 .push(msg.clone());
         }
 
-        println!("..Internal..get_range {}", idx);
         &child.node_pointer
     }
 
     pub fn get_next_node(&self, key: &[u8]) -> Option<&RwLock<N>> {
         let idx = self.idx(key) + 1;
-        println!("isolating issue {}", idx);
         self.children.get(idx).map(|child| &child.node_pointer)
     }
 

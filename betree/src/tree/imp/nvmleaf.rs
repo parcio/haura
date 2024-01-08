@@ -52,6 +52,12 @@ pub(crate) const NVMLEAF_METADATA_OFFSET: usize = 8;
 pub(crate) const NVMLEAF_DATA_OFFSET: usize = 8;
 pub(crate) const NVMLEAF_HEADER_FIXED_LEN: usize = NVMLEAF_TYPE_ID + NVMLEAF_METADATA_OFFSET + NVMLEAF_DATA_OFFSET;
 
+pub(super) struct NVMLeafNodeLoadDetails {
+    pub need_to_load_data_from_nvm: bool,
+    pub time_for_nvm_last_fetch: SystemTime,
+    pub nvm_fetch_counter: usize,
+}
+
 /// A leaf node of the tree holds pairs of keys values which are plain data.
 #[derive(Clone)]
 //#[archive(check_bytes)]
@@ -71,9 +77,7 @@ where S: StoragePoolLayer + 'static*/
     pub data_end: usize,
     pub node_size: crate::vdev::Block<u32>,
     pub checksum: Option<crate::checksum::XxHash>,
-    pub need_to_load_data_from_nvm: std::sync::Arc<std::sync::RwLock<bool>>,
-    pub time_for_nvm_last_fetch: SystemTime,
-    pub nvm_fetch_counter: usize,
+    pub nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Archive, Serialize, Deserialize)]
@@ -273,10 +277,10 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(false)),
-            time_for_nvm_last_fetch: SystemTime::now(),
-            nvm_fetch_counter: 0,
-
+            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
+                need_to_load_data_from_nvm: false,
+                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+                nvm_fetch_counter: 0})),
         }
     }
 }
@@ -302,15 +306,68 @@ impl NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(false)),
-            time_for_nvm_last_fetch: SystemTime::now(),
-            nvm_fetch_counter: 0,
+            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
+                need_to_load_data_from_nvm: false,
+                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+                nvm_fetch_counter: 0})),
         }
     }    
 
+    pub(in crate::tree) fn load_entry(&self, key: &[u8]) -> Result<(), std::io::Error> {
+        if self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm {
+            if self.data.read().unwrap().is_none() {
+                let mut node = NVMLeafNodeData { 
+                    entries: BTreeMap::new()
+                };
+
+                *self.data.write().unwrap() = Some(node);            
+            }
+            
+            if self.disk_offset.is_some() && !self.data.read().as_ref().unwrap().as_ref().unwrap().entries.contains_key(key) {
+                if self.nvm_load_details.read().unwrap().time_for_nvm_last_fetch.elapsed().unwrap().as_secs() < 5 {
+                    self.nvm_load_details.write().unwrap().nvm_fetch_counter = self.nvm_load_details.read().as_ref().unwrap().nvm_fetch_counter + 1;
+
+                    if self.nvm_load_details.read().as_ref().unwrap().nvm_fetch_counter >= 2 {
+                        self.load_all_entries();
+
+                        return Ok(());
+                    }
+                } else {
+                    self.nvm_load_details.write().as_mut().unwrap().nvm_fetch_counter = 0;
+                    self.nvm_load_details.write().as_mut().unwrap().time_for_nvm_last_fetch = SystemTime::now();
+                }
+
+                match self.pool.as_ref().unwrap().slice(self.disk_offset.unwrap(), self.data_start, self.data_end) {
+                    Ok(val) => {
+                        //let archivedleafnodedata: &ArchivedNVMLeafNodeData = unsafe { archived_root::<NVMLeafNodeData>(&val[..]) };
+                        let archivedleafnodedata: &ArchivedNVMLeafNodeData = rkyv::check_archived_root::<NVMLeafNodeData>(&val[..]).unwrap();
+
+                        for val in archivedleafnodedata.entries.iter() {
+                            if val.key.as_ref().cmp(key).is_eq() {
+                                let val_1: KeyInfo = val.value.0.deserialize(&mut rkyv::Infallible).unwrap();
+                                let val_2: SlicedCowBytes = val.value.1.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).unwrap();
+
+                                let key: CowBytes = val.key.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).unwrap();
+
+                                self.data.write().as_mut().unwrap().as_mut().unwrap().entries.insert(key, (val_1, val_2));
+                            }
+                        }
+                        
+                        return Ok(());
+                    },
+                    Err(e) => {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                    }
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
     pub(in crate::tree) fn load_all_entries(&self) -> Result<(), std::io::Error> {
-        if *self.need_to_load_data_from_nvm.read().unwrap() && self.disk_offset.is_some() {
-            *self.need_to_load_data_from_nvm.write().unwrap() = false; // TODO: What if all the entries are fetched one by one? handle this part as well.
+        if self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm && self.disk_offset.is_some() {
+            self.nvm_load_details.write().unwrap().need_to_load_data_from_nvm = false; // TODO: What if all the entries are fetched one by one? handle this part as well.
             let compressed_data = self.pool.as_ref().unwrap().read(self.node_size, self.disk_offset.unwrap(), self.checksum.unwrap());
             match compressed_data {
                 Ok(buffer) => {
@@ -518,10 +575,10 @@ impl NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(false)),
-            time_for_nvm_last_fetch: SystemTime::now(),
-            nvm_fetch_counter: 0,
-
+            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
+                need_to_load_data_from_nvm: false,
+                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+                nvm_fetch_counter: 0})),
         };
 
         // This adjusts sibling's size and pref according to its new entries

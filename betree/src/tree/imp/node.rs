@@ -4,9 +4,9 @@ use super::{
     child_buffer::ChildBuffer,
     nvm_child_buffer::NVMChildBuffer,
     internal::{InternalNode, TakeChildBuffer, self},
-    nvminternal::{NVMInternalNode, NVMTakeChildBuffer, self},
+    nvminternal::{NVMInternalNode, NVMTakeChildBuffer, self, NVMLazyLoadDetails},
     leaf::LeafNode,
-    nvmleaf::{NVMLeafNode, NVMLeafNodeMetaData, NVMLeafNodeData, self},
+    nvmleaf::{NVMLeafNode, NVMLeafNodeMetaData, NVMLeafNodeData, self, NVMLeafNodeLoadDetails},
     packed::PackedMap,
     nvmleaf::NVMFillUpResult,
     FillUpResult, KeyInfo, PivotKey, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT,
@@ -81,7 +81,6 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
     pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) where N: ObjectReference{
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                println!("22...........................................");
                 obj.as_mut().unwrap().take_buffer()
             },
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
@@ -365,10 +364,10 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),                
-                need_to_load_data_from_nvm: std::sync::RwLock::new(true), //false,
-                time_for_nvm_last_fetch: SystemTime::now(),
-                nvm_fetch_counter: 0,
-
+                nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails{
+                    need_to_load_data_from_nvm: true,
+                    time_for_nvm_last_fetch: SystemTime::now(),
+                    nvm_fetch_counter: 0}),
             }.complete_object_refs(d_id))))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
             //println!("unpack: NVMLeaf ...........................................");
@@ -405,10 +404,10 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),
-                need_to_load_data_from_nvm: std::sync::Arc::new(std::sync::RwLock::new(true)), //false,
-                time_for_nvm_last_fetch: SystemTime::now(),
-                nvm_fetch_counter: 0,
-
+                nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
+                    need_to_load_data_from_nvm: true,
+                    time_for_nvm_last_fetch: SystemTime::now(),
+                    nvm_fetch_counter: 0})),
             };
             //nvmleaf.load_missing_part();
 
@@ -832,25 +831,18 @@ impl<N: HasStoragePreference> Node<N> {
     ) -> GetRangeResult<Box<dyn Iterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))> + 'a>, N>
     where N: ObjectReference
     {
-        //println!("..get_range");
-
         match self.0 {
             PackedLeaf(ref map) => {
-                //println!("..PackedLeaf");
                 GetRangeResult::Data(Box::new(map.get_all()))
             },
             Leaf(ref leaf) => {
-                //println!("..Leaf");
                 GetRangeResult::Data(Box::new(
                 leaf.entries().iter().map(|(k, v)| (&k[..], v.clone())),
             ))},
             Internal(ref internal) => {
-                println!("..Internal");
                 let prefetch_option = if internal.level() == 1 {
-                    //println!("..Internal................1");
                     internal.get_next_node(key)
                 } else {
-                    //println!("..Internal................2");
                     None
                 };
                 let np = internal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);

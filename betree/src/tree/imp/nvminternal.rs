@@ -33,6 +33,12 @@ use rkyv::{
     Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
 };
 
+pub(super) struct NVMLazyLoadDetails {
+    pub need_to_load_data_from_nvm: bool,
+    pub time_for_nvm_last_fetch: SystemTime,
+    pub nvm_fetch_counter: usize,
+}
+
 //#[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
 //#[archive(check_bytes)]
 //#[cfg_attr(test, derive(PartialEq))]
@@ -47,9 +53,7 @@ pub(super) struct NVMInternalNode<N: 'static> {
     pub data_end: usize,
     pub node_size: crate::vdev::Block<u32>,
     pub checksum: Option<crate::checksum::XxHash>,
-    pub need_to_load_data_from_nvm: std::sync::RwLock<bool>,
-    pub time_for_nvm_last_fetch: SystemTime,
-    pub nvm_fetch_counter: usize,
+    pub nvm_load_details: std::sync::RwLock<NVMLazyLoadDetails>,
 }
 
 impl<N> std::fmt::Debug for NVMInternalNode<N> {
@@ -117,7 +121,7 @@ lazy_static! {
             system_storage_preference: AtomicSystemStoragePreference::none(),
             pref: AtomicStoragePreference::unknown(),
             pivot: vec![]
-            },
+        },
         data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
             children: vec![]
         }))),
@@ -127,9 +131,11 @@ lazy_static! {
         data_end: 0,
         node_size: crate::vdev::Block(0),
         checksum: None,
-        need_to_load_data_from_nvm: std::sync::RwLock::new(false),
-        time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,// SystemTime::::from(DateTime::parse_from_rfc3339("1996-12-19T16:39:57-00:00").unwrap()),
-        nvm_fetch_counter: 0,
+        nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails {
+            need_to_load_data_from_nvm: false,
+            time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+            nvm_fetch_counter: 0
+        }),
     };
 }
 
@@ -213,7 +219,11 @@ impl<N: StaticSize> Size for NVMInternalNode<N> {
 
     fn actual_size(&self) -> Option<usize> {
         assert!(
-            !*self.need_to_load_data_from_nvm.read().unwrap(),
+            !self
+                .nvm_load_details
+                .read()
+                .unwrap()
+                .need_to_load_data_from_nvm,
             "Some data for the NVMInternal node still has to be loaded into the cache."
         );
 
@@ -253,7 +263,11 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
         let mut pref = StoragePreference::NONE;
 
         assert!(
-            !*self.need_to_load_data_from_nvm.read().unwrap(),
+            !self
+                .nvm_load_details
+                .read()
+                .unwrap()
+                .need_to_load_data_from_nvm,
             "Some data for the NVMInternal node still has to be loaded into the cache."
         );
 
@@ -290,6 +304,139 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
 }
 
 impl<N: ObjectReference> NVMInternalNode<N> {
+    pub(in crate::tree) fn load_entry(&self, idx: usize) -> Result<(), std::io::Error> {
+        // This method ensures the data part is fully loaded before performing an operation that requires all the entries.
+        // However, a better approach can be to load the pairs that are required (so it is a TODO!)
+        // Also since at this point I am loading all the data so assuming that 'None' suggests all the data is already fetched.
+
+        if self
+            .nvm_load_details
+            .read()
+            .unwrap()
+            .need_to_load_data_from_nvm
+        {
+            if self.data.read().unwrap().is_none() {
+                let mut node: InternalNodeData<N> = InternalNodeData { children: vec![] };
+
+                *self.data.write().unwrap() = Some(node);
+            }
+
+            if self.disk_offset.is_some()
+                && self
+                    .data
+                    .read()
+                    .as_ref()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .children
+                    .len()
+                    < idx
+            {
+                if self
+                    .nvm_load_details
+                    .read()
+                    .unwrap()
+                    .time_for_nvm_last_fetch
+                    .elapsed()
+                    .unwrap()
+                    .as_secs()
+                    < 5
+                {
+                    self.nvm_load_details.write().unwrap().nvm_fetch_counter = self
+                        .nvm_load_details
+                        .read()
+                        .as_ref()
+                        .unwrap()
+                        .nvm_fetch_counter
+                        + 1;
+
+                    if self
+                        .nvm_load_details
+                        .read()
+                        .as_ref()
+                        .unwrap()
+                        .nvm_fetch_counter
+                        >= 2
+                    {
+                        return self.load_all_data();
+                    }
+                } else {
+                    self.nvm_load_details
+                        .write()
+                        .as_mut()
+                        .unwrap()
+                        .nvm_fetch_counter = 0;
+                    self.nvm_load_details
+                        .write()
+                        .as_mut()
+                        .unwrap()
+                        .time_for_nvm_last_fetch = SystemTime::now();
+                }
+
+                self.data
+                    .write()
+                    .as_mut()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .children
+                    .resize_with(idx, || None);
+
+                match self.pool.as_ref().unwrap().slice(
+                    self.disk_offset.unwrap(),
+                    self.data_start,
+                    self.data_end,
+                ) {
+                    Ok(val) => {
+                        let archivedinternalnodedata: &ArchivedInternalNodeData<_> =
+                            rkyv::check_archived_root::<InternalNodeData<N>>(&val[..]).unwrap();
+
+                        let val: Option<NVMChildBuffer<N>> = archivedinternalnodedata.children[idx]
+                            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+                            .unwrap();
+
+                        self.data
+                            .write()
+                            .as_mut()
+                            .unwrap()
+                            .as_mut()
+                            .unwrap()
+                            .children
+                            .insert(idx, val);
+
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                    }
+                }
+
+                /*let compressed_data = self.pool.as_ref().unwrap().read(self.node_size, self.disk_offset.unwrap(), self.checksum.unwrap());
+                match compressed_data {
+                    Ok(buffer) => {
+                        let bytes: Box<[u8]> = buffer.into_boxed_slice();
+
+                        let archivedinternalnodedata: &ArchivedInternalNodeData<_> = rkyv::check_archived_root::<InternalNodeData<N>>(&bytes[self.data_start..self.data_end]).unwrap();
+
+                        let val: Option<NVMChildBuffer<N>> = archivedinternalnodedata.children[idx].deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).unwrap();
+
+                        self.data.as_mut().unwrap().children.insert(idx, val);
+                        //let node: InternalNodeData<_> = archivedinternalnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                        //self.data = Some(node);
+
+                        return Ok(());
+                    },
+                    Err(e) => {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                    }
+                }*/
+            }
+        }
+
+        Ok(())
+    }
+
     pub(in crate::tree) fn load_all_data(&self) -> Result<(), std::io::Error> {
         // This method ensures the data part is fully loaded before performing an operation that requires all the entries.
         // However, a better approach can be to load the pairs that are required (so it is a TODO!)
@@ -301,8 +448,17 @@ impl<N: ObjectReference> NVMInternalNode<N> {
         //     println!("..............false");
         // }
 
-        if *self.need_to_load_data_from_nvm.read().unwrap() && self.disk_offset.is_some() {
-            *self.need_to_load_data_from_nvm.write().unwrap() = false;
+        if self
+            .nvm_load_details
+            .read()
+            .unwrap()
+            .need_to_load_data_from_nvm
+            && self.disk_offset.is_some()
+        {
+            self.nvm_load_details
+                .write()
+                .unwrap()
+                .need_to_load_data_from_nvm = false;
             let compressed_data = self.pool.as_ref().unwrap().read(
                 self.node_size,
                 self.disk_offset.unwrap(),
@@ -371,9 +527,11 @@ impl<N> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::RwLock::new(false),
-            time_for_nvm_last_fetch: SystemTime::now(),
-            nvm_fetch_counter: 0,
+            nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails {
+                need_to_load_data_from_nvm: false,
+                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+                nvm_fetch_counter: 0,
+            }),
         }
     }
 
@@ -395,7 +553,11 @@ impl<N> NVMInternalNode<N> {
         N: ObjectReference,
     {
         assert!(
-            !*self.need_to_load_data_from_nvm.read().unwrap(),
+            !self
+                .nvm_load_details
+                .read()
+                .unwrap()
+                .need_to_load_data_from_nvm,
             "Some data for the NVMInternal node still has to be loaded into the cache."
         );
 
@@ -641,7 +803,6 @@ impl<N> NVMInternalNode<N> {
         usize,
     ) {
         let idx = self.idx(key) + 1;
-        //println!("isolating issue {}", idx);
 
         //self.data.read().as_ref().unwrap().as_ref().unwrap().children.get(idx).map(|child| &child.as_ref().unwrap().node_pointer)
         (&self.data, idx)
@@ -890,9 +1051,11 @@ impl<N: ObjectReference> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
-            need_to_load_data_from_nvm: std::sync::RwLock::new(false),
-            time_for_nvm_last_fetch: SystemTime::now(),
-            nvm_fetch_counter: 0,
+            nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails {
+                need_to_load_data_from_nvm: false,
+                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+                nvm_fetch_counter: 0,
+            }),
         };
         (
             right_sibling,
@@ -1341,9 +1504,11 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
-                need_to_load_data_from_nvm: std::sync::RwLock::new(false),
-                time_for_nvm_last_fetch: SystemTime::now(),
-                nvm_fetch_counter: 0,
+                nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails {
+                    need_to_load_data_from_nvm: false,
+                    time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+                    nvm_fetch_counter: 0,
+                }),
             }
         }
     }
@@ -1390,9 +1555,11 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
-                need_to_load_data_from_nvm: std::sync::RwLock::new(false),
-                time_for_nvm_last_fetch: SystemTime::now(),
-                nvm_fetch_counter: 0,
+                nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails {
+                    need_to_load_data_from_nvm: false,
+                    time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
+                    nvm_fetch_counter: 0,
+                }),
             }
         }
     }

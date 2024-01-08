@@ -67,6 +67,17 @@ impl PMem {
         Self::new(ptr, mapped_len, is_pmem)
     }
 
+    pub unsafe fn get_slice(
+        &self,
+        offset: usize,
+        len: usize,
+    ) -> Result<&'static [u8], std::io::Error> {
+        Ok(std::slice::from_raw_parts(
+            self.ptr.as_ptr().add(offset) as *const u8,
+            len,
+        ))
+    }
+
     fn new(ptr: *mut c_void, len: usize, is_pmem: i32) -> Result<Self, std::io::Error> {
         NonNull::new(ptr)
             .map(|valid| PMem {

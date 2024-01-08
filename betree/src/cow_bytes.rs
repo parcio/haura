@@ -20,6 +20,12 @@ pub struct CowBytes {
     pub(super) inner: Arc<Vec<u8>>,
 }
 
+impl AsRef<[u8]> for ArchivedCowBytes {
+    fn as_ref(&self) -> &[u8] {
+        &self.inner
+    }
+}
+
 impl<T: AsRef<[u8]>> PartialEq<T> for CowBytes {
     fn eq(&self, other: &T) -> bool {
         &**self == other.as_ref()

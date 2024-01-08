@@ -52,6 +52,27 @@ fn get_block_device_size(file: &fs::File) -> io::Result<Block<u64>> {
 
 #[async_trait]
 impl VdevRead for PMemFile {
+    async fn get_slice(
+        &self,
+        offset: Block<u64>,
+        start: usize,
+        end: usize
+    ) -> Result<&'static [u8]> {
+        //println!("1> {:?}, {}, {}", offset, start, end);
+
+        unsafe {
+            match self.file.get_slice(offset.to_bytes() as usize + start, end - start) {
+                Ok(val) => Ok(val),
+                Err(e) => {
+                    self.stats
+                        .failed_reads
+                        .fetch_add(end as u64, Ordering::Relaxed);
+                    bail!(e)
+                }
+            }
+        }
+    }
+    
     async fn read<C: Checksum>(
         &self,
         size: Block<u32>,

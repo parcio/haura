@@ -86,6 +86,15 @@ impl<V: VdevLeafWrite> Mirror<V> {
 
 #[async_trait]
 impl<V: Vdev + VdevRead + VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Mirror<V> {
+    async fn get_slice(
+        &self,
+        offset: Block<u64>,
+        start: usize,
+        end: usize
+    ) -> Result<&'static [u8]> {
+        unimplemented!("..");
+    }
+    
     async fn read<C: Checksum>(
         &self,
         size: Block<u32>,
