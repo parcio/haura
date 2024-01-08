@@ -682,7 +682,7 @@ impl DeadListData {
     Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
     rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
     #[archive(check_bytes)]
-pub struct DatasetId(pub u64);
+pub struct DatasetId(u64);
 
 use std::fmt::Display;
 

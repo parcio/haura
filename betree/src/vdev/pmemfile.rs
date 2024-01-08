@@ -58,8 +58,6 @@ impl VdevRead for PMemFile {
         start: usize,
         end: usize
     ) -> Result<&'static [u8]> {
-        //println!("1> {:?}, {}, {}", offset, start, end);
-
         unsafe {
             match self.file.get_slice(offset.to_bytes() as usize + start, end - start) {
                 Ok(val) => Ok(val),
@@ -72,7 +70,7 @@ impl VdevRead for PMemFile {
             }
         }
     }
-    
+
     async fn read<C: Checksum>(
         &self,
         size: Block<u32>,

@@ -92,24 +92,28 @@ impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>
     }
 }*/
 
-
-static NVMChildBuffer_EMPTY_NODE: NVMChildBuffer<()> = NVMChildBuffer {
-    messages_preference: AtomicStoragePreference::known(StoragePreference::NONE),
-    system_storage_preference: AtomicSystemStoragePreference::none(),
-    buffer_entries_size: 0,
-    buffer: BTreeMap::new(),
-    node_pointer: RwLock::new(()),
-};
+use lazy_static::lazy_static;
+lazy_static! {
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
+    #[archive(check_bytes)]
+        static ref NVMChildBuffer_EMPTY_NODE: NVMChildBuffer<()> = NVMChildBuffer {
+        messages_preference: AtomicStoragePreference::known(StoragePreference::NONE),
+        system_storage_preference: AtomicSystemStoragePreference::none(),
+        buffer_entries_size: 0,
+        buffer: BTreeMap::new(),
+        node_pointer: RwLock::new(()),
+    };
+}
 
 #[inline]
 fn nvm_child_buffer_base_size() -> usize {
-    let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+    /*let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
     serializer_data.serialize_value(&NVMChildBuffer_EMPTY_NODE).unwrap();
     let bytes_data = serializer_data.into_serializer().into_inner();
 
-    bytes_data.len()
+    bytes_data.len()*/
+    0
 }
-
 
 impl<N: HasStoragePreference> HasStoragePreference for NVMChildBuffer<N> {
     fn current_preference(&self) -> Option<StoragePreference> {

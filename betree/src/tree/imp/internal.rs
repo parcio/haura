@@ -175,21 +175,7 @@ impl<N> InternalNode<N> {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
         self.children.iter_mut()
     }
-/*
-    pub fn iter_mut_nvm(&mut self) -> ChildBufferWrapperStruct<'_, N> where N: ObjectReference {
-    /*pub fn iter_mut_nvm(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
-        let auto = ChildBufferWrapper::ChildBuffer(self.children.iter_mut());
-        let mut st = ChildBufferWrapperStruct{
-            data: auto
-        };
 
-        let it = st.next();
-        //ChildBufferWrapper::ChildBuffer(self.children.iter_mut())
-        it.unwrap()*/
-        //self.children.iter_mut()
-        unimplemented!("..")
-    }
-*/
     pub fn iter_with_bounds(
         &self,
     ) -> impl Iterator<Item = (Option<&CowBytes>, &ChildBuffer<N>, Option<&CowBytes>)> + '_  where N: ObjectReference{
@@ -425,10 +411,6 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<N> {
 
 impl<N: ObjectReference> InternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
-
-        let __entries_size = self.pivot.iter().map(Size::size).sum::<usize>()
-        + self.children.iter_mut().map(SizeMut::size).sum::<usize>();
-
         self.pref.invalidate();
         let split_off_idx = self.fanout() / 2;
         let pivot = self.pivot.split_off(split_off_idx);
@@ -514,38 +496,6 @@ where
         }
     }
 
-/*  pub fn try_find_flush_candidate(
-        &mut self,
-        min_flush_size: usize,
-        max_node_size: usize,
-        min_fanout: usize,
-    ) -> Option<TakeChildBuffer<N>> where N: ObjectReference{
-        let child_idx = {
-            let size = self.size();
-            let fanout = self.fanout();
-            let (child_idx, child) = self
-                .children
-                .iter()
-                .enumerate()
-                .max_by_key(|&(_, child)| child.buffer_size())
-                .unwrap();
-
-            debug!("Largest child's buffer size: {}", child.buffer_size());
-
-            if child.buffer_size() >= min_flush_size
-                && (size - child.buffer_size() <= max_node_size || fanout < 2 * min_fanout)
-            {
-                Some(child_idx)
-            } else {
-                None
-            }
-        };
-        child_idx.map(move |child_idx| TakeChildBuffer {
-            node: self,
-            child_idx,
-        })
-    }
-*/
     pub fn try_find_flush_candidate(
         &mut self,
         min_flush_size: usize,
@@ -926,54 +876,6 @@ mod tests {
 
     static mut PK: Option<PivotKey> = None;
 
-    // impl ObjectReference for () {
-    //     type ObjectPointer = ();
-
-    //     fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
-    //         Some(&())
-    //     }
-
-    //     fn set_index(&mut self, _pk: PivotKey) {
-    //         // NO-OP
-    //     }
-
-    //     fn index(&self) -> &PivotKey {
-    //         unsafe {
-    //             if PK.is_none() {
-    //                 PK = Some(PivotKey::LeftOuter(
-    //                     CowBytes::from(vec![42u8]),
-    //                     DatasetId::default(),
-    //                 ));
-    //             }
-    //             PK.as_ref().unwrap()
-    //         }
-    //     }
-
-    //     fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
-    //         Ok(())
-    //         // if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
-    
-    //         //     bincode::serialize_into(w, p)
-    //         //             .map_err(|e| {
-    //         //                 debug!("Failed to serialize ObjectPointer.");
-    //         //                 std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    //         //             })?;
-    //         // }
-    //         // Ok(())
-    //     }
-    
-    //     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
-    //         unimplemented!("..")
-    //         // match bincode::deserialize::<ObjectPointer<D>>(bytes) {
-    //         //     Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
-    //         //     Err(e) => {
-    //         //         debug!("Failed to deserialize ObjectPointer.");
-    //         //         Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    //         //     )},
-    //         // }
-    //     }
-    // }
-
     #[quickcheck]
     fn check_size_split(mut node: InternalNode<()>) -> TestResult {
         if node.fanout() < 2 {
@@ -1020,7 +922,7 @@ mod tests {
         assert_eq!(LocalPivotKey::Right(pivot), pivot_key);
         TestResult::passed()
     }
-/*
+
     // #[test]
     // fn check_constant() {
     //     let node: InternalNode<ChildBuffer<()>> = InternalNode {
@@ -1044,5 +946,4 @@ mod tests {
     // child split
     // flush buffer
     // get with max_msn
-    */
 }
