@@ -30,6 +30,7 @@ impl Drop for PMem {
 unsafe impl Send for PMem {}
 unsafe impl Sync for PMem {}
 
+#[allow(clippy::len_without_is_empty)]
 impl PMem {
     /// Create a new persistent memory pool. By default a file is created which
     /// is readable and writable by all users.
@@ -39,7 +40,7 @@ impl PMem {
         let ptr = unsafe {
             pmem_map_file(
                 CString::new(filepath.into().to_string_lossy().into_owned())?.into_raw(),
-                len as usize,
+                len,
                 (PMEM_FILE_CREATE | PMEM_FILE_EXCL) as i32,
                 0o666,
                 &mut mapped_len,
@@ -68,12 +69,10 @@ impl PMem {
 
     fn new(ptr: *mut c_void, len: usize, is_pmem: i32) -> Result<Self, std::io::Error> {
         NonNull::new(ptr)
-            .and_then(|valid| {
-                Some(PMem {
-                    ptr: valid,
-                    actually_pmem: is_pmem != 0,
-                    len,
-                })
+            .map(|valid| PMem {
+                ptr: valid,
+                actually_pmem: is_pmem != 0,
+                len,
             })
             .ok_or_else(|| {
                 let err = unsafe { CString::from_raw(pmem_errormsg() as *mut i8) };
@@ -102,6 +101,11 @@ impl PMem {
     ///
     /// By default, we always perform a persisting write here, equivalent to a
     /// direct & sync in traditional interfaces.
+    ///
+    /// # Safety
+    /// It is possible to issue multiple write requests to the same area at the
+    /// same time. What happens then is undefined and might lead to
+    /// inconsistencies.
     pub unsafe fn write(&self, offset: usize, data: &[u8]) {
         let _ = pmem_memcpy(
             self.ptr.as_ptr().add(offset),

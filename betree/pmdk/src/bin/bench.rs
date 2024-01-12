@@ -8,12 +8,13 @@ const ITER: usize = SIZE / BUFFER_SIZE;
 const JOBS: usize = 8;
 const OPS_PER_JOB: usize = ITER / JOBS;
 const REM_OPS: usize = ITER % JOBS;
-enum CMD {
-    READ,
-    WRITE,
-    WAIT,
+enum Command {
+    Read,
+    Write,
+    Wait,
 }
 
+#[allow(clippy::absurd_extreme_comparisons)]
 fn basic_read_write_test(path: &str) -> Result<(), std::io::Error> {
     let pmem = Arc::new(match PMem::create(path, SIZE) {
         Ok(value) => value,
@@ -23,17 +24,15 @@ fn basic_read_write_test(path: &str) -> Result<(), std::io::Error> {
     let threads: Vec<_> = (0..JOBS)
         .map(|id| {
             let p = Arc::clone(&pmem);
-            let (tx, rx) = std::sync::mpsc::sync_channel::<CMD>(0);
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Command>(0);
             (
                 tx,
                 std::thread::spawn(move || {
-                    assert!(core_affinity::set_for_current(core_affinity::CoreId {
-                        id: id
-                    }));
+                    assert!(core_affinity::set_for_current(core_affinity::CoreId { id }));
                     let mut buf = vec![0u8; BUFFER_SIZE];
                     while let Ok(msg) = rx.recv() {
                         match msg {
-                            CMD::READ => {
+                            Command::Read => {
                                 for it in 0..OPS_PER_JOB {
                                     p.read((it * BUFFER_SIZE) + (id * BUFFER_SIZE), &mut buf)
                                 }
@@ -44,7 +43,7 @@ fn basic_read_write_test(path: &str) -> Result<(), std::io::Error> {
                                     )
                                 }
                             }
-                            CMD::WRITE => unsafe {
+                            Command::Write => unsafe {
                                 for it in 0..OPS_PER_JOB {
                                     p.write((it * BUFFER_SIZE) + (id * BUFFER_SIZE), &buf)
                                 }
@@ -55,7 +54,7 @@ fn basic_read_write_test(path: &str) -> Result<(), std::io::Error> {
                                     )
                                 }
                             },
-                            CMD::WAIT => {}
+                            Command::Wait => {}
                         }
                     }
                 }),
@@ -65,11 +64,12 @@ fn basic_read_write_test(path: &str) -> Result<(), std::io::Error> {
 
     // Write
     let start = std::time::Instant::now();
-    for id in 0..JOBS {
-        threads[id].0.send(CMD::WRITE).unwrap();
+    for job in threads.iter() {
+        job.0.send(Command::Write).unwrap();
     }
-    for id in 0..JOBS {
-        threads[id % JOBS].0.send(CMD::WAIT).unwrap();
+
+    for job in threads.iter() {
+        job.0.send(Command::Wait).unwrap();
     }
 
     println!(
@@ -80,10 +80,10 @@ fn basic_read_write_test(path: &str) -> Result<(), std::io::Error> {
     // Read
     let start = std::time::Instant::now();
     for id in 0..JOBS {
-        threads[id % JOBS].0.send(CMD::READ).unwrap();
+        threads[id % JOBS].0.send(Command::Read).unwrap();
     }
     for id in 0..JOBS {
-        threads[id % JOBS].0.send(CMD::WAIT).unwrap();
+        threads[id % JOBS].0.send(Command::Wait).unwrap();
     }
 
     println!(
