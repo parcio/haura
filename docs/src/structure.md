@@ -10,5 +10,5 @@ Implementation:
 - [**bectl**](./bectl.md): Allows for a basic acces to the storage stack as an CLI application.
 
 Bindings:
-- [**julea-betree**](./julea-betree.md): Bindings exposed to be used by [JULEA](https://github.com/julea-io/julea). Specifies a betree backend.
+- [**julea-betree**](./julea-betree.md): Bindings exposed to be used by [JULEA](https://github.com/parcio/julea). Specifies a betree backend.
 - [**julea-sys**](./julea-sys.md): Generated bindings by bindgen for use in *julea-betree*.

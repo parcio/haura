@@ -1,7 +1,7 @@
 # Be-Tree Storage Stack
 
-[![CI](https://github.com/julea-io/haura/workflows/CI/badge.svg)](https://github.com/julea-io/haura/actions)
-[![Pages](https://github.com/julea-io/haura/workflows/Pages/badge.svg)](https://github.com/julea-io/haura/actions)
+[![CI](https://github.com/parcio/haura/workflows/CI/badge.svg)](https://github.com/parcio/haura/actions)
+[![Pages](https://github.com/parcio/haura/workflows/Pages/badge.svg)](https://github.com/parcio/haura/actions)
 
 A storage library offering key-value and object interfaces by managing B^ε-trees on block storage devices.
 
@@ -10,7 +10,7 @@ A storage library offering key-value and object interfaces by managing B^ε-tree
 We advise you to use always the latest version of Rust *Stable*. For compatability we provide the minimum rust version also in the Cargo.toml of each crate in this project.
 
 ```
-git clone https://github.com/julea-io/haura
+git clone https://github.com/parcio/haura
 cd haura/betree
 cargo build
 cd tests
@@ -20,7 +20,7 @@ cd tests
 ## Documentation
 
 You can find an in-depth documentation and developer guide under
-https://julea-io.github.io/haura or you may build it yourself locally.  For
+https://parcio.github.io/haura or you may build it yourself locally.  For
 building the documentation [`mdbook`](https://rust-lang.github.io/mdBook/) is
 required. You can find install directions in their documentation under
 https://rust-lang.github.io/mdBook/.

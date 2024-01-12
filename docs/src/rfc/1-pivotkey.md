@@ -142,5 +142,5 @@ possible as with reconstruction of subtrees paths may be shifted around. With
 Currently the only advantage this method would have to the `PivotKey` method is
 that the size can be expected to remain comparatively low, with 5 bytes for
 each element in the search path. A restriction of key size as discussed in [the
-corresponding issue](https://github.com/julea-io/haura/issues/12) could solve
+corresponding issue](https://github.com/parcio/haura/issues/12) could solve
 this problem and is already in discussion.
