@@ -218,14 +218,7 @@ impl<N: StaticSize> Size for NVMInternalNode<N> {
     }
 
     fn actual_size(&self) -> Option<usize> {
-        assert!(
-            !self
-                .nvm_load_details
-                .read()
-                .unwrap()
-                .need_to_load_data_from_nvm,
-            "Some data for the NVMInternal node still has to be loaded into the cache."
-        );
+        //assert!(!self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm, "Some data for the NVMInternal node still has to be loaded into the cache.");
 
         Some(
             internal_node_base_size()
@@ -262,14 +255,7 @@ impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        assert!(
-            !self
-                .nvm_load_details
-                .read()
-                .unwrap()
-                .need_to_load_data_from_nvm,
-            "Some data for the NVMInternal node still has to be loaded into the cache."
-        );
+        //assert!(!self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm, "Some data for the NVMInternal node still has to be loaded into the cache.");
 
         for child in &self
             .data
@@ -540,14 +526,7 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
-        assert!(
-            !self
-                .nvm_load_details
-                .read()
-                .unwrap()
-                .need_to_load_data_from_nvm,
-            "Some data for the NVMInternal node still has to be loaded into the cache."
-        );
+        //assert!(!self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm, "Some data for the NVMInternal node still has to be loaded into the cache.");
 
         self.data
             .read()
@@ -580,10 +559,7 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
-        assert!(
-            !*self.need_to_load_data_from_nvm.read().unwrap(),
-            "Some data for the NVMInternal node still has to be loaded into the cache."
-        );
+        //assert!(!self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm, "Some data for the NVMInternal node still has to be loaded into the cache.");
 
         &self.data
     }
@@ -592,9 +568,6 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
-        //unimplemented!("...");
-        //TODO: Karim.. load remaining data...
-        //self.data.write().as_mut().unwrap().as_mut().unwrap().children.iter_mut()
         &self.data
     }
 
@@ -604,21 +577,6 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
-        //    ) -> impl Iterator<Item = (Option<&CowBytes>, &Option<NVMChildBuffer<N>>, Option<&CowBytes>)> + '_  where N: ObjectReference{
-        //unimplemented!("...");
-        /*        assert!(!self.need_to_load_data_from_nvm, "Some data for the NVMInternal node still has to be loaded into the cache.");
-                self.data.read().as_ref().unwrap().as_ref().unwrap().children.iter().enumerate().map(move |(idx, child)| {
-                    let maybe_left = if idx == 0 {
-                        None
-                    } else {
-                        self.meta_data.pivot.get(idx - 1)
-                    };
-
-                        let maybe_right = self.meta_data.pivot.get(idx);
-
-                    (maybe_left, child, maybe_right)
-                })
-        */
         &self.data
     }
 }
