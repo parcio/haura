@@ -824,38 +824,39 @@ impl<'ds> ObjectHandle<'ds> {
         let chunk_range = ChunkRange::from_byte_bounds(offset, to_be_read);
 
         let start = Instant::now();
-        for chunk in chunk_range.split_at_chunk_bounds() {
-            let want_len = chunk.single_chunk_len() as usize;
-            let key = object_chunk_key(oid, chunk.start.chunk_id);
 
-            let maybe_data = self
-                .store
-                .data
-                .get(&key[..])
-                .map_err(|err| (total_read, err))?;
-            if let Some(data) = maybe_data {
-                if let Some(data) = data.get(chunk.start.offset as usize..) {
-                    // there was a value, and it has some data in the desired range
-                    let have_len = want_len.min(data.len());
-                    buf[..have_len].copy_from_slice(&data[..have_len]);
+        let mut last_offset = offset;
 
-                    // if there was less data available than requested
-                    // (and because only data below obj_size is requested at all),
-                    // we need to zero-fill the rest of this chunk
-                    buf[have_len..want_len].fill(0);
-                } else {
-                    // there was a value, but it has no data in the desired range
-                    buf[..want_len].fill(0);
-                }
+        for chunk in self
+            .read_chunk_range(chunk_range.start.chunk_id..chunk_range.end.chunk_id + 1)
+            .map_err(|e| (total_read, e))?
+        {
+            let chunk = chunk.map_err(|e| (total_read, e))?;
+            let want_len = ((chunk.0.end - chunk.0.start) as usize).min(buf.len());
+            let chunk_start = chunk.0.start.max(offset);
+            // There was a gap in the stored data, fill with zero
+            let gap = (chunk_start.checked_sub(last_offset).unwrap_or(0)) as usize;
+            buf[..gap].fill(0);
+            buf = &mut buf[gap..];
+            // Cut-off data if start of the range is within the chunk
+            if let Some(data) = chunk.1.get((chunk_start - chunk.0.start) as usize..) {
+                // there was a value, and it has some data in the desired range
+                let have_len = want_len.min(data.len());
+                buf[..have_len].copy_from_slice(&data[..have_len]);
+
+                // if there was less data available than requested
+                // (and because only data below obj_size is requested at all),
+                // we need to zero-fill the rest of this chunk
+                buf[have_len..want_len].fill(0);
             } else {
-                // there was no data for this key, but there could be additional keys
-                // separated by a gap, if this is a sparse object
+                // there was a value, but it has no data in the desired range
                 buf[..want_len].fill(0);
             }
-
+            last_offset = chunk.0.end;
             total_read += want_len as u64;
             buf = &mut buf[want_len..];
         }
+
         if let Some(tx) = &self.store.report {
             let _ = tx
                 .send(DatabaseMsg::ObjectRead(
