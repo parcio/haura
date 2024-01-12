@@ -893,7 +893,7 @@ impl<'ds> ObjectHandle<'ds> {
                     offset: 0,
                 };
                 let byte_offset = chunk.as_bytes();
-                let range = byte_offset..byte_offset + k.len() as u64;
+                let range = byte_offset..byte_offset + v.len() as u64;
                 Ok((range, v))
             }
             Err(e) => Err(e),
