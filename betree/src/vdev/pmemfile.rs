@@ -1,4 +1,3 @@
-use pmdk;
 use super::{
     errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead,
@@ -6,6 +5,7 @@ use super::{
 use crate::{buffer::Buf, buffer::BufWrite, checksum::Checksum};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
+use pmdk;
 use std::{
     fs,
     io::{self, Write},
@@ -27,8 +27,8 @@ pub struct PMemFile {
 
 impl PMemFile {
     /// Creates a new `PMEMFile`.
-    pub fn new(file: pmdk::PMem, id: String, len: u64) -> io::Result<Self> {
-        let size = Block::from_bytes(len);
+    pub fn new(file: pmdk::PMem, id: String) -> io::Result<Self> {
+        let size = Block::from_bytes(file.len() as u64);
         Ok(PMemFile {
             file,
             id,
@@ -62,14 +62,7 @@ impl VdevRead for PMemFile {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let buf = {
             let mut buf = Buf::zeroed(size).into_full_mut();
-
-            if let Err(e) = self.file.read(offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
-                self.stats
-                    .failed_reads
-                    .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(e)
-            }
-
+            self.file.read(offset.to_bytes() as usize, buf.as_mut());
             buf.into_full_buf()
         };
 
@@ -101,16 +94,9 @@ impl VdevRead for PMemFile {
     async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         let mut buf = Buf::zeroed(size).into_full_mut();
-       
-        match self.file.read(offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
-            Ok(()) => Ok(vec![buf.into_full_buf()]),
-            Err(e) => {
-                self.stats
-                    .failed_reads
-                    .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(e)
-            }
-        }
+
+        self.file.read(offset.to_bytes() as usize, buf.as_mut());
+        Ok(vec![buf.into_full_buf()])
     }
 }
 
@@ -147,16 +133,9 @@ impl VdevLeafRead for PMemFile {
     async fn read_raw<T: AsMut<[u8]> + Send>(&self, mut buf: T, offset: Block<u64>) -> Result<T> {
         let size = Block::from_bytes(buf.as_mut().len() as u32);
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
-        
-        match self.file.read(offset.to_bytes() as usize, buf.as_mut(), size.to_bytes() as u64) {
-            Ok(()) => Ok(buf),
-            Err(e) => {
-                self.stats
-                    .failed_reads
-                    .fetch_add(size.as_u64(), Ordering::Relaxed);
-                bail!(e)
-            }
-        }
+
+        self.file.read(offset.to_bytes() as usize, buf.as_mut());
+        Ok(buf)
     }
 
     fn checksum_error_occurred(&self, size: Block<u32>) {
@@ -166,8 +145,6 @@ impl VdevLeafRead for PMemFile {
     }
 }
 
-static mut cntr : u32 = 0;
-
 #[async_trait]
 impl VdevLeafWrite for PMemFile {
     async fn write_raw<W: AsRef<[u8]> + Send>(
@@ -175,27 +152,11 @@ impl VdevLeafWrite for PMemFile {
         data: W,
         offset: Block<u64>,
         is_repair: bool,
-    ) -> Result<()> { 
+    ) -> Result<()> {
         let block_cnt = Block::from_bytes(data.as_ref().len() as u64).as_u64();
         self.stats.written.fetch_add(block_cnt, Ordering::Relaxed);
 
-        unsafe {
-            match self.file.write(offset.to_bytes() as usize, data.as_ref(), data.as_ref().len())
-                .map_err(|_| VdevError::Write(self.id.clone())) {
-                    Ok(()) => {
-                        if is_repair {
-                            self.stats.repaired.fetch_add(block_cnt, Ordering::Relaxed);
-                        }
-                        Ok(())
-                    }
-                    Err(e) => {
-                        self.stats
-                            .failed_writes
-                            .fetch_add(block_cnt, Ordering::Relaxed);
-                        Err(e)
-                    }
-            }
-        }
+        unsafe { Ok(self.file.write(offset.to_bytes() as usize, data.as_ref())) }
     }
 
     fn flush(&self) -> Result<()> {
