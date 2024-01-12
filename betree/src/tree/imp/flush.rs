@@ -6,7 +6,7 @@
 use std::borrow::Borrow;
 
 use super::{
-    child_buffer::ChildBuffer, derivate_ref::DerivateRef, internal::TakeChildBuffer, FillUpResult,
+    child_buffer::ChildBuffer, derivate_ref::DerivateRef, internal::TakeChildBuffer, FillUpResult, node::TakeChildBufferWrapper, derivate_ref_nvm::DerivateRefNVM,
     Inner, Node, Tree,
 };
 use crate::{
@@ -52,7 +52,7 @@ where
         &self,
         mut node: X::CacheValueRefMut,
         mut parent: Option<
-            DerivateRef<X::CacheValueRefMut, TakeChildBuffer<'static, ChildBuffer<R>>>,
+            DerivateRefNVM<X::CacheValueRefMut, TakeChildBufferWrapper<'static, R>>,
         >,
     ) -> Result<(), Error> {
         loop {
@@ -69,7 +69,7 @@ where
             );
             // 1. Select the largest child buffer which can be flushed.
             let mut child_buffer =
-                match DerivateRef::try_new(node, |node| node.try_find_flush_candidate()) {
+                match DerivateRefNVM::try_new(node, |node| node.try_find_flush_candidate()) {
                     // 1.1. If there is none we have to split the node.
                     Err(_node) => match parent {
                         None => {
@@ -77,7 +77,7 @@ where
                             return Ok(());
                         }
                         Some(ref mut parent) => {
-                            let (next_node, size_delta) = self.split_node(_node, parent)?;
+                            let (next_node, size_delta) = self.split_node_nvm(_node, parent)?;
                             parent.add_size(size_delta);
                             node = next_node;
                             continue;
@@ -86,7 +86,23 @@ where
                     // 1.2. If successful we flush in the following steps to this node.
                     Ok(selected_child_buffer) => selected_child_buffer,
                 };
-            let mut child = self.get_mut_node(child_buffer.node_pointer_mut())?;
+
+            // TODO: Karim... add comments...
+            //let mut child = self.get_mut_node(child_buffer.node_pointer_mut())?;
+            let mut child;
+
+            match child_buffer.node_pointer_mut() {
+                TakeChildBufferWrapper::TakeChildBuffer(obj) => {
+                    child = self.get_mut_node(obj.as_mut().unwrap().node_pointer_mut())?;
+                },
+                TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                    let (_node,idx) = obj.as_mut().unwrap().node_pointer_mut();
+                    child = self.get_mut_node(&mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer)?;
+                },
+            };
+            // TODO: Karim... End of new code
+
+            
             // 2. Iterate down to child if too large
             if !child.is_leaf() && child.is_too_large() {
                 warn!("Aborting flush, child is too large already");
@@ -165,7 +181,7 @@ where
             }
             // 7. If the child is too large, split until it is not.
             while child.is_too_large_leaf() {
-                let (next_node, size_delta) = self.split_node(child, &mut child_buffer)?;
+                let (next_node, size_delta) = self.split_node_nvm(child, &mut child_buffer)?;
                 child_buffer.add_size(size_delta);
                 child = next_node;
             }
@@ -185,4 +201,5 @@ where
             node = child;
         }
     }
+
 }

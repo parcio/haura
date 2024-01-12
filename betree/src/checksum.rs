@@ -1,13 +1,22 @@
 //! This module provides a `Checksum` trait for verifying data integrity.
 
 use crate::size::{Size, StaticSize};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+//use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{error::Error, fmt, hash::Hasher, iter::once};
 use twox_hash;
 
+use rkyv::{
+    archived_root,
+    ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
+    vec::{ArchivedVec, VecResolver},
+    with::{ArchiveWith, DeserializeWith, SerializeWith},
+    Archive, Archived, Deserialize, Fallible, Infallible, Serialize, AlignedVec,
+};
+
+
 /// A checksum to verify data integrity.
 pub trait Checksum:
-    Serialize + DeserializeOwned + Size + Clone + Send + Sync + fmt::Debug + 'static
+serde::Serialize + serde::de::DeserializeOwned + Size + Clone + Send + Sync + fmt::Debug + 'static
 {
     /// Builds a new `Checksum`.
     type Builder: Builder<Self>;
@@ -27,7 +36,7 @@ pub trait Checksum:
 
 /// A checksum builder
 pub trait Builder<C: Checksum>:
-    Serialize + DeserializeOwned + Clone + Send + Sync + fmt::Debug + 'static
+serde::Serialize + serde::de::DeserializeOwned + Clone + Send + Sync + fmt::Debug + 'static
 {
     /// The internal state of the checksum.
     type State: State<Checksum = C>;
@@ -67,7 +76,8 @@ impl Error for ChecksumError {
 /// `XxHash` contains a digest of `xxHash`
 /// which is an "extremely fast non-cryptographic hash algorithm"
 /// (<https://github.com/Cyan4973/xxHash>)
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[archive(check_bytes)]
 pub struct XxHash(u64);
 
 impl StaticSize for XxHash {
@@ -97,7 +107,7 @@ impl Checksum for XxHash {
 }
 
 /// The corresponding `Builder` for `XxHash`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct XxHashBuilder;
 
 impl Builder<XxHash> for XxHashBuilder {

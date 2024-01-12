@@ -5,7 +5,7 @@ use super::{
 use crate::{
     bounded_future_queue::BoundedFutureQueue,
     buffer::Buf,
-    checksum::Checksum,
+    checksum::{Checksum, XxHash},
     vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
     PreferredAccessType, StoragePreference,
 };
@@ -134,6 +134,24 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         })
     }
 
+    type SliceAsync = Pin<Box<dyn Future<Output = Result<&'static [u8], VdevError>> + Send>>;
+
+    fn get_slice(
+        &self,
+        offset: DiskOffset,
+        start: usize,
+        end: usize
+    ) -> Result<Self::SliceAsync, VdevError> {
+        self.inner.write_back_queue.wait(&offset)?;
+        let inner = self.inner.clone();
+        Ok(Box::pin(self.inner.pool.spawn_with_handle(async move {
+            inner
+                .by_offset(offset)
+                .get_slice(offset.block_offset(), start, end)
+                .await
+        })?))
+    }
+    
     type ReadAsync = Pin<Box<dyn Future<Output = Result<Buf, VdevError>> + Send>>;
 
     fn read_async(

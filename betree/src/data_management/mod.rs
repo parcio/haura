@@ -14,7 +14,7 @@
 
 use crate::{
     cache::AddSize,
-    database::DatasetId,
+    database::{DatasetId, RootSpu},
     migration::DmlMsg,
     size::{Size, StaticSize},
     storage_pool::{DiskOffset, GlobalDiskId, StoragePoolLayer},
@@ -71,6 +71,10 @@ pub trait ObjectReference: Serialize + DeserializeOwned + StaticSize + Debug + '
     fn set_index(&mut self, pk: PivotKey);
     /// Retrieve the index of this node.
     fn index(&self) -> &PivotKey;
+
+    // TODO: Karim.. add comments
+    fn serialize_unmodified(&self, w: &mut Vec<u8>) -> Result<(), std::io::Error>;
+    fn deserialize_and_set_unmodified(bytes: & [u8]) -> Result<Self, std::io::Error>;
 }
 
 /// Implementing types have an allocation preference, which can be invalidated
@@ -111,9 +115,12 @@ pub trait HasStoragePreference {
 /// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
-    fn pack<W: Write>(&self, writer: W) -> Result<(), io::Error>;
+    fn pack<W: Write>(&self, writer: W, metadata_size: &mut usize) -> Result<(), io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at(
+        size: crate::vdev::Block<u32>,
+        checksum: crate::checksum::XxHash,
+        pool: RootSpu,
         disk_offset: DiskOffset,
         d_id: DatasetId,
         data: Box<[u8]>,
