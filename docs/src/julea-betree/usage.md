@@ -6,7 +6,7 @@ default, so check there when you are unsure).
 
 With the built library, we can switch to JULEA to integrate our results into
 their configuration. If you have not setup JULEA have a look at their
-[documentation](https://github.com/julea-io/julea#quick-start). Continue their
+[documentation](https://github.com/parcio/julea#quick-start). Continue their
 documentation until you configure JULEA with `julea-config`, then this
 documentation will use a modified procedure.
 
