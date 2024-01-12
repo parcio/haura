@@ -55,7 +55,7 @@ bitvec = "1.0"
 
 serde_json = "1.0"
 crossbeam-channel = "0.5.5"
-lfu_cache = { git = "https://github.com/julea-io/lfu-cache", rev = "haura-v5" }
+lfu_cache = { git = "https://github.com/parcio/lfu-cache", rev = "haura-v5" }
 rand = { version = "0.8", features = ["std_rng"] }
 
 pmdk = { path = "./pmdk", optional = true }
