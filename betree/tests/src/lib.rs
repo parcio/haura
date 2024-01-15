@@ -284,6 +284,22 @@ fn rename() {
     driver.checkpoint("changed (meta)data after renaming");
 }
 
+#[test]
+fn object_read_at() {
+    let driver = TestDriver::setup("object_read_at", 1, 512);
+    {
+        let obj = driver.open(b"foo");
+        obj.write_at(b"ello", 42).unwrap();
+        let mut buf = [0u8; 3];
+        obj.read_at(&mut buf, 43).unwrap();
+        assert_eq!(&buf, b"llo");
+
+        obj.write_at(b"byee", 128 * 1024 - 1).unwrap();
+        obj.read_at(&mut buf, 128 * 1024).unwrap();
+        assert_eq!(&buf, b"yee");
+    }
+}
+
 const TO_MEBIBYTE: usize = 1024 * 1024;
 
 // @jwuensche:
