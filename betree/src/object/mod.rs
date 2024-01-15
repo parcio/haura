@@ -809,7 +809,6 @@ impl<'ds> ObjectHandle<'ds> {
     /// Read object data into `buf`, starting at offset `offset`, and returning the amount of
     /// actually read bytes.
     pub fn read_at(&self, mut buf: &mut [u8], offset: u64) -> result::Result<u64, (u64, Error)> {
-        let oid = self.object.id;
         let mut total_read = 0;
 
         // Sparse object data below object size is zero-filled
@@ -827,17 +826,22 @@ impl<'ds> ObjectHandle<'ds> {
 
         let mut last_offset = offset;
 
-        for chunk in self
+        let chunks = self
             .read_chunk_range(chunk_range.start.chunk_id..chunk_range.end.chunk_id + 1)
-            .map_err(|e| (total_read, e))?
-        {
+            .map_err(|e| (total_read, e))?;
+
+        for chunk in chunks {
             let chunk = chunk.map_err(|e| (total_read, e))?;
-            let want_len = ((chunk.0.end - chunk.0.start) as usize).min(buf.len());
             let chunk_start = chunk.0.start.max(offset);
+
             // There was a gap in the stored data, fill with zero
-            let gap = (chunk_start.checked_sub(last_offset).unwrap_or(0)) as usize;
+            let gap = (chunk_start.checked_sub(last_offset).unwrap_or(0)).min(to_be_read) as usize;
             buf[..gap].fill(0);
+            total_read += gap as u64;
             buf = &mut buf[gap..];
+
+            let chunk_end = chunk.0.end.min(offset + to_be_read);
+            let want_len = chunk_end.saturating_sub(chunk_start) as usize;
             // Cut-off data if start of the range is within the chunk
             if let Some(data) = chunk.1.get((chunk_start - chunk.0.start) as usize..) {
                 // there was a value, and it has some data in the desired range
@@ -855,6 +859,12 @@ impl<'ds> ObjectHandle<'ds> {
             last_offset = chunk.0.end;
             total_read += want_len as u64;
             buf = &mut buf[want_len..];
+        }
+        if total_read != buf.len() as u64 {
+            // No data or tailing data could not be found, simply fill the
+            // buffer to the end with `0` in this case.
+            buf.fill(0);
+            return Ok(to_be_read);
         }
 
         if let Some(tx) = &self.store.report {
