@@ -2,21 +2,20 @@ use super::{
     errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead,
 };
-use crate::{buffer::Buf, buffer::BufWrite, checksum::Checksum};
+use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
 use pmdk;
 use std::{
     fs,
-    io::{self, Write},
-    os::unix::{
-        fs::{FileExt, FileTypeExt},
+    io,
+    os::unix::
         io::AsRawFd,
-    },
+
     sync::atomic::Ordering,
 };
 
-/// `LeafVdev` that is backed by a file.
+/// `LeafVdev` which is backed by NVM and uses `pmdk`.
 #[derive(Debug)]
 pub struct PMemFile {
     file: pmdk::PMem,
@@ -151,16 +150,16 @@ impl VdevLeafWrite for PMemFile {
         &self,
         data: W,
         offset: Block<u64>,
-        is_repair: bool,
+        _is_repair: bool,
     ) -> Result<()> {
         let block_cnt = Block::from_bytes(data.as_ref().len() as u64).as_u64();
         self.stats.written.fetch_add(block_cnt, Ordering::Relaxed);
 
-        unsafe { Ok(self.file.write(offset.to_bytes() as usize, data.as_ref())) }
+        unsafe { self.file.write(offset.to_bytes() as usize, data.as_ref()) };
+        Ok(())
     }
 
     fn flush(&self) -> Result<()> {
-        //Ok(self.file.sync_data()?)
         Ok(())
     }
 }

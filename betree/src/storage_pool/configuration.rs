@@ -121,7 +121,13 @@ pub enum Vdev {
 #[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum LeafVdev {
     #[cfg(feature = "nvm")]
-    PMemFile { path: PathBuf, len: usize },
+    /// Backed by NVM with `pmdk`.
+    PMemFile {
+        /// Path to the underlying file.
+        path: PathBuf,
+        /// Size of backing file in bytes.
+        len: usize,
+    },
     /// Backed by a file or disk.
     File(PathBuf),
     /// Customisable file vdev.
@@ -416,7 +422,7 @@ impl LeafVdev {
                 writeln!(f, "{:indent$}memory({})", "", mem, indent = indent)
             }
             #[cfg(feature = "nvm")]
-            LeafVdev::PMemFile { path, len } => {
+            LeafVdev::PMemFile { path, len: _ } => {
                 writeln!(f, "{:indent$}{}", "", path.display(), indent = indent)
             }
         }
