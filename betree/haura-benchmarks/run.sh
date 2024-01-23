@@ -200,6 +200,10 @@ function switchover() {
   run "$VDEV_TYPE" switchover_large switchover 4 "$((8 * 1024 * 1024 * 1024))"
 }
 
+function ci() {
+  run "$VDEV_TYPE" switchover_small switchover 8 "$((128 * 1024 * 1024))"
+}
+
 cargo build --release
 
 if [ -z "$BETREE_CONFIG" ]

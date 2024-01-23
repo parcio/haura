@@ -201,3 +201,49 @@ jobs:
           make fio
           export BETREE_CONFIG=$(realpath ./.ci/haura.json)
           ./fio --direct=1 --rw=write --bs=4M --ioengine=external:src/fio-engine-haura.o --numjobs=1 --name=iops-test-job --size=128M
+  haura-benchmarks:
+    name: benchmarks for the haura storage engine
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    needs: dependencies
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rm --recursive --force "${HOME}/.cargo" "${HOME}/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
+      - name: Cache fio
+        id: cache
+        uses: actions/cache@v3
+        # Environment variables do not seem to work, use ~ instead.
+        with:
+          path: |
+            ~/.cargo
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-haura-benchmarks
+      - name: Build haura-benchmarks
+        run: |
+          cd betree/haura-benchmarks
+          cargo build --release
+      - name: Prepare scripts and configuration
+        run: |
+          cd betree/haura-benchmarks
+          echo "ci" >> run.sh
+      - name: Run benchmark smoke test
+        run: |
+          cd betree/haura-benchmarks
+          cp example_config/.ci-config.json perf-config.json
+          ./run.sh smoke-test
+          rm perf-config.json
+      - name: Run plots
+        run: |
+          sudo apt update || true
+          sudo apt --yes --no-install-recommends install python3
+          cd betree/haura-benchmarks/haura-plots
+          poetry install
+          poetry run plots ../results/*
+          rm -rf results
