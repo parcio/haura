@@ -242,7 +242,7 @@ jobs:
       - name: Run plots
         run: |
           sudo apt update || true
-          sudo apt --yes --no-install-recommends install python3
+          sudo apt --yes --no-install-recommends install python3-poetry
           cd betree/haura-benchmarks/haura-plots
           poetry install
           poetry run plots ../results/*
