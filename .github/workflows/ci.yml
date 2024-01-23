@@ -202,7 +202,7 @@ jobs:
           export BETREE_CONFIG=$(realpath ./.ci/haura.json)
           ./fio --direct=1 --rw=write --bs=4M --ioengine=external:src/fio-engine-haura.o --numjobs=1 --name=iops-test-job --size=128M
   haura-benchmarks:
-    name: benchmarks for the haura storage engine
+    name: Benchmark Compatibility Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     needs: dependencies
@@ -217,7 +217,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
           echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
-      - name: Cache fio
+      - name: Cache
         id: cache
         uses: actions/cache@v3
         # Environment variables do not seem to work, use ~ instead.

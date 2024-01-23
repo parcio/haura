@@ -201,7 +201,7 @@ function switchover() {
 }
 
 function ci() {
-  run "$VDEV_TYPE" switchover_small switchover 8 "$((128 * 1024 * 1024))"
+  run "$VDEV_TYPE" switchover_small switchover 4 "$((128 * 1024 * 1024))"
 }
 
 cargo build --release
