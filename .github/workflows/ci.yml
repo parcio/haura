@@ -224,6 +224,8 @@ jobs:
         with:
           path: |
             ~/.cargo
+            ~/.cache/pip
+            ~/.cache/poetry
           key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-haura-benchmarks
       - name: Build haura-benchmarks
         run: |
