@@ -68,43 +68,43 @@ function run {
 function tiered() {
   (
     export BETREE__ALLOC_STRATEGY='[[0],[0],[],[]]'
-    run "$VDEV_TYPE" tiered1_all0_alloc tiered1
+    run "$RUN_IDENT" tiered1_all0_alloc tiered1
   )
 
   (
     export BETREE__ALLOC_STRATEGY='[[0],[1],[],[]]'
-    run "$VDEV_TYPE" tiered1_id_alloc tiered1
+    run "$RUN_IDENT" tiered1_id_alloc tiered1
   )
 
   (
     export BETREE__ALLOC_STRATEGY='[[1],[1],[],[]]'
-    run "$VDEV_TYPE" tiered1_all1_alloc tiered1
+    run "$RUN_IDENT" tiered1_all1_alloc tiered1
   )
 }
 
 function scientific_evaluation() {
   export BETREE__ALLOC_STRATEGY='[[0],[1],[],[]]'
-  run "$VDEV_TYPE" scientific_evaluation_id_alloc evaluation-read 30
+  run "$RUN_IDENT" scientific_evaluation_id_alloc evaluation-read 30
 }
 
 function evaluation_rw() {
   export BETREE__ALLOC_STRATEGY='[[0],[1],[],[]]'
-  run "$VDEV_TYPE" file_system_three evaluation-rw
+  run "$RUN_IDENT" file_system_three evaluation-rw
 }
 
 function filesystem_zip() {
   export BETREE__ALLOC_STRATEGY='[[0],[1],[2],[]]'
-  run "$VDEV_TYPE" file_system_three "$ZIP_ARCHIVE"
+  run "$RUN_IDENT" file_system_three "$ZIP_ARCHIVE"
 }
 
 function checkpoints() {
   export BETREE__ALLOC_STRATEGY='[[0, 1],[1],[],[]]'
-  run "$VDEV_TYPE" checkpoints_fastest checkpoints
+  run "$RUN_IDENT" checkpoints_fastest checkpoints
 }
 
 function filesystem() {
   export BETREE__ALLOC_STRATEGY='[[0],[1],[2],[]]'
-  run "$VDEV_TYPE" file_system_three filesystem
+  run "$RUN_IDENT" file_system_three filesystem
 }
 
 function zip_cache() {
@@ -113,7 +113,7 @@ function zip_cache() {
   for cache_mib in 32 64 128 256 512 1024 2048 4096 8192; do
     (
       export BETREE__CACHE_SIZE=$((cache_mib * 1024 * 1024))
-      run "$VDEV_TYPE" "zip_cache_$cache_mib" zip 4 100 10 "$ZIP_ARCHIVE" "$F_CD_START"
+      run "$RUN_IDENT" "zip_cache_$cache_mib" zip 4 100 10 "$ZIP_ARCHIVE" "$F_CD_START"
     )
   done
 }
@@ -134,7 +134,7 @@ function zip_mt() {
         local per_worker=$((total / num_workers))
         local per_run=$((per_worker / 10))
 
-        run "$VDEV_TYPE" "zip_mt_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$F" "$F_CD_START"
+        run "$RUN_IDENT" "zip_mt_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$F" "$F_CD_START"
       done
     )
   done
@@ -159,17 +159,17 @@ function zip_tiered() {
 
         (
           export BETREE__ALLOC_STRATEGY='[[0],[0],[],[]]'
-          run "$VDEV_TYPE" "zip_tiered_all0_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$ZIP_ARCHIVE" "$F_CD_START"
+          run "$RUN_IDENT" "zip_tiered_all0_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$ZIP_ARCHIVE" "$F_CD_START"
         )
 
         (
           export BETREE__ALLOC_STRATEGY='[[0],[1],[],[]]'
-          run "$VDEV_TYPE" "zip_tiered_id_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$ZIP_ARCHIVE" "$F_CD_START"
+          run "$RUN_IDENT" "zip_tiered_id_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$ZIP_ARCHIVE" "$F_CD_START"
         )
 
         (
           export BETREE__ALLOC_STRATEGY='[[1],[1],[],[]]'
-          run "$VDEV_TYPE" "zip_tiered_all1_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$ZIP_ARCHIVE" "$F_CD_START"
+          run "$RUN_IDENT" "zip_tiered_all1_${cache_mib}_${num_workers}_${per_run}_10" zip "$num_workers" "$per_run" 10 "$ZIP_ARCHIVE" "$F_CD_START"
         )
 
       done
@@ -187,21 +187,21 @@ function ingest() {
     for level in $(seq 1 16); do
       (
         export BETREE__COMPRESSION="{ Zstd = { level = $level } }"
-        run "$VDEV_TYPE" "ingest_hdd_zstd_$level" ingest "$ZIP_ARCHIVE"
+        run "$RUN_IDENT" "ingest_hdd_zstd_$level" ingest "$ZIP_ARCHIVE"
       )
     done
   )
 }
 
 function switchover() {
-  run "$VDEV_TYPE" switchover_tiny switchover 32 "$((32 * 1024 * 1024))"
-  run "$VDEV_TYPE" switchover_small switchover 8 "$((128 * 1024 * 1024))"
-  run "$VDEV_TYPE" switchover_medium switchover 4 "$((2 * 1024 * 1024 * 1024))"
-  run "$VDEV_TYPE" switchover_large switchover 4 "$((8 * 1024 * 1024 * 1024))"
+  run "$RUN_IDENT" switchover_tiny switchover 32 "$((32 * 1024 * 1024))"
+  run "$RUN_IDENT" switchover_small switchover 8 "$((128 * 1024 * 1024))"
+  run "$RUN_IDENT" switchover_medium switchover 4 "$((2 * 1024 * 1024 * 1024))"
+  run "$RUN_IDENT" switchover_large switchover 4 "$((8 * 1024 * 1024 * 1024))"
 }
 
 function ci() {
-  run "$VDEV_TYPE" switchover_small switchover 4 "$((128 * 1024 * 1024))"
+  run "$RUN_IDENT" switchover_small switchover 4 "$((128 * 1024 * 1024))"
 }
 
 cargo build --release
@@ -215,7 +215,7 @@ export ROOT="$PWD"
 export ZIP_ARCHIVE="$PWD/data/linux.zip"
 # Category under which the default runs should be made, a function may modify
 # this if multiple categories are needed.
-export VDEV_TYPE="default"
+export RUN_IDENT="default"
 
 if [ "$1" == "-h" ] || [ "$1" == "--help" ] || [ "$1" = "help" ]
 then
@@ -226,7 +226,7 @@ fi
 
 if [ -n "$*" ]
 then
-    export VDEV_TYPE=$*
+    export RUN_IDENT=$*
 fi
 
 ensure_bectl
