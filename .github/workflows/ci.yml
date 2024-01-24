@@ -229,7 +229,8 @@ jobs:
             ~/.cache/poetry
             target
             betree/haura-benchmarks/data
-          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-benchmarks
+            betree/haura-benchmarks/haura-plots/poetry.lock
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/pyproject.toml')}}-benchmarks
       - name: Build haura-benchmarks
         run: |
           cd betree/haura-benchmarks
