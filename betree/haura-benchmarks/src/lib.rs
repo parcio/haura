@@ -96,24 +96,25 @@ pub fn log_process_info(path: impl AsRef<Path>, interval_ms: u64) -> io::Result<
     let mut output = BufWriter::new(file);
     let interval = Duration::from_millis(interval_ms);
 
-    let ticks = procfs::ticks_per_second().expect("Couldn't query tick frequency") as f64;
-    let page_size = procfs::page_size().expect("Couldn't query page size");
+    let ticks = procfs::ticks_per_second() as f64;
+    let page_size = procfs::page_size();
 
     loop {
         let now = Instant::now();
 
         if let Ok(proc) = Process::myself() {
+            let stats = proc.stat().map_err(|e| io::Error::other(e))?;
             let info = serde_json::json!({
-                "vsize": proc.stat.vsize,
-                "rss": proc.stat.rss * page_size,
-                "utime": proc.stat.utime as f64 / ticks,
-                "stime": proc.stat.stime as f64 / ticks,
-                "cutime": proc.stat.cutime as f64 / ticks,
-                "cstime": proc.stat.cstime as f64 / ticks,
-                "minflt": proc.stat.minflt,
-                "cminflt": proc.stat.cminflt,
-                "majflt": proc.stat.majflt,
-                "cmajflt": proc.stat.cmajflt
+                "vsize": stats.vsize,
+                "rss": stats.rss * page_size,
+                "utime": stats.utime as f64 / ticks,
+                "stime": stats.stime as f64 / ticks,
+                "cutime": stats.cutime as f64 / ticks,
+                "cstime": stats.cstime as f64 / ticks,
+                "minflt": stats.minflt,
+                "cminflt": stats.cminflt,
+                "majflt": stats.majflt,
+                "cmajflt": stats.cmajflt
             });
 
             serde_json::to_writer(

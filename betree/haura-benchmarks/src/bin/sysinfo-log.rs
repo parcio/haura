@@ -8,7 +8,7 @@ use std::{
 
 use libmedium::{
     hwmon::Hwmons,
-    sensors::{Input, Sensor},
+    sensors::{temp::TempSensor, Sensor},
 };
 use serde_json::{Map, Number, Value};
 use structopt::StructOpt;
@@ -27,7 +27,7 @@ fn gather() -> Map<String, Value> {
     if let Ok(hwmons) = Hwmons::parse() {
         let mut hwmons_map = Map::new();
 
-        for (idx, name, hwmon) in hwmons.into_iter() {
+        for hwmon in hwmons.into_iter() {
             let mut hwmon_map = Map::new();
             for (_name, tempsensor) in hwmon.temps() {
                 if let Ok(temp) = tempsensor.read_input() {
@@ -37,7 +37,10 @@ fn gather() -> Map<String, Value> {
                 }
             }
 
-            hwmons_map.insert(format!("{}:{}", idx, name), Value::Object(hwmon_map));
+            hwmons_map.insert(
+                format!("{}:{}", hwmon.index(), hwmon.name()),
+                Value::Object(hwmon_map),
+            );
         }
 
         map.insert(String::from("hwmon"), Value::Object(hwmons_map));
