@@ -237,13 +237,12 @@ jobs:
       - name: Prepare scripts and configuration
         run: |
           cd betree/haura-benchmarks
+          cp example_config/.ci-config.json perf-config.json
           echo "ci" >> run.sh
       - name: Run benchmark smoke test
         run: |
           cd betree/haura-benchmarks
-          cp example_config/.ci-config.json perf-config.json
           ./run.sh smoke-test
-          rm perf-config.json
       - name: Prepare poetry for plots
         run: |
           sudo apt update || true
