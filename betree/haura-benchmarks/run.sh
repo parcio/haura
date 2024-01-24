@@ -34,11 +34,19 @@ function ensure_config {
   fi
 }
 
+total_runs=0
+
 function run {
   local vdev_type="$1"
   local name="$2"
   local mode="$3"
   shift 3
+
+  if [ "$total_runs" -gt 0 ]
+  then
+      sleep 60
+  fi
+  total_runs=$((total_runs + 1))
 
   local out_path
   out_path="results/$(date -I)_${vdev_type}/${name}_$(date +%s)"
@@ -61,8 +69,6 @@ function run {
     | "$ROOT/target/release/json-flatten" > "out.jsonl"
 
   popd || return
-
-  sleep 60
 }
 
 function tiered() {
