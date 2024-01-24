@@ -3,35 +3,39 @@
 use betree_perf::*;
 use betree_storage_stack::StoragePreference;
 use rand::Rng;
-use std::{error::Error, io::{Write, Seek}};
+use std::{
+    error::Error,
+    io::{Seek, Write},
+};
 
-const OBJECT_SIZE: u64 = 25 * 1024 * 1024 * 1024;
-const MIN_FETCH_SIZE: u64 = 1 * 1024;
-const MAX_FETCH_SIZE: u64 = 12 * 1024 * 1024;
-const N_POSITIONS: u64 = 1024; // E(sum N_POSITIONS_size) = 3GiB
 const OBJ_NAME: &[u8] = b"important_research";
 
-fn gen_positions(client: &mut Client) -> Vec<(u64, u64)> {
+pub struct EvaluationConfig {
+    pub runtime: u64,
+    pub size: u64,
+    pub samples: u64,
+    pub min_size: u64,
+    pub max_size: u64,
+}
+
+fn gen_positions(client: &mut Client, config: &EvaluationConfig) -> Vec<(u64, u64)> {
     let mut positions = vec![];
-    for _ in 0..N_POSITIONS {
-        let start = client.rng.gen_range(0..OBJECT_SIZE);
-        let length = client.rng.gen_range(MIN_FETCH_SIZE..MAX_FETCH_SIZE);
-        positions.push((
-            start,
-            length.clamp(0, OBJECT_SIZE.saturating_sub(start)),
-        ));
+    for _ in 0..config.samples {
+        let start = client.rng.gen_range(0..config.size);
+        let length = client.rng.gen_range(config.min_size..config.max_size);
+        positions.push((start, length.clamp(0, config.size.saturating_sub(start))));
     }
     positions
 }
 
-fn prepare_store(client: &mut Client) -> Result<(), Box<dyn Error>> {
+fn prepare_store(client: &mut Client, config: &EvaluationConfig) -> Result<(), Box<dyn Error>> {
     let start = std::time::Instant::now();
     let (obj, _info) = client
         .object_store
         .open_or_create_object_with_pref(b"important_research", StoragePreference::SLOW)?;
     let mut cursor = obj.cursor_with_pref(StoragePreference::SLOW);
 
-    with_random_bytes(&mut client.rng, OBJECT_SIZE, 8 * 1024 * 1024, |b| {
+    with_random_bytes(&mut client.rng, config.size, 8 * 1024 * 1024, |b| {
         cursor.write_all(b)
     })?;
     println!("Initial write took {}s", start.elapsed().as_secs());
@@ -39,11 +43,11 @@ fn prepare_store(client: &mut Client) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn run_read(mut client: Client, runtime: u64) -> Result<(), Box<dyn Error>> {
+pub fn run_read(mut client: Client, config: EvaluationConfig) -> Result<(), Box<dyn Error>> {
     println!("running scientific_evaluation");
     // Generate positions to read
-    let positions = gen_positions(&mut client);
-    prepare_store(&mut client)?;
+    let positions = gen_positions(&mut client, &config);
+    prepare_store(&mut client, &config)?;
 
     let (obj, _info) = client
         .object_store
@@ -51,20 +55,21 @@ pub fn run_read(mut client: Client, runtime: u64) -> Result<(), Box<dyn Error>> 
         .expect("Object was just created, but can't be opened!");
 
     let start = std::time::Instant::now();
-    let mut buf = vec![0; MAX_FETCH_SIZE as usize];
+    let mut buf = vec![0; config.max_size as usize];
     let f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .open("evaluation_read.csv")?;
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"offset,size,latency_ns\n")?;
+
     for (pos, len) in positions.iter().cycle() {
         // Read data as may be done in some evaluation where only parts of a
         // database file are read in.
         let t = std::time::Instant::now();
         obj.read_at(&mut buf[..*len as usize], *pos).unwrap();
         w.write_fmt(format_args!("{pos},{len},{}", t.elapsed().as_nanos()))?;
-        if start.elapsed().as_secs() >= runtime {
+        if start.elapsed().as_secs() >= config.runtime {
             break;
         }
     }
@@ -72,11 +77,11 @@ pub fn run_read(mut client: Client, runtime: u64) -> Result<(), Box<dyn Error>> 
     Ok(())
 }
 
-pub fn run_read_write(mut client: Client, runtime: u64) -> Result<(), Box<dyn Error>> {
+pub fn run_read_write(mut client: Client, config: EvaluationConfig) -> Result<(), Box<dyn Error>> {
     println!("running scientific_evaluation");
     // Generate positions to read
-    let positions = gen_positions(&mut client);
-    prepare_store(&mut client)?;
+    let positions = gen_positions(&mut client, &config);
+    prepare_store(&mut client, &config)?;
 
     let (obj, _info) = client
         .object_store
@@ -85,7 +90,7 @@ pub fn run_read_write(mut client: Client, runtime: u64) -> Result<(), Box<dyn Er
     let mut cursor = obj.cursor();
 
     let start = std::time::Instant::now();
-    let mut buf = vec![0; MAX_FETCH_SIZE as usize];
+    let mut buf = vec![0; config.max_size as usize];
     let f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -107,7 +112,7 @@ pub fn run_read_write(mut client: Client, runtime: u64) -> Result<(), Box<dyn Er
             })?;
             w.write_fmt(format_args!("{pos},{len},{},w", t.elapsed().as_nanos()))?;
         }
-        if start.elapsed().as_secs() >= runtime {
+        if start.elapsed().as_secs() >= config.runtime {
             break;
         }
     }

@@ -22,15 +22,23 @@ enum Mode {
     Checkpoints,
     Filesystem,
     FilesystemZip {
-        path: PathBuf
+        path: PathBuf,
     },
     EvaluationRead {
         #[structopt(default_value = "120")]
         runtime: u64,
+        size: u64,
+        samples: u64,
+        min_size: u64,
+        max_size: u64,
     },
     EvaluationRW {
         #[structopt(default_value = "120")]
         runtime: u64,
+        size: u64,
+        samples: u64,
+        min_size: u64,
+        max_size: u64,
     },
     Zip {
         n_clients: u32,
@@ -83,14 +91,40 @@ fn run_all(mode: Mode) -> Result<(), Box<dyn Error>> {
             filesystem_zip::run(client, path)?;
             control.database.write().sync()?;
         }
-        Mode::EvaluationRead { runtime } => {
+        Mode::EvaluationRead {
+            runtime,
+            size,
+            samples,
+            min_size,
+            max_size,
+        } => {
             let client = control.client(0, b"scientific_evaluation");
-            scientific_evaluation::run_read(client, runtime)?;
+            let config = scientific_evaluation::EvaluationConfig {
+                runtime,
+                size,
+                samples,
+                min_size,
+                max_size,
+            };
+            scientific_evaluation::run_read(client, config)?;
             control.database.write().sync()?;
         }
-        Mode::EvaluationRW { runtime } => {
+        Mode::EvaluationRW {
+            runtime,
+            size,
+            samples,
+            min_size,
+            max_size,
+        } => {
             let client = control.client(0, b"scientific_evaluation");
-            scientific_evaluation::run_read_write(client, runtime)?;
+            let config = scientific_evaluation::EvaluationConfig {
+                runtime,
+                size,
+                samples,
+                min_size,
+                max_size,
+            };
+            scientific_evaluation::run_read_write(client, config)?;
             control.database.write().sync()?;
         }
         Mode::Zip {

@@ -83,13 +83,13 @@ function tiered() {
 }
 
 function scientific_evaluation() {
-  export BETREE__ALLOC_STRATEGY='[[0],[1],[],[]]'
-  run "$RUN_IDENT" scientific_evaluation_id_alloc evaluation-read 30
+  # Invocation: <Evaluation Length s> <Object Size in bytes> <Samples> <Min. Sample Size> <Max. Sample Size>
+  run "$RUN_IDENT" random_evaluation_read evaluation-read 30 $((25 * 1024 * 1024 * 1024)) $((8192)) $((1 * 1024)) $((12 * 1024 * 1024))
 }
 
 function evaluation_rw() {
-  export BETREE__ALLOC_STRATEGY='[[0],[1],[],[]]'
-  run "$RUN_IDENT" file_system_three evaluation-rw
+  # Invocation: <Evaluation Length s> <Object Size in bytes> <Samples> <Min. Sample Size> <Max. Sample Size>
+  run "$RUN_IDENT" random_evaluation_rw evaluation-rw 30 $((25 * 1024 * 1024 * 1024)) $((8192)) $((1 * 1024)) $((12 * 1024 * 1024))
 }
 
 function filesystem_zip() {
