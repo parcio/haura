@@ -33,13 +33,13 @@ jobs:
           cd betree/tests
           cargo build --tests
           cargo build --tests --release
-          cargo clean --package betree-tests
-          cargo clean --release --package betree-tests
+          #cargo clean --package betree-tests
+          #cargo clean --release --package betree-tests
           cd ..
           cargo build --tests
           cargo build --tests --release
-          cargo clean --package betree_storage_stack
-          cargo clean --release --package betree_storage_stack
+          #cargo clean --package betree_storage_stack
+          #cargo clean --release --package betree_storage_stack
   betree-integration:
     name: Integration Tests
     needs: dependencies
