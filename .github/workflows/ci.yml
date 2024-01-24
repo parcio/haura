@@ -134,7 +134,7 @@ jobs:
         with:
           path: |
             ~/.cargo
-          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-msrv
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-msrv
       - name: Prepare JULEA
         run: |
           sudo apt update || true
@@ -181,7 +181,8 @@ jobs:
         with:
           path: |
             ~/.cargo
-          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-fio-haura
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}
       - name: Build betree
         run: |
           cd betree
@@ -226,7 +227,7 @@ jobs:
             ~/.cargo
             ~/.cache/pip
             ~/.cache/poetry
-          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-haura-benchmarks
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-benchmarks
       - name: Build haura-benchmarks
         run: |
           cd betree/haura-benchmarks
@@ -241,11 +242,14 @@ jobs:
           cp example_config/.ci-config.json perf-config.json
           ./run.sh smoke-test
           rm perf-config.json
-      - name: Run plots
+      - name: Prepare poetry for plots
         run: |
           sudo apt update || true
           sudo apt --yes --no-install-recommends install python3-poetry
           cd betree/haura-benchmarks/haura-plots
           poetry install
+      - name: Run plots
+        run: |
+          cd betree/haura-benchmarks/haura-plots
           poetry run plots ../results/*/*
           rm -rf results
