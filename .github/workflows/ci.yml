@@ -237,7 +237,7 @@ jobs:
         with:
           path: |
             ~/.cache/pip
-            ~/.cache/poetry
+            ~/.cache/pypoetry
             betree/haura-benchmarks/data
             betree/haura-benchmarks/haura-plots/poetry.lock
           key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/pyproject.toml')}}-benchmarks
