@@ -32,10 +32,14 @@ jobs:
         run: |
           cd betree/tests
           cargo build --tests
+          cargo build --tests --release
           cargo clean --package betree-tests
+          cargo clean --release --package betree-tests
           cd ..
           cargo build --tests
+          cargo build --tests --release
           cargo clean --package betree_storage_stack
+          cargo clean --release --package betree_storage_stack
   betree-integration:
     name: Integration Tests
     needs: dependencies
@@ -134,6 +138,7 @@ jobs:
         with:
           path: |
             ~/.cargo
+            target
           key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-msrv
       - name: Prepare JULEA
         run: |
@@ -174,7 +179,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
           echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
-      - name: Cache fio
+      - name: Cache
         id: cache
         uses: actions/cache@v3
         # Environment variables do not seem to work, use ~ instead.
@@ -218,16 +223,21 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
           echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
-      - name: Cache
+      - name: Common Cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}
+      - name: Poetry and Data Cache
         id: cache
         uses: actions/cache@v3
         # Environment variables do not seem to work, use ~ instead.
         with:
           path: |
-            ~/.cargo
             ~/.cache/pip
             ~/.cache/poetry
-            target
             betree/haura-benchmarks/data
             betree/haura-benchmarks/haura-plots/poetry.lock
           key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/pyproject.toml')}}-benchmarks
