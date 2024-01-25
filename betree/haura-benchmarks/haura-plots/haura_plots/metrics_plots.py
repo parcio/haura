@@ -57,3 +57,33 @@ def plot_throughput(data, path):
             lines[1].zorder = 2.0
     fig.legend(loc="center right",handles=axs[0].get_lines())
     fig.savefig(f"{path}/plot_read.svg")
+    fig.close()
+
+def plot_tier_usage(data, path):
+    """
+    Plot the utilized space of each storage tier.
+    """
+    fig, axs = plt.subplots(4, 1, figsize=(10,13))
+
+    # 0 - 3; Fastest - Slowest
+    free = [[], [], [], []]
+    total = [[], [], [], []]
+    # Map each timestep to an individual
+    for ts in data:
+        tier = 0
+        for stat in ts["usage"]:
+            free[tier].append(stat["free"])
+            total[tier].append(stat["total"])
+            tier += 1
+
+    tier = 0
+    for fr in free:
+        axs[tier].plot((np.array(total[tier]) - np.array(fr)) * 4096 / 1024 / 1024 / 1024, label="Used", marker="o", markevery=200, color=util.BLUE)
+        axs[tier].plot(np.array(total[tier]) * 4096 / 1024 / 1024 / 1024, label="Total", marker="^", markevery=200, color=util.GREEN)
+        axs[tier].set_ylim(bottom=0)
+        axs[tier].set_ylabel(f"{util.num_to_name(tier)}\nCapacity in GiB")
+        tier += 1
+
+    fig.legend(loc='center right',handles=axs[0].get_lines())
+    fig.savefig(f"{path}/tier_usage.svg")
+    fig.close()
