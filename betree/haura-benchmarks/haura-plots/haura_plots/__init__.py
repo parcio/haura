@@ -205,7 +205,7 @@ def plot_filesystem_test():
         axs[1][n].set_ylim(min(min_read, min_write),max_write + 10000000)
 
     fig.savefig(f"{sys.argv[1]}/filesystem_comp.svg")
-    fig.close()
+    plt.close(fig)
 
 
 def plot_evaluation_latency(path, variant):
@@ -224,7 +224,7 @@ def plot_evaluation_latency(path, variant):
     label=' | '.join(path.split('/')[-2:])
     ax.set_title(f"Haura - {label}")
     fig.savefig(f"{path}/evaluation_read.svg")
-    fig.close()
+    plt.close(fig)
 
 USAGE_HELP="""Please specify an input run directory. If you already completed \
 benchmarks they can be found under `results/*`.

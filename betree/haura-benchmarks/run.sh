@@ -116,7 +116,7 @@ function filesystem() {
 function zip_cache() {
   local F_CD_START=1040032667
 
-  for cache_mib in 32 64 128 256 512 1024 2048 4096 8192; do
+  for cache_mib in 32 128 512 2048; do
     (
       export BETREE__CACHE_SIZE=$((cache_mib * 1024 * 1024))
       run "$RUN_IDENT" "zip_cache_$cache_mib" zip 4 100 10 "$ZIP_ARCHIVE" "$F_CD_START"
@@ -126,7 +126,7 @@ function zip_cache() {
 
 function zip_mt() {
   local F="$PWD/data/linux.zip"
-  local F_CD_START=1040032667
+  local F_CD_START=1
 
   for cache_mib in 256 512 1024 2048; do
     echo "using $cache_mib MiB of cache"
@@ -156,9 +156,7 @@ function zip_tiered() {
 
       local total=10000
 
-      export BETREE__STORAGE__TIERS="[ [ { mem = $((1 * 1024 * 1024 * 1024)) } ], [ { mem = $((1 * 1024 * 1024 * 1024)) } ] ]"
-
-      for num_workers in 1 2 3 4 5 6 7 8 9 10; do
+      for num_workers in 1 2 3 4 5 6 7 8; do
         echo "running with $num_workers workers"
         local per_worker=$((total / num_workers))
         local per_run=$((per_worker / 10))

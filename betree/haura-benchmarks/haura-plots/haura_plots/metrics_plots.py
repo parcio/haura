@@ -57,7 +57,7 @@ def plot_throughput(data, path):
             lines[1].zorder = 2.0
     fig.legend(loc="center right",handles=axs[0].get_lines())
     fig.savefig(f"{path}/plot_read.svg")
-    fig.close()
+    plt.close(fig)
 
 def plot_tier_usage(data, path):
     """
@@ -86,4 +86,4 @@ def plot_tier_usage(data, path):
 
     fig.legend(loc='center right',handles=axs[0].get_lines())
     fig.savefig(f"{path}/tier_usage.svg")
-    fig.close()
+    plt.close(fig)
