@@ -3,7 +3,7 @@
 //! `None` and `Lz4` are provided as implementation.
 
 use crate::{
-    buffer::Buf,
+    buffer::{Buf, BufWrite},
     size::{Size, StaticSize},
     vdev::Block,
 };
@@ -72,7 +72,7 @@ pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
 pub trait CompressionState: Write {
     /// Finishes the compression stream and returns a buffer that contains the
     /// compressed data.
-    fn finish(&mut self) -> Buf;
+    fn finish(&mut self, data: Buf) -> Result<Buf>;
 }
 
 pub trait DecompressionState {

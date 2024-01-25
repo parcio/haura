@@ -384,11 +384,12 @@ where
         let compressed_data = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
+            let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
             {
-                object.pack(&mut state)?;
+                object.pack(&mut buf)?;
                 drop(object);
             }
-            state.finish()
+            state.finish(buf.into_buf())?
         };
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
@@ -408,10 +409,11 @@ where
 
         let checksum = {
             let mut state = self.default_checksum_builder.build();
-            state.ingest(&compressed_data);
+            state.ingest(compressed_data.as_ref());
             state.finish()
         };
 
+        // FIXME: COMPRESSION
         self.pool.begin_write(compressed_data, offset)?;
 
         let obj_ptr = ObjectPointer {
@@ -499,11 +501,7 @@ where
             {
                 warn!(
                     "Storage tier {class} does not have enough space remaining. {} blocks of {}",
-                    self.handler
-                        .free_space_tier(class)
-                        .unwrap()
-                        .free
-                        .as_u64(),
+                    self.handler.free_space_tier(class).unwrap().free.as_u64(),
                     size.as_u64()
                 );
                 continue;

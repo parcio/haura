@@ -56,8 +56,8 @@ impl io::Write for NoneCompression {
 }
 
 impl CompressionState for NoneCompression {
-    fn finish(&mut self) -> Buf {
-        mem::replace(&mut self.buf, BufWrite::with_capacity(DEFAULT_BUFFER_SIZE)).into_buf()
+    fn finish(&mut self, buf: Buf) -> Result<Buf> {
+        Ok(buf)
     }
 }
 

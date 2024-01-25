@@ -266,6 +266,10 @@ impl BufWrite {
             buf: Arc::new(UnsafeCell::new(self.buf)),
         })
     }
+
+    pub fn len(&self) -> usize {
+        self.size as usize
+    }
 }
 
 impl io::Write for BufWrite {
@@ -287,6 +291,24 @@ impl io::Write for BufWrite {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+unsafe impl zstd::stream::raw::WriteBuf for BufWrite {
+    fn as_slice(&self) -> &[u8] {
+        self.as_ref()
+    }
+
+    fn capacity(&self) -> usize {
+        self.buf.capacity.to_bytes() as usize
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.buf.ptr
+    }
+
+    unsafe fn filled_until(&mut self, n: usize) {
+        self.size = n as u32
     }
 }
 
