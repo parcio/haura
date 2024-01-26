@@ -113,8 +113,8 @@ impl CompressionState for ZstdCompression {
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
 
-        let sem_len = buf.len() as u32;
-        sem_len
+        let og_len = data.len() as u32;
+        og_len
             .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
             .unwrap();
         Ok(buf.into_buf())
@@ -124,7 +124,7 @@ impl CompressionState for ZstdCompression {
 impl DecompressionState for ZstdDecompression {
     fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
         let size = u32::read_from_buffer(data).unwrap();
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
 
         let mut input = zstd::stream::raw::InBuffer::around(&data[DATA_OFF..]);
         let mut output = zstd::stream::raw::OutBuffer::around(&mut buf);
@@ -156,11 +156,16 @@ impl DecompressionState for ZstdDecompression {
 
 #[cfg(test)]
 mod tests {
+    use rand::RngCore;
+
     use super::*;
 
     #[test]
     fn encode_then_decode() {
-        let buf = Buf::from_zero_padded(vec![42u8; 4097]);
+        let mut rng = rand::thread_rng();
+        let mut buf = vec![42u8; 4 * 1024 * 1024];
+        rng.fill_bytes(buf.as_mut());
+        let buf = Buf::from_zero_padded(buf);
         let zstd = Zstd { level: 1 };
         let mut comp = zstd.new_compression().unwrap();
         let c_buf = comp.finish(buf.clone()).unwrap();
