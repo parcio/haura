@@ -62,8 +62,8 @@ impl CompressionState for NoneCompression {
 }
 
 impl DecompressionState for NoneDecompression {
-    fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
+    fn decompress(&mut self, data: Buf) -> Result<Buf> {
         // FIXME: pass-through Buf, reusing alloc
-        Ok(data.to_vec().into_boxed_slice())
+        Ok(data)
     }
 }

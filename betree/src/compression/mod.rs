@@ -76,7 +76,7 @@ pub trait CompressionState: Write {
 }
 
 pub trait DecompressionState {
-    fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>>;
+    fn decompress(&mut self, data: Buf) -> Result<Buf>;
 }
 
 mod none;

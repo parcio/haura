@@ -231,8 +231,8 @@ where
             .read(op.size(), op.offset(), op.checksum().clone())?;
 
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack_at(op.offset(), op.info(), data)?
+            let data = decompression_state.decompress(compressed_data)?;
+            Object::unpack_at(op.offset(), op.info(), data.into_boxed_slice())?
         };
         let key = ObjectKey::Unmodified { offset, generation };
         self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key));
@@ -413,7 +413,6 @@ where
             state.finish()
         };
 
-        // FIXME: COMPRESSION
         self.pool.begin_write(compressed_data, offset)?;
 
         let obj_ptr = ObjectPointer {
@@ -937,8 +936,8 @@ where
             let data = ptr
                 .decompression_tag()
                 .new_decompression()?
-                .decompress(&compressed_data)?;
-            Object::unpack_at(ptr.offset(), ptr.info(), data)?
+                .decompress(compressed_data)?;
+            Object::unpack_at(ptr.offset(), ptr.info(), data.into_boxed_slice())?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),
