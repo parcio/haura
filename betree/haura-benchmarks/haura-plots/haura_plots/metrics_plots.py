@@ -38,12 +38,12 @@ def plot_throughput(data, path):
             def ms_to_string(time):
                 time: f"{int(time / 1000 / 60)}:{int(time / 1000) % 60:02d}"
 
-            epoch_formatted = list(map(ms_to_string, epoch))
-            axs[tier_id].set_xlabel("runtime (minute:seconds)")
-            axs[tier_id].set_xticks(epoch, epoch_formatted)
-            axs[tier_id].locator_params(tight=True, nbins=10)
-            axs[tier_id].set_ylabel(f"{util.num_to_name(tier_id)}\nMiB/s (I/0)")
-            label=' | '.join(path.split('/')[-2:])
+        epoch_formatted = list(map(ms_to_string, epoch))
+        axs[tier_id].set_xlabel("runtime (minute:seconds)")
+        axs[tier_id].set_xticks(epoch, epoch_formatted)
+        axs[tier_id].locator_params(tight=True, nbins=10)
+        axs[tier_id].set_ylabel(f"{util.num_to_name(tier_id)}\nMiB/s (I/0)")
+        label=' | '.join(path.split('/')[-2:])
     fig.legend(loc="center right",handles=axs[0].get_lines())
     # Epoch in seconds
     fig.suptitle(f"Haura - {label}", y=0.98)  # add title

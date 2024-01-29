@@ -238,10 +238,10 @@ def main():
         print(USAGE_HELP)
         sys.exit(2)
     data = []
-    with open(f"{sys.argv[1]}/betree-metrics.jsonl", 'r', encoding="UTF-8") as metrics:
-        data = util.read_jsonl(metrics)
 
     for path in sys.argv[1:]:
+        with open(f"{path}/betree-metrics.jsonl", 'r', encoding="UTF-8") as metrics:
+            data = util.read_jsonl(metrics)
         # Plot actions
         metrics_plots.plot_throughput(data, path)
         metrics_plots.plot_tier_usage(data, path)

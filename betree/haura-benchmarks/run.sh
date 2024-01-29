@@ -185,7 +185,7 @@ function ingest() {
   (
     (
       export BETREE__COMPRESSION="None"
-      run "default" ingest_hdd_none ingest "$ZIP_ARCHIVE"
+      run "$RUN_IDENT" ingest_hdd_none ingest "$ZIP_ARCHIVE"
     )
 
     for level in $(seq 1 16); do

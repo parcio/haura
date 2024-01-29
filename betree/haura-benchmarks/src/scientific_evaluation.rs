@@ -43,41 +43,11 @@ fn prepare_store(client: &mut Client, config: &EvaluationConfig) -> Result<(), B
     Ok(())
 }
 
-pub fn run_read(mut client: Client, config: EvaluationConfig) -> Result<(), Box<dyn Error>> {
-    println!("running scientific_evaluation");
-    // Generate positions to read
-    let positions = gen_positions(&mut client, &config);
-    prepare_store(&mut client, &config)?;
-
-    let (obj, _info) = client
-        .object_store
-        .open_object_with_info(OBJ_NAME)?
-        .expect("Object was just created, but can't be opened!");
-
-    let start = std::time::Instant::now();
-    let mut buf = vec![0; config.max_size as usize];
-    let f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open("evaluation_read.csv")?;
-    let mut w = std::io::BufWriter::new(f);
-    w.write_all(b"offset,size,latency_ns\n")?;
-
-    for (pos, len) in positions.iter().cycle() {
-        // Read data as may be done in some evaluation where only parts of a
-        // database file are read in.
-        let t = std::time::Instant::now();
-        obj.read_at(&mut buf[..*len as usize], *pos).unwrap();
-        w.write_fmt(format_args!("{pos},{len},{}", t.elapsed().as_nanos()))?;
-        if start.elapsed().as_secs() >= config.runtime {
-            break;
-        }
-    }
-    w.flush()?;
-    Ok(())
-}
-
-pub fn run_read_write(mut client: Client, config: EvaluationConfig) -> Result<(), Box<dyn Error>> {
+pub fn run_read_write(
+    mut client: Client,
+    config: EvaluationConfig,
+    rw: f64,
+) -> Result<(), Box<dyn Error>> {
     println!("running scientific_evaluation");
     // Generate positions to read
     let positions = gen_positions(&mut client, &config);
@@ -100,17 +70,17 @@ pub fn run_read_write(mut client: Client, config: EvaluationConfig) -> Result<()
     for (pos, len) in positions.iter().cycle() {
         // Read data as may be done in some evaluation where only parts of a
         // database file are read in.
-        if client.rng.gen_bool(0.5) {
+        if client.rng.gen_bool(rw) {
             let t = std::time::Instant::now();
             obj.read_at(&mut buf[..*len as usize], *pos).unwrap();
-            w.write_fmt(format_args!("{pos},{len},{},r", t.elapsed().as_nanos()))?;
+            w.write_fmt(format_args!("{pos},{len},{},r\n", t.elapsed().as_nanos()))?;
         } else {
             cursor.seek(std::io::SeekFrom::Start(*pos))?;
             let t = std::time::Instant::now();
             with_random_bytes(&mut client.rng, *len, 8 * 1024 * 1024, |b| {
                 cursor.write_all(b)
             })?;
-            w.write_fmt(format_args!("{pos},{len},{},w", t.elapsed().as_nanos()))?;
+            w.write_fmt(format_args!("{pos},{len},{},w\n", t.elapsed().as_nanos()))?;
         }
         if start.elapsed().as_secs() >= config.runtime {
             break;
