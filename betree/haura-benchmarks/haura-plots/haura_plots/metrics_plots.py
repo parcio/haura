@@ -9,8 +9,14 @@ def plot_throughput(data, path):
     """
     Print a four row throughput plot with focussed read or write throughput.
     """
+
+    # Formatting
+    def ms_to_string(time):
+        return f"{int(time / 1000 / 60)}:{int(time / 1000) % 60:02d}"
+
     epoch = [temp['epoch_ms'] for temp in data]
     util.subtract_first_index(epoch)
+    epoch_formatted = list(map(ms_to_string, epoch))
     num_tiers = len(data[0]['storage']['tiers'])
     fig, axs = plt.subplots(num_tiers, 1, figsize=(16,8))
     for tier_id in range(num_tiers):
@@ -31,14 +37,9 @@ def plot_throughput(data, path):
             # this here too.
             writes = writes * util.BLOCK_SIZE / 1024 / 1024 * (util.SEC_MS / util.EPOCH_MS)
             reads = reads * util.BLOCK_SIZE / 1024 / 1024 * (util.SEC_MS / util.EPOCH_MS)
-            axs[tier_id].plot(epoch, reads, label = 'Read', linestyle='dotted', color=util.GREEN)
-            axs[tier_id].plot(epoch, writes, label = 'Written', color=util.BLUE)
 
-            # Formatting
-            def ms_to_string(time):
-                time: f"{int(time / 1000 / 60)}:{int(time / 1000) % 60:02d}"
-
-        epoch_formatted = list(map(ms_to_string, epoch))
+        axs[tier_id].plot(epoch, reads, label = 'Read', linestyle='dotted', color=util.GREEN)
+        axs[tier_id].plot(epoch, writes, label = 'Written', color=util.BLUE)
         axs[tier_id].set_xlabel("runtime (minute:seconds)")
         axs[tier_id].set_xticks(epoch, epoch_formatted)
         axs[tier_id].locator_params(tight=True, nbins=10)
