@@ -248,6 +248,7 @@ def main():
         plot_evaluation_latency(path, "read")
         plot_evaluation_latency(path, "rw")
         plot_object_distribution(path)
+        metrics_plots.plot_system(path)
         #plot_filesystem_test()
 
 if __name__ == "__main__":

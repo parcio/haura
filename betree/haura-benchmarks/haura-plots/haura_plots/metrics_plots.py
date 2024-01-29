@@ -5,14 +5,16 @@ from . import util
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+# Formatting
+def ms_to_string(time):
+    """Nicer formatter for epoch strings in figures"""
+    return f"{int(time / 1000 / 60)}:{int(time / 1000) % 60:02d}"
+
 def plot_throughput(data, path):
     """
     Print a four row throughput plot with focussed read or write throughput.
     """
-
-    # Formatting
-    def ms_to_string(time):
-        return f"{int(time / 1000 / 60)}:{int(time / 1000) % 60:02d}"
 
     epoch = [temp['epoch_ms'] for temp in data]
     util.subtract_first_index(epoch)
@@ -88,3 +90,46 @@ def plot_tier_usage(data, path):
     fig.legend(loc='center right',handles=axs[0].get_lines())
     fig.savefig(f"{path}/tier_usage.svg")
     plt.close(fig)
+
+
+def plot_system(path):
+    """Plot the system usage and temperatures during the run."""
+    data = []
+    with open(f"{path}/out.jsonl", 'r', encoding="UTF-8") as metrics:
+        data = util.read_jsonl(metrics)
+
+    epoch = [temp['epoch_ms'] for temp in data]
+    util.subtract_first_index(epoch)
+    epoch_formatted = list(map(ms_to_string, epoch))
+    min_pagefaults = [x["proc_minflt"] + x["proc_cminflt"] for x in data]
+    maj_pagefaults = [x["proc_majflt"] + x["proc_cmajflt"] for x in data]
+    virtual_mem = [x["proc_vsize"] for x in data]
+    resident_mem = [x["proc_rss"] for x in data]
+    utime = [x["proc_utime"] + x["proc_cutime"] for x in data]
+    stime = [x["proc_stime"] + x["proc_cstime"] for x in data]
+
+    fig, axs = plt.subplots(4,2, figsize=(10,13))
+    eticks = range(0, epoch[-1:][0], 30 * 10**3);
+    eticks_formatted = list(map(ms_to_string, eticks))
+    axs[0][0].plot(epoch, min_pagefaults)
+    axs[0][0].set_ylabel("Minor Pagefaults (All threads)")
+    axs[0][0].set_xticks(eticks, eticks_formatted)
+    axs[1][0].plot(epoch, maj_pagefaults)
+    axs[1][0].set_ylabel("Major Pagefaults (All threads)")
+    axs[1][0].set_xticks(eticks, eticks_formatted)
+    # Show[0] in MiB
+    axs[2][0].plot(epoch, np.array(virtual_mem) / 1024 / 1024)
+    axs[2][0].set_ylabel("Virtual Memory [MiB]")
+    axs[2][0].set_xticks(eticks, eticks_formatted)
+    axs[3][0].plot(epoch, np.array(resident_mem))
+    axs[3][0].set_ylabel("Resident Memory Pages [#]")
+    axs[3][0].set_xticks(eticks, eticks_formatted)
+
+    axs[0][1].plot(epoch, utime, label="utime")
+    axs[0][1].plot(epoch, stime, label="stime")
+    axs[0][1].set_ylabel("time [s] (All threads)")
+    axs[0][1].set_xticks(eticks, eticks_formatted)
+
+    fig.legend()
+
+    fig.savefig(f"{path}/proc.svg")
