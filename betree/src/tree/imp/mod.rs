@@ -28,7 +28,17 @@ use node::TakeChildBufferWrapper;
 
 /// Additional information for a single entry. Concerns meta information like
 /// the desired storage level of a key.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[archive(check_bytes)]
 pub struct KeyInfo {
     storage_preference: StoragePreference,
@@ -123,6 +133,16 @@ where
 {
     /// Returns a new, empty tree.
     pub fn empty_tree(
+        tree_id: DatasetId,
+        msg_action: M,
+        dml: X,
+        storage_preference: StoragePreference,
+    ) -> Self {
+        let root_node = dml.insert(Node::empty_leaf(false), tree_id, PivotKey::Root(tree_id));
+        Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
+    }
+
+    pub fn empty_nvm_tree(
         tree_id: DatasetId,
         msg_action: M,
         dml: X,
@@ -259,7 +279,7 @@ where
                 Some(PivotGetResult::Target(None)) => break Some(node),
                 Some(PivotGetResult::NextNode(np)) => self.get_node(np)?,
                 // TODO: Karim.. add comments..
-                Some(PivotGetResult::NVMTarget{np, idx}) => {
+                Some(PivotGetResult::NVMTarget { np, idx }) => {
                     if let Ok(data) = np.read() {
                         let child;
                         if pivot.is_left() {
@@ -268,21 +288,21 @@ where
                             child = &data.as_ref().unwrap().children[idx + 1];
                         }
 
-                        break Some((self.get_node(&child.as_ref().unwrap().node_pointer))?)
+                        break Some((self.get_node(&child.as_ref().unwrap().node_pointer))?);
                     } else {
                         panic!("This case should not occur!");
-                        break None
+                        break None;
                     }
-                },
-                Some(PivotGetResult::NVMNextNode {np, idx}) => {
+                }
+                Some(PivotGetResult::NVMNextNode { np, idx }) => {
                     if let Ok(data) = np.read() {
                         let child = &data.as_ref().unwrap().children[idx];
                         self.get_node(&child.as_ref().unwrap().node_pointer)?
                     } else {
                         panic!("This case should not occur!");
-                        break None
+                        break None;
                     }
-                },
+                }
                 None => break None,
             };
             node = next_node;
@@ -308,49 +328,69 @@ where
                     first_bool,
                     second_bool,
                     np,
-                }) => {
-                    match (first_bool, second_bool) {
-                        (true, true) => {
-                            if let Ok(mut data) = np.write() {
-                                break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?)
-                            } else {
-                                panic!("This case should not occur!");
-                                break None
-                            }
-                        }
-                        (true, false) => {
-                            if let Ok(mut data) = np.write() {
-                                break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx + 1].as_mut().unwrap().node_pointer.get_mut())?)
-                            } else {
-                                panic!("This case should not occur!");
-                                break None
-                            }
-                        }
-                        (false, _) => {
+                }) => match (first_bool, second_bool) {
+                    (true, true) => {
+                        if let Ok(mut data) = np.write() {
+                            break Some(
+                                self.get_mut_node_mut(
+                                    data.as_mut().unwrap().children[idx]
+                                        .as_mut()
+                                        .unwrap()
+                                        .node_pointer
+                                        .get_mut(),
+                                )?,
+                            );
+                        } else {
                             panic!("This case should not occur!");
-                            break None
+                            break None;
                         }
+                    }
+                    (true, false) => {
+                        if let Ok(mut data) = np.write() {
+                            break Some(
+                                self.get_mut_node_mut(
+                                    data.as_mut().unwrap().children[idx + 1]
+                                        .as_mut()
+                                        .unwrap()
+                                        .node_pointer
+                                        .get_mut(),
+                                )?,
+                            );
+                        } else {
+                            panic!("This case should not occur!");
+                            break None;
+                        }
+                    }
+                    (false, _) => {
+                        panic!("This case should not occur!");
+                        break None;
                     }
                 },
                 Some(PivotGetMutResult::NVMNextNode {
                     idx,
                     first_bool,
                     second_bool,
-                    np
-                }) => {
-                    match (first_bool, second_bool) {
-                        (false, _) => {
-                            if let Ok(mut data) = np.write() {
-                                break Some(self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?)
-                            } else {
-                                panic!("This case should not occur!");
-                                break None
-                            }
-                        }
-                        (true, _) => {
+                    np,
+                }) => match (first_bool, second_bool) {
+                    (false, _) => {
+                        if let Ok(mut data) = np.write() {
+                            break Some(
+                                self.get_mut_node_mut(
+                                    data.as_mut().unwrap().children[idx]
+                                        .as_mut()
+                                        .unwrap()
+                                        .node_pointer
+                                        .get_mut(),
+                                )?,
+                            );
+                        } else {
                             panic!("This case should not occur!");
-                            break None
+                            break None;
                         }
+                    }
+                    (true, _) => {
+                        panic!("This case should not occur!");
+                        break None;
                     }
                 },
                 None => break None,
@@ -462,16 +502,18 @@ where
                 GetResult::NextNode(np) => self.get_node(np)?,
                 GetResult::Data(data) => break data,
                 // TODO: Karim.. add comments..
-                GetResult::NVMNextNode {
-                    np,
-                    idx
-                } => {
+                GetResult::NVMNextNode { np, idx } => {
                     if let Ok(data) = np.read() {
-                        self.get_node(&data.as_ref().unwrap().children[idx].as_ref().unwrap().node_pointer)?
-                    } else { 
+                        self.get_node(
+                            &data.as_ref().unwrap().children[idx]
+                                .as_ref()
+                                .unwrap()
+                                .node_pointer,
+                        )?
+                    } else {
                         panic!("This case should not occur!");
                     }
-                },
+                }
             };
             node = next_node;
         };
@@ -510,17 +552,20 @@ where
                 ApplyResult::Leaf(info) => break info,
                 ApplyResult::NVMLeaf(info) => break info,
                 // TODO: Karim.. add comments..
-                ApplyResult::NVMNextNode {
-                    node,
-                    idx
-                } => {
+                ApplyResult::NVMNextNode { node, idx } => {
                     if let Ok(mut data) = node.write() {
-                        self.get_mut_node_mut(data.as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer.get_mut())?
+                        self.get_mut_node_mut(
+                            data.as_mut().unwrap().children[idx]
+                                .as_mut()
+                                .unwrap()
+                                .node_pointer
+                                .get_mut(),
+                        )?
                     } else {
                         panic!("This case should not occur!");
-                        break None
+                        break None;
                     }
-                },
+                }
             };
             node = next_node;
         });
@@ -575,22 +620,28 @@ where
 
                         match child_buffer.node_pointer_mut() {
                             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                                auto = self.try_get_mut_node(obj.as_mut().unwrap().node_pointer_mut());
-                            },
+                                auto =
+                                    self.try_get_mut_node(obj.as_mut().unwrap().node_pointer_mut());
+                            }
                             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                                let (_node,idx) = obj.as_mut().unwrap().node_pointer_mut();
-                                auto = self.try_get_mut_node(&mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer);
-                            },
+                                let (_node, idx) = obj.as_mut().unwrap().node_pointer_mut();
+                                auto = self.try_get_mut_node(
+                                    &mut _node.write().as_mut().unwrap().as_mut().unwrap().children
+                                        [idx]
+                                        .as_mut()
+                                        .unwrap()
+                                        .node_pointer,
+                                );
+                            }
                         };
 
-                        if let Some(child) = auto
-                        {
+                        if let Some(child) = auto {
                             node = child;
                             parent = Some(child_buffer);
                         } else {
                             break child_buffer.into_owner();
                         }
-                    },
+                    }
                     Err(node) => break node,
                 };
             }
@@ -601,7 +652,7 @@ where
         node.add_size(added_size);
 
         // TODO: Load all remaining data for NVM.... becase root_needs_merge iterates through all the children.. Also it just looks for children.len().. should keep this data in metadata as well?
-        
+
         if parent.is_none() && node.root_needs_merge() {
             // TODO Merge, this is not implemented with the 'rebalance_tree'
             // method. Since the root has a fanout of 1 at this point, merge all
@@ -670,15 +721,15 @@ where
 }
 
 mod child_buffer;
-mod nvm_child_buffer;
 mod derivate_ref;
 mod derivate_ref_nvm;
 mod flush;
 mod internal;
-mod nvminternal;
 mod leaf;
-mod nvmleaf;
 mod node;
+mod nvm_child_buffer;
+mod nvminternal;
+mod nvmleaf;
 mod packed;
 mod range;
 mod split;

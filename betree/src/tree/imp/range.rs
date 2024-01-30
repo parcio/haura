@@ -206,7 +206,12 @@ where
                     } => {
                         let previous_prefetch = if let Some(prefetch_np) = prefetch_option {
                             if let Ok(_node) = prefetch_np.0.read() {
-                                let _node_pointer = _node.as_ref().unwrap().children.get(prefetch_np.1).map(|child| &child.as_ref().unwrap().node_pointer);
+                                let _node_pointer = _node
+                                    .as_ref()
+                                    .unwrap()
+                                    .children
+                                    .get(prefetch_np.1)
+                                    .map(|child| &child.as_ref().unwrap().node_pointer);
 
                                 if let Some(__np) = _node_pointer {
                                     let f = self.dml.prefetch(&__np.read())?;
@@ -214,7 +219,6 @@ where
                                 } else {
                                     prefetch.take()
                                 }
-
                             } else {
                                 prefetch.take()
                             }
@@ -226,20 +230,19 @@ where
                             self.dml.finish_prefetch(previous_prefetch)?;
                         }
 
-                        if let Ok(nvmdata) = np.0.read()
-                        {
-                            let ref _np = nvmdata.as_ref().unwrap().children[np.1].as_ref().unwrap().node_pointer;
-                
+                        if let Ok(nvmdata) = np.0.read() {
+                            let ref _np = nvmdata.as_ref().unwrap().children[np.1]
+                                .as_ref()
+                                .unwrap()
+                                .node_pointer;
+
                             self.get_node(_np)?
                         } else {
                             unimplemented!("should not happen!");
                         }
                     }
-                    GetRangeResult::NVMData {
-                        np
-                    } => {
-                        if let Ok(nvmdata) = np.read()
-                        {
+                    GetRangeResult::NVMData { np } => {
+                        if let Ok(nvmdata) = np.read() {
                             let ref auto = nvmdata.as_ref().unwrap().entries;
                             let range = Box::new(auto.iter().map(|(k, v)| (&k[..], v.clone())));
 

@@ -6,8 +6,8 @@
 use std::borrow::Borrow;
 
 use super::{
-    child_buffer::ChildBuffer, derivate_ref::DerivateRef, internal::TakeChildBuffer, FillUpResult, node::TakeChildBufferWrapper, derivate_ref_nvm::DerivateRefNVM,
-    Inner, Node, Tree,
+    child_buffer::ChildBuffer, derivate_ref::DerivateRef, derivate_ref_nvm::DerivateRefNVM,
+    internal::TakeChildBuffer, node::TakeChildBufferWrapper, FillUpResult, Inner, Node, Tree,
 };
 use crate::{
     cache::AddSize,
@@ -51,9 +51,7 @@ where
     pub(super) fn rebalance_tree(
         &self,
         mut node: X::CacheValueRefMut,
-        mut parent: Option<
-            DerivateRefNVM<X::CacheValueRefMut, TakeChildBufferWrapper<'static, R>>,
-        >,
+        mut parent: Option<DerivateRefNVM<X::CacheValueRefMut, TakeChildBufferWrapper<'static, R>>>,
     ) -> Result<(), Error> {
         loop {
             if !node.is_too_large() {
@@ -94,15 +92,19 @@ where
             match child_buffer.node_pointer_mut() {
                 TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                     child = self.get_mut_node(obj.as_mut().unwrap().node_pointer_mut())?;
-                },
+                }
                 TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                    let (_node,idx) = obj.as_mut().unwrap().node_pointer_mut();
-                    child = self.get_mut_node(&mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer)?;
-                },
+                    let (_node, idx) = obj.as_mut().unwrap().node_pointer_mut();
+                    child = self.get_mut_node(
+                        &mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx]
+                            .as_mut()
+                            .unwrap()
+                            .node_pointer,
+                    )?;
+                }
             };
             // TODO: Karim... End of new code
 
-            
             // 2. Iterate down to child if too large
             if !child.is_leaf() && child.is_too_large() {
                 warn!("Aborting flush, child is too large already");
@@ -201,5 +203,4 @@ where
             node = child;
         }
     }
-
 }

@@ -9,7 +9,9 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 #[archive(check_bytes)]
 /// A pointer to an on-disk serialized object.
 pub struct ObjectPointer<D> {
@@ -17,9 +19,20 @@ pub struct ObjectPointer<D> {
     pub(super) checksum: D,
     pub(super) offset: DiskOffset,
     pub(super) size: Block<u32>,
+    // This could be replaced with a optional NonZero to save a byte. In Bytes.
+    pub(super) metadata_size: u32,
     pub(super) info: DatasetId,
     pub(super) generation: Generation,
-    pub(super) metadata_size: usize, // TODO: Karim.. add comments
+}
+
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+#[archive(check_bytes)]
+pub enum NodeType {
+    // FIXME: Replace with adjustal block size. 256 bytes for NVM.
+    Memory { m_size: Block<u32> },
+    Block,
 }
 
 impl<D> HasStoragePreference for ObjectPointer<D> {
@@ -53,6 +66,7 @@ impl<D: StaticSize> StaticSize for ObjectPointer<D> {
             + Generation::static_size()
             + <DiskOffset as StaticSize>::static_size()
             + Block::<u32>::static_size()
+            + Block::<u32>::static_size()
             + std::mem::size_of::<usize>()
     }
 }
@@ -70,6 +84,16 @@ impl<D> ObjectPointer<D> {
     pub fn offset(&self) -> DiskOffset {
         self.offset
     }
+
+    /// Whether a node needs all data initially or a skeleton size can be deconstructed.
+    /// FIXME: This needs to load data in large blocks right now.
+    pub fn can_be_loaded_partial(&self) -> Option<Block<u32>> {
+        if self.metadata_size > 0 {
+            return Some(Block::round_up_from_bytes(self.metadata_size));
+        }
+        None
+    }
+
     /// Get the size in blocks of the serialized object.
     pub fn size(&self) -> Block<u32> {
         self.size
@@ -83,9 +107,4 @@ impl<D> ObjectPointer<D> {
     pub fn info(&self) -> DatasetId {
         self.info
     }
-
-    pub fn metadata_size(&self) -> usize {
-        self.metadata_size
-    }
-
 }

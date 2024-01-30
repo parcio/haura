@@ -90,7 +90,7 @@ impl<V: Vdev + VdevRead + VdevLeafRead + VdevLeafWrite + 'static> VdevRead for M
         &self,
         offset: Block<u64>,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<&'static [u8]> {
         unimplemented!("This case should not occur!");
     }

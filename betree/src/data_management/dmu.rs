@@ -288,18 +288,19 @@ where
         let offset = op.offset();
         let generation = op.generation();
 
-        // TODO: Karim.. add comments
-        let mut bytes_to_read = op.size();
-        // FIXME:
-        let meta_data_len = 0;
-        if (meta_data_len != 0) {
-            bytes_to_read = Block::round_up_from_bytes(meta_data_len as u32);
-        }
+        // Depending on the encoded node type we might not need the entire range
+        // right away. Or at all in some cases.
+        let bytes_to_read = if let Some(m_size) = op.can_be_loaded_partial() {
+            m_size
+        } else {
+            op.size()
+        };
 
-        let compressed_data = self
-            .pool
-            .read(bytes_to_read, op.offset(), op.checksum().clone())?;
+        let compressed_data =
+            self.pool
+                .read(dbg!(bytes_to_read), op.offset(), op.checksum().clone())?;
 
+        // FIXME: The NVM node is only available when no compression is used.
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(compressed_data)?;
             Object::unpack_at(
@@ -463,7 +464,7 @@ where
         let compressed_data = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
-            let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
+            let buf = crate::buffer::BufWrite::with_capacity(Block(128));
             {
                 object.pack(&mut state, &mut metadata_size)?;
                 drop(object);
@@ -501,7 +502,7 @@ where
             decompression_tag: compression.decompression_tag(),
             generation,
             info,
-            metadata_size,
+            metadata_size: metadata_size as u32,
         };
 
         let was_present;

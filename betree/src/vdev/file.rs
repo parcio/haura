@@ -64,7 +64,7 @@ impl VdevRead for File {
         &self,
         offset: Block<u64>,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<&'static [u8]> {
         unimplemented!("This case should not occur!");
     }

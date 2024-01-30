@@ -1,13 +1,14 @@
 use super::{
     errors::*,
     root_tree_msg::{deadlist, segment, space_accounting},
-    AtomicStorageInfo, DatasetId, DeadListData, Generation, StorageInfo, TreeInner,
+    AtomicStorageInfo, DatasetId, DeadListData, Generation, Object, ObjectPointer, StorageInfo,
+    TreeInner,
 };
 use crate::{
     allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     atomic_option::AtomicOption,
     cow_bytes::SlicedCowBytes,
-    data_management::{CopyOnWriteEvent, Dml, HasStoragePreference, ObjectReference},
+    data_management::{self, CopyOnWriteEvent, Dml, HasStoragePreference, ObjectReference},
     storage_pool::{DiskOffset, GlobalDiskId},
     tree::{DefaultMessageAction, Node, Tree, TreeLayer},
     vdev::Block,

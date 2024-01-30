@@ -59,9 +59,9 @@ impl Memory {
 
         let x = &self.mem.read()[inner_offset];
 
-        Ok(unsafe { std::slice::from_raw_parts(x, size)})
-   }
-   
+        Ok(unsafe { std::slice::from_raw_parts(x, size) })
+    }
+
     fn slice_read(&self, size: Block<u32>, offset: Block<u64>) -> Result<Buf> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
         #[cfg(feature = "latency_metrics")]
@@ -107,9 +107,9 @@ impl VdevRead for Memory {
         &self,
         offset: Block<u64>,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<&'static [u8]> {
-       // println!("1> {:?}, {}, {}", offset, start, end);
+        // println!("1> {:?}, {}, {}", offset, start, end);
 
         self.ref_to_slice(offset, start, end)
     }

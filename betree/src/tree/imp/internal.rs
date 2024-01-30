@@ -1,7 +1,7 @@
 //! Implementation of the [InternalNode] node type.
 use super::{
     child_buffer::ChildBuffer,
-    node::{PivotGetMutResult, PivotGetResult,TakeChildBufferWrapper},
+    node::{PivotGetMutResult, PivotGetResult, TakeChildBufferWrapper},
     PivotKey,
 };
 use crate::{
@@ -133,7 +133,12 @@ impl<N: HasStoragePreference> HasStoragePreference for InternalNode<N> {
 }
 
 impl<N> InternalNode<N> {
-    pub fn new(left_child: ChildBuffer<N>, right_child: ChildBuffer<N>, pivot_key: CowBytes, level: u32) -> Self
+    pub fn new(
+        left_child: ChildBuffer<N>,
+        right_child: ChildBuffer<N>,
+        pivot_key: CowBytes,
+        level: u32,
+    ) -> Self
     where
         N: StaticSize,
     {
@@ -148,7 +153,10 @@ impl<N> InternalNode<N> {
     }
 
     /// Returns the number of children.
-    pub fn fanout(&self) -> usize  where N: ObjectReference {
+    pub fn fanout(&self) -> usize
+    where
+        N: ObjectReference,
+    {
         self.children.len()
     }
 
@@ -168,17 +176,26 @@ impl<N> InternalNode<N> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &ChildBuffer<N>> + '_ where N: ObjectReference{
+    pub fn iter(&self) -> impl Iterator<Item = &ChildBuffer<N>> + '_
+    where
+        N: ObjectReference,
+    {
         self.children.iter()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_  where N: ObjectReference {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ChildBuffer<N>> + '_
+    where
+        N: ObjectReference,
+    {
         self.children.iter_mut()
     }
 
     pub fn iter_with_bounds(
         &self,
-    ) -> impl Iterator<Item = (Option<&CowBytes>, &ChildBuffer<N>, Option<&CowBytes>)> + '_  where N: ObjectReference{
+    ) -> impl Iterator<Item = (Option<&CowBytes>, &ChildBuffer<N>, Option<&CowBytes>)> + '_
+    where
+        N: ObjectReference,
+    {
         self.children.iter().enumerate().map(move |(idx, child)| {
             let maybe_left = if idx == 0 {
                 None
@@ -194,14 +211,20 @@ impl<N> InternalNode<N> {
 }
 
 impl<N> InternalNode<N> {
-    pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>)  where N: ObjectReference {
+    pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>)
+    where
+        N: ObjectReference,
+    {
         let child = &self.children[self.idx(key)];
 
         let msg = child.get(key).cloned();
         (&child.node_pointer, msg)
     }
 
-    pub fn pivot_get(&self, pk: &PivotKey) -> PivotGetResult<N>  where N: ObjectReference{
+    pub fn pivot_get(&self, pk: &PivotKey) -> PivotGetResult<N>
+    where
+        N: ObjectReference,
+    {
         // Exact pivot matches are required only
         debug_assert!(!pk.is_root());
         let pivot = pk.bytes().unwrap();
@@ -228,7 +251,10 @@ impl<N> InternalNode<N> {
             )
     }
 
-    pub fn pivot_get_mut(&mut self, pk: &PivotKey) -> PivotGetMutResult<N>  where N: ObjectReference{
+    pub fn pivot_get_mut(&mut self, pk: &PivotKey) -> PivotGetMutResult<N>
+    where
+        N: ObjectReference,
+    {
         // Exact pivot matches are required only
         debug_assert!(!pk.is_root());
         let pivot = pk.bytes().unwrap();
@@ -258,7 +284,10 @@ impl<N> InternalNode<N> {
         }
     }
 
-    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N  where N: ObjectReference {
+    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> &mut N
+    where
+        N: ObjectReference,
+    {
         let idx = self.idx(key);
         let child = &mut self.children[idx];
 
@@ -306,7 +335,7 @@ impl<N> InternalNode<N> {
     where
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
-        N: ObjectReference
+        N: ObjectReference,
     {
         self.pref.invalidate();
         let idx = self.idx(key.borrow());
@@ -324,7 +353,7 @@ impl<N> InternalNode<N> {
     where
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
-        N: ObjectReference
+        N: ObjectReference,
     {
         self.pref.invalidate();
         let mut added_size = 0;
@@ -344,7 +373,10 @@ impl<N> InternalNode<N> {
         added_size
     }
 
-    pub fn drain_children(&mut self) -> impl Iterator<Item = N> + '_  where N: ObjectReference {
+    pub fn drain_children(&mut self) -> impl Iterator<Item = N> + '_
+    where
+        N: ObjectReference,
+    {
         self.pref.invalidate();
         self.entries_size = 0;
         self.children
@@ -359,8 +391,10 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<N> {
         start: &[u8],
         end: Option<&[u8]>,
         dead: &mut Vec<N>,
-    ) -> (usize, &mut N, Option<&mut N>) 
-    where N: ObjectReference {
+    ) -> (usize, &mut N, Option<&mut N>)
+    where
+        N: ObjectReference,
+    {
         self.pref.invalidate();
         let size_before = self.entries_size;
         let start_idx = self.idx(start);
@@ -482,7 +516,7 @@ impl<N: ObjectReference> InternalNode<N> {
 impl<N: HasStoragePreference> InternalNode<N>
 where
     N: StaticSize,
-    N: ObjectReference
+    N: ObjectReference,
 {
     pub fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<N>> {
         let child_idx = self.idx(key);
@@ -501,7 +535,10 @@ where
         min_flush_size: usize,
         max_node_size: usize,
         min_fanout: usize,
-    ) -> Option<TakeChildBufferWrapper<N>> where N: ObjectReference{
+    ) -> Option<TakeChildBufferWrapper<N>>
+    where
+        N: ObjectReference,
+    {
         let child_idx = {
             let size = self.size();
             let fanout = self.fanout();
@@ -541,7 +578,10 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
         sibling_np: N,
         pivot_key: CowBytes,
         select_right: bool,
-    ) -> isize where N: ObjectReference {
+    ) -> isize
+    where
+        N: ObjectReference,
+    {
         // split_at invalidates both involved children (old and new), but as the new child
         // is added to self, the overall entries don't change, so this node doesn't need to be
         // invalidated
@@ -564,17 +604,24 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
         sibling_np: N,
         pivot_key: CowBytes,
         select_right: bool,
-    ) -> isize where N: ObjectReference {
+    ) -> isize
+    where
+        N: ObjectReference,
+    {
         // split_at invalidates both involved children (old and new), but as the new child
         // is added to self, the overall entries don't change, so this node doesn't need to be
         // invalidated
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                obj.as_mut().unwrap().split_child(sibling_np, pivot_key, select_right)
-            },
+                obj.as_mut()
+                    .unwrap()
+                    .split_child(sibling_np, pivot_key, select_right)
+            }
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                obj.as_mut().unwrap().split_child(sibling_np, pivot_key, select_right)
-            },
+                obj.as_mut()
+                    .unwrap()
+                    .split_child(sibling_np, pivot_key, select_right)
+            }
         }
     }
 }
@@ -587,7 +634,10 @@ where
         Size::size(&*self.node)
     }
 
-    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N> where N: ObjectReference {
+    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N>
+    where
+        N: ObjectReference,
+    {
         if self.child_idx + 1 < self.node.children.len() {
             PrepareMergeChild {
                 node: self.node,
@@ -610,24 +660,21 @@ where
 {
     pub(super) fn size(&self) -> usize {
         match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                obj.as_ref().unwrap().size()
-            },
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                obj.as_ref().unwrap().size()
-            },
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.as_ref().unwrap().size(),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.as_ref().unwrap().size(),
         }
     }
 
-    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N> where N: ObjectReference {
+    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N>
+    where
+        N: ObjectReference,
+    {
         match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                obj.as_mut().unwrap().prepare_merge()
-            },
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.as_mut().unwrap().prepare_merge(),
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
                 unimplemented!("..");
                 //obj.as_mut().unwrap().prepare_merge()
-            },
+            }
         }
     }
 }
@@ -639,7 +686,10 @@ pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
 }
 
 impl<'a, N> PrepareMergeChild<'a, N> {
-    pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N> where N: ObjectReference {
+    pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
+    where
+        N: ObjectReference,
+    {
         &mut self.node.children[self.other_child_idx].node_pointer
     }
     pub(super) fn is_right_sibling(&self) -> bool {
@@ -654,7 +704,10 @@ pub(super) struct MergeChildResult<NP> {
 }
 
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    pub(super) fn merge_children(self) -> MergeChildResult<N>  where N: ObjectReference {
+    pub(super) fn merge_children(self) -> MergeChildResult<N>
+    where
+        N: ObjectReference,
+    {
         let mut right_sibling = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.pivot.remove(self.pivot_key_idx);
         let size_delta =
@@ -676,12 +729,18 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 }
 
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    fn get_children(&mut self) -> (&mut ChildBuffer<N>, &mut ChildBuffer<N>)  where N: ObjectReference {
+    fn get_children(&mut self) -> (&mut ChildBuffer<N>, &mut ChildBuffer<N>)
+    where
+        N: ObjectReference,
+    {
         let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
         (&mut left[0], &mut right[0])
     }
 
-    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize  where N: ObjectReference {
+    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
+    where
+        N: ObjectReference,
+    {
         {
             // Move messages around
             let (left_child, right_child) = self.get_children();
@@ -697,10 +756,16 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 }
 
 impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, N> {
-    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N> where N: ObjectReference {
+    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N>
+    where
+        N: ObjectReference,
+    {
         &mut self.node.children[self.child_idx].node_pointer
     }
-    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) where N: ObjectReference{
+    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize)
+    where
+        N: ObjectReference,
+    {
         let (buffer, size_delta) = self.node.children[self.child_idx].take();
         self.node.entries_size -= size_delta;
         (buffer, -(size_delta as isize))
@@ -716,7 +781,7 @@ mod tests {
         tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
     };
     use bincode::serialized_size;
-    
+
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
     use serde::Serialize;
@@ -737,7 +802,7 @@ mod tests {
         }
     }
 
-     impl<T: Clone> Clone for InternalNode<T> {
+    impl<T: Clone> Clone for InternalNode<T> {
         fn clone(&self) -> Self {
             InternalNode {
                 level: self.level,
@@ -783,7 +848,7 @@ mod tests {
         }
     }
 
-   fn check_size<T: Serialize + StaticSize>(node: &mut InternalNode<T>) {
+    fn check_size<T: Serialize + StaticSize>(node: &mut InternalNode<T>) {
         assert_eq!(
             node.size() as u64,
             serialized_size(node).unwrap(),

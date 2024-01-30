@@ -3,26 +3,28 @@
 //! Encapsulating common nodes like [super::internal::NVMInternalNode] and
 //! [super::leaf::NVMNVMLeafNode].
 use crate::{
+    compression::CompressionBuilder,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HasStoragePreference, ObjectReference, impls::ObjRef, ObjectPointer},
+    data_management::{impls::ObjRef, HasStoragePreference, ObjectPointer, ObjectReference},
     size::{Size, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
     tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction, PivotKey},
-    AtomicStoragePreference, StoragePreference, compression::CompressionBuilder,
+    AtomicStoragePreference, StoragePreference,
 };
 use parking_lot::RwLock;
 //use serde::{Deserialize, Serialize};
-use std::{
-    borrow::Borrow,
-    collections::{btree_map::Entry, BTreeMap, Bound},
-    mem::replace, any::type_name,
-};
 use rkyv::{
     archived_root,
     ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
     vec::{ArchivedVec, VecResolver},
     with::{ArchiveWith, DeserializeWith, SerializeWith},
-    Archive, Archived, Deserialize, Fallible, Infallible, Serialize, AlignedVec,
+    AlignedVec, Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
+};
+use std::{
+    any::type_name,
+    borrow::Borrow,
+    collections::{btree_map::Entry, BTreeMap, Bound},
+    mem::replace,
 };
 
 pub struct EncodeNodePointer;
@@ -61,11 +63,14 @@ impl<N: ObjectReference> ArchiveWith<RwLock<N>> for EncodeNodePointer {
     }
 }
 
-impl<N: ObjectReference, S: ScratchSpace + Serializer + ?Sized> SerializeWith<RwLock<N>, S> for EncodeNodePointer 
-where <S as Fallible>::Error: std::fmt::Debug {
+impl<N: ObjectReference, S: ScratchSpace + Serializer + ?Sized> SerializeWith<RwLock<N>, S>
+    for EncodeNodePointer
+where
+    <S as Fallible>::Error: std::fmt::Debug,
+{
     fn serialize_with(field: &RwLock<N>, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
         let mut serialized_data = Vec::new();
-        match field.read().serialize_unmodified(&mut serialized_data){
+        match field.read().serialize_unmodified(&mut serialized_data) {
             Ok(data) => debug!("Successfully serialized childbuffer's node_pointer"),
             Err(e) => panic!("Failed to serialize childbuffer's node_pointer"),
         };
@@ -76,10 +81,12 @@ where <S as Fallible>::Error: std::fmt::Debug {
     }
 }
 
-impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, RwLock<N>, D> for EncodeNodePointer {
+impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, RwLock<N>, D>
+    for EncodeNodePointer
+{
     fn deserialize_with(field: &Archived<Vec<u8>>, _: &mut D) -> Result<RwLock<N>, D::Error> {
         match <N as ObjectReference>::deserialize_and_set_unmodified(field.as_slice()) {
-            Ok(obj) => Ok(RwLock::new(obj)) ,
+            Ok(obj) => Ok(RwLock::new(obj)),
             Err(e) => panic!("Failed to deserialize childbuffer's node_pointer"),
         }
     }
@@ -196,7 +203,7 @@ impl<N: StaticSize> Size for NVMChildBuffer<N> {
 
     fn actual_size(&self) -> Option<usize> {
         Some(
-            nvm_child_buffer_base_size() 
+            nvm_child_buffer_base_size()
                 + N::static_size()
                 + self
                     .buffer
@@ -449,9 +456,13 @@ mod tests {
         serializer_data.serialize_value(&child_buffer).unwrap();
         let bytes_data = serializer_data.into_serializer().into_inner();
 
-        let archivedleafnodedata = rkyv::check_archived_root::<NVMChildBuffer<_>>(&bytes_data).unwrap();
-        let data: NVMChildBuffer<_> = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)).unwrap();
-        
+        let archivedleafnodedata =
+            rkyv::check_archived_root::<NVMChildBuffer<_>>(&bytes_data).unwrap();
+        let data: NVMChildBuffer<_> = archivedleafnodedata
+            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            .unwrap();
+
         assert_eq!(child_buffer, data);
 
         /* TODO: Fix it.. For the time being the above code is used to fullfil the task.
@@ -480,14 +491,18 @@ mod tests {
             size_before
         );
         */
-        
+
         let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
         serializer_data.serialize_value(&sibling).unwrap();
         let bytes_data = serializer_data.into_serializer().into_inner();
 
-        let archivedleafnodedata = rkyv::check_archived_root::<NVMChildBuffer<_>>(&bytes_data).unwrap();
-        let data: NVMChildBuffer<_> = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)).unwrap();
-        
+        let archivedleafnodedata =
+            rkyv::check_archived_root::<NVMChildBuffer<_>>(&bytes_data).unwrap();
+        let data: NVMChildBuffer<_> = archivedleafnodedata
+            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            .unwrap();
+
         assert_eq!(sibling, data);
     }
 

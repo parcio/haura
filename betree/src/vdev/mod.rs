@@ -108,9 +108,9 @@ pub trait VdevRead: Send + Sync {
         &self,
         offset: Block<u64>,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<&'static [u8]>;
-    
+
     /// Reads `size` blocks at `offset` and verifies the data with the
     /// `checksum`.
     /// In contrast to `read`, this function will read and verify data from

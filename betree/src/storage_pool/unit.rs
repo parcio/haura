@@ -140,7 +140,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         &self,
         offset: DiskOffset,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<Self::SliceAsync, VdevError> {
         self.inner.write_back_queue.wait(&offset)?;
         let inner = self.inner.clone();
@@ -151,7 +151,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
                 .await
         })?))
     }
-    
+
     type ReadAsync = Pin<Box<dyn Future<Output = Result<Buf, VdevError>> + Send>>;
 
     fn read_async(

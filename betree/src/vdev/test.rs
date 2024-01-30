@@ -102,7 +102,7 @@ impl VdevRead for FailingLeafVdev {
         &self,
         offset: Block<u64>,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<&'static [u8], Error> {
         unimplemented!("Implement test case!");
     }

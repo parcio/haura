@@ -4,7 +4,18 @@ use std::{fmt, mem};
 
 /// 2-bit storage class, 10-bit disk ID, 52-bit block offset (see
 /// [`BLOCK_SIZE`](../vdev/constant.BLOCK_SIZE.html))
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[archive(check_bytes)]
 pub struct DiskOffset(u64);
 

@@ -1,5 +1,8 @@
 //! Encapsulating logic for splitting of normal and root nodes.
-use super::{child_buffer::ChildBuffer, internal::TakeChildBuffer, Inner, Node, Tree, node::TakeChildBufferWrapper};
+use super::{
+    child_buffer::ChildBuffer, internal::TakeChildBuffer, node::TakeChildBufferWrapper, Inner,
+    Node, Tree,
+};
 use crate::{
     cache::AddSize,
     data_management::{Dml, HasStoragePreference, ObjectReference},
@@ -108,5 +111,4 @@ where
 
         Ok((node, size_delta))
     }
-
 }

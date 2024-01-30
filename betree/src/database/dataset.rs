@@ -1,7 +1,7 @@
 use super::root_tree_msg::dataset;
 use super::{
     errors::*, fetch_ds_data, Database, DatasetData, DatasetId, DatasetTree, Generation,
-    MessageTree, StorageInfo, RootDmu,
+    MessageTree, RootDmu, StorageInfo,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
@@ -62,12 +62,30 @@ impl Database {
 
     /// A convenience instantiation of [Database::create_custom_dataset] with the default message set.
     pub fn create_dataset(&mut self, name: &[u8]) -> Result<()> {
-        self.create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
+        self.create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE, false)
+    }
+
+    /// A convenience instantiation of [Database::create_custom_dataset] with the default message set.
+    pub fn create_nvm_dataset(&mut self, name: &[u8]) -> Result<()> {
+        self.create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE, true)
     }
 
     /// A convenience instantiation of [Database::open_or_create_custom_dataset] with the default message set.
     pub fn open_or_create_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
-        self.open_or_create_custom_dataset::<DefaultMessageAction>(name, StoragePreference::NONE)
+        self.open_or_create_custom_dataset::<DefaultMessageAction>(
+            name,
+            StoragePreference::NONE,
+            false,
+        )
+    }
+
+    /// A convenience instantiation of [Database::open_or_create_custom_dataset] with the default message set.
+    pub fn open_or_create_nvm_dataset(&mut self, name: &[u8]) -> Result<Dataset> {
+        self.open_or_create_custom_dataset::<DefaultMessageAction>(
+            name,
+            StoragePreference::NONE,
+            true,
+        )
     }
 
     /// Opens a data set identified by the given name.
@@ -145,6 +163,7 @@ impl Database {
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
+        is_nvm: bool,
     ) -> Result<()> {
         match self.lookup_dataset_id(name) {
             Ok(_) => return Err(Error::AlreadyExists),
@@ -152,12 +171,21 @@ impl Database {
             Err(e) => return Err(e),
         };
         let ds_id = self.allocate_ds_id()?;
-        let tree = DatasetTree::empty_tree(
-            ds_id,
-            DefaultMessageAction,
-            Arc::clone(self.root_tree.dmu()),
-            storage_preference,
-        );
+        let tree = if is_nvm {
+            DatasetTree::empty_nvm_tree(
+                ds_id,
+                DefaultMessageAction,
+                Arc::clone(self.root_tree.dmu()),
+                storage_preference,
+            )
+        } else {
+            DatasetTree::empty_tree(
+                ds_id,
+                DefaultMessageAction,
+                Arc::clone(self.root_tree.dmu()),
+                storage_preference,
+            )
+        };
         let ptr = tree.sync()?;
 
         let key = &dataset::data_key(ds_id) as &[_];
@@ -186,11 +214,12 @@ impl Database {
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
+        is_nvm: bool,
     ) -> Result<Dataset<M>> {
         match self.lookup_dataset_id(name) {
             Ok(_) => self.open_custom_dataset(name, storage_preference),
             Err(Error::DoesNotExist) => self
-                .create_custom_dataset::<M>(name, storage_preference)
+                .create_custom_dataset::<M>(name, storage_preference, is_nvm)
                 .and_then(|()| self.open_custom_dataset(name, storage_preference)),
             Err(e) => Err(e),
         }

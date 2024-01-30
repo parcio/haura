@@ -473,7 +473,7 @@ pub unsafe extern "C" fn betree_create_ds(
 ) -> c_int {
     let db = &mut (*db).0;
     let name = from_raw_parts(name as *const u8, len as usize);
-    db.create_custom_dataset::<DefaultMessageAction>(name, storage_pref.0)
+    db.create_custom_dataset::<DefaultMessageAction>(name, storage_pref.0, false)
         .handle_result(err)
 }
 

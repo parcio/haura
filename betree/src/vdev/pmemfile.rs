@@ -6,14 +6,7 @@ use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
 use pmdk;
-use std::{
-    fs,
-    io,
-    os::unix::
-        io::AsRawFd,
-
-    sync::atomic::Ordering,
-};
+use std::{fs, io, os::unix::io::AsRawFd, sync::atomic::Ordering};
 
 /// `LeafVdev` which is backed by NVM and uses `pmdk`.
 #[derive(Debug)]
@@ -56,10 +49,13 @@ impl VdevRead for PMemFile {
         &self,
         offset: Block<u64>,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<&'static [u8]> {
         unsafe {
-            match self.file.get_slice(offset.to_bytes() as usize + start, end - start) {
+            match self
+                .file
+                .get_slice(offset.to_bytes() as usize + start, end - start)
+            {
                 Ok(val) => Ok(val),
                 Err(e) => {
                     self.stats

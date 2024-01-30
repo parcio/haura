@@ -97,7 +97,7 @@ impl<V: VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Parity1<V> {
         &self,
         offset: Block<u64>,
         start: usize,
-        end: usize
+        end: usize,
     ) -> Result<&'static [u8]> {
         unimplemented!("This case should not occur!");
     }

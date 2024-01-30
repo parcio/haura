@@ -27,7 +27,21 @@ const SLOWEST: u8 = 3;
 ///
 /// This type is not an `Option<u8>`, because it saves one byte per value, and allows the
 /// implementation of convenience methods on itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Readable, Writable, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Readable,
+    Writable,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[archive(check_bytes)]
 #[repr(transparent)]
 pub struct StoragePreference(u8);
@@ -114,7 +128,9 @@ impl PartialOrd for StoragePreference {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 #[archive(check_bytes)]
 /// An atomic version of [StoragePreference], replacing a RwLock<Option<StoragePreference>> by
 /// using the additional variant "Unknown" in place of None.
@@ -208,7 +224,9 @@ impl Default for AtomicStoragePreference {
 /// automated migration policy, in contrast to the lower bound by
 /// [StoragePreference]. Acts as a neutral element when set to
 /// `None`.
-#[derive(Debug, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug, serde::Serialize, serde::Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 #[archive(check_bytes)]
 pub struct AtomicSystemStoragePreference(AtomicU8);
 
