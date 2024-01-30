@@ -5,7 +5,6 @@ from . import util
 import numpy as np
 import matplotlib.pyplot as plt
 
-
 # Formatting
 def ms_to_string(time):
     """Nicer formatter for epoch strings in figures"""
@@ -108,7 +107,7 @@ def plot_system(path):
     utime = [x["proc_utime"] + x["proc_cutime"] for x in data]
     stime = [x["proc_stime"] + x["proc_cstime"] for x in data]
 
-    fig, axs = plt.subplots(4,2, figsize=(10,13))
+    fig, axs = plt.subplots(4,2, figsize=(13,13))
     eticks = range(0, epoch[-1:][0], 30 * 10**3);
     eticks_formatted = list(map(ms_to_string, eticks))
     axs[0][0].plot(epoch, min_pagefaults)
@@ -130,6 +129,12 @@ def plot_system(path):
     axs[0][1].set_ylabel("time [s] (All threads)")
     axs[0][1].set_xticks(eticks, eticks_formatted)
 
-    fig.legend()
+    temps_keys = filter(lambda x: 'hwmon' in x and not 'Tccd' in x, data[0].keys())
+    for (key, m) in zip(temps_keys, util.MARKERS):
+        axs[1][1].plot(epoch, [x[key] for x in data], label=key, marker=m, markevery=40)
+    axs[1][1].set_xticks(eticks, eticks_formatted)
+    axs[1][1].set_ylabel("Temperature [C]")
 
+
+    fig.legend()
     fig.savefig(f"{path}/proc.svg")

@@ -19,6 +19,8 @@ LIGHT_BLUE='#56B4E9'
 RED='#D55E00'
 ORANGE='#E69F00'
 
+MARKERS=['x', '.', '^', 'v', '<', '>']
+
 def read_jsonl(file):
     """
     Read from a file descriptor line by line a json, parse it, and return a list
