@@ -62,6 +62,7 @@ pmdk = { path = "./pmdk", optional = true }
 rustc-hash = "1.1.0"
 gxhash = "3.1.1"
 rkyv = { version = "0.7.43", features = ["validation"] }
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 rand_xorshift = "0.3"

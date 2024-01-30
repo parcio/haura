@@ -464,10 +464,6 @@ impl<N: ObjectReference> NVMInternalNode<N> {
                         .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-                    if let Ok(mut _data) = self.data.write() {
-                        *_data = Some(node);
-                    }
-
                     *self.data.write().unwrap() = Some(node);
 
                     return Ok(());

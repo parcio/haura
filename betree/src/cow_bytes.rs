@@ -13,16 +13,85 @@ use std::{
 
 /// Copy-on-Write smart pointer which supports cheap cloning as it is
 /// reference-counted.
-#[derive(Hash, Debug, Clone, Eq, Ord, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
+#[derive(Hash, Debug, Clone, Eq, Ord, Default)]
 pub struct CowBytes {
     // TODO Replace by own implementation
     pub(super) inner: Arc<Vec<u8>>,
 }
 
-impl AsRef<[u8]> for ArchivedCowBytes {
-    fn as_ref(&self) -> &[u8] {
-        &self.inner
+use rkyv::{Archived, CheckBytes, Fallible};
+
+impl<C: ?Sized> CheckBytes<C> for ArchivedCowBytes {
+    type Error = std::io::Error;
+
+    unsafe fn check_bytes<'a>(
+        value: *const Self,
+        _context: &mut C,
+    ) -> Result<&'a Self, Self::Error> {
+        // TODO: Remove the requirement for this trait?
+        value.as_ref().ok_or(std::io::Error::other("oops"))
+    }
+}
+
+/// The zero-copy representation of a [CowBytes].
+pub struct ArchivedCowBytes {
+    len: Archived<usize>,
+    offset: isize,
+}
+
+impl ArchivedCowBytes {
+    #[inline]
+    /// Create a readable slice constrained to the semantic length from the
+    /// memory reference. This does not copy the values.
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(
+                (self as *const Self).cast::<u8>().offset(self.offset),
+                self.len as usize,
+            )
+        }
+    }
+
+    /// Compatibility wrapper around [Self::as_slice].
+    pub fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl<D: Fallible + ?Sized> rkyv::Deserialize<CowBytes, D> for ArchivedCowBytes {
+    #[inline]
+    fn deserialize(&self, _deserializer: &mut D) -> Result<CowBytes, <D as Fallible>::Error> {
+        Ok(CowBytes::from(self.as_slice()))
+    }
+}
+
+/// Resolver to archive [CowBytes].
+pub struct CowDigger {
+    pos: usize,
+}
+
+impl rkyv::Archive for CowBytes {
+    type Archived = ArchivedCowBytes;
+    type Resolver = CowDigger;
+
+    #[inline]
+    unsafe fn resolve(&self, pos: usize, resolver: Self::Resolver, out: *mut Self::Archived) {
+        (*out).len = rkyv::to_archived!(self.inner.as_slice().len() as u32);
+        let offset = rkyv::rel_ptr::signed_offset(pos, resolver.pos).unwrap();
+        (*out).offset = offset;
+    }
+}
+
+impl<S: rkyv::Fallible + rkyv::ser::Serializer + ?Sized> rkyv::Serialize<S> for CowBytes {
+    #[inline]
+    fn serialize(
+        &self,
+        serializer: &mut S,
+    ) -> Result<Self::Resolver, <S as rkyv::Fallible>::Error> {
+        let pos = serializer.pos();
+        serializer.write(self.inner.as_slice())?;
+
+        Ok(CowDigger { pos })
     }
 }
 
