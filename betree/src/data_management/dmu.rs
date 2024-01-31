@@ -296,9 +296,9 @@ where
             op.size()
         };
 
-        let compressed_data =
-            self.pool
-                .read(dbg!(bytes_to_read), op.offset(), op.checksum().clone())?;
+        let compressed_data = self
+            .pool
+            .read(bytes_to_read, op.offset(), op.checksum().clone())?;
 
         // FIXME: The NVM node is only available when no compression is used.
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
@@ -464,9 +464,9 @@ where
         let compressed_data = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
-            let buf = crate::buffer::BufWrite::with_capacity(Block(128));
+            let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
             {
-                object.pack(&mut state, &mut metadata_size)?;
+                object.pack(&mut buf, &mut metadata_size)?;
                 drop(object);
             }
             state.finish(buf.into_buf())?
@@ -478,7 +478,7 @@ where
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
-        assert_eq!(size.to_bytes() as usize, compressed_data.len());
+        assert_eq!(size.to_bytes() as usize, _data.len());
         /*if size.to_bytes() as usize != compressed_data.len() {
             let mut v = compressed_data.into_vec();
             v.resize(size.to_bytes() as usize, 0);
