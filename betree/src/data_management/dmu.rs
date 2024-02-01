@@ -290,15 +290,17 @@ where
 
         // Depending on the encoded node type we might not need the entire range
         // right away. Or at all in some cases.
-        let bytes_to_read = if let Some(m_size) = op.can_be_loaded_partial() {
-            m_size
+        let compressed_data = if let Some(m_size) = op.can_be_loaded_partial() {
+            // FIXME: This is only correct for mirrored vdev and leaf vdevs
+            warn!("Performing dangerous read...");
+            replace(
+                &mut self.pool.read_raw(m_size, op.offset().block_offset())?[0],
+                Buf::zeroed(Block(0)),
+            )
         } else {
-            op.size()
+            self.pool
+                .read(op.size(), op.offset(), op.checksum().clone())?
         };
-
-        let compressed_data = self
-            .pool
-            .read(bytes_to_read, op.offset(), op.checksum().clone())?;
 
         // FIXME: The NVM node is only available when no compression is used.
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
@@ -478,7 +480,7 @@ where
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
-        assert_eq!(size.to_bytes() as usize, _data.len());
+        assert_eq!(size.to_bytes() as usize, compressed_data.len());
         /*if size.to_bytes() as usize != compressed_data.len() {
             let mut v = compressed_data.into_vec();
             v.resize(size.to_bytes() as usize, 0);

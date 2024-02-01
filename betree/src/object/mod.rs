@@ -55,7 +55,7 @@ use crate::{
     migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
     storage_pool::StoragePoolLayer,
-    tree::{DefaultMessageAction, TreeLayer},
+    tree::{DefaultMessageAction, StorageKind, TreeLayer},
     vdev::Block,
     Database, Dataset, PreferredAccessType, StoragePreference,
 };
@@ -290,8 +290,16 @@ impl Database {
     /// Create an object store backed by a single database.
     pub fn open_object_store(&mut self) -> Result<ObjectStore> {
         let id = self.get_or_create_os_id(&[0])?;
-        let data = self.open_or_create_custom_dataset(b"data", StoragePreference::NONE, false)?;
-        let meta = self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE, false)?;
+        let data = self.open_or_create_custom_dataset(
+            b"data",
+            StoragePreference::NONE,
+            StorageKind::Block,
+        )?;
+        let meta = self.open_or_create_custom_dataset(
+            b"meta",
+            StoragePreference::NONE,
+            StorageKind::Block,
+        )?;
         self.store_os_data(
             id,
             ObjectStoreData {
@@ -320,8 +328,10 @@ impl Database {
         data_name.extend_from_slice(b"data");
         let mut meta_name = v;
         meta_name.extend_from_slice(b"meta");
-        let data = self.open_or_create_custom_dataset(&data_name, storage_preference, false)?;
-        let meta = self.open_or_create_custom_dataset(&meta_name, storage_preference, false)?;
+        let data =
+            self.open_or_create_custom_dataset(&data_name, storage_preference, StorageKind::Block)?;
+        let meta =
+            self.open_or_create_custom_dataset(&meta_name, storage_preference, StorageKind::Block)?;
         self.store_os_data(
             id,
             ObjectStoreData {

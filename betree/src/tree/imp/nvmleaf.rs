@@ -1,17 +1,20 @@
 //! Implementation of the [NVMLeafNode] node type.
 use crate::{
+    buffer::Buf,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     database::RootSpu,
     size::Size,
     storage_pool::{AtomicSystemStoragePreference, DiskOffset, StoragePoolLayer},
     tree::{imp::packed, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
+    vdev::{Block, BLOCK_SIZE},
     AtomicStoragePreference, StoragePreference,
 };
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
     iter::FromIterator,
+    mem::size_of,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -29,11 +32,11 @@ use rkyv::{
     Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
 };
 
-pub(crate) const NVMLEAF_TYPE_ID: usize = 4;
-pub(crate) const NVMLEAF_METADATA_OFFSET: usize = 8;
-pub(crate) const NVMLEAF_DATA_OFFSET: usize = 8;
+pub(crate) const NVMLEAF_METADATA_LEN_OFFSET: usize = 0;
+pub(crate) const NVMLEAF_DATA_LEN_OFFSET: usize = size_of::<u32>();
+pub(crate) const NVMLEAF_METADATA_OFFSET: usize = NVMLEAF_DATA_LEN_OFFSET + size_of::<u32>();
 pub(crate) const NVMLEAF_HEADER_FIXED_LEN: usize =
-    NVMLEAF_TYPE_ID + NVMLEAF_METADATA_OFFSET + NVMLEAF_DATA_OFFSET;
+    NVMLEAF_METADATA_LEN_OFFSET + NVMLEAF_DATA_LEN_OFFSET;
 
 pub(super) struct NVMLeafNodeLoadDetails {
     pub need_to_load_data_from_nvm: bool,
@@ -41,13 +44,11 @@ pub(super) struct NVMLeafNodeLoadDetails {
     pub nvm_fetch_counter: usize,
 }
 
-/// A leaf node of the tree holds pairs of keys values which are plain data.
+// Enable actual zero-copy at all? All data is copied twice at the moment, we
+// could hold a variant which holds the original buffer and simply returns
+// slices to this buffer.
 #[derive(Clone)]
-//#[archive(check_bytes)]
-//#[cfg_attr(test, derive(PartialEq))]
-pub(super) struct NVMLeafNode /*<S>
-where S: StoragePoolLayer + 'static*/ {
-    //#[with(Skip)]
+pub(super) struct NVMLeafNode {
     pub pool: Option<RootSpu>,
     pub disk_offset: Option<DiskOffset>,
     pub meta_data: NVMLeafNodeMetaData,
@@ -432,6 +433,11 @@ impl NVMLeafNode {
         return Ok(());
     }
 
+    /// Read all entries regardless if they have been deserialized before.
+    ///
+    /// Only the actual length of data within the encoded node is copied and
+    /// deserialized. For normal access with single value caching see
+    /// [load_entry].
     pub(in crate::tree) fn load_all_entries(&self) -> Result<(), std::io::Error> {
         if self
             .nvm_load_details
@@ -440,41 +446,132 @@ impl NVMLeafNode {
             .need_to_load_data_from_nvm
             && self.disk_offset.is_some()
         {
-            self.nvm_load_details
-                .write()
+            // Lock the entire node while reading in entries to avoid race conditions.
+            let mut lock = self.nvm_load_details.write().unwrap();
+            // TODO: What if all the entries are fetched one by one? handle this part as well.
+            let internal_blk_off = Block(self.data_start as u64 / BLOCK_SIZE as u64);
+            let mut compressed_data = self
+                .pool
+                .as_ref()
                 .unwrap()
-                .need_to_load_data_from_nvm = false; // TODO: What if all the entries are fetched one by one? handle this part as well.
-            let compressed_data = self.pool.as_ref().unwrap().read(
-                self.node_size,
-                self.disk_offset.unwrap(),
-                self.checksum.unwrap(),
-            );
-            match compressed_data {
-                Ok(buffer) => {
-                    let bytes: Box<[u8]> = buffer.into_boxed_slice();
+                .read_raw(
+                    self.node_size - internal_blk_off.0 as u32,
+                    self.disk_offset.unwrap().block_offset() + internal_blk_off,
+                )
+                .unwrap();
+            let compressed_data = std::mem::replace(&mut compressed_data[0], Buf::zeroed(Block(0)));
+            let data: Box<[u8]> = compressed_data.into_boxed_slice();
+            let bytes = &data[if internal_blk_off.0 == 0 { 4 } else { 0 }..];
 
-                    let archivedleafnodedata: &ArchivedNVMLeafNodeData =
-                        rkyv::check_archived_root::<NVMLeafNodeData>(
-                            &bytes[self.data_start..self.data_end],
-                        )
-                        .unwrap();
-                    let node: NVMLeafNodeData = archivedleafnodedata
-                        .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            // FIXME: Alignment issues from the direct encoding hinder this part to be properly checked.
+            let archivedleafnodedata: &ArchivedNVMLeafNodeData = unsafe {
+                rkyv::archived_root::<NVMLeafNodeData>(
+                    &bytes[self.data_start - internal_blk_off.to_bytes() as usize
+                        ..self.data_end - internal_blk_off.to_bytes() as usize],
+                )
+            };
+            let node: NVMLeafNodeData = archivedleafnodedata
+                .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-                    if let Ok(mut _data) = self.data.write() {
-                        *_data = Some(node);
-                    }
-
-                    return Ok(());
-                }
-                Err(e) => {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
-                }
+            if let Ok(mut data) = self.data.write() {
+                *data = Some(node);
             }
+            lock.need_to_load_data_from_nvm = false;
+
+            return Ok(());
         }
 
         Ok(())
+    }
+
+    pub fn pack<W: std::io::Write>(
+        &self,
+        mut writer: W,
+        metadata_size: &mut usize,
+    ) -> Result<(), std::io::Error> {
+        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_meta_data
+            .serialize_value(&self.meta_data)
+            .unwrap();
+        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        serializer_data
+            .serialize_value(self.data.read().as_ref().unwrap().as_ref().unwrap())
+            .unwrap();
+        let bytes_data = serializer_data.into_serializer().into_inner();
+
+        let meta_len = (bytes_meta_data.len() as u32).to_be_bytes();
+        writer.write_all(meta_len.as_ref())?;
+        let data_len = (bytes_data.len() as u32).to_be_bytes();
+        writer.write_all(data_len.as_ref())?;
+
+        writer.write_all(&bytes_meta_data.as_ref())?;
+        writer.write_all(&bytes_data.as_ref())?;
+
+        *metadata_size = NVMLEAF_METADATA_OFFSET + bytes_meta_data.len();
+
+        debug!("NVMLeaf node packed successfully");
+        Ok(())
+    }
+
+    pub fn unpack(
+        data: &[u8],
+        pool: RootSpu,
+        offset: DiskOffset,
+        checksum: crate::checksum::XxHash,
+        size: Block<u32>,
+    ) -> Result<Self, std::io::Error> {
+        let meta_data_len: usize = u32::from_be_bytes(
+            data[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let data_len: usize = u32::from_be_bytes(
+            data[NVMLEAF_DATA_LEN_OFFSET..NVMLEAF_METADATA_OFFSET]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let meta_data_end = NVMLEAF_METADATA_OFFSET + meta_data_len;
+        let data_start = meta_data_end;
+        let data_end = data_start + data_len;
+
+        let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(
+            &data[NVMLEAF_METADATA_OFFSET..meta_data_end],
+        )
+        .unwrap();
+        //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };
+        let meta_data: NVMLeafNodeMetaData = archivedleafnodemetadata
+            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        // let archivedleafnodedata =
+        //     rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
+        // //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };
+        // let data: NVMLeafNodeData = archivedleafnodedata
+        //     .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+        //     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        Ok(NVMLeafNode {
+            pool: Some(pool),
+            disk_offset: Some(offset),
+            meta_data,
+            data: std::sync::Arc::new(std::sync::RwLock::new(Some(NVMLeafNodeData {
+                entries: BTreeMap::new(),
+            }))),
+            meta_data_size: meta_data_len,
+            data_size: data_len,
+            data_start,
+            data_end,
+            node_size: size,
+            checksum: Some(checksum),
+            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
+                need_to_load_data_from_nvm: true,
+                time_for_nvm_last_fetch: SystemTime::now(),
+                nvm_fetch_counter: 0,
+            })),
+        })
     }
 
     pub(in crate::tree) fn set_data(&mut self, obj: NVMLeafNodeData) {

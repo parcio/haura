@@ -24,7 +24,7 @@ use crate::{
             InternalNodeMetaData,
         },
         pivot_key::LocalPivotKey,
-        MessageAction,
+        MessageAction, StorageKind,
     },
     StoragePreference,
 };
@@ -217,31 +217,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             }
             NVMLeaf(ref leaf) => {
-                let mut serializer_meta_data =
-                    rkyv::ser::serializers::AllocSerializer::<0>::default();
-                serializer_meta_data
-                    .serialize_value(&leaf.meta_data)
-                    .unwrap();
-                let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
-
-                let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-                serializer_data
-                    .serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap())
-                    .unwrap();
-                let bytes_data = serializer_data.into_serializer().into_inner();
-
                 writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
-                writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
-                writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
-
-                writer.write_all(&bytes_meta_data.as_ref())?;
-                writer.write_all(&bytes_data.as_ref())?;
-
-                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this.. magic nos!
-
-                debug!("NVMLeaf node packed successfully");
-
-                Ok(())
+                leaf.pack(writer, metadata_size)
             }
             NVMInternal(ref nvminternal) => {
                 let mut serializer_meta_data =
@@ -277,7 +254,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         size: crate::vdev::Block<u32>,
         checksum: crate::checksum::XxHash,
         pool: RootSpu,
-        _offset: DiskOffset,
+        offset: DiskOffset,
         d_id: DatasetId,
         data: Box<[u8]>,
     ) -> Result<Self, io::Error> {
@@ -324,7 +301,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             Ok(Node(NVMInternal(
                 NVMInternalNode {
                     pool: Some(pool),
-                    disk_offset: Some(_offset),
+                    disk_offset: Some(offset),
                     meta_data,
                     data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
                         children: vec![],
@@ -344,56 +321,13 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 .complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
-            let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
-            let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
-
-            let meta_data_start = 4 + 8 + 8;
-            let meta_data_end = meta_data_start + meta_data_len;
-
-            let data_start = meta_data_end;
-            let data_end = data_start + data_len;
-
-            let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(
-                &data[meta_data_start..meta_data_end],
-            )
-            .unwrap();
-            //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };
-            let meta_data: NVMLeafNodeMetaData = archivedleafnodemetadata
-                .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-            // let archivedleafnodedata =
-            //     rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
-            // //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };
-            // let data: NVMLeafNodeData = archivedleafnodedata
-            //     .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            //     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-            let mut nvmleaf = NVMLeafNode {
-                pool: Some(pool),
-                disk_offset: Some(_offset),
-                meta_data,
-                data: std::sync::Arc::new(std::sync::RwLock::new(Some(NVMLeafNodeData {
-                    entries: BTreeMap::new(),
-                }))), //Some(data),
-                meta_data_size: meta_data_len,
-                data_size: data_len,
-                data_start,
-                data_end,
-                node_size: size,
-                checksum: Some(checksum),
-                nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(
-                    NVMLeafNodeLoadDetails {
-                        need_to_load_data_from_nvm: true,
-                        time_for_nvm_last_fetch: SystemTime::now(),
-                        nvm_fetch_counter: 0,
-                    },
-                )),
-            };
-
-            debug!("NVMLeaf node un-packed successfully");
-
-            Ok(Node(NVMLeaf(nvmleaf)))
+            Ok(Node(NVMLeaf(NVMLeafNode::unpack(
+                &data[4..],
+                pool,
+                offset,
+                checksum,
+                size,
+            )?)))
         } else {
             panic!(
                 "Unkown bytes to unpack. [0..4]: {}",
@@ -454,7 +388,7 @@ impl<N: StaticSize> Size for Node<N> {
             PackedLeaf(ref map) => map.size(),
             Leaf(ref leaf) => leaf.size(),
             Internal(ref internal) => 4 + internal.size(),
-            NVMLeaf(ref nvmleaf) => nvmleaf.size(),
+            NVMLeaf(ref nvmleaf) => 4 + nvmleaf.size(),
             NVMInternal(ref nvminternal) => 4 + nvminternal.size(),
         }
     }
@@ -464,7 +398,7 @@ impl<N: StaticSize> Size for Node<N> {
             PackedLeaf(ref map) => map.actual_size(),
             Leaf(ref leaf) => leaf.actual_size(),
             Internal(ref internal) => internal.actual_size().map(|size| 4 + size),
-            NVMLeaf(ref nvmleaf) => nvmleaf.actual_size(),
+            NVMLeaf(ref nvmleaf) => nvmleaf.actual_size().map(|size| 4 + size),
             NVMInternal(ref nvminternal) => nvminternal.actual_size().map(|size| 4 + size),
         }
     }
@@ -562,8 +496,12 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         after as isize - before as isize
     }
 
-    fn take(&mut self, isnvm: bool) -> Self {
-        replace(self, Self::empty_leaf(isnvm))
+    fn take(&mut self) -> Self {
+        let kind = match self.0 {
+            PackedLeaf(_) | Leaf(_) | Internal(_) => StorageKind::Block,
+            NVMLeaf(_) | NVMInternal(_) => StorageKind::NVM,
+        };
+        replace(self, Self::empty_leaf(kind))
     }
 
     pub(super) fn has_too_low_fanout(&self) -> bool
@@ -607,11 +545,10 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         }
     }
 
-    pub(super) fn empty_leaf(isnvm: bool) -> Self {
-        if (isnvm) {
-            Node(NVMLeaf(NVMLeafNode::new()))
-        } else {
-            Node(Leaf(LeafNode::new()))
+    pub(super) fn empty_leaf(kind: StorageKind) -> Self {
+        match kind {
+            StorageKind::Block => Node(Leaf(LeafNode::new())),
+            StorageKind::NVM => Node(NVMLeaf(NVMLeafNode::new())),
         }
     }
 
@@ -650,7 +587,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         let size_before = self.size();
         self.ensure_unpacked();
         // FIXME: Update this PivotKey, as the index of the node is changing due to the structural change.
-        let mut left_sibling = self.take(isnvm);
+        let mut left_sibling = self.take();
 
         let (right_sibling, pivot_key, cur_level) = match left_sibling.0 {
             PackedLeaf(_) => unreachable!(),

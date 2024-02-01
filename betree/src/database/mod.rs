@@ -325,6 +325,9 @@ impl DatabaseConfiguration {
                 DefaultMessageAction,
                 dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
+                // NOTE: This is set for compatibility right now, we can ensure
+                // somewhat that this should work as expected.
+                crate::tree::StorageKind::Block,
             );
 
             for (tier_id, tier) in tree.dmu().handler().free_space_tier.iter().enumerate() {

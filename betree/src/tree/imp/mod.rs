@@ -7,7 +7,7 @@ use self::{
 use super::{
     errors::*,
     layer::{ErasedTreeSync, TreeLayer},
-    PivotKey,
+    PivotKey, StorageKind,
 };
 use crate::{
     cache::AddSize,
@@ -137,18 +137,9 @@ where
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
+        kind: StorageKind,
     ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(false), tree_id, PivotKey::Root(tree_id));
-        Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
-    }
-
-    pub fn empty_nvm_tree(
-        tree_id: DatasetId,
-        msg_action: M,
-        dml: X,
-        storage_preference: StoragePreference,
-    ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(true), tree_id, PivotKey::Root(tree_id));
+        let root_node = dml.insert(Node::empty_leaf(kind), tree_id, PivotKey::Root(tree_id));
         Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 

@@ -17,6 +17,11 @@ pub use self::{
     message_action::MessageAction,
 };
 
+pub enum StorageKind {
+    Block,
+    NVM,
+}
+
 #[cfg(not(feature = "internal-api"))]
 pub(crate) use self::{imp::NodeInfo, pivot_key::PivotKey};
 
