@@ -10,6 +10,6 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
     "level": 0,
     "storage": 254,
     "system_storage": 254,
-    "type": "nvmleaf"
+    "type": "leaf"
   }
 }

@@ -1874,7 +1874,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 1,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": null,
         "pivot_key": {
@@ -1905,7 +1905,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 1,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0017",
         "pivot_key": {
@@ -1936,7 +1936,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 1,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 002F",
         "pivot_key": {
@@ -1967,7 +1967,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 1,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0047",
         "pivot_key": {
@@ -1998,7 +1998,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 1,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 005F",
         "pivot_key": {
@@ -2029,7 +2029,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0077",
         "pivot_key": {
@@ -2058,6 +2058,6 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
     "level": 1,
     "storage": 0,
     "system_storage": 254,
-    "type": "nvminternal"
+    "type": "internal"
   }
 }

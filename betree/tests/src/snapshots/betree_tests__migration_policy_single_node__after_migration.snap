@@ -7,5 +7,5 @@ expression: json!(ds.tree_dump().unwrap())
   "level": 0,
   "storage": 0,
   "system_storage": 0,
-  "type": "nvmleaf"
+  "type": "leaf"
 }

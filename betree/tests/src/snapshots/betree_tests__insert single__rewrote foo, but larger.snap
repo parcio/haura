@@ -3523,10 +3523,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 0000",
+            "0000 0000 0000 0000 0000 0017"
+          ],
+          "type": "packed"
         },
         "from": null,
         "pivot_key": {
@@ -3557,7 +3558,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 0017",
         "pivot_key": {
@@ -3588,7 +3589,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 002F",
         "pivot_key": {
@@ -3616,10 +3617,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 0048",
+            "0000 0000 0000 0000 0000 005F"
+          ],
+          "type": "packed"
         },
         "from": "0000 0000 0000 0000 0000 0047",
         "pivot_key": {
@@ -3647,10 +3649,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 0060",
+            "0000 0000 0000 0000 0000 0077"
+          ],
+          "type": "packed"
         },
         "from": "0000 0000 0000 0000 0000 005F",
         "pivot_key": {
@@ -3678,10 +3681,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 0078",
+            "0000 0000 0000 0000 0000 008F"
+          ],
+          "type": "packed"
         },
         "from": "0000 0000 0000 0000 0000 0077",
         "pivot_key": {
@@ -3709,10 +3713,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 0090",
+            "0000 0000 0000 0000 0000 00A7"
+          ],
+          "type": "packed"
         },
         "from": "0000 0000 0000 0000 0000 008F",
         "pivot_key": {
@@ -3740,10 +3745,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 00A8",
+            "0000 0000 0000 0000 0000 00BF"
+          ],
+          "type": "packed"
         },
         "from": "0000 0000 0000 0000 0000 00A7",
         "pivot_key": {
@@ -3771,10 +3777,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 00C0",
+            "0000 0000 0000 0000 0000 00D7"
+          ],
+          "type": "packed"
         },
         "from": "0000 0000 0000 0000 0000 00BF",
         "pivot_key": {
@@ -3802,10 +3809,11 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
       {
         "child": {
           "entry_count": 24,
-          "level": 0,
-          "storage": 0,
-          "system_storage": 254,
-          "type": "nvmleaf"
+          "range": [
+            "0000 0000 0000 0000 0000 00D8",
+            "0000 0000 0000 0000 0000 00EF"
+          ],
+          "type": "packed"
         },
         "from": "0000 0000 0000 0000 0000 00D7",
         "pivot_key": {
@@ -3836,7 +3844,7 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
           "level": 0,
           "storage": 0,
           "system_storage": 254,
-          "type": "nvmleaf"
+          "type": "leaf"
         },
         "from": "0000 0000 0000 0000 0000 00EF",
         "pivot_key": {
@@ -3865,6 +3873,6 @@ expression: "json!({\n        \"shape/data\" :\n        self.object_store.data_t
     "level": 1,
     "storage": 0,
     "system_storage": 254,
-    "type": "nvminternal"
+    "type": "internal"
   }
 }
