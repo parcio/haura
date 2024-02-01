@@ -1,17 +1,17 @@
 use super::util;
-use betree_storage_stack::tree::{NodeInfo, PivotKey};
+use betree_storage_stack::tree::{NodeInfo, PivotKey, StorageKind};
 use rand::seq::IteratorRandom;
 
 #[test]
 fn structure_is_good() {
-    let (_db, ds) = util::random_db(2, 128);
+    let (_db, ds) = util::random_db(2, 128, StorageKind::Block);
     let dmp = ds.tree_dump().unwrap();
     internal_node_check(&dmp)
 }
 
 #[test]
 fn get() {
-    let (_db, ds) = util::random_db(2, 128);
+    let (_db, ds) = util::random_db(2, 128, StorageKind::Block);
     let dmp = ds.tree_dump().unwrap();
     let pk = random_pivot_key(&dmp).unwrap();
     let _node = ds.test_get_node_pivot(pk).unwrap().unwrap();

@@ -16,8 +16,10 @@ use betree_storage_stack::{
 use std::{
     env,
     io::{BufReader, Read},
+    ops::RangeFull,
     sync::RwLockWriteGuard,
 };
+use util::random_db;
 
 use rand::{prelude::ThreadRng, Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -39,6 +41,7 @@ fn test_db(tiers: u32, mb_per_tier: u32) -> Database {
         },
         compression: CompressionConfiguration::None,
         access_mode: AccessMode::AlwaysCreateNew,
+        cache_size: 32 * 1024 * 1024,
         ..Default::default()
     };
 
@@ -178,6 +181,34 @@ impl TestDriver {
             .expect("Unable to create object");
 
         BufReader::new(obj.cursor()).bytes().count() as u64
+    }
+}
+
+use betree_storage_stack::tree::StorageKind;
+
+#[rstest]
+#[case(StorageKind::NVM)]
+#[case(StorageKind::Block)]
+fn insert_single_key(#[case] kind: StorageKind) {
+    let mut db = test_db(1, 512);
+    let ds = db.open_or_create_dataset_on(b"foo", kind).unwrap();
+
+    let key = &[42][..];
+    let val = b"Hello World";
+    ds.insert(key, val).unwrap();
+    db.sync().unwrap();
+    assert_eq!(&ds.get(key).unwrap().unwrap()[..], val);
+}
+
+#[rstest]
+#[case(StorageKind::NVM)]
+#[case(StorageKind::Block)]
+fn insert_random_keys(#[case] kind: StorageKind) {
+    let (_db, ds) = random_db(1, 1024, kind);
+    for r in ds.range::<RangeFull, &[u8]>(..).unwrap() {
+        let r = r.unwrap();
+        assert_eq!(r.0.len(), 64);
+        assert_eq!(r.1.len(), 4096);
     }
 }
 
