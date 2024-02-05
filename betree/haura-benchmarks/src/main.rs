@@ -108,7 +108,7 @@ fn run_all(mode: Mode) -> Result<(), Box<dyn Error>> {
                 min_size,
                 max_size,
             };
-            scientific_evaluation::run_read_write(client, config, 1.0)?;
+            scientific_evaluation::run_read_write(client, config, 1.0, "read")?;
             control.database.write().sync()?;
         }
         Mode::EvaluationRW {
@@ -127,7 +127,7 @@ fn run_all(mode: Mode) -> Result<(), Box<dyn Error>> {
                 min_size,
                 max_size,
             };
-            scientific_evaluation::run_read_write(client, config, ratio.clamp(0.0, 1.0))?;
+            scientific_evaluation::run_read_write(client, config, ratio.clamp(0.0, 1.0), "rw")?;
             control.database.write().sync()?;
         }
         Mode::Zip {

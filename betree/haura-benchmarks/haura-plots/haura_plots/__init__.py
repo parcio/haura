@@ -215,7 +215,10 @@ def plot_evaluation_latency(path, variant):
     data = pd.read_csv(f"{path}/evaluation_{variant}.csv");
 
     fig, ax = plt.subplots(1,1,figsize=(6,4))
-    ax.scatter(data['size'][:5000], data['latency_ns'][:5000], marker='x')
+    reads = data[data['op'] == 'r']
+    writes = data[data['op'] == 'w']
+    ax.scatter(reads['size'], reads['latency_ns'], marker='x')
+    ax.scatter(writes['size'], writes['latency_ns'], marker='.')
     xticks = np.arange(0, 12 * 1024 * 1024 + 1, 2 * 1024 * 1024)
     ax.set_xticks(xticks, [int(x / 1024) for x in xticks])
     ax.set_xlabel("Size in KiB")
@@ -223,7 +226,7 @@ def plot_evaluation_latency(path, variant):
     ax.set_yscale("log")
     label=' | '.join(path.split('/')[-2:])
     ax.set_title(f"Haura - {label}")
-    fig.savefig(f"{path}/evaluation_read.svg")
+    fig.savefig(f"{path}/evaluation_{variant}.svg")
     plt.close(fig)
 
 USAGE_HELP="""Please specify an input run directory. If you already completed \

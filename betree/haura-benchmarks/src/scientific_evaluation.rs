@@ -47,6 +47,7 @@ pub fn run_read_write(
     mut client: Client,
     config: EvaluationConfig,
     rw: f64,
+    name: &str,
 ) -> Result<(), Box<dyn Error>> {
     println!("running scientific_evaluation");
     // Generate positions to read
@@ -64,7 +65,7 @@ pub fn run_read_write(
     let f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .open("evaluation_read_write.csv")?;
+        .open("evaluation_{name}.csv")?;
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"offset,size,latency_ns,op\n")?;
     for (pos, len) in positions.iter().cycle() {
