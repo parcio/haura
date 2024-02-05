@@ -154,6 +154,8 @@ enum NodeInnerType {
     NVMInternal,
 }
 
+pub(super) const NODE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
+
 impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
     fn current_preference(&self) -> Option<StoragePreference> {
         match self.0 {
@@ -418,7 +420,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
                     None
                 }
             }
-            NVMLeaf(ref nvmleaf) => None,
+            NVMLeaf(_) => None,
             NVMInternal(ref mut nvminternal) => {
                 if let Some(data) = nvminternal.try_walk(key) {
                     Some(TakeChildBufferWrapper::NVMTakeChildBuffer(Some(data)))
@@ -440,7 +442,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
                 MAX_INTERNAL_NODE_SIZE,
                 MIN_FANOUT,
             ),
-            NVMLeaf(ref nvmleaf) => None,
+            NVMLeaf(_) => None,
             NVMInternal(ref mut nvminternal) => nvminternal.try_find_flush_candidate(
                 MIN_FLUSH_SIZE,
                 MAX_INTERNAL_NODE_SIZE,
@@ -466,8 +468,8 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             PackedLeaf(_) => "packed leaf",
             Leaf(_) => "leaf",
             Internal(_) => "internal",
-            NVMLeaf(ref nvmleaf) => "nvmleaf",
-            NVMInternal(ref nvminternal) => "nvminternal",
+            NVMLeaf(_) => "nvmleaf",
+            NVMInternal(_) => "nvminternal",
         }
     }
     pub(super) fn fanout(&self) -> Option<usize>
@@ -477,7 +479,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref internal) => Some(internal.fanout()),
-            NVMLeaf(ref nvmleaf) => None,
+            NVMLeaf(_) => None,
             NVMInternal(ref nvminternal) => Some(nvminternal.fanout()),
         }
     }
@@ -511,7 +513,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => false,
             Internal(ref internal) => internal.fanout() < MIN_FANOUT,
-            NVMLeaf(ref nvmleaf) => false,
+            NVMLeaf(_) => false,
             NVMInternal(ref nvminternal) => nvminternal.fanout() < MIN_FANOUT,
         }
     }
@@ -522,7 +524,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Leaf(ref leaf) => leaf.size() < MIN_LEAF_NODE_SIZE,
             Internal(_) => false,
             NVMLeaf(ref nvmleaf) => nvmleaf.size() < MIN_LEAF_NODE_SIZE,
-            NVMInternal(ref nvminternal) => false,
+            NVMInternal(_) => false,
         }
     }
 
@@ -532,7 +534,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
             Internal(_) => false,
             NVMLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
-            NVMInternal(ref nvminternal) => false,
+            NVMInternal(_) => false,
         }
     }
 
@@ -540,8 +542,8 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => true,
             Internal(_) => false,
-            NVMLeaf(ref nvmleaf) => true,
-            NVMInternal(ref nvminternal) => false,
+            NVMLeaf(_) => true,
+            NVMInternal(_) => false,
         }
     }
 
@@ -556,7 +558,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => 0,
             Internal(ref internal) => internal.level(),
-            NVMLeaf(ref nvmleaf) => 0,
+            NVMLeaf(_) => 0,
             NVMInternal(ref nvminternal) => nvminternal.level(),
         }
     }
@@ -568,7 +570,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => false,
             Internal(ref internal) => internal.fanout() == 1,
-            NVMLeaf(ref nvmleaf) => false,
+            NVMLeaf(_) => false,
             NVMInternal(ref nvminternal) => nvminternal.fanout() == 1,
         }
     }
@@ -776,8 +778,7 @@ impl<N: HasStoragePreference> Node<N> {
                 }
             }
             NVMLeaf(ref nvmleaf) => {
-                let np = nvmleaf.entries();
-                GetRangeResult::NVMData { np }
+                GetRangeResult::Data(Box::new(nvmleaf.range().map(|(k, v)| (&k[..], v.clone()))))
             }
             NVMInternal(ref nvminternal) => {
                 nvminternal.load_all_data();
@@ -1202,15 +1203,7 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
                 storage: self.correct_preference(),
                 system_storage: self.system_storage_preference(),
                 level: self.level(),
-                entry_count: nvmleaf
-                    .entries()
-                    .read()
-                    .as_ref()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .entries
-                    .len(),
+                entry_count: nvmleaf.len(),
             },
             Inner::NVMInternal(ref nvminternal) => NodeInfo::NVMInternal {
                 storage: self.correct_preference(),
