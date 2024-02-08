@@ -65,7 +65,7 @@ pub fn run_read_write(
     let f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .open("evaluation_{name}.csv")?;
+        .open(format!("evaluation_{name}.csv"))?;
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"offset,size,latency_ns,op\n")?;
     for (pos, len) in positions.iter().cycle() {
