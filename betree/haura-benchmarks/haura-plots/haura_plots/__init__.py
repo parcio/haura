@@ -217,8 +217,8 @@ def plot_evaluation_latency(path, variant):
     fig, ax = plt.subplots(1,1,figsize=(6,4))
     reads = data[data['op'] == 'r']
     writes = data[data['op'] == 'w']
-    ax.scatter(reads['size'], reads['latency_ns'], marker='x')
-    ax.scatter(writes['size'], writes['latency_ns'], marker='.')
+    ax.scatter(reads['size'], reads['latency_ns'], marker='x', label="read")
+    ax.scatter(writes['size'], writes['latency_ns'], marker='.', label="write")
     xticks = np.arange(0, 12 * 1024 * 1024 + 1, 2 * 1024 * 1024)
     ax.set_xticks(xticks, [int(x / 1024) for x in xticks])
     ax.set_xlabel("Size in KiB")
@@ -226,7 +226,12 @@ def plot_evaluation_latency(path, variant):
     ax.set_yscale("log")
     label=' | '.join(path.split('/')[-2:])
     ax.set_title(f"Haura - {label}")
-    fig.savefig(f"{path}/evaluation_{variant}.svg")
+    pls_no_cut_off = ax.legend(bbox_to_anchor=(1.0,1.0), loc="upper left")
+    fig.savefig(
+        f"{path}/evaluation_{variant}.svg",
+        bbox_extra_artists=(pls_no_cut_off,),
+        bbox_inches='tight'
+    )
     plt.close(fig)
 
 USAGE_HELP="""Please specify an input run directory. If you already completed \
