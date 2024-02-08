@@ -36,8 +36,9 @@ def plot_cache(data, path):
     axs[1].set_xticks(eticks, eticks_formatted)
     axs[1].set_ylabel("# per 500ms")
     oax = axs[1].twinx()
-    np.seterr(divide='ignore')
-    oax.plot(epoch, hits / (hits + miss) * 100, label="Hit-Miss-Ratio", linestyle=':')
+    # this may be zero somewhere in there
+    with np.errstate(divide='ignore', invalid='ignore'):
+        oax.plot(epoch, hits / (hits + miss) * 100, label="Hit-Miss-Ratio", linestyle=':')
     oax.set_ylabel("Hits [%]")
     oax.legend(bbox_to_anchor=(1.0, 1.2))
     axs[1].legend(ncols=2, bbox_to_anchor=(0.8, 1.2))

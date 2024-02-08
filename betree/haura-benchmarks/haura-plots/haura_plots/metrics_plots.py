@@ -102,34 +102,47 @@ def plot_system(path):
     utime = [x["proc_utime"] + x["proc_cutime"] for x in data]
     stime = [x["proc_stime"] + x["proc_cstime"] for x in data]
 
-    fig, axs = plt.subplots(4,2, figsize=(13,13))
+    fig, axs = plt.subplots(3,2, figsize=(10, 10))
     eticks = range(0, epoch[-1:][0], 30 * 10**3);
     eticks_formatted = list(map(util.ms_to_string, eticks))
+
+    # Page Faults (Minor)
     axs[0][0].plot(epoch, min_pagefaults)
     axs[0][0].set_ylabel("Minor Pagefaults (All threads)")
     axs[0][0].set_xticks(eticks, eticks_formatted)
+
+    # Page Faults (Major)
     axs[1][0].plot(epoch, maj_pagefaults)
     axs[1][0].set_ylabel("Major Pagefaults (All threads)")
     axs[1][0].set_xticks(eticks, eticks_formatted)
+
+
     # Show[0] in MiB
     axs[2][0].plot(epoch, np.array(virtual_mem) / 1024 / 1024)
     axs[2][0].set_ylabel("Virtual Memory [MiB]")
     axs[2][0].set_xticks(eticks, eticks_formatted)
-    axs[3][0].plot(epoch, np.array(resident_mem))
-    axs[3][0].set_ylabel("Resident Memory Pages [#]")
-    axs[3][0].set_xticks(eticks, eticks_formatted)
 
+
+    # Resident Memory
+    axs[2][1].plot(epoch, np.array(resident_mem))
+    axs[2][1].set_ylabel("Resident Memory Pages [#]")
+    axs[2][1].set_xticks(eticks, eticks_formatted)
+
+    # CPU time
     axs[0][1].plot(epoch, utime, label="utime")
     axs[0][1].plot(epoch, stime, label="stime")
     axs[0][1].set_ylabel("time [s] (All threads)")
     axs[0][1].set_xticks(eticks, eticks_formatted)
+    axs[0][1].legend(bbox_to_anchor=(1.35, 0.6))
+
 
     temps_keys = filter(lambda x: 'hwmon' in x and not 'Tccd' in x, data[0].keys())
-    for (key, m) in zip(temps_keys, util.MARKERS):
-        axs[1][1].plot(epoch, [x[key] for x in data], label=key, marker=m, markevery=40)
+    for (key, m) in zip(temps_keys, ['-', '--', '-.', ':']):
+        axs[1][1].plot(epoch, [x[key] for x in data], label=key, linestyle=m)
     axs[1][1].set_xticks(eticks, eticks_formatted)
     axs[1][1].set_ylabel("Temperature [C]")
+    axs[1][1].legend(bbox_to_anchor=(1.0, 0.6))
 
 
-    fig.legend()
+    fig.tight_layout()
     fig.savefig(f"{path}/proc.svg")
