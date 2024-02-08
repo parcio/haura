@@ -21,9 +21,6 @@ use std::{
 };
 
 use itertools::Itertools;
-//use serde::{Deserialize, Serialize};
-//use rkyv::{Archive, Deserialize, Serialize};
-//use rkyv::ser::{Serializer, serializers::AllocSerializer};
 use rkyv::{
     archived_root,
     ser::{
@@ -40,8 +37,8 @@ use super::node::NODE_PREFIX_LEN;
 pub(crate) const NVMLEAF_METADATA_LEN_OFFSET: usize = 0;
 pub(crate) const NVMLEAF_DATA_LEN_OFFSET: usize = size_of::<u32>();
 pub(crate) const NVMLEAF_METADATA_OFFSET: usize = NVMLEAF_DATA_LEN_OFFSET + size_of::<u32>();
-pub(crate) const NVMLEAF_HEADER_FIXED_LEN: usize =
-    NVMLEAF_METADATA_LEN_OFFSET + NVMLEAF_DATA_LEN_OFFSET;
+pub(crate) const NVMLEAF_HEADER_FIXED_LEN: usize = NVMLEAF_METADATA_OFFSET;
+const NVMLEAF_PER_KEY_META_LEN: usize = 3 * size_of::<u32>();
 
 pub(super) struct NVMLeafNodeLoadDetails {
     pub need_to_load_data_from_nvm: bool,
@@ -69,7 +66,7 @@ pub(super) struct NVMLeafNode {
     pub nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// A NVMLeaf can have different states depending on how much data has actually
 /// been loaded from disk. Or if this data is already deserialized and copied
 /// again to another memory buffer. The latter is most important for NVM.
@@ -139,7 +136,15 @@ impl NVMLeafNodeState {
     /// not present entries if necessary.
     pub fn force_upgrade(&mut self) {
         self.fetch();
-        self.upgrade().unwrap()
+        let err = if let Err(e) = self.upgrade() {
+            match e {
+                NVMLeafError::AttemptedInvalidTransition => Err(e),
+                NVMLeafError::AlreadyDeserialized => Ok(()),
+            }
+        } else {
+            Ok(())
+        };
+        err.unwrap()
     }
 
     /// Deserialize all entries from the underlying storage. This can bring
@@ -212,14 +217,14 @@ impl NVMLeafNodeState {
         &self,
     ) -> impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { buf, data } => todo!(),
+            NVMLeafNodeState::PartiallyLoaded { .. } => todo!(),
             NVMLeafNodeState::Deserialized { data } => data.entries.iter(),
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { buf, data } => data.len(),
+            NVMLeafNodeState::PartiallyLoaded { data, .. } => data.len(),
             NVMLeafNodeState::Deserialized { data } => data.entries.len(),
         }
     }
@@ -227,7 +232,7 @@ impl NVMLeafNodeState {
     /// Access the underlying the BTree, only valid in the context of deserialized state.
     pub fn force_entries(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { buf, data } => unimplemented!(),
+            NVMLeafNodeState::PartiallyLoaded { .. } => unimplemented!(),
             NVMLeafNodeState::Deserialized { data } => &mut data.entries,
         }
     }
@@ -262,8 +267,8 @@ pub(super) struct NVMLeafNodeMetaData {
 
 impl StaticSize for NVMLeafNodeMetaData {
     fn static_size() -> usize {
-        // pref             sys pref            entries size
-        size_of::<u8>() + size_of::<u8>() + size_of::<u32>()
+        // pref             sys pref            entries size   FIXME  ARCHIVE OVERHEAD
+        size_of::<u8>() + size_of::<u8>() + size_of::<u32>() + 2
     }
 }
 
@@ -278,7 +283,7 @@ pub struct NVMLeafNodeData {
 
 impl std::fmt::Debug for NVMLeafNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TODO: Karim.. fix this...")
+        write!(f, "{:?}", &self.state)
     }
 }
 
@@ -294,72 +299,27 @@ pub(super) enum NVMFillUpResult {
     },
 }
 
-static NVMLeafNodeMetaData_EMPTY_NODE: NVMLeafNodeMetaData = NVMLeafNodeMetaData {
-    storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
-    system_storage_preference: AtomicSystemStoragePreference::none(),
-    entries_size: 0,
-};
-
-static NVMLeafNodeData_EMPTY_NODE: NVMLeafNodeData = NVMLeafNodeData {
-    entries: BTreeMap::new(),
-};
-
-#[inline]
-fn nvmleaf_node_base_size() -> usize {
-    let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-    serializer_meta_data
-        .serialize_value(&NVMLeafNodeMetaData_EMPTY_NODE)
-        .unwrap();
-    let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
-
-    let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-    serializer_data
-        .serialize_value(&NVMLeafNodeData_EMPTY_NODE)
-        .unwrap();
-    let bytes_data = serializer_data.into_serializer().into_inner();
-
-    NVMLEAF_HEADER_FIXED_LEN + bytes_meta_data.len() + bytes_data.len()
-}
-
 impl Size for NVMLeafNode {
     fn size(&self) -> usize {
-        // FIXME: Precalculate or store the results of this somewhere. These operations are very expensive.
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data
-            .serialize_value(self.state.force_data())
-            .unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
-
-        let size = NVMLEAF_HEADER_FIXED_LEN + NVMLeafNodeMetaData::static_size() + bytes_data.len();
-
-        size
+        NVMLEAF_HEADER_FIXED_LEN + NVMLeafNodeMetaData::static_size() + self.meta_data.entries_size
     }
 
     fn actual_size(&self) -> Option<usize> {
-        // FIXME: Precalculate or store the results of this somewhere. These operations are very expensive.
-        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_meta_data
-            .serialize_value(&self.meta_data)
-            .unwrap();
-        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+        let data_size: usize = self
+            .state
+            .iter()
+            .map(|(_k, (info, v))| v.len() + info.size())
+            .sum();
 
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data
-            .serialize_value(self.state.force_data())
-            .unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
+        let key_size: usize = self
+            .state
+            .iter()
+            .map(|(k, _)| NVMLEAF_PER_KEY_META_LEN + k.len())
+            .sum();
 
-        let size = NVMLEAF_HEADER_FIXED_LEN + NVMLeafNodeMetaData::static_size() + bytes_data.len();
-
+        let size =
+            NVMLEAF_HEADER_FIXED_LEN + NVMLeafNodeMetaData::static_size() + data_size + key_size;
         Some(size)
-        // Some(
-        //     nvmleaf_node_base_size()
-        //         + self.data.read().as_ref().unwrap().as_ref().unwrap()
-        //             .entries
-        //             .iter()
-        //             .map(|(key, (_keyinfo, value))| key.len() + _keyinfo.size() + value.len())
-        //             .sum::<usize>(),
-        // )
     }
 }
 
@@ -407,7 +367,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
             // We're already looking at every entry here, so finding the overall pref here
             // avoids a full scan later.
             storage_pref.upgrade(keyinfo.storage_preference);
-            entries_size += packed::ENTRY_LEN + key.len() + value.len();
+            entries_size += key.len() + NVMLEAF_PER_KEY_META_LEN + value.len() + keyinfo.size();
 
             let curr_storage_pref = keyinfo.storage_preference;
             if let Some((ckeyinfo, cvalue)) = entries.insert(CowBytes::from(key), (keyinfo, value))
@@ -415,7 +375,8 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
                 // iterator has collisions, try to compensate
                 //
                 // this entry will no longer be part of the final map, subtract its size
-                entries_size -= packed::ENTRY_LEN + key.len() + cvalue.len();
+                entries_size -=
+                    key.len() + NVMLEAF_PER_KEY_META_LEN + cvalue.len() + ckeyinfo.size();
 
                 // In case the old value increased the overall storage priority (faster), and the new
                 // value wouldn't have increased it as much, we might need to recalculate the
@@ -499,26 +460,34 @@ impl NVMLeafNode {
             .serialize_value(&self.meta_data)
             .unwrap();
         let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
         let mut bytes_pivots: Vec<u8> = vec![];
-        for key in self.state.force_data().entries.keys().map(|s| &s[..]) {
+        let mut data_entry_offset = 0;
+        // TODO: Inefficient wire format these are 12 bytes extra for each and every entry
+        // Also avoid redundant copies... directly to writer
+        for (key, (_, val)) in self.state.force_data().entries.iter() {
             bytes_pivots.extend_from_slice(&(key.len() as u32).to_le_bytes());
+            bytes_pivots.extend_from_slice(&(data_entry_offset as u32).to_le_bytes());
+            bytes_pivots.extend_from_slice(&(val.len() as u32).to_le_bytes());
             bytes_pivots.extend_from_slice(key);
+            data_entry_offset += KeyInfo::static_size() + val.len();
         }
 
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data
-            .serialize_value(self.state.force_data())
-            .unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
-
         let meta_len = (bytes_meta_data.len() as u32 + bytes_pivots.len() as u32).to_le_bytes();
+        let data_len: usize = self
+            .state
+            .iter()
+            .map(|(_, (info, val))| info.size() + val.len())
+            .sum();
         writer.write_all(meta_len.as_ref())?;
-        writer.write_all(&bytes_pivots)?;
-        let data_len = (bytes_data.len() as u32).to_le_bytes();
-        writer.write_all(data_len.as_ref())?;
-
+        writer.write_all(&(data_len as u32).to_le_bytes())?;
         writer.write_all(&bytes_meta_data.as_ref())?;
-        writer.write_all(&bytes_data.as_ref())?;
+        writer.write_all(&bytes_pivots)?;
+
+        for (_, (info, val)) in self.state.force_data().entries.iter() {
+            writer.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
+            writer.write_all(&val)?;
+        }
 
         *metadata_size = NVMLEAF_METADATA_OFFSET + bytes_meta_data.len();
 
@@ -533,12 +502,12 @@ impl NVMLeafNode {
         checksum: crate::checksum::XxHash,
         size: Block<u32>,
     ) -> Result<Self, std::io::Error> {
-        let meta_data_len: usize = u32::from_be_bytes(
+        let meta_data_len: usize = u32::from_le_bytes(
             data[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
                 .try_into()
                 .unwrap(),
         ) as usize;
-        let data_len: usize = u32::from_be_bytes(
+        let data_len: usize = u32::from_le_bytes(
             data[NVMLEAF_DATA_LEN_OFFSET..NVMLEAF_METADATA_OFFSET]
                 .try_into()
                 .unwrap(),
@@ -552,34 +521,36 @@ impl NVMLeafNode {
                 ..NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size()],
         )
         .unwrap();
+        let meta_data: NVMLeafNodeMetaData = archivedleafnodemetadata
+            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Read in keys, format: len key len key ...
         let keys = {
             let mut ks = vec![];
-            let mut off = 0;
+            let mut off = NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size();
             let mut total = 0;
             while off < meta_data_end {
                 let len = u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
                 off += 4;
-                ks.push((total, CowBytes::from(&data[off..off + len])));
+                let entry_offset =
+                    u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
+                off += 4;
+                let val_len = u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
+                off += 4;
+                ks.push((
+                    total,
+                    entry_offset,
+                    val_len,
+                    CowBytes::from(&data[off..off + len]),
+                ));
                 off += len;
                 total += 1;
             }
             ks
         };
 
-        //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };
-        let meta_data: NVMLeafNodeMetaData = archivedleafnodemetadata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        // let archivedleafnodedata =
-        //     rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
-        // //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };
-        // let data: NVMLeafNodeData = archivedleafnodedata
-        //     .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-        //     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
+        #[cfg(not(test))]
         // Fetch the slice location where data is located.
         let compressed_data = pool
             .slice(
@@ -589,16 +560,18 @@ impl NVMLeafNode {
             )
             .unwrap();
 
+        #[cfg(test)]
+        let compressed_data = &[];
+
         Ok(NVMLeafNode {
             pool: Some(pool),
             disk_offset: Some(offset),
             meta_data,
-            // FIXME: Fill this Btree with the keys and oncelocks for individual values.
             state: NVMLeafNodeState::PartiallyLoaded {
                 buf: compressed_data,
                 data: keys
                     .into_iter()
-                    .map(|(idx, key)| (key, (idx, OnceLock::new())))
+                    .map(|(idx, entry_offset, val_len, key)| (key, (idx, OnceLock::new())))
                     .collect(),
             },
             meta_data_size: meta_data_len,
@@ -615,10 +588,6 @@ impl NVMLeafNode {
         })
     }
 
-    // pub(in crate::tree) fn set_data(&mut self, obj: NVMLeafNodeData) {
-    //     self.data = std::sync::Arc::new(std::sync::RwLock::new(Some(obj)));
-    // }
-
     /// Returns the value for the given key.
     pub fn get(&self, key: &[u8]) -> Option<SlicedCowBytes> {
         self.state.get(key).and_then(|o| Some(o.1.clone()))
@@ -630,13 +599,6 @@ impl NVMLeafNode {
             .get(key)
             .and_then(|o| Some((o.0.clone(), o.1.clone())))
     }
-
-    // pub(in crate::tree) fn entries(
-    //     &self,
-    // ) -> &std::sync::Arc<std::sync::RwLock<Option<NVMLeafNodeData>>> {
-    //     self.load_all_entries();
-    //     &self.data
-    // }
 
     pub fn len(&self) -> usize {
         self.state.len()
@@ -665,10 +627,11 @@ impl NVMLeafNode {
         let mut sibling_pref = StoragePreference::NONE;
         let mut split_key = None;
         for (k, (keyinfo, v)) in self.state.iter().rev() {
-            sibling_size += packed::ENTRY_LEN + k.len() + v.len();
+            let size_delta = k.len() + NVMLEAF_PER_KEY_META_LEN + v.len() + KeyInfo::static_size();
+            sibling_size += size_delta;
             sibling_pref.upgrade(keyinfo.storage_preference);
 
-            if packed::HEADER_FIXED_LEN + sibling_size >= min_size {
+            if sibling_size >= min_size {
                 split_key = Some(k.clone());
                 break;
             }
@@ -676,8 +639,8 @@ impl NVMLeafNode {
         let split_key = split_key.unwrap();
 
         *right_sibling.state.force_entries() = self.state.force_entries().split_off(&split_key);
-        self.meta_data.entries_size -= sibling_size;
         right_sibling.meta_data.entries_size = sibling_size;
+        self.meta_data.entries_size -= sibling_size;
         right_sibling.meta_data.storage_preference.set(sibling_pref);
 
         // have removed many keys from self, no longer certain about own pref, mark invalid
@@ -742,8 +705,8 @@ impl NVMLeafNode {
                 }
             } else {
                 // There was no previous value in entries
-                self.meta_data.entries_size += packed::ENTRY_LEN;
-                self.meta_data.entries_size += key_size;
+                self.meta_data.entries_size +=
+                    key_size + NVMLEAF_PER_KEY_META_LEN + KeyInfo::static_size();
             }
         } else if let Some((old_info, old_data)) = self.state.force_entries().remove(key.borrow()) {
             // The value was removed by msg, this may be a downgrade opportunity.
@@ -761,9 +724,8 @@ impl NVMLeafNode {
                 self.meta_data.storage_preference.invalidate();
             }
 
-            self.meta_data.entries_size -= packed::ENTRY_LEN;
-            self.meta_data.entries_size -= key_size;
-            self.meta_data.entries_size -= old_data.len();
+            self.meta_data.entries_size -= key_size + NVMLEAF_PER_KEY_META_LEN;
+            self.meta_data.entries_size -= old_data.len() + KeyInfo::static_size();
         }
         self.meta_data.entries_size as isize - size_before
     }
@@ -882,46 +844,21 @@ impl NVMLeafNode {
             }
         }
     }
-
-    /*pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> usize {
-        // https://github.com/rust-lang/rust/issues/42849
-        let size_before = self.entries_size;
-        let range = (
-            Bound::Included(start),
-            end.map_or(Bound::Unbounded, Bound::Excluded),
-        );
-        let mut keys = Vec::new();
-        for (key, (_keyinfo, value)) in self.entries.range_mut::<[u8], _>(range) {
-            self.entries_size -= key.len() + value.len();
-            keys.push(key.clone());
-        }
-        for key in keys {
-            self.entries.remove(&key);
-        }
-        size_before - self.entries_size
-    }*/
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CowBytes, NVMLeafNode, NVMLeafNodeData, NVMLeafNodeMetaData, Size};
+    use super::{CowBytes, NVMLeafNode, Size};
     use crate::{
         arbitrary::GenExt,
+        checksum::{Builder, State, XxHashBuilder},
         data_management::HasStoragePreference,
+        storage_pool::{DiskOffset, StoragePoolLayer},
         tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
-            imp::packed::PackedMap,
             KeyInfo,
         },
-        StoragePreference,
-    };
-
-    use rkyv::{
-        archived_root,
-        ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
-        vec::{ArchivedVec, VecResolver},
-        with::{ArchiveWith, DeserializeWith, SerializeWith},
-        Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
+        StoragePoolConfiguration,
     };
 
     use quickcheck::{Arbitrary, Gen, TestResult};
@@ -959,17 +896,11 @@ mod tests {
 
         fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
             let v: Vec<_> = self
-                .entries()
-                .clone()
-                .read()
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .unwrap()
+                .state
+                .force_data()
                 .entries
-                .clone()
-                .into_iter()
-                .map(|(k, (info, v))| (k, (info, CowBytes::from(v.to_vec()))))
+                .iter()
+                .map(|(k, (info, v))| (k.clone(), (info.clone(), CowBytes::from(v.to_vec()))))
                 .collect();
             Box::new(v.shrink().map(|entries| {
                 entries
@@ -981,20 +912,10 @@ mod tests {
     }
 
     fn serialized_size(leaf: &NVMLeafNode) -> usize {
-        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_meta_data
-            .serialize_value(&leaf.meta_data)
-            .unwrap();
-        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
-
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data
-            .serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap())
-            .unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
-
-        let size = 4 + 8 + 8 + bytes_meta_data.len() + bytes_data.len();
-        size
+        let mut w = vec![];
+        let mut m_size = 0;
+        leaf.pack(&mut w, &mut m_size).unwrap();
+        w.len()
     }
 
     #[quickcheck]
@@ -1003,7 +924,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_serialize_size(leaf_node: NVMLeafNode) {
+    fn check_size(leaf_node: NVMLeafNode) {
         let size = leaf_node.size();
         let serialized = serialized_size(&leaf_node);
         if size != serialized {
@@ -1019,38 +940,23 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_serialization(leaf_node: NVMLeafNode) {
-        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_meta_data
-            .serialize_value(&leaf_node.meta_data)
-            .unwrap();
-        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+    fn check_ser_deser(leaf_node: NVMLeafNode) {
+        let mut bytes = vec![];
+        let mut metadata_size = 0;
+        leaf_node.pack(&mut bytes, &mut metadata_size).unwrap();
 
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data
-            .serialize_value(leaf_node.data.read().as_ref().unwrap().as_ref().unwrap())
-            .unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
+        let config = StoragePoolConfiguration::default();
+        let pool = crate::database::RootSpu::new(&config).unwrap();
+        let csum = XxHashBuilder.build().finish();
 
-        let archivedleafnodemetadata =
-            rkyv::check_archived_root::<NVMLeafNodeMetaData>(&bytes_meta_data).unwrap();
-        let meta_data: NVMLeafNodeMetaData = archivedleafnodemetadata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            .unwrap();
-
-        let archivedleafnodedata =
-            rkyv::check_archived_root::<NVMLeafNodeData>(&bytes_data).unwrap();
-        let data: NVMLeafNodeData = archivedleafnodedata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            .unwrap();
-
-        assert_eq!(leaf_node.meta_data, meta_data);
-        assert_eq!(
-            leaf_node.data.read().as_ref().unwrap().as_ref().unwrap(),
-            &data
-        );
+        let _node = NVMLeafNode::unpack(
+            &bytes,
+            pool,
+            DiskOffset::from_u64(0),
+            csum,
+            crate::vdev::Block(4),
+        )
+        .unwrap();
     }
 
     #[quickcheck]
@@ -1063,8 +969,12 @@ mod tests {
         let size_before = leaf_node.size();
         let size_delta = leaf_node.insert(key, key_info, msg.0, DefaultMessageAction);
         let size_after = leaf_node.size();
-        //assert_eq!((size_before as isize + size_delta) as usize, size_after); //TODO: Karim fix this!
-        assert_eq!({ serialized_size(&leaf_node) }, size_after);
+        assert_eq!((size_before as isize + size_delta) as usize, size_after);
+        assert_eq!(
+            serialized_size(&leaf_node),
+            leaf_node.actual_size().unwrap()
+        );
+        assert_eq!(serialized_size(&leaf_node), size_after);
     }
 
     const MIN_LEAF_SIZE: usize = 512;
@@ -1074,55 +984,28 @@ mod tests {
     fn check_size_split(mut leaf_node: NVMLeafNode) -> TestResult {
         let size_before = leaf_node.size();
 
-        if size_before <= MAX_LEAF_SIZE {
+        if size_before <= MAX_LEAF_SIZE || size_before > MAX_LEAF_SIZE + MIN_LEAF_SIZE {
             return TestResult::discard();
         }
 
-        let (sibling, _, size_delta, _pivot_key) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
-        assert_eq!({ serialized_size(&leaf_node) }, leaf_node.size());
-        assert_eq!({ serialized_size(&sibling) }, sibling.size());
-        /*assert_eq!(
-            (size_before as isize + size_delta) as usize,
-            leaf_node.size()
-        );*/
-        //TODO: Karim fix this!
+        assert_eq!(serialized_size(&leaf_node), leaf_node.size());
+        assert_eq!(
+            serialized_size(&leaf_node),
+            leaf_node.actual_size().unwrap()
+        );
+        let (sibling, _split_key, _size_delta, _pivot_key) =
+            leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
+        assert_eq!(serialized_size(&leaf_node), leaf_node.size());
+        assert_eq!(
+            serialized_size(&leaf_node),
+            leaf_node.actual_size().unwrap()
+        );
+        assert_eq!(serialized_size(&sibling), sibling.size());
+        assert_eq!(serialized_size(&sibling), sibling.actual_size().unwrap());
         assert!(sibling.size() <= MAX_LEAF_SIZE);
         assert!(sibling.size() >= MIN_LEAF_SIZE);
-        //assert!(leaf_node.size() >= MIN_LEAF_SIZE); //TODO: Karim fix this!
-
-        // TODO: Fix it.. For the time being the code at the bottom is used to fullfil the task.
-        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_meta_data
-            .serialize_value(&sibling.meta_data)
-            .unwrap();
-        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
-
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data
-            .serialize_value(sibling.data.read().as_ref().unwrap().as_ref().unwrap())
-            .unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
-
-        let archivedleafnodemetadata =
-            rkyv::check_archived_root::<NVMLeafNodeMetaData>(&bytes_meta_data).unwrap();
-        let sibling_deserialized_meta_data: NVMLeafNodeMetaData = archivedleafnodemetadata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            .unwrap();
-
-        let archivedleafnodedata =
-            rkyv::check_archived_root::<NVMLeafNodeData>(&bytes_data).unwrap();
-        let sibling_deserialized_data: NVMLeafNodeData = archivedleafnodedata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            .unwrap();
-
-        assert_eq!(sibling.meta_data, sibling_deserialized_meta_data);
-        assert_eq!(
-            sibling.data.read().as_ref().unwrap().as_ref().unwrap(),
-            &sibling_deserialized_data
-        );
-
+        assert!(leaf_node.size() >= MIN_LEAF_SIZE);
+        assert!(leaf_node.size() <= MAX_LEAF_SIZE);
         TestResult::passed()
     }
 
@@ -1136,10 +1019,7 @@ mod tests {
         leaf_node.recalculate();
         leaf_node.merge(&mut sibling);
         assert_eq!(this.meta_data, leaf_node.meta_data);
-        assert_eq!(
-            this.data.read().as_ref().unwrap().as_ref().unwrap(),
-            leaf_node.data.read().as_ref().unwrap().as_ref().unwrap()
-        );
+        assert_eq!(this.state.force_data(), leaf_node.state.force_data());
         TestResult::passed()
     }
 }
