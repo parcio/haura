@@ -5,11 +5,6 @@ from . import util
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Formatting
-def ms_to_string(time):
-    """Nicer formatter for epoch strings in figures"""
-    return f"{int(time / 1000 / 60)}:{int(time / 1000) % 60:02d}"
-
 def plot_throughput(data, path):
     """
     Print a four row throughput plot with focussed read or write throughput.
@@ -17,7 +12,7 @@ def plot_throughput(data, path):
 
     epoch = [temp['epoch_ms'] for temp in data]
     util.subtract_first_index(epoch)
-    epoch_formatted = list(map(ms_to_string, epoch))
+    epoch_formatted = list(map(util.ms_to_string, epoch))
     num_tiers = len(data[0]['storage']['tiers'])
     fig, axs = plt.subplots(num_tiers, 1, figsize=(16,8))
     for tier_id in range(num_tiers):
@@ -99,7 +94,7 @@ def plot_system(path):
 
     epoch = [temp['epoch_ms'] for temp in data]
     util.subtract_first_index(epoch)
-    epoch_formatted = list(map(ms_to_string, epoch))
+    epoch_formatted = list(map(util.ms_to_string, epoch))
     min_pagefaults = [x["proc_minflt"] + x["proc_cminflt"] for x in data]
     maj_pagefaults = [x["proc_majflt"] + x["proc_cmajflt"] for x in data]
     virtual_mem = [x["proc_vsize"] for x in data]
@@ -109,7 +104,7 @@ def plot_system(path):
 
     fig, axs = plt.subplots(4,2, figsize=(13,13))
     eticks = range(0, epoch[-1:][0], 30 * 10**3);
-    eticks_formatted = list(map(ms_to_string, eticks))
+    eticks_formatted = list(map(util.ms_to_string, eticks))
     axs[0][0].plot(epoch, min_pagefaults)
     axs[0][0].set_ylabel("Minor Pagefaults (All threads)")
     axs[0][0].set_xticks(eticks, eticks_formatted)

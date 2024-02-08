@@ -21,6 +21,12 @@ ORANGE='#E69F00'
 
 MARKERS=['x', '.', '^', 'v', '<', '>']
 
+# Formatting
+def ms_to_string(time):
+    """Nicer formatter for epoch strings in figures"""
+    return f"{int(time / 1000 / 60)}:{int(time / 1000) % 60:02d}"
+
+
 def read_jsonl(file):
     """
     Read from a file descriptor line by line a json, parse it, and return a list
@@ -48,6 +54,18 @@ def subtract_last_index(array):
         array[index] = value - last_val
         last_val = value
     array[0] = 0
+    return array
+
+def diff_window(array):
+    """
+    From a list of numbers store the diff between n-1 and n in n.
+    Operates in-place.
+    """
+    last_val = 0
+    for index, value in enumerate(array):
+        array[index] = value - last_val
+        last_val = value
+    return array
 
 def subtract_first_index(array):
     """
@@ -57,6 +75,7 @@ def subtract_first_index(array):
     first_val = array[0]
     for index, value in enumerate(array):
         array[index] = value -first_val
+    return array
 
 def num_to_name(tier):
     """Convert a number to the corresponding tier name in the storage

@@ -13,6 +13,7 @@ import subprocess
 
 from . import util
 from . import metrics_plots
+from . import cache_plots
 
 def sort_by_o_id(key):
     """
@@ -257,6 +258,7 @@ def main():
         plot_evaluation_latency(path, "rw")
         plot_object_distribution(path)
         metrics_plots.plot_system(path)
+        cache_plots.plot_cache(data, path)
         #plot_filesystem_test()
 
 if __name__ == "__main__":
