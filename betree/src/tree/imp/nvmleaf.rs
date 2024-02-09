@@ -147,7 +147,7 @@ impl NVMLeafNodeState {
     /// Transition a node from "partially in memory" to "deserialized".
     pub fn upgrade(&mut self) -> Result<(), NVMLeafError> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { buf, data } => {
+            NVMLeafNodeState::PartiallyLoaded { data, .. } => {
                 if data.iter().filter(|x| x.1 .1.get().is_some()).count() < data.len() {
                     return Err(NVMLeafError::AttemptedInvalidTransition);
                 }
@@ -165,7 +165,7 @@ impl NVMLeafNodeState {
                 );
                 Ok(())
             }
-            NVMLeafNodeState::Deserialized { data } => Err(NVMLeafError::AlreadyDeserialized),
+            NVMLeafNodeState::Deserialized { .. } => Err(NVMLeafError::AlreadyDeserialized),
         }
     }
 
@@ -492,37 +492,36 @@ impl NVMLeafNode {
         mut writer: W,
         metadata_size: &mut usize,
     ) -> Result<(), std::io::Error> {
-        let mut bytes_pivots: Vec<u8> = vec![];
-        let mut data_entry_offset = 0;
-        // TODO: Inefficient wire format these are 12 bytes extra for each and every entry
-        // Also avoid redundant copies... directly to writer
-        for (key, (_, val)) in self.state.force_data().entries.iter() {
-            bytes_pivots.extend_from_slice(&(key.len() as u32).to_le_bytes());
-            bytes_pivots.extend_from_slice(&(data_entry_offset as u32).to_le_bytes());
-            bytes_pivots.extend_from_slice(&(val.len() as u32).to_le_bytes());
-            bytes_pivots.extend_from_slice(key);
-            data_entry_offset += KeyInfo::static_size() + val.len();
-        }
-
-        let meta_len =
-            (NVMLeafNodeMetaData::static_size() as u32 + bytes_pivots.len() as u32).to_le_bytes();
+        let num_entries = self.state.force_data().entries.len();
+        let meta_len = NVMLeafNodeMetaData::static_size() + num_entries * NVMLEAF_PER_KEY_META_LEN;
         let data_len: usize = self
             .state
             .iter()
             .map(|(_, (info, val))| info.size() + val.len())
             .sum();
-        writer.write_all(meta_len.as_ref())?;
+        writer.write_all(&(meta_len as u32).to_le_bytes())?;
         writer.write_all(&(data_len as u32).to_le_bytes())?;
         self.meta_data.pack(&mut writer)?;
-        writer.write_all(&bytes_pivots)?;
+
+        let mut data_entry_offset = 0;
+        // TODO: Inefficient wire format these are 12 bytes extra for each and every entry
+        for (key, (_, val)) in self.state.force_data().entries.iter() {
+            writer.write_all(&(key.len() as u32).to_le_bytes())?;
+            let loc = Location {
+                off: data_entry_offset as u32,
+                len: val.len() as u32,
+            };
+            loc.pack(&mut writer)?;
+            writer.write_all(key)?;
+            data_entry_offset += KeyInfo::static_size() + val.len();
+        }
 
         for (_, (info, val)) in self.state.force_data().entries.iter() {
-            writer.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
+            info.pack(&mut writer)?;
             writer.write_all(&val)?;
         }
 
-        *metadata_size =
-            NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size() + bytes_pivots.len();
+        *metadata_size = NVMLEAF_METADATA_OFFSET + meta_len;
 
         debug!("NVMLeaf node packed successfully");
         Ok(())
