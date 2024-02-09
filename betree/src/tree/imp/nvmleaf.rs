@@ -1,38 +1,20 @@
 //! Implementation of the [NVMLeafNode] node type.
 use crate::{
-    buffer::Buf,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
     database::RootSpu,
     size::{Size, StaticSize},
     storage_pool::{AtomicSystemStoragePreference, DiskOffset, StoragePoolLayer},
-    tree::{imp::packed, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
-    vdev::{Block, BLOCK_SIZE},
+    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
+    vdev::Block,
     AtomicStoragePreference, StoragePreference,
 };
 use std::{
-    borrow::Borrow,
-    cell::OnceCell,
-    collections::BTreeMap,
-    iter::FromIterator,
-    mem::size_of,
-    sync::{Arc, OnceLock},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    borrow::Borrow, collections::BTreeMap, io::Write, iter::FromIterator, mem::size_of, ops::Range,
+    sync::OnceLock, time::SystemTime,
 };
 
-use itertools::Itertools;
-use rkyv::{
-    archived_root,
-    ser::{
-        serializers::{AllocSerializer, CoreSerializer},
-        ScratchSpace, Serializer,
-    },
-    vec::{ArchivedVec, VecResolver},
-    with::{ArchiveWith, DeserializeWith, SerializeWith},
-    Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
-};
-
-use super::node::NODE_PREFIX_LEN;
+use rkyv::{Archive, Deserialize, Serialize};
 
 pub(crate) const NVMLEAF_METADATA_LEN_OFFSET: usize = 0;
 pub(crate) const NVMLEAF_DATA_LEN_OFFSET: usize = size_of::<u32>();
@@ -51,26 +33,20 @@ pub(super) struct NVMLeafNodeLoadDetails {
 // slices to this buffer.
 #[derive(Clone)]
 pub(super) struct NVMLeafNode {
-    pub pool: Option<RootSpu>,
-    pub disk_offset: Option<DiskOffset>,
     // NOTE: Use for now, non-blocking would be nicer.
-    pub state: NVMLeafNodeState,
-    pub meta_data: NVMLeafNodeMetaData,
-    //pub data: NVMLeafNodeData,
-    pub meta_data_size: usize,
-    pub data_size: usize,
-    pub data_start: usize,
-    pub data_end: usize,
-    pub node_size: crate::vdev::Block<u32>,
-    pub checksum: Option<crate::checksum::XxHash>,
-    pub nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
+    state: NVMLeafNodeState,
+    meta_data: NVMLeafNodeMetaData,
+    // FIXME: Actual check the node hash, this can be either done when data is
+    // anyway read entirely or on a per-entry base.
+    checksum: Option<crate::checksum::XxHash>,
+    nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
 }
 
 #[derive(Clone, Debug)]
 /// A NVMLeaf can have different states depending on how much data has actually
 /// been loaded from disk. Or if this data is already deserialized and copied
 /// again to another memory buffer. The latter is most important for NVM.
-pub enum NVMLeafNodeState {
+enum NVMLeafNodeState {
     /// State in which a node is allowed to access the memory range independly
     /// but does not guarantee that all keys are present in the memory
     /// structure. Zero-copy possible. This state does _not_ support insertions.
@@ -88,10 +64,71 @@ pub enum NVMLeafNodeState {
         // parallelism brings some advantages.
         //
         // TODO: Fetch keys initially in serial manner.
-        data: BTreeMap<CowBytes, (usize, OnceLock<(KeyInfo, SlicedCowBytes)>)>,
+        data: BTreeMap<CowBytes, (Location, OnceLock<(KeyInfo, SlicedCowBytes)>)>,
     },
     /// Only from this state a node may be serialized again.
     Deserialized { data: NVMLeafNodeData },
+}
+
+#[derive(Clone, Debug)]
+struct Location {
+    off: u32,
+    len: u32,
+}
+
+impl Location {
+    fn pack<W: Write>(&self, mut w: W) -> Result<(), std::io::Error> {
+        w.write_all(&self.off.to_le_bytes())?;
+        w.write_all(&self.len.to_le_bytes())
+    }
+
+    fn unpack(data: &[u8]) -> Self {
+        debug_assert!(data.len() >= 8);
+        Location {
+            off: u32::from_le_bytes(data[0..4].try_into().unwrap()),
+            len: u32::from_le_bytes(data[4..8].try_into().unwrap()),
+        }
+    }
+
+    fn range(&self) -> Range<usize> {
+        self.off as usize..self.off as usize + self.len as usize
+    }
+}
+
+impl StaticSize for Location {
+    fn static_size() -> usize {
+        2 * size_of::<u32>()
+    }
+}
+
+fn unpack_entry(data: &[u8]) -> (KeyInfo, SlicedCowBytes) {
+    (
+        KeyInfo::unpack(&data[0..1]),
+        CowBytes::from(&data[1..]).into(),
+    )
+}
+
+fn pack_entry<W: Write>(
+    mut w: W,
+    info: KeyInfo,
+    val: SlicedCowBytes,
+) -> Result<(), std::io::Error> {
+    info.pack(&mut w)?;
+    w.write_all(&val)
+}
+
+impl KeyInfo {
+    pub fn pack<W: Write>(&self, mut w: W) -> Result<(), std::io::Error> {
+        w.write_all(&self.storage_preference.as_u8().to_le_bytes())
+    }
+
+    pub fn unpack(data: &[u8]) -> Self {
+        KeyInfo {
+            storage_preference: StoragePreference::from_u8(u8::from_le_bytes(
+                data[0..1].try_into().unwrap(),
+            )),
+        }
+    }
 }
 
 use thiserror::Error;
@@ -168,27 +205,9 @@ impl NVMLeafNodeState {
     /// storage. Memory is always preferred.
     pub fn get(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { buf, data } => {
-                data.get(key).and_then(|e| {
-                    Some(e.1.get_or_init(|| {
-                        // FIXME: Replace this entire part with simple offsets?
-                        let archivedleafnodedata: &ArchivedNVMLeafNodeData =
-                            unsafe { rkyv::archived_root::<NVMLeafNodeData>(buf) };
-                        archivedleafnodedata
-                            .entries
-                            .get(e.0)
-                            .map(|d| {
-                                // FIXME: At best we avoid this copy too, but due to
-                                // the return types in the block tree this copy is
-                                // necessary. It's also two copies due to rkyv when
-                                // not relying on internal device caching of
-                                // adjacent chunks.
-                                d.value.deserialize(&mut Infallible).unwrap()
-                            })
-                            .unwrap()
-                    }))
-                })
-            }
+            NVMLeafNodeState::PartiallyLoaded { buf, data } => data
+                .get(key)
+                .and_then(|e| Some(e.1.get_or_init(|| unpack_entry(&buf[e.0.range()])))),
             NVMLeafNodeState::Deserialized { data } => data.entries.get(key),
         }
     }
@@ -255,8 +274,7 @@ impl NVMLeafNodeState {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Archive, Serialize, Deserialize)]
-#[archive(check_bytes)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct NVMLeafNodeMetaData {
     pub storage_preference: AtomicStoragePreference,
@@ -265,10 +283,43 @@ pub(super) struct NVMLeafNodeMetaData {
     pub entries_size: usize,
 }
 
+impl NVMLeafNodeMetaData {
+    pub fn pack<W: Write>(&self, mut w: W) -> Result<(), std::io::Error> {
+        w.write_all(
+            &self
+                .storage_preference
+                .as_option()
+                .unwrap_or(StoragePreference::NONE)
+                .as_u8()
+                .to_le_bytes(),
+        )?;
+        w.write_all(
+            &self
+                .system_storage_preference
+                .strong_bound(&StoragePreference::NONE)
+                .as_u8()
+                .to_le_bytes(),
+        )?;
+        w.write_all(&(self.entries_size as u32).to_le_bytes())
+    }
+
+    pub fn unpack(data: &[u8]) -> Self {
+        let pref: StoragePreference =
+            StoragePreference::from_u8(u8::from_le_bytes(data[0..1].try_into().unwrap()));
+        let sys_pref: StoragePreference =
+            StoragePreference::from_u8(u8::from_le_bytes(data[1..2].try_into().unwrap()));
+        Self {
+            storage_preference: AtomicStoragePreference::known(pref),
+            system_storage_preference: sys_pref.into(),
+            entries_size: u32::from_le_bytes(data[2..2 + 4].try_into().unwrap()) as usize,
+        }
+    }
+}
+
 impl StaticSize for NVMLeafNodeMetaData {
     fn static_size() -> usize {
         // pref             sys pref            entries size   FIXME  ARCHIVE OVERHEAD
-        size_of::<u8>() + size_of::<u8>() + size_of::<u32>() + 2
+        size_of::<u8>() + size_of::<u8>() + size_of::<u32>()
     }
 }
 
@@ -395,8 +446,6 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
         }
 
         NVMLeafNode {
-            pool: None,
-            disk_offset: None,
             meta_data: NVMLeafNodeMetaData {
                 storage_preference: AtomicStoragePreference::known(storage_pref),
                 system_storage_preference: AtomicSystemStoragePreference::from(
@@ -407,11 +456,6 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
             state: NVMLeafNodeState::Deserialized {
                 data: NVMLeafNodeData { entries },
             },
-            meta_data_size: 0,
-            data_size: 0,
-            data_start: 0,
-            data_end: 0,
-            node_size: crate::vdev::Block(0),
             checksum: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: false,
@@ -426,8 +470,6 @@ impl NVMLeafNode {
     /// Constructs a new, empty `NVMLeafNode`.
     pub fn new() -> Self {
         NVMLeafNode {
-            pool: None,
-            disk_offset: None,
             meta_data: NVMLeafNodeMetaData {
                 storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
                 system_storage_preference: AtomicSystemStoragePreference::from(
@@ -436,11 +478,6 @@ impl NVMLeafNode {
                 entries_size: 0,
             },
             state: NVMLeafNodeState::new(),
-            meta_data_size: 0,
-            data_size: 0,
-            data_start: 0,
-            data_end: 0,
-            node_size: crate::vdev::Block(0),
             checksum: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: false,
@@ -455,12 +492,6 @@ impl NVMLeafNode {
         mut writer: W,
         metadata_size: &mut usize,
     ) -> Result<(), std::io::Error> {
-        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_meta_data
-            .serialize_value(&self.meta_data)
-            .unwrap();
-        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
-
         let mut bytes_pivots: Vec<u8> = vec![];
         let mut data_entry_offset = 0;
         // TODO: Inefficient wire format these are 12 bytes extra for each and every entry
@@ -473,7 +504,8 @@ impl NVMLeafNode {
             data_entry_offset += KeyInfo::static_size() + val.len();
         }
 
-        let meta_len = (bytes_meta_data.len() as u32 + bytes_pivots.len() as u32).to_le_bytes();
+        let meta_len =
+            (NVMLeafNodeMetaData::static_size() as u32 + bytes_pivots.len() as u32).to_le_bytes();
         let data_len: usize = self
             .state
             .iter()
@@ -481,7 +513,7 @@ impl NVMLeafNode {
             .sum();
         writer.write_all(meta_len.as_ref())?;
         writer.write_all(&(data_len as u32).to_le_bytes())?;
-        writer.write_all(&bytes_meta_data.as_ref())?;
+        self.meta_data.pack(&mut writer)?;
         writer.write_all(&bytes_pivots)?;
 
         for (_, (info, val)) in self.state.force_data().entries.iter() {
@@ -489,7 +521,8 @@ impl NVMLeafNode {
             writer.write_all(&val)?;
         }
 
-        *metadata_size = NVMLEAF_METADATA_OFFSET + bytes_meta_data.len();
+        *metadata_size =
+            NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size() + bytes_pivots.len();
 
         debug!("NVMLeaf node packed successfully");
         Ok(())
@@ -514,71 +547,49 @@ impl NVMLeafNode {
         ) as usize;
         let meta_data_end = NVMLEAF_METADATA_OFFSET + meta_data_len;
         let data_start = meta_data_end;
-        let data_end = data_start + data_len;
 
-        let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(
+        let meta_data = NVMLeafNodeMetaData::unpack(
             &data[NVMLEAF_METADATA_OFFSET
                 ..NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size()],
-        )
-        .unwrap();
-        let meta_data: NVMLeafNodeMetaData = archivedleafnodemetadata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        );
 
         // Read in keys, format: len key len key ...
         let keys = {
             let mut ks = vec![];
             let mut off = NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size();
-            let mut total = 0;
             while off < meta_data_end {
                 let len = u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
                 off += 4;
-                let entry_offset =
-                    u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
-                off += 4;
-                let val_len = u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
-                off += 4;
-                ks.push((
-                    total,
-                    entry_offset,
-                    val_len,
-                    CowBytes::from(&data[off..off + len]),
-                ));
+                let location = Location::unpack(&data[off..off + Location::static_size()]);
+                off += Location::static_size();
+                ks.push((location, CowBytes::from(&data[off..off + len])));
                 off += len;
-                total += 1;
             }
             ks
         };
 
         #[cfg(not(test))]
-        // Fetch the slice location where data is located.
-        let compressed_data = pool
+        // Fetch the slice where data is located.
+        let raw_data = pool
             .slice(
                 offset,
-                data_start + NODE_PREFIX_LEN,
-                data_end + NODE_PREFIX_LEN,
+                data_start + super::node::NODE_PREFIX_LEN,
+                data_start + data_len + super::node::NODE_PREFIX_LEN,
             )
             .unwrap();
 
         #[cfg(test)]
-        let compressed_data = &[];
+        let raw_data = &[];
 
         Ok(NVMLeafNode {
-            pool: Some(pool),
-            disk_offset: Some(offset),
             meta_data,
             state: NVMLeafNodeState::PartiallyLoaded {
-                buf: compressed_data,
+                buf: raw_data,
                 data: keys
                     .into_iter()
-                    .map(|(idx, entry_offset, val_len, key)| (key, (idx, OnceLock::new())))
+                    .map(|(location, key)| (key, (location, OnceLock::new())))
                     .collect(),
             },
-            meta_data_size: meta_data_len,
-            data_size: data_len,
-            data_start,
-            data_end,
-            node_size: size,
             checksum: Some(checksum),
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: true,
@@ -753,8 +764,6 @@ impl NVMLeafNode {
     ) -> (Self, CowBytes, isize, LocalPivotKey) {
         // assert!(self.size() > S::MAX);
         let mut right_sibling = NVMLeafNode {
-            pool: None,
-            disk_offset: None,
             // During a split, preference can't be inherited because the new subset of entries
             // might be a subset with a lower maximal preference.
             meta_data: NVMLeafNodeMetaData {
@@ -765,11 +774,6 @@ impl NVMLeafNode {
                 entries_size: 0,
             },
             state: NVMLeafNodeState::new(),
-            meta_data_size: 0,
-            data_size: 0,
-            data_start: 0,
-            data_end: 0,
-            node_size: crate::vdev::Block(0),
             checksum: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: false,
