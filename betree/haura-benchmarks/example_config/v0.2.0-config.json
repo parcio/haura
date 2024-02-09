@@ -1,0 +1,33 @@
+{
+  "storage": {
+    "tiers": [
+            [{
+            "mem": 85899345920
+          }],
+          ["/tmp/disk_a"]
+    ],
+    "queue_depth_factor": 20,
+    "thread_pool_size": null,
+    "thread_pool_pinned": false
+  },
+  "alloc_strategy": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ]
+  ],
+  "default_storage_class": 0,
+  "compression": "None",
+  "cache_size": 268435456,
+  "access_mode": "AlwaysCreateNew",
+  "sync_interval_ms": 1000,
+  "metrics": null
+}

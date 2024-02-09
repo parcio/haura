@@ -1,0 +1,60 @@
+{
+  "storage": {
+    "tiers": [
+      {
+        "top_level_vdevs": [
+          {
+            "mem": 16106127360
+          }
+        ],
+        "preferred_access_type": "Unknown"
+      },
+      {
+        "top_level_vdevs": [
+	  {
+            "path": "/tmp/disk_a",
+                "direct": true
+	  }
+        ],
+        "preferred_access_type": "Unknown"
+      }
+    ],
+    "queue_depth_factor": 20,
+    "thread_pool_size": null,
+    "thread_pool_pinned": false
+  },
+  "alloc_strategy": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ]
+  ],
+  "default_storage_class": 0,
+  "compression": "None",
+  "cache_size": 4294967296,
+  "access_mode": "AlwaysCreateNew",
+  "sync_interval_ms": 1000,
+  "migration_policy": {
+    "ReinforcementLearning": {
+      "grace_period": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "migration_threshold": 0.8,
+      "update_period": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "policy_config": null
+    }
+  },
+  "metrics": null
+}

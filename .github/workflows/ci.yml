@@ -32,10 +32,14 @@ jobs:
         run: |
           cd betree/tests
           cargo build --tests
+          cargo build --tests --release
           cargo clean --package betree-tests
+          cargo clean --release --package betree-tests
           cd ..
           cargo build --tests
+          cargo build --tests --release
           cargo clean --package betree_storage_stack
+          cargo clean --release --package betree_storage_stack
   betree-integration:
     name: Integration Tests
     needs: dependencies
@@ -134,7 +138,8 @@ jobs:
         with:
           path: |
             ~/.cargo
-          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-msrv
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-msrv
       - name: Prepare JULEA
         run: |
           sudo apt update || true
@@ -174,14 +179,15 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "${HOME}/.cargo/env"
           echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
-      - name: Cache fio
+      - name: Cache
         id: cache
         uses: actions/cache@v3
         # Environment variables do not seem to work, use ~ instead.
         with:
           path: |
             ~/.cargo
-          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-fio-haura
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}
       - name: Build betree
         run: |
           cd betree
@@ -201,3 +207,61 @@ jobs:
           make fio
           export BETREE_CONFIG=$(realpath ./.ci/haura.json)
           ./fio --direct=1 --rw=write --bs=4M --ioengine=external:src/fio-engine-haura.o --numjobs=1 --name=iops-test-job --size=128M
+  haura-benchmarks:
+    name: Benchmark Compatibility Tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    needs: dependencies
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rm --recursive --force "${HOME}/.cargo" "${HOME}/.rustup"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "${HOME}/.cargo/env"
+          echo "RUSTC_VERSION=$(rustc --version | grep --only-matching '[0-9]\+\.[0-9]\+\.[0-9]\+' | head --lines=1)" >> $GITHUB_ENV
+      - name: Common Cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}
+      - name: Poetry and Data Cache
+        id: cache
+        uses: actions/cache@v3
+        # Environment variables do not seem to work, use ~ instead.
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/pypoetry
+            betree/haura-benchmarks/data
+            betree/haura-benchmarks/haura-plots/poetry.lock
+          key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/pyproject.toml')}}-benchmarks
+      - name: Build haura-benchmarks
+        run: |
+          cd betree/haura-benchmarks
+          cargo build --release
+      - name: Prepare scripts and configuration
+        run: |
+          cd betree/haura-benchmarks
+          cp example_config/.ci-config.json perf-config.json
+          echo "ci" >> run.sh
+      - name: Run benchmark smoke test
+        run: |
+          cd betree/haura-benchmarks
+          ./run.sh smoke-test
+      - name: Prepare poetry for plots
+        run: |
+          sudo apt update || true
+          sudo apt --yes --no-install-recommends install python3-poetry
+          cd betree/haura-benchmarks/haura-plots
+          poetry install
+      - name: Run plots
+        run: |
+          cd betree/haura-benchmarks/haura-plots
+          poetry run plots ../results/*/*
+          rm -rf results
