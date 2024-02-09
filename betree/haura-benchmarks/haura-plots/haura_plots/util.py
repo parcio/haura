@@ -3,6 +3,8 @@ Utility functions which may be used in multiple plotting types.
 """
 
 import json
+import matplotlib.pyplot as plt
+from cycler import cycler
 
 # Constants
 BLOCK_SIZE=4096
@@ -20,6 +22,20 @@ RED='#D55E00'
 ORANGE='#E69F00'
 
 MARKERS=['x', '.', '^', 'v', '<', '>']
+
+def init_colormap():
+    """Create the "Wong" color scheme and set it as matplotlib default."""
+    wong =  cycler(linestyle=['-', '--', '-.']) * cycler(color=[
+        "#56B4E9",
+        "#E69F00",
+        "#009E73",
+        "#F0E442",
+        "#0072B2",
+        "#D55E00",
+        "#CC79A7",
+        "#000000",
+    ])
+    plt.rc('axes', prop_cycle=wong)
 
 # Formatting
 def ms_to_string(time):

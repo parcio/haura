@@ -16,7 +16,7 @@ def plot_cache(data, path):
 
     # Capacity vs Size (Peak Check)
     cap = np.array([temp['cache']['capacity'] / 1024 / 1024 for temp in data])
-    axs[0].plot(epoch, cap, label='capacity')
+    axs[0].plot(epoch, cap, label='capacity', linestyle=':')
     axs[0].plot(epoch, [temp['cache']['size'] / 1024 / 1024 for temp in data], label='size')
     axs[0].set_xticks(eticks, eticks_formatted)
     axs[0].set_ylabel("Size [MiB]")
@@ -43,7 +43,7 @@ def plot_cache(data, path):
     oax.legend(bbox_to_anchor=(1.0, 1.2))
     axs[1].legend(ncols=2, bbox_to_anchor=(0.8, 1.2))
 
-    # insertions (reads, new nodes, updates, writes) vs evictions (updates) vs removals (reads)
+    # insertions (reads, new nodes, updates, writes) vs evictions (updates, reads) vs removals (updates)
     axs[2].plot(epoch, util.diff_window([temp['cache']['insertions'] for temp in data]), label='insertions')
     axs[2].plot(epoch, util.diff_window([temp['cache']['evictions'] for temp in data]), label='evictions')
     axs[2].plot(epoch, util.diff_window([temp['cache']['removals'] for temp in data]), label='removals')

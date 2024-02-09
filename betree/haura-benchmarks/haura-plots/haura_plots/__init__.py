@@ -248,6 +248,9 @@ def main():
         sys.exit(2)
     data = []
 
+    # Prep the color scheme
+    util.init_colormap()
+
     for path in sys.argv[1:]:
         with open(f"{path}/betree-metrics.jsonl", 'r', encoding="UTF-8") as metrics:
             data = util.read_jsonl(metrics)
