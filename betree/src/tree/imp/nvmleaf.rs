@@ -919,12 +919,12 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_actual_size(leaf_node: NVMLeafNode) {
+    fn actual_size(leaf_node: NVMLeafNode) {
         assert_eq!(leaf_node.actual_size(), Some(serialized_size(&leaf_node)));
     }
 
     #[quickcheck]
-    fn check_size(leaf_node: NVMLeafNode) {
+    fn size(leaf_node: NVMLeafNode) {
         let size = leaf_node.size();
         let serialized = serialized_size(&leaf_node);
         if size != serialized {
@@ -940,7 +940,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_ser_deser(leaf_node: NVMLeafNode) {
+    fn ser_deser(leaf_node: NVMLeafNode) {
         let mut bytes = vec![];
         let mut metadata_size = 0;
         leaf_node.pack(&mut bytes, &mut metadata_size).unwrap();
@@ -960,7 +960,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_size_insert(
+    fn insert(
         mut leaf_node: NVMLeafNode,
         key: CowBytes,
         key_info: KeyInfo,
@@ -981,7 +981,7 @@ mod tests {
     const MAX_LEAF_SIZE: usize = 2048;
 
     #[quickcheck]
-    fn check_size_split(mut leaf_node: NVMLeafNode) -> TestResult {
+    fn split(mut leaf_node: NVMLeafNode) -> TestResult {
         let size_before = leaf_node.size();
 
         if size_before <= MAX_LEAF_SIZE || size_before > MAX_LEAF_SIZE + MIN_LEAF_SIZE {
@@ -1010,7 +1010,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn check_split_merge_idempotent(mut leaf_node: NVMLeafNode) -> TestResult {
+    fn split_merge_idempotent(mut leaf_node: NVMLeafNode) -> TestResult {
         if leaf_node.size() <= MAX_LEAF_SIZE {
             return TestResult::discard();
         }
