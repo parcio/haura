@@ -10,8 +10,14 @@ use crate::{
     AtomicStoragePreference, StoragePreference,
 };
 use std::{
-    borrow::Borrow, collections::BTreeMap, io::Write, iter::FromIterator, mem::size_of, ops::Range,
-    sync::OnceLock, time::SystemTime,
+    borrow::Borrow,
+    collections::BTreeMap,
+    io::Write,
+    iter::FromIterator,
+    mem::size_of,
+    ops::{Range, RangeInclusive},
+    sync::OnceLock,
+    time::SystemTime,
 };
 
 use rkyv::{Archive, Deserialize, Serialize};
@@ -270,6 +276,14 @@ impl NVMLeafNodeState {
             data: BTreeMap::new(),
         }
     }
+
+    #[cfg(test)]
+    pub fn set_data(&mut self, data: &'static [u8]) {
+        match self {
+            NVMLeafNodeState::PartiallyLoaded { ref mut buf, .. } => *buf = data,
+            NVMLeafNodeState::Deserialized { data } => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -479,8 +493,13 @@ impl NVMLeafNode {
         mut writer: W,
         metadata_size: &mut usize,
     ) -> Result<(), std::io::Error> {
-        let num_entries = self.state.force_data().len();
-        let meta_len = NVMLeafNodeMetaData::static_size() + num_entries * NVMLEAF_PER_KEY_META_LEN;
+        let pivots_size: usize = self
+            .state
+            .force_data()
+            .iter()
+            .map(|(k, _)| k.len() + NVMLEAF_PER_KEY_META_LEN)
+            .sum();
+        let meta_len = NVMLeafNodeMetaData::static_size() + pivots_size;
         let data_len: usize = self
             .state
             .iter()
@@ -490,17 +509,19 @@ impl NVMLeafNode {
         writer.write_all(&(data_len as u32).to_le_bytes())?;
         self.meta_data.pack(&mut writer)?;
 
+        // Offset after metadata
         let mut data_entry_offset = 0;
         // TODO: Inefficient wire format these are 12 bytes extra for each and every entry
         for (key, (_, val)) in self.state.force_data().iter() {
             writer.write_all(&(key.len() as u32).to_le_bytes())?;
+            let val_len = KeyInfo::static_size() + val.len();
             let loc = Location {
                 off: data_entry_offset as u32,
-                len: val.len() as u32,
+                len: val_len as u32,
             };
             loc.pack(&mut writer)?;
             writer.write_all(key)?;
-            data_entry_offset += KeyInfo::static_size() + val.len();
+            data_entry_offset += val_len;
         }
 
         for (_, (info, val)) in self.state.force_data().iter() {
@@ -839,11 +860,16 @@ impl NVMLeafNode {
 
 #[cfg(test)]
 mod tests {
-    use super::{CowBytes, NVMLeafNode, Size};
+    use super::{
+        CowBytes, NVMLeafNode, NVMLeafNodeMetaData, Size, NVMLEAF_METADATA_OFFSET,
+        NVMLEAF_PER_KEY_META_LEN,
+    };
     use crate::{
         arbitrary::GenExt,
         checksum::{Builder, State, XxHashBuilder},
+        cow_bytes::SlicedCowBytes,
         data_management::HasStoragePreference,
+        size::StaticSize,
         storage_pool::{DiskOffset, StoragePoolLayer},
         tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
@@ -1010,6 +1036,42 @@ mod tests {
         leaf_node.merge(&mut sibling);
         assert_eq!(this.meta_data, leaf_node.meta_data);
         assert_eq!(this.state.force_data(), leaf_node.state.force_data());
+        TestResult::passed()
+    }
+
+    #[quickcheck]
+    fn access_serialized(leaf_node: NVMLeafNode) -> TestResult {
+        if leaf_node.size() < MIN_LEAF_SIZE && leaf_node.state.force_data().len() < 3 {
+            return TestResult::discard();
+        }
+
+        let kvs: Vec<(CowBytes, (KeyInfo, SlicedCowBytes))> = leaf_node
+            .state
+            .force_data()
+            .iter()
+            .map(|(k, v)| (k.clone(), (v.0.clone(), v.1.clone())))
+            .collect();
+
+        let mut buf = vec![];
+        let mut foo = 0;
+        leaf_node.pack(&mut buf, &mut foo).unwrap();
+        let config = StoragePoolConfiguration::default();
+        let pool = crate::database::RootSpu::new(&config).unwrap();
+        let csum = XxHashBuilder.build().finish();
+        let mut wire_node = NVMLeafNode::unpack(
+            &buf,
+            pool,
+            DiskOffset::from_u64(0),
+            csum,
+            crate::vdev::Block(0),
+        )
+        .unwrap();
+        wire_node.state.set_data(&buf.leak()[foo..]);
+
+        for (key, v) in kvs.into_iter() {
+            assert_eq!(Some(v), wire_node.get_with_info(&key));
+        }
+
         TestResult::passed()
     }
 }
