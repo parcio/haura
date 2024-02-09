@@ -67,7 +67,9 @@ enum NVMLeafNodeState {
         data: BTreeMap<CowBytes, (Location, OnceLock<(KeyInfo, SlicedCowBytes)>)>,
     },
     /// Only from this state a node may be serialized again.
-    Deserialized { data: NVMLeafNodeData },
+    Deserialized {
+        data: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -156,11 +158,9 @@ impl NVMLeafNodeState {
                 std::mem::replace(
                     self,
                     NVMLeafNodeState::Deserialized {
-                        data: NVMLeafNodeData {
-                            entries: BTreeMap::from_iter(
-                                data.into_iter().map(|mut e| (e.0, e.1 .1.take().unwrap())),
-                            ),
-                        },
+                        data: BTreeMap::from_iter(
+                            data.into_iter().map(|mut e| (e.0, e.1 .1.take().unwrap())),
+                        ),
                     },
                 );
                 Ok(())
@@ -208,7 +208,7 @@ impl NVMLeafNodeState {
             NVMLeafNodeState::PartiallyLoaded { buf, data } => data
                 .get(key)
                 .and_then(|e| Some(e.1.get_or_init(|| unpack_entry(&buf[e.0.range()])))),
-            NVMLeafNodeState::Deserialized { data } => data.entries.get(key),
+            NVMLeafNodeState::Deserialized { data } => data.get(key),
         }
     }
 
@@ -216,7 +216,7 @@ impl NVMLeafNodeState {
     pub fn get_from_cache(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         match self {
             NVMLeafNodeState::PartiallyLoaded { data, .. } => data.get(key).and_then(|e| e.1.get()),
-            NVMLeafNodeState::Deserialized { data } => data.entries.get(key),
+            NVMLeafNodeState::Deserialized { data } => data.get(key),
         }
     }
 
@@ -227,7 +227,7 @@ impl NVMLeafNodeState {
     ) -> Option<(KeyInfo, SlicedCowBytes)> {
         match self {
             NVMLeafNodeState::PartiallyLoaded { .. } => unimplemented!(),
-            NVMLeafNodeState::Deserialized { data } => data.entries.insert(key, val),
+            NVMLeafNodeState::Deserialized { data } => data.insert(key, val),
         }
     }
 
@@ -237,27 +237,27 @@ impl NVMLeafNodeState {
     ) -> impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator {
         match self {
             NVMLeafNodeState::PartiallyLoaded { .. } => todo!(),
-            NVMLeafNodeState::Deserialized { data } => data.entries.iter(),
+            NVMLeafNodeState::Deserialized { data } => data.iter(),
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
             NVMLeafNodeState::PartiallyLoaded { data, .. } => data.len(),
-            NVMLeafNodeState::Deserialized { data } => data.entries.len(),
+            NVMLeafNodeState::Deserialized { data } => data.len(),
         }
     }
 
     /// Access the underlying the BTree, only valid in the context of deserialized state.
-    pub fn force_entries(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
+    pub fn force_data_mut(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
             NVMLeafNodeState::PartiallyLoaded { .. } => unimplemented!(),
-            NVMLeafNodeState::Deserialized { data } => &mut data.entries,
+            NVMLeafNodeState::Deserialized { ref mut data } => data,
         }
     }
 
     /// Access the internal data representation. Panics if node not entirely deserialized.
-    pub fn force_data(&self) -> &NVMLeafNodeData {
+    pub fn force_data(&self) -> &BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
             NVMLeafNodeState::PartiallyLoaded { .. } => unreachable!(),
             NVMLeafNodeState::Deserialized { data } => data,
@@ -267,9 +267,7 @@ impl NVMLeafNodeState {
     /// Create a new deserialized empty state.
     pub fn new() -> Self {
         Self::Deserialized {
-            data: NVMLeafNodeData {
-                entries: BTreeMap::new(),
-            },
+            data: BTreeMap::new(),
         }
     }
 }
@@ -321,15 +319,6 @@ impl StaticSize for NVMLeafNodeMetaData {
         // pref             sys pref            entries size   FIXME  ARCHIVE OVERHEAD
         size_of::<u8>() + size_of::<u8>() + size_of::<u32>()
     }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Archive, Serialize, Deserialize)]
-#[archive(check_bytes)]
-#[cfg_attr(test, derive(PartialEq))]
-
-pub struct NVMLeafNodeData {
-    #[with(rkyv::with::AsVec)]
-    pub entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
 }
 
 impl std::fmt::Debug for NVMLeafNode {
@@ -453,9 +442,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
                 ),
                 entries_size,
             },
-            state: NVMLeafNodeState::Deserialized {
-                data: NVMLeafNodeData { entries },
-            },
+            state: NVMLeafNodeState::Deserialized { data: entries },
             checksum: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: false,
@@ -492,7 +479,7 @@ impl NVMLeafNode {
         mut writer: W,
         metadata_size: &mut usize,
     ) -> Result<(), std::io::Error> {
-        let num_entries = self.state.force_data().entries.len();
+        let num_entries = self.state.force_data().len();
         let meta_len = NVMLeafNodeMetaData::static_size() + num_entries * NVMLEAF_PER_KEY_META_LEN;
         let data_len: usize = self
             .state
@@ -505,7 +492,7 @@ impl NVMLeafNode {
 
         let mut data_entry_offset = 0;
         // TODO: Inefficient wire format these are 12 bytes extra for each and every entry
-        for (key, (_, val)) in self.state.force_data().entries.iter() {
+        for (key, (_, val)) in self.state.force_data().iter() {
             writer.write_all(&(key.len() as u32).to_le_bytes())?;
             let loc = Location {
                 off: data_entry_offset as u32,
@@ -516,7 +503,7 @@ impl NVMLeafNode {
             data_entry_offset += KeyInfo::static_size() + val.len();
         }
 
-        for (_, (info, val)) in self.state.force_data().entries.iter() {
+        for (_, (info, val)) in self.state.force_data().iter() {
             info.pack(&mut writer)?;
             writer.write_all(&val)?;
         }
@@ -532,7 +519,7 @@ impl NVMLeafNode {
         pool: RootSpu,
         offset: DiskOffset,
         checksum: crate::checksum::XxHash,
-        size: Block<u32>,
+        _size: Block<u32>,
     ) -> Result<Self, std::io::Error> {
         let meta_data_len: usize = u32::from_le_bytes(
             data[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
@@ -648,7 +635,7 @@ impl NVMLeafNode {
         }
         let split_key = split_key.unwrap();
 
-        *right_sibling.state.force_entries() = self.state.force_entries().split_off(&split_key);
+        *right_sibling.state.force_data_mut() = self.state.force_data_mut().split_off(&split_key);
         right_sibling.meta_data.entries_size = sibling_size;
         self.meta_data.entries_size -= sibling_size;
         right_sibling.meta_data.storage_preference.set(sibling_pref);
@@ -660,7 +647,7 @@ impl NVMLeafNode {
 
         let pivot_key = self
             .state
-            .force_entries()
+            .force_data_mut()
             .keys()
             .next_back()
             .cloned()
@@ -718,7 +705,8 @@ impl NVMLeafNode {
                 self.meta_data.entries_size +=
                     key_size + NVMLEAF_PER_KEY_META_LEN + KeyInfo::static_size();
             }
-        } else if let Some((old_info, old_data)) = self.state.force_entries().remove(key.borrow()) {
+        } else if let Some((old_info, old_data)) = self.state.force_data_mut().remove(key.borrow())
+        {
             // The value was removed by msg, this may be a downgrade opportunity.
             // The preference of the removed entry can't be stricter than the current node
             // preference, by invariant. That leaves "less strict" and "as strict" as the
@@ -806,8 +794,8 @@ impl NVMLeafNode {
         self.state.force_upgrade();
         right_sibling.state.force_upgrade();
         self.state
-            .force_entries()
-            .append(&mut right_sibling.state.force_entries());
+            .force_data_mut()
+            .append(&mut right_sibling.state.force_data_mut());
         let size_delta = right_sibling.meta_data.entries_size;
         self.meta_data.entries_size += right_sibling.meta_data.entries_size;
 
@@ -901,7 +889,6 @@ mod tests {
             let v: Vec<_> = self
                 .state
                 .force_data()
-                .entries
                 .iter()
                 .map(|(k, (info, v))| (k.clone(), (info.clone(), CowBytes::from(v.to_vec()))))
                 .collect();

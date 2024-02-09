@@ -7,7 +7,7 @@ use super::{
     nvm_child_buffer::NVMChildBuffer,
     nvminternal::{self, NVMInternalNode, NVMLazyLoadDetails, NVMTakeChildBuffer},
     nvmleaf::NVMFillUpResult,
-    nvmleaf::{self, NVMLeafNode, NVMLeafNodeData, NVMLeafNodeLoadDetails, NVMLeafNodeMetaData},
+    nvmleaf::{self, NVMLeafNode, NVMLeafNodeLoadDetails, NVMLeafNodeMetaData},
     packed::PackedMap,
     FillUpResult, KeyInfo, PivotKey, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT,
     MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,
@@ -705,9 +705,6 @@ pub(super) enum PivotGetMutResult<'a, N: 'a + 'static> {
 
 pub(super) enum GetRangeResult<'a, T, N: 'a + 'static> {
     Data(T),
-    NVMData {
-        np: &'a std::sync::Arc<std::sync::RwLock<Option<NVMLeafNodeData>>>,
-    },
     NextNode {
         np: &'a RwLock<N>,
         prefetch_option: Option<&'a RwLock<N>>,
