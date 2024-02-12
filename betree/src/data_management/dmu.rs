@@ -346,6 +346,9 @@ where
     }
 
     fn insert_object_into_cache(&self, key: ObjectKey<Generation>, mut object: E::Value) {
+        // FIXME: This is always the maximum size of nodes as it concerns their
+        // disk representation. An useful metric would be the actual memory
+        // footprint which may differ based on the node type (NVM etc.).
         let size = object.value_mut().get_mut().size();
         let mut cache = self.cache.write();
         if !cache.contains_key(&key) {

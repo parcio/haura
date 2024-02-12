@@ -1,4 +1,10 @@
 //! Implementation of the [NVMLeafNode] node type.
+//!
+//! FIXME: This node is freely allowed to occupy memory at the moment. This can
+//! be bad. At the moment we always assume in the DMU the worst-case (entire
+//! node) and are somewhat fine due to that. But a more efficient way would be
+//! the propagating size changes to the cache. Although size increases are more
+//! difficult to handle than because nodes cannot evict other entries.
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
@@ -349,7 +355,7 @@ impl NVMLeafNodeMetaData {
 
 impl StaticSize for NVMLeafNodeMetaData {
     fn static_size() -> usize {
-        // pref             sys pref            entries size   FIXME  ARCHIVE OVERHEAD
+        // pref             sys pref            entries size
         size_of::<u8>() + size_of::<u8>() + size_of::<u32>()
     }
 }
