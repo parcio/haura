@@ -226,6 +226,7 @@ impl NVMLeafNodeState {
         }
     }
 
+    /// Insert an new entry into the state. Only valid when executed with a fully deserialized map.
     pub fn insert(
         &mut self,
         key: CowBytes,
@@ -240,13 +241,31 @@ impl NVMLeafNodeState {
     /// Iterate over all key value pairs.
     pub fn iter(
         &self,
-    ) -> impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator {
+    ) -> Option<impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator>
+    {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { .. } => todo!(),
-            NVMLeafNodeState::Deserialized { data } => data.iter(),
+            NVMLeafNodeState::PartiallyLoaded { .. } => None,
+            NVMLeafNodeState::Deserialized { data } => Some(data.iter()),
         }
     }
 
+    /// This function is similar to [iter] but will always return an iterator,
+    /// entries which are not present in memory will be skipped. So when using
+    /// this method with partially deserialized nodes, you have to pinky promise
+    /// that you know what you're doing, okay?
+    pub fn partial_iter(
+        &self,
+    ) -> Option<impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator>
+    {
+        match self {
+            NVMLeafNodeState::PartiallyLoaded { data, .. } => {
+                Some(data.iter().filter_map(|(k, v)| v.1.get().map(|e| (k, e))))
+            }
+            NVMLeafNodeState::Deserialized { .. } => None,
+        }
+    }
+
+    /// Returns the number of entries present in the node.
     pub fn len(&self) -> usize {
         match self {
             NVMLeafNodeState::PartiallyLoaded { data, .. } => data.len(),
@@ -359,21 +378,21 @@ impl Size for NVMLeafNode {
     }
 
     fn actual_size(&self) -> Option<usize> {
-        let data_size: usize = self
-            .state
-            .iter()
-            .map(|(_k, (info, v))| v.len() + info.size())
-            .sum();
-
-        let key_size: usize = self
-            .state
-            .iter()
-            .map(|(k, _)| NVMLEAF_PER_KEY_META_LEN + k.len())
-            .sum();
-
-        let size =
-            NVMLEAF_HEADER_FIXED_LEN + NVMLeafNodeMetaData::static_size() + data_size + key_size;
-        Some(size)
+        if let Some(kv_iter) = self.state.iter() {
+            let (data_size, key_size) = kv_iter.fold((0, 0), |acc, (k, (info, v))| {
+                (
+                    acc.0 + v.len() + info.size(),
+                    acc.1 + NVMLEAF_PER_KEY_META_LEN + k.len(),
+                )
+            });
+            return Some(
+                NVMLEAF_HEADER_FIXED_LEN
+                    + NVMLeafNodeMetaData::static_size()
+                    + data_size
+                    + key_size,
+            );
+        }
+        None
     }
 }
 
@@ -388,7 +407,12 @@ impl HasStoragePreference for NVMLeafNode {
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        for (keyinfo, _v) in self.state.iter().map(|e| e.1) {
+        for (keyinfo, _v) in self
+            .state
+            .iter()
+            .expect("Node was not ready. Check state transitions.")
+            .map(|e| e.1)
+        {
             pref.upgrade(keyinfo.storage_preference);
         }
 
@@ -502,6 +526,7 @@ impl NVMLeafNode {
         let meta_len = NVMLeafNodeMetaData::static_size() + pivots_size;
         let data_len: usize = self
             .state
+            .force_data()
             .iter()
             .map(|(_, (info, val))| info.size() + val.len())
             .sum();
@@ -644,7 +669,7 @@ impl NVMLeafNode {
         let mut sibling_size = 0;
         let mut sibling_pref = StoragePreference::NONE;
         let mut split_key = None;
-        for (k, (keyinfo, v)) in self.state.iter().rev() {
+        for (k, (keyinfo, v)) in self.state.iter().unwrap().rev() {
             let size_delta = k.len() + NVMLEAF_PER_KEY_META_LEN + v.len() + KeyInfo::static_size();
             sibling_size += size_delta;
             sibling_pref.upgrade(keyinfo.storage_preference);
@@ -803,9 +828,14 @@ impl NVMLeafNode {
 
     /// Create an iterator over all entries.
     /// FIXME: This also fetches entries which are not required, maybe implement special iterator for that.
-    pub fn range(&self) -> impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> {
+    pub fn range(&self) -> Box<dyn Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + '_> {
         self.state.fetch();
-        self.state.iter()
+        // NOTE: The node must be in either case now, check which one it is.
+        if let Some(iter) = self.state.partial_iter() {
+            Box::new(iter)
+        } else {
+            Box::new(self.state.iter().unwrap())
+        }
     }
 
     /// Merge all entries from the *right* node into the *left* node.  Returns
