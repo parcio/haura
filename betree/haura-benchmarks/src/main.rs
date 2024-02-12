@@ -11,6 +11,7 @@ mod rewrite;
 mod scientific_evaluation;
 mod switchover;
 mod tiered1;
+mod ycsb;
 mod zip;
 
 #[global_allocator]
@@ -59,6 +60,13 @@ enum Mode {
     Rewrite {
         object_size: u64,
         rewrite_count: u64,
+    },
+    YcsbA {
+        size: u64,
+    },
+    YcsbC {
+        size: u64,
+        kind: u8,
     },
 }
 
@@ -161,6 +169,13 @@ fn run_all(mode: Mode) -> Result<(), Box<dyn Error>> {
         } => {
             let mut client = control.client(0, b"rewrite");
             rewrite::run(&mut client, object_size, rewrite_count)?;
+        }
+        Mode::YcsbA { size } => {
+            todo!()
+        }
+        Mode::YcsbC { size, kind } => {
+            let mut client = control.kv_client(0);
+            ycsb::C(client, size)
         }
     }
 
