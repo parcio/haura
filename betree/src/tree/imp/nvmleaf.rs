@@ -16,17 +16,9 @@ use crate::{
     AtomicStoragePreference, StoragePreference,
 };
 use std::{
-    borrow::Borrow,
-    collections::BTreeMap,
-    io::Write,
-    iter::FromIterator,
-    mem::size_of,
-    ops::{Range, RangeInclusive},
-    sync::OnceLock,
-    time::SystemTime,
+    borrow::Borrow, collections::BTreeMap, io::Write, iter::FromIterator, mem::size_of, ops::Range,
+    sync::OnceLock, time::SystemTime,
 };
-
-use rkyv::{Archive, Deserialize, Serialize};
 
 pub(crate) const NVMLEAF_METADATA_LEN_OFFSET: usize = 0;
 pub(crate) const NVMLEAF_DATA_LEN_OFFSET: usize = size_of::<u32>();

@@ -318,39 +318,23 @@ impl LeafVdev {
                 format!("memory-{mem}"),
             )?)),
             #[cfg(feature = "nvm")]
-            LeafVdev::PMemFile { .. } => {
-                let (path, len) = match self {
-                    LeafVdev::File(path) => unreachable!(),
-                    LeafVdev::FileWithOpts { .. } => unreachable!(),
-                    LeafVdev::Memory { .. } => unreachable!(),
-                    LeafVdev::PMemFile { path, len } => (path, len),
-                };
-
-                let mut file = match path.to_str() {
-                    Some(filepath_str) => {
-                        match pmdk::PMem::open(format!("{}\0", filepath_str).as_str()) {
-                            Ok(handle) => handle,
-                            Err(e) => match pmdk::PMem::create(
-                                format!("{}\0", filepath_str).as_str(),
-                                *len,
-                            ) {
-                                Ok(handle) => handle,
-                                Err(e) => {
-                                    return Err(io::Error::new(io::ErrorKind::Other,
-                                            format!("Failed to create or open handle for pmem file. Path: {}", filepath_str)));
-                                }
-                            },
+            LeafVdev::PMemFile { ref path, len } => {
+                let file = match pmdk::PMem::open(path) {
+                    Ok(handle) => handle,
+                    Err(e) => match pmdk::PMem::create(path, len) {
+                        Ok(handle) => handle,
+                        Err(e) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                format!(
+                                    "Failed to create or open handle for pmem file. Path: {}",
+                                    path.display()
+                                ),
+                            ));
                         }
-                    }
-                    None => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("Invalid file path: {:?}", path),
-                        ));
-                    }
+                    },
                 };
-
-                if file.len() != *len {
+                if file.len() != len {
                     return Err(io::Error::new(io::ErrorKind::Other,
                                     format!("The file already exists with a different length. Provided length: {}, File's length: {}",
                                             len, file.len())));
