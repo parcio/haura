@@ -17,6 +17,7 @@ pub use self::{
     message_action::MessageAction,
 };
 
+#[derive(Debug)]
 pub enum StorageKind {
     Block,
     NVM,

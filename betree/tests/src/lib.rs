@@ -204,11 +204,21 @@ fn insert_single_key(#[case] kind: StorageKind) {
 #[case(StorageKind::NVM)]
 #[case(StorageKind::Block)]
 fn insert_random_keys(#[case] kind: StorageKind) {
-    let (_db, ds) = random_db(1, 1024, kind);
-    for r in ds.range::<RangeFull, &[u8]>(..).unwrap() {
-        let r = r.unwrap();
-        assert_eq!(r.0.len(), 64);
-        assert_eq!(r.1.len(), 4096);
+    let (_db, ds, ks) = random_db(1, 512, kind);
+    for (idx, r) in ds.range::<RangeFull, &[u8]>(..).unwrap().enumerate() {
+        let (key, val) = r.unwrap();
+        let k = (idx as u64 + 1).to_be_bytes();
+        println!("{:?} {}/{ks}", k, idx + 1);
+        println!("{:?} {}/{ks}", &key[..], idx + 1);
+        assert_eq!(&k[..], &key[..]);
+        assert_eq!(val.len(), 1024);
+    }
+
+    for idx in 1..ks {
+        let k = format!("{idx}");
+        let k = (idx as u64).to_be_bytes();
+        // println!("{:?} {}/{ks}", k.as_bytes(), idx);
+        assert_eq!(ds.get(&k[..]).unwrap().unwrap().len(), 1024);
     }
 }
 

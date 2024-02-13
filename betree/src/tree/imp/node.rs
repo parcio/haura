@@ -282,11 +282,9 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             let data_start = meta_data_end;
             let data_end = data_start + data_len;
 
-            let archivedinternalnodemetadata: &ArchivedInternalNodeMetaData =
-                rkyv::check_archived_root::<InternalNodeMetaData>(
-                    &data[meta_data_start..meta_data_end],
-                )
-                .unwrap();
+            let archivedinternalnodemetadata: &ArchivedInternalNodeMetaData = unsafe {
+                rkyv::archived_root::<InternalNodeMetaData>(&data[meta_data_start..meta_data_end])
+            };
             //let archivedinternalnode: &ArchivedInternalNode<NVMChildBuffer<_>>  = unsafe { archived_root::<NVMInternalNode<NVMChildBuffer<R>>>(&data[12..len+12]) };
             let meta_data: InternalNodeMetaData = archivedinternalnodemetadata
                 .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
