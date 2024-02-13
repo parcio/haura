@@ -559,11 +559,12 @@ where
                 None
             }
         };
-        let res = child_idx.map(move |child_idx| TakeChildBuffer {
-            node: self,
-            child_idx,
-        });
-        Some(TakeChildBufferWrapper::TakeChildBuffer(res))
+        child_idx.map(move |child_idx| {
+            TakeChildBufferWrapper::TakeChildBuffer(TakeChildBuffer {
+                node: self,
+                child_idx,
+            })
+        })
     }
 }
 
@@ -613,14 +614,10 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
         // invalidated
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                obj.as_mut()
-                    .unwrap()
-                    .split_child(sibling_np, pivot_key, select_right)
+                obj.split_child(sibling_np, pivot_key, select_right)
             }
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                obj.as_mut()
-                    .unwrap()
-                    .split_child(sibling_np, pivot_key, select_right)
+                obj.split_child(sibling_np, pivot_key, select_right)
             }
         }
     }
@@ -660,8 +657,8 @@ where
 {
     pub(super) fn size(&self) -> usize {
         match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.as_ref().unwrap().size(),
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.as_ref().unwrap().size(),
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.size(),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.size(),
         }
     }
 
@@ -670,7 +667,7 @@ where
         N: ObjectReference,
     {
         match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.as_mut().unwrap().prepare_merge(),
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.prepare_merge(),
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
                 unimplemented!("..");
                 //obj.as_mut().unwrap().prepare_merge()

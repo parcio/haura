@@ -62,8 +62,8 @@ pub(super) enum Inner<N: 'static> {
 }
 
 pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
-    TakeChildBuffer(Option<TakeChildBuffer<'a, N>>),
-    NVMTakeChildBuffer(Option<NVMTakeChildBuffer<'a, N>>),
+    TakeChildBuffer(TakeChildBuffer<'a, N>),
+    NVMTakeChildBuffer(NVMTakeChildBuffer<'a, N>),
 }
 
 impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
@@ -80,8 +80,8 @@ impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
         N: ObjectReference,
     {
         match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.as_mut().unwrap().take_buffer(),
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.as_mut().unwrap().take_buffer(),
+            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.take_buffer(),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.take_buffer(),
         }
     }
 }
@@ -415,7 +415,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => {
                 if let Some(data) = internal.try_walk(key) {
-                    Some(TakeChildBufferWrapper::TakeChildBuffer(Some(data)))
+                    Some(TakeChildBufferWrapper::TakeChildBuffer(data))
                 } else {
                     None
                 }
@@ -423,7 +423,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             NVMLeaf(_) => None,
             NVMInternal(ref mut nvminternal) => {
                 if let Some(data) = nvminternal.try_walk(key) {
-                    Some(TakeChildBufferWrapper::NVMTakeChildBuffer(Some(data)))
+                    Some(TakeChildBufferWrapper::NVMTakeChildBuffer(data))
                 } else {
                     None
                 }

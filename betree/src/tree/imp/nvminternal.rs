@@ -1148,11 +1148,12 @@ where
                 unimplemented!("..")
             }
         };
-        let res = child_idx.map(move |child_idx| NVMTakeChildBuffer {
-            node: self,
-            child_idx,
-        });
-        Some(TakeChildBufferWrapper::NVMTakeChildBuffer(res))
+        child_idx.map(move |child_idx| {
+            TakeChildBufferWrapper::NVMTakeChildBuffer(NVMTakeChildBuffer {
+                node: self,
+                child_idx,
+            })
+        })
     }
 }
 

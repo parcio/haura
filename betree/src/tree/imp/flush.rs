@@ -91,10 +91,10 @@ where
 
             match child_buffer.node_pointer_mut() {
                 TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                    child = self.get_mut_node(obj.as_mut().unwrap().node_pointer_mut())?;
+                    child = self.get_mut_node(obj.node_pointer_mut())?;
                 }
                 TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                    let (_node, idx) = obj.as_mut().unwrap().node_pointer_mut();
+                    let (_node, idx) = obj.node_pointer_mut();
                     child = self.get_mut_node(
                         &mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx]
                             .as_mut()
