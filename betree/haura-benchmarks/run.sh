@@ -208,6 +208,11 @@ function ci() {
   run "$RUN_IDENT" switchover_small switchover 4 "$((128 * 1024 * 1024))"
 }
 
+function ycsb() {
+  run "$RUN_IDENT" ycsb_c_block ycsb-c "$((8 * 1024 * 1024 * 1024))" 0
+  run "$RUN_IDENT" ycsb_c_memory ycsb-c "$((8 * 1024 * 1024 * 1024))" 1
+}
+
 cargo build --release
 
 if [ -z "$BETREE_CONFIG" ]
@@ -252,3 +257,4 @@ ensure_config
 #checkpoints
 #switchover
 #ingest
+#ycsb
