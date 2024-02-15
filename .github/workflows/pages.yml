@@ -30,8 +30,8 @@ jobs:
           key: ubuntu-22.04-rustc-${{ env.RUSTC_VERSION }}-mdbook
       - name: Install mdBook
         run: |
-          cargo install mdbook
-          cargo install mdbook-graphviz
+          # Fix for incompatability of mdbook graphviz with newest mdbook
+          cargo install --locked mdbook@0.4.36 mdbook-graphviz
       - name: Configure Pages
         uses: actions/configure-pages@v2
       - name: Build book
