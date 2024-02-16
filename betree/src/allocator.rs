@@ -124,7 +124,7 @@ impl Action {
 }
 
 /// Identifier for 1GiB segments of a `StoragePool`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SegmentId(pub u64);
 
 impl SegmentId {

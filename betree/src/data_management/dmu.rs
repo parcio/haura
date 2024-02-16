@@ -56,7 +56,7 @@ where
     // Storage Pool Layers:
     //      Layer Disks:
     //          Tuple of SegmentIDs and their according Allocators
-    allocation_data: Box<[Box<[Mutex<Option<(SegmentId, SegmentAllocator)>>]>]>,
+    allocation_data: Box<[Box<[Mutex<Option<SegmentId>>]>]>,
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
@@ -525,18 +525,23 @@ where
             let disk_size = self.pool.size_in_blocks(class, disk_id);
 
             let disk_offset = {
-                let mut x = self.allocation_data[class as usize][disk_id as usize].lock();
-
-                if x.is_none() {
+                let mut last_seg_id = self.allocation_data[class as usize][disk_id as usize].lock();
+                let segment_id = if last_seg_id.is_some() {
+                    last_seg_id.as_mut().unwrap()
+                } else {
                     let segment_id = SegmentId::get(DiskOffset::new(class, disk_id, Block(0)));
-                    let allocator = self.handler.get_allocation_bitmap(segment_id, self)?;
-                    *x = Some((segment_id, allocator));
-                }
-                let &mut (ref mut segment_id, ref mut allocator) = x.as_mut().unwrap();
+                    *last_seg_id = Some(segment_id);
+                    last_seg_id.as_mut().unwrap()
+                };
 
                 let first_seen_segment_id = *segment_id;
                 loop {
-                    if let Some(segment_offset) = allocator.allocate(size.as_u32()) {
+                    if let Some(segment_offset) = self
+                        .handler
+                        .get_allocation_bitmap(*segment_id, self)?
+                        .access()
+                        .allocate(size.as_u32())
+                    {
                         break segment_id.disk_offset(segment_offset);
                     }
                     let next_segment_id = segment_id.next(disk_size);
@@ -555,7 +560,6 @@ where
                         );
                         continue 'class;
                     }
-                    *allocator = self.handler.get_allocation_bitmap(next_segment_id, self)?;
                     *segment_id = next_segment_id;
                 }
             };
@@ -587,9 +591,12 @@ where
         let segment_id = SegmentId::get(disk_offset);
         let mut x =
             self.allocation_data[disk_offset.storage_class() as usize][disk_id as usize].lock();
-        let mut allocator = self.handler.get_allocation_bitmap(segment_id, self)?;
-        if allocator.allocate_at(size.as_u32(), SegmentId::get_block_offset(disk_offset)) {
-            *x = Some((segment_id, allocator));
+        let allocator = self.handler.get_allocation_bitmap(segment_id, self)?;
+        if allocator
+            .access()
+            .allocate_at(size.as_u32(), SegmentId::get_block_offset(disk_offset))
+        {
+            *x = Some(segment_id);
             self.handler
                 .update_allocation_bitmap(disk_offset, size, Action::Allocate, self)?;
             Ok(())

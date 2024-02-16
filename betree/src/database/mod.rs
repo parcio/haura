@@ -208,6 +208,7 @@ impl DatabaseConfiguration {
                 .collect_vec(),
             allocations: AtomicU64::new(0),
             old_root_allocation: SeqLock::new(None),
+            allocators: RwLock::new(HashMap::new()),
         }
     }
 
