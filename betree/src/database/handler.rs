@@ -43,7 +43,9 @@ pub fn update_storage_info(info: &StorageInfo) -> Option<SlicedCowBytes> {
 /// The database handler, holding management data for interactions
 /// between the database and data management layers.
 pub struct Handler<OR: ObjectReference> {
+    // The version of the root tree which is initially present at the start of the process.
     pub(crate) root_tree_inner: AtomicOption<Arc<TreeInner<OR, DefaultMessageAction>>>,
+    // An updated version of the root tree from this session, created after first sync.
     pub(crate) root_tree_snapshot: RwLock<Option<TreeInner<OR, DefaultMessageAction>>>,
     pub(crate) current_generation: SeqLock<Generation>,
     // Free Space counted as blocks
