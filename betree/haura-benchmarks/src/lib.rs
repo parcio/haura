@@ -18,7 +18,6 @@ use parking_lot::RwLock;
 use procfs::process::Process;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus;
-use std::collections::HashSet;
 
 pub mod bufreader;
 
@@ -94,7 +93,7 @@ pub struct KvClient {
 }
 
 impl KvClient {
-    pub fn new(mut db: Arc<RwLock<Database>>, rng: Xoshiro256Plus) -> Self {
+    pub fn new(db: Arc<RwLock<Database>>, rng: Xoshiro256Plus) -> Self {
         let ds = db.write().open_or_create_dataset(b"FOOBAR").unwrap();
         Self { db, ds, rng }
     }
@@ -108,7 +107,7 @@ impl KvClient {
             self.ds.insert(&k[..], &value).unwrap();
             keys.push(k);
         }
-        self.db.write().sync();
+        self.db.write().sync().unwrap();
         keys
     }
 

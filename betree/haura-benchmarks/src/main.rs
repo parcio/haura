@@ -61,12 +61,12 @@ enum Mode {
         object_size: u64,
         rewrite_count: u64,
     },
-    YcsbA {
-        size: u64,
-    },
     YcsbC {
         size: u64,
         kind: u8,
+        threads: u32,
+        #[structopt(default_value = "120")]
+        runtime: u64,
     },
 }
 
@@ -170,12 +170,14 @@ fn run_all(mode: Mode) -> Result<(), Box<dyn Error>> {
             let mut client = control.client(0, b"rewrite");
             rewrite::run(&mut client, object_size, rewrite_count)?;
         }
-        Mode::YcsbA { size } => {
-            todo!()
-        }
-        Mode::YcsbC { size, kind } => {
-            let mut client = control.kv_client(0);
-            ycsb::C(client, size)
+        Mode::YcsbC {
+            size,
+            kind,
+            threads,
+            runtime,
+        } => {
+            let client = control.kv_client(0);
+            ycsb::c(client, size, threads as usize, runtime)
         }
     }
 

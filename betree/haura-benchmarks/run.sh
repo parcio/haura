@@ -209,8 +209,8 @@ function ci() {
 }
 
 function ycsb() {
-  run "$RUN_IDENT" ycsb_c_block ycsb-c "$((2 * 1024 * 1024 * 1024))" 0
-  run "$RUN_IDENT" ycsb_c_memory ycsb-c "$((2 * 1024 * 1024 * 1024))" 1
+  run "$RUN_IDENT" ycsb_c_block ycsb-c "$((8 * 1024 * 1024 * 1024))" 0 8
+  run "$RUN_IDENT" ycsb_c_memory ycsb-c "$((8 * 1024 * 1024 * 1024))" 1 8
 }
 
 cargo build --release
@@ -257,4 +257,4 @@ ensure_config
 #checkpoints
 #switchover
 #ingest
-ycsb
+#ycsb
