@@ -16,6 +16,7 @@ const ZIPF_EXP: f64 = 0.99;
 /// Application example: Session store recording recent actions in a user session
 // pub fn A() {}
 use rand::distributions::Distribution;
+use rand::prelude::SliceRandom;
 use std::io::Write;
 
 /// C - Read heavy
@@ -25,7 +26,8 @@ use std::io::Write;
 pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload C");
     println!("Filling KV store...");
-    let keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
         .write(true)
