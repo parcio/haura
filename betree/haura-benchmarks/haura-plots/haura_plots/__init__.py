@@ -218,8 +218,18 @@ def plot_evaluation_latency(path, variant):
     fig, ax = plt.subplots(1,1,figsize=(6,4))
     reads = data[data['op'] == 'r']
     writes = data[data['op'] == 'w']
-    ax.scatter(reads['size'], reads['latency_ns'], marker='x', label="read")
-    ax.scatter(writes['size'], writes['latency_ns'], marker='.', label="write")
+    if len(reads) > 0:
+        ax.scatter(reads['size'], reads['latency_ns'], marker='x', label="read")
+        size = reads['size'].to_numpy()
+        latency = reads['latency_ns'].to_numpy()
+        p = np.polynomial.Polynomial.fit(size, latency, 1)
+        ax.plot(np.sort(size), p(np.sort(size)), linestyle=':', label='read trend', color='black')
+    if len(writes) > 0:
+        ax.scatter(writes['size'], writes['latency_ns'], marker='.', label="write")
+        size = writes['size'].to_numpy()
+        latency = writes['latency_ns'].to_numpy()
+        p = np.polynomial.Polynomial.fit(size, latency, 1)
+        ax.plot(np.sort(size), p(np.sort(size)), linestyle='-.', label='write trend', color='black')
     xticks = np.arange(0, 12 * 1024 * 1024 + 1, 2 * 1024 * 1024)
     ax.set_xticks(xticks, [int(x / 1024) for x in xticks])
     ax.set_xlabel("Size in KiB")
