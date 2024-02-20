@@ -146,3 +146,4 @@ def plot_system(path):
 
     fig.tight_layout()
     fig.savefig(f"{path}/proc.svg")
+    plt.close(fig)
