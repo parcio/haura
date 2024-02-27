@@ -269,31 +269,6 @@ where
                 Some(PivotGetResult::Target(Some(np))) => break Some(self.get_node(np)?),
                 Some(PivotGetResult::Target(None)) => break Some(node),
                 Some(PivotGetResult::NextNode(np)) => self.get_node(np)?,
-                // TODO: Karim.. add comments..
-                Some(PivotGetResult::NVMTarget { np, idx }) => {
-                    if let Ok(data) = np.read() {
-                        let child;
-                        if pivot.is_left() {
-                            child = &data.as_ref().unwrap().children[idx];
-                        } else {
-                            child = &data.as_ref().unwrap().children[idx + 1];
-                        }
-
-                        break Some((self.get_node(&child.as_ref().unwrap().node_pointer))?);
-                    } else {
-                        panic!("This case should not occur!");
-                        break None;
-                    }
-                }
-                Some(PivotGetResult::NVMNextNode { np, idx }) => {
-                    if let Ok(data) = np.read() {
-                        let child = &data.as_ref().unwrap().children[idx];
-                        self.get_node(&child.as_ref().unwrap().node_pointer)?
-                    } else {
-                        panic!("This case should not occur!");
-                        break None;
-                    }
-                }
                 None => break None,
             };
             node = next_node;
@@ -313,77 +288,6 @@ where
                 }
                 Some(PivotGetMutResult::Target(None)) => break Some(node),
                 Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
-                // TODO: Karim.. add comments..
-                Some(PivotGetMutResult::NVMTarget {
-                    idx,
-                    first_bool,
-                    second_bool,
-                    np,
-                }) => match (first_bool, second_bool) {
-                    (true, true) => {
-                        if let Ok(mut data) = np.write() {
-                            break Some(
-                                self.get_mut_node_mut(
-                                    data.as_mut().unwrap().children[idx]
-                                        .as_mut()
-                                        .unwrap()
-                                        .node_pointer
-                                        .get_mut(),
-                                )?,
-                            );
-                        } else {
-                            panic!("This case should not occur!");
-                            break None;
-                        }
-                    }
-                    (true, false) => {
-                        if let Ok(mut data) = np.write() {
-                            break Some(
-                                self.get_mut_node_mut(
-                                    data.as_mut().unwrap().children[idx + 1]
-                                        .as_mut()
-                                        .unwrap()
-                                        .node_pointer
-                                        .get_mut(),
-                                )?,
-                            );
-                        } else {
-                            panic!("This case should not occur!");
-                            break None;
-                        }
-                    }
-                    (false, _) => {
-                        panic!("This case should not occur!");
-                        break None;
-                    }
-                },
-                Some(PivotGetMutResult::NVMNextNode {
-                    idx,
-                    first_bool,
-                    second_bool,
-                    np,
-                }) => match (first_bool, second_bool) {
-                    (false, _) => {
-                        if let Ok(mut data) = np.write() {
-                            break Some(
-                                self.get_mut_node_mut(
-                                    data.as_mut().unwrap().children[idx]
-                                        .as_mut()
-                                        .unwrap()
-                                        .node_pointer
-                                        .get_mut(),
-                                )?,
-                            );
-                        } else {
-                            panic!("This case should not occur!");
-                            break None;
-                        }
-                    }
-                    (true, _) => {
-                        panic!("This case should not occur!");
-                        break None;
-                    }
-                },
                 None => break None,
             };
             node = next_node;
@@ -492,18 +396,8 @@ where
             let next_node = match node.get(key, &mut msgs) {
                 GetResult::NextNode(np) => self.get_node(np)?,
                 GetResult::Data(data) => break data,
-                // TODO: Karim.. add comments..
-                GetResult::NVMNextNode { np, idx } => {
-                    if let Ok(data) = np.read() {
-                        self.get_node(
-                            &data.as_ref().unwrap().children[idx]
-                                .as_ref()
-                                .unwrap()
-                                .node_pointer,
-                        )?
-                    } else {
-                        panic!("This case should not occur!");
-                    }
+                GetResult::NVMNextNode { .. } => {
+                    todo!()
                 }
             };
             node = next_node;
@@ -543,19 +437,8 @@ where
                 ApplyResult::Leaf(info) => break info,
                 ApplyResult::NVMLeaf(info) => break info,
                 // TODO: Karim.. add comments..
-                ApplyResult::NVMNextNode { node, idx } => {
-                    if let Ok(mut data) = node.write() {
-                        self.get_mut_node_mut(
-                            data.as_mut().unwrap().children[idx]
-                                .as_mut()
-                                .unwrap()
-                                .node_pointer
-                                .get_mut(),
-                        )?
-                    } else {
-                        panic!("This case should not occur!");
-                        break None;
-                    }
+                ApplyResult::NVMNextNode { .. } => {
+                    todo!()
                 }
             };
             node = next_node;
@@ -606,22 +489,12 @@ where
             loop {
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-                        // TODO: Karim.. add comments..
-                        let mut auto;
-
-                        match child_buffer.node_pointer_mut() {
+                        let auto = match &mut *child_buffer {
                             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                                auto = self.try_get_mut_node(obj.node_pointer_mut());
+                                self.try_get_mut_node(obj.node_pointer_mut())
                             }
                             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                                let (_node, idx) = obj.node_pointer_mut();
-                                auto = self.try_get_mut_node(
-                                    &mut _node.write().as_mut().unwrap().as_mut().unwrap().children
-                                        [idx]
-                                        .as_mut()
-                                        .unwrap()
-                                        .node_pointer,
-                                );
+                                self.try_get_mut_node(obj.node_pointer_mut())
                             }
                         };
 
@@ -722,6 +595,7 @@ mod nvminternal;
 mod nvmleaf;
 mod packed;
 mod range;
+mod serialize_nodepointer;
 mod split;
 
 pub use self::{

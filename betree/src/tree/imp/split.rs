@@ -1,10 +1,13 @@
 //! Encapsulating logic for splitting of normal and root nodes.
+use owning_ref::{OwningRef, OwningRefMut};
+
 use super::{
-    child_buffer::ChildBuffer, internal::TakeChildBuffer, node::TakeChildBufferWrapper, Inner,
-    Node, Tree,
+    child_buffer::ChildBuffer, internal::TakeChildBuffer, node::TakeChildBufferWrapper,
+    nvminternal::NVMTakeChildBuffer, Inner, Node, Tree,
 };
 use crate::{
     cache::AddSize,
+    cow_bytes::CowBytes,
     data_management::{Dml, HasStoragePreference, ObjectReference},
     size::Size,
     tree::{errors::*, MessageAction},
@@ -48,40 +51,6 @@ where
     pub(super) fn split_node(
         &self,
         mut node: X::CacheValueRefMut,
-        parent: &mut TakeChildBuffer<R>,
-    ) -> Result<(X::CacheValueRefMut, isize), Error> {
-        self.dml.verify_cache();
-
-        let before = node.size();
-        let (sibling, pivot_key, size_delta, lpk) = node.split();
-        let pk = lpk.to_global(self.tree_id());
-        let select_right = sibling.size() > node.size();
-        debug!(
-            "split {}: {} -> ({}, {}), {}",
-            node.kind(),
-            before,
-            node.size(),
-            sibling.size(),
-            select_right,
-        );
-        node.add_size(size_delta);
-        let sibling_np = if select_right {
-            let (sibling, np) = self.dml.insert_and_get_mut(sibling, self.tree_id(), pk);
-            node = sibling;
-            np
-        } else {
-            self.dml.insert(sibling, self.tree_id(), pk)
-        };
-
-        let size_delta = parent.split_child(sibling_np, pivot_key, select_right);
-
-        Ok((node, size_delta))
-    }
-
-    // tODO: fix this..
-    pub(super) fn split_node_nvm(
-        &self,
-        mut node: X::CacheValueRefMut,
         parent: &mut TakeChildBufferWrapper<R>,
     ) -> Result<(X::CacheValueRefMut, isize), Error> {
         self.dml.verify_cache();
@@ -107,7 +76,24 @@ where
             self.dml.insert(sibling, self.tree_id(), pk)
         };
 
-        let size_delta = parent.split_child(sibling_np, pivot_key, select_right);
+        let size_delta = match parent {
+            TakeChildBufferWrapper::TakeChildBuffer(ref mut parent) => {
+                parent.split_child(sibling_np, pivot_key, select_right)
+            }
+            TakeChildBufferWrapper::NVMTakeChildBuffer(ref mut parent) => parent.split_child::<_,_,X>(
+                sibling_np,
+                pivot_key,
+                select_right,
+                |np| OwningRefMut::new(self.get_mut_node(np).unwrap()).map_mut(|o| o.assert_buffer()),
+                |node| {
+                    self.dml.insert(
+                        super::Node::new_buffer(node),
+                        self.tree_id(),
+                        crate::tree::PivotKey::Right(CowBytes::from(vec![]), self.tree_id()),
+                    )
+                },
+            ),
+        };
 
         Ok((node, size_delta))
     }

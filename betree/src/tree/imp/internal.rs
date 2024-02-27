@@ -31,32 +31,6 @@ pub(super) struct InternalNode<N: 'static> {
     children: Vec<ChildBuffer<N>>,
 }
 
-// @tilpner:
-// Previously, this literal was magically spread across the code below, and I've (apparently
-// correctly) guessed it to be the fixed size of an empty InternalNode<_> when encoded with bincode.
-// I've added a test below to verify this and to ensure any bincode-sided change is noticed.
-// This is still wrong because:
-//
-// * usize is platform-dependent, 28 is not. Size will be impl'd incorrectly on 32b platforms
-//   * not just the top-level usize, Vec contains further address-sized fields, though bincode
-//     might special-case Vec encoding so that this doesn't matter
-// * the bincode format may not have changed in a while, but that's not a guarantee
-//
-// I'm not going to fix them, because the proper fix would be to take bincode out of everything,
-// and that's a lot of implementation and testing effort. You should though, if you find the time.
-// @jwuensche:
-// Added TODO to better find this in the future.
-// Will definitely need to adjust this at some point, though this is not now.
-// const TEST_BINCODE_FIXED_SIZE: usize = 28;
-//
-// UPDATE:
-// We removed by now the fixed constant and determine the base size of an
-// internal node with bincode provided methods based on an empty node created on
-// compile-time. We might want to store this value for future access or even
-// better determine the size on compile time directly, this requires
-// `serialized_size` to be const which it could but its not on their task list
-// yet.
-
 // NOTE: Waiting for OnceCell to be stabilized...
 // https://doc.rust-lang.org/stable/std/cell/struct.OnceCell.html
 static EMPTY_NODE: InternalNode<()> = InternalNode {
@@ -599,30 +573,6 @@ impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
     }
 }
 
-impl<'a, N: StaticSize + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
-    pub(super) fn split_child(
-        &mut self,
-        sibling_np: N,
-        pivot_key: CowBytes,
-        select_right: bool,
-    ) -> isize
-    where
-        N: ObjectReference,
-    {
-        // split_at invalidates both involved children (old and new), but as the new child
-        // is added to self, the overall entries don't change, so this node doesn't need to be
-        // invalidated
-        match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                obj.split_child(sibling_np, pivot_key, select_right)
-            }
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                obj.split_child(sibling_np, pivot_key, select_right)
-            }
-        }
-    }
-}
-
 impl<'a, N> TakeChildBuffer<'a, N>
 where
     N: StaticSize,
@@ -669,8 +619,8 @@ where
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.prepare_merge(),
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                unimplemented!("..");
-                //obj.as_mut().unwrap().prepare_merge()
+                /// FIXME: This needs some viable impl, probably with a separate preload..
+                todo!("prepare merge nvm");
             }
         }
     }

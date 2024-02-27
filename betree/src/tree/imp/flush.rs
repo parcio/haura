@@ -3,7 +3,7 @@
 //! Calling [Tree::rebalance_tree] is not only possible with the root node but may be
 //! applied to a variety of nodes given that their parent node is correctly
 //! given. Use with caution.
-use std::borrow::Borrow;
+use std::{borrow::Borrow, ops::Deref};
 
 use super::{
     child_buffer::ChildBuffer, derivate_ref::DerivateRef, derivate_ref_nvm::DerivateRefNVM,
@@ -75,9 +75,9 @@ where
                             return Ok(());
                         }
                         Some(ref mut parent) => {
-                            let (next_node, size_delta) = self.split_node_nvm(_node, parent)?;
-                            parent.add_size(size_delta);
+                            let (next_node, size_delta) = self.split_node(_node, parent)?;
                             node = next_node;
+                            parent.add_size(size_delta);
                             continue;
                         }
                     },
@@ -85,25 +85,7 @@ where
                     Ok(selected_child_buffer) => selected_child_buffer,
                 };
 
-            // TODO: Karim... add comments...
-            //let mut child = self.get_mut_node(child_buffer.node_pointer_mut())?;
-            let mut child;
-
-            match child_buffer.node_pointer_mut() {
-                TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                    child = self.get_mut_node(obj.node_pointer_mut())?;
-                }
-                TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                    let (_node, idx) = obj.node_pointer_mut();
-                    child = self.get_mut_node(
-                        &mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx]
-                            .as_mut()
-                            .unwrap()
-                            .node_pointer,
-                    )?;
-                }
-            };
-            // TODO: Karim... End of new code
+            let mut child = self.get_mut_node(child_buffer.child_pointer_mut())?;
 
             // 2. Iterate down to child if too large
             if !child.is_leaf() && child.is_too_large() {
@@ -138,7 +120,14 @@ where
                 continue;
             }
             // 4. Remove messages from the child buffer.
-            let (buffer, size_delta) = child_buffer.take_buffer();
+            let (buffer, size_delta) = match &mut *child_buffer {
+                TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.take_buffer(),
+                TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
+                    let mut cbuf = self.get_mut_node(obj.child_buffer_pointer_mut())?;
+                    let (bmap, size_delta) = cbuf.assert_buffer().take();
+                    (bmap, -(size_delta as isize))
+                }
+            };
             child_buffer.add_size(size_delta);
             self.dml.verify_cache();
             // 5. Insert messages from the child buffer into the child.
@@ -183,7 +172,7 @@ where
             }
             // 7. If the child is too large, split until it is not.
             while child.is_too_large_leaf() {
-                let (next_node, size_delta) = self.split_node_nvm(child, &mut child_buffer)?;
+                let (next_node, size_delta) = self.split_node(child, &mut child_buffer)?;
                 child_buffer.add_size(size_delta);
                 child = next_node;
             }

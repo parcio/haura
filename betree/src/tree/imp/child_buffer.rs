@@ -2,6 +2,7 @@
 //!
 //! Encapsulating common nodes like [super::internal::InternalNode] and
 //! [super::leaf::LeafNode].
+use super::serialize_nodepointer;
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, ObjectReference},
@@ -27,7 +28,7 @@ pub(super) struct ChildBuffer<N: 'static> {
     pub(super) system_storage_preference: AtomicSystemStoragePreference,
     buffer_entries_size: usize,
     pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
-    #[serde(with = "ser_np")]
+    #[serde(with = "serialize_nodepointer")]
     pub(super) node_pointer: RwLock<N>,
 }
 
@@ -87,28 +88,6 @@ impl<N: ObjectReference> ChildBuffer<N> {
     /// FIXME: This is best replaced with actual type exclusion.
     pub fn complete_object_ref(&mut self, pk: PivotKey) {
         self.node_pointer.get_mut().set_index(pk)
-    }
-}
-
-mod ser_np {
-    //! Serialization utilities of a node pointer type.
-    use super::RwLock;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<N, S>(np: &RwLock<N>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        N: Serialize,
-        S: Serializer,
-    {
-        np.read().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, N, D>(deserializer: D) -> Result<RwLock<N>, D::Error>
-    where
-        N: Deserialize<'de>,
-        D: Deserializer<'de>,
-    {
-        N::deserialize(deserializer).map(RwLock::new)
     }
 }
 
