@@ -144,8 +144,7 @@ jobs:
         run: |
           sudo apt update || true
           sudo apt --yes --no-install-recommends install pkgconf libglib2.0-dev libbson-dev
-          # FIXME use forked version
-          git clone --depth 1 --branch modules-conditional-unload https://github.com/tilpner/julea.git "${HOME}/julea"
+          git clone --depth 1 https://github.com/parcio/julea.git "${HOME}/julea"
       - name: Install MSRV
         run: |
           cargo install cargo-msrv
