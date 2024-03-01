@@ -5,7 +5,7 @@ use super::{
     internal::{InternalNode, TakeChildBuffer},
     leaf::LeafNode,
     nvm_child_buffer::NVMChildBuffer,
-    nvminternal::{NVMInternalNode, NVMTakeChildBuffer},
+    nvminternal::{self, ChildLink, NVMInternalNode, NVMTakeChildBuffer},
     nvmleaf::NVMFillUpResult,
     nvmleaf::NVMLeafNode,
     packed::PackedMap,
@@ -100,19 +100,9 @@ impl<'a> ChildBufferIteratorTrait<'a, Option<NVMChildBuffer>> for Vec<Option<NVM
     }
 }
 
-pub(super) enum ChildBufferIterator<'a, N: 'a + 'static> {
-    ChildBuffer(Option<Box<dyn Iterator<Item = &'a mut N> + 'a>>),
-    NVMChildBuffer(Option<Box<dyn Iterator<Item = &'a mut N> + 'a>>),
-}
-
-pub(super) enum ChildBufferIterator3<'a, N> {
-    ChildBuffer(Option<Box<dyn Iterator<Item = N> + 'a>>),
-    NVMChildBuffer(Option<Box<dyn Iterator<Item = N> + 'a>>),
-}
-
-pub(super) enum ChildBufferIterator2<'a, N> {
-    ChildBuffer(Option<Box<dyn Iterator<Item = &'a RwLock<N>> + 'a>>),
-    NVMChildBuffer(Option<Box<dyn Iterator<Item = &'a RwLock<N>> + 'a>>),
+pub(super) enum ChildrenObjects<'a, N> {
+    ChildBuffer(Box<dyn Iterator<Item = N> + 'a>),
+    NVMChildBuffer(Box<dyn Iterator<Item = ChildLink<N>> + 'a>),
 }
 
 #[derive(Debug)]
@@ -265,41 +255,9 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     where
         F: FnMut(&mut R) -> Result<(), E>,
     {
-        //TODO: Karim.. add comments..
-        if let Some(iter_type) = self.child_pointer_iter_mut() {
-            match iter_type {
-                ChildBufferIterator::ChildBuffer(obj) => {
-                    if let Some(iter) = obj {
-                        for np in iter {
-                            f(np)?;
-                        }
-                    } else {
-                        ()
-                    }
-                }
-                ChildBufferIterator::NVMChildBuffer(obj) => {
-                    // FIXME: Get the actual children not the child buffers in this case.
-                    if let Some(iter) = obj {
-                        for np in iter {
-                            f(np)?;
-                        }
-                    } else {
-                        ()
-                    }
-
-                    // if let Ok(mut data) = obj.write() {
-                    //     let child_itr = data.as_mut().unwrap().children.iter_mut();
-
-                    //     let itr =
-                    //         child_itr.map(|child| child.as_mut().unwrap().node_pointer.get_mut());
-
-                    //     for np in itr {
-                    //         f(np)?;
-                    //     }
-                    // } else {
-                    //     ()
-                    // }
-                }
+        if let Some(iter) = self.child_pointer_iter_mut() {
+            for np in iter {
+                f(np)?;
             }
         }
         Ok(())
@@ -854,71 +812,57 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 }
 
 impl<N: HasStoragePreference> Node<N> {
-    pub(super) fn child_pointer_iter_mut(&mut self) -> Option<ChildBufferIterator<'_, N>>
+    pub(super) fn child_pointer_iter_mut(&mut self) -> Option<Box<dyn Iterator<Item = &mut N> + '_>>
     where
         N: ObjectReference,
     {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => {
-                let core_value = internal
+            Internal(ref mut internal) => Some(Box::new(
+                internal
                     .iter_mut()
-                    .map(|child| child.node_pointer.get_mut());
-
-                Some(ChildBufferIterator::ChildBuffer(Some(Box::new(core_value))))
-            }
-            NVMLeaf(ref nvmleaf) => None,
-            NVMInternal(ref mut nvminternal) => {
-                let core_value = nvminternal
+                    .map(|child| child.node_pointer.get_mut()),
+            )),
+            NVMLeaf(_) => None,
+            NVMInternal(ref mut nvminternal) => Some(Box::new(
+                nvminternal
                     .iter_mut()
-                    .map(|child| child.ptr_mut().get_mut());
-                unimplemented!("Mutable iterator over children");
-
-                Some(ChildBufferIterator::NVMChildBuffer(Some(Box::new(
-                    core_value,
-                ))))
-            }
+                    .map(|child| child.ptr_mut().get_mut()),
+            )),
             Inner::ChildBuffer(_) => unreachable!(),
         }
     }
 
-    pub(super) fn child_pointer_iter(&self) -> Option<ChildBufferIterator2<'_, N>>
+    pub(super) fn child_pointer_iter(&self) -> Option<Box<dyn Iterator<Item = &RwLock<N>> + '_>>
     where
         N: ObjectReference,
     {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref internal) => {
-                let core_value = internal.iter().map(|child| &child.node_pointer);
-                Some(ChildBufferIterator2::ChildBuffer(Some(Box::new(
-                    core_value,
-                ))))
+                Some(Box::new(internal.iter().map(|child| &child.node_pointer)))
             }
-            NVMLeaf(ref nvmleaf) => None,
+            NVMLeaf(_) => None,
             NVMInternal(ref nvminternal) => {
-                unimplemented!("Immutable iterator over children");
+                Some(Box::new(nvminternal.iter().map(|link| link.ptr())))
             }
             Inner::ChildBuffer(_) => todo!(),
         }
     }
 
-    pub(super) fn drain_children(&mut self) -> Option<ChildBufferIterator3<'_, N>>
+    pub(super) fn drain_children(&mut self) -> Option<ChildrenObjects<'_, N>>
     where
         N: ObjectReference,
     {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => {
-                let core_value = internal.drain_children();
-                Some(ChildBufferIterator3::ChildBuffer(Some(Box::new(
-                    core_value,
-                ))))
-            }
-            NVMLeaf(ref nvmleaf) => None,
-            NVMInternal(ref mut nvminternal) => {
-                let core_value = nvminternal.drain_children();
-                unimplemented!("Draining children, consuming iterator needs to be passed.")
-            }
+            Internal(ref mut internal) => Some(ChildrenObjects::ChildBuffer(Box::new(
+                internal.drain_children(),
+            ))),
+            NVMLeaf(_) => None,
+            NVMInternal(ref mut nvminternal) => Some(ChildrenObjects::NVMChildBuffer(Box::new(
+                nvminternal.drain_children(),
+            ))),
             Inner::ChildBuffer(_) => unreachable!(),
         }
     }
