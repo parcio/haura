@@ -87,7 +87,7 @@ where
         (**self).prefetch(or)
     }
 
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<Self::CacheValueRef, Error> {
         (**self).finish_prefetch(p)
     }
 

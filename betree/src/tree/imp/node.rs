@@ -49,8 +49,10 @@ pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
     NVMTakeChildBuffer(NVMTakeChildBuffer<'a, N>),
 }
 
-impl<'a, N: Size + HasStoragePreference + ObjectReference + 'a + 'static> TakeChildBufferWrapper<'a, N> {
-    pub fn child_pointer_mut(&mut self) -> &mut RwLock<N>{
+impl<'a, N: Size + HasStoragePreference + ObjectReference + 'a + 'static>
+    TakeChildBufferWrapper<'a, N>
+{
+    pub fn child_pointer_mut(&mut self) -> &mut RwLock<N> {
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.node_pointer_mut(),
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.node_pointer_mut(),
@@ -610,7 +612,11 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
 pub(super) enum GetResult<'a, N: 'a + 'static> {
     Data(Option<(KeyInfo, SlicedCowBytes)>),
     NextNode(&'a RwLock<N>),
-    NVMNextNode { child: &'a mut N, buffer: &'a mut N },
+    NVMNextNode {
+        child: &'a RwLock<N>,
+        buffer: &'a RwLock<N>,
+    },
+    ChildBuffer,
 }
 
 pub(super) enum ApplyResult<'a, N: 'a + 'static> {
@@ -675,13 +681,19 @@ impl<N: HasStoragePreference> Node<N> {
             }
             NVMLeaf(ref nvmleaf) => GetResult::Data(nvmleaf.get_with_info(key)),
             NVMInternal(ref nvminternal) => {
-                let child_np = nvminternal.get(key);
+                let child_link = nvminternal.get(key);
 
-                unimplemented!("Get child pointer and queue buffer fetch eventually");
-
-                GetResult::NextNode(child_np.ptr())
+                GetResult::NVMNextNode {
+                    child: child_link.ptr(),
+                    buffer: child_link.buffer(),
+                }
             }
-            Inner::ChildBuffer(_) => unreachable!(),
+            Inner::ChildBuffer(ref buf) => {
+                if let Some(msg) = buf.get(key) {
+                    msgs.push(msg.clone());
+                }
+                GetResult::ChildBuffer
+            }
         }
     }
 
@@ -857,7 +869,9 @@ impl<N: HasStoragePreference> Node<N> {
             }
             NVMLeaf(ref nvmleaf) => None,
             NVMInternal(ref mut nvminternal) => {
-                let core_value = nvminternal.iter_mut().map(|child| child.ptr_mut().get_mut());
+                let core_value = nvminternal
+                    .iter_mut()
+                    .map(|child| child.ptr_mut().get_mut());
                 unimplemented!("Mutable iterator over children");
 
                 Some(ChildBufferIterator::NVMChildBuffer(Some(Box::new(
@@ -1152,9 +1166,11 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
                 system_storage: self.system_storage_preference(),
                 level: self.level(),
                 children: {
-
-                    let itr = nvminternal.children.iter().enumerate().map(
-                        move |(idx, child)| {
+                    let itr = nvminternal
+                        .children
+                        .iter()
+                        .enumerate()
+                        .map(move |(idx, child)| {
                             let maybe_left = if idx == 0 {
                                 None
                             } else {
@@ -1164,8 +1180,7 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
                             let maybe_right = nvminternal.meta_data.pivot.get(idx);
 
                             (maybe_left, child, maybe_right)
-                        },
-                    );
+                        });
 
                     itr.map(|(maybe_left, child_buf, maybe_right)| {
                         let (child, storage_preference, pivot_key) = {

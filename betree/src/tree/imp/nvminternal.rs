@@ -6,30 +6,18 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HasStoragePreference, ObjectReference, Dml},
+    data_management::{Dml, HasStoragePreference, ObjectReference},
     database::DatasetId,
-    database::RootSpu,
     size::{Size, SizeMut, StaticSize},
-    storage_pool::{AtomicSystemStoragePreference, DiskOffset, StoragePoolLayer},
-    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
+    storage_pool::AtomicSystemStoragePreference,
+    tree::{pivot_key::LocalPivotKey, KeyInfo},
     AtomicStoragePreference, StoragePreference,
 };
 use owning_ref::OwningRefMut;
 use parking_lot::RwLock;
-use std::{
-    borrow::Borrow,
-    collections::BTreeMap,
-    mem::replace,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
-use rkyv::{
-    archived_root,
-    ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
-    vec::{ArchivedVec, VecResolver},
-    with::{ArchiveWith, DeserializeWith, SerializeWith},
-    Archived, Fallible, Infallible,
-};
+use rkyv::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
 pub(super) struct NVMInternalNode<N> {
@@ -762,8 +750,7 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         // is added to self, the overall entries don't change, so this node doesn't need to be
         // invalidated
 
-        let sibling = load(&mut self.node.children[self.child_idx].buffer)
-            .split_at(&pivot_key);
+        let sibling = load(&mut self.node.children[self.child_idx].buffer).split_at(&pivot_key);
         let size_delta = sibling.size() + pivot_key.size();
         self.node.children.insert(
             self.child_idx + 1,

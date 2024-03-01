@@ -1061,7 +1061,7 @@ where
         })
     }
 
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error> {
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<Self::CacheValueRef, Error> {
         let (ptr, compressed_data, pk) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = ptr
@@ -1087,7 +1087,8 @@ where
                 .send(DmlMsg::fetch(ptr.offset(), ptr.size(), pk))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
-        Ok(())
+        let cache_ref = self.cache.read().get(&key, false).unwrap();
+        Ok(CacheValueRef::read(cache_ref))
     }
 
     // Cache depending methods

@@ -222,7 +222,7 @@ pub trait Dml: Sized {
     fn prefetch(&self, or: &Self::ObjectRef) -> Result<Option<Self::Prefetch>, Error>;
 
     /// Finishes the prefetching.
-    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<(), Error>;
+    fn finish_prefetch(&self, p: Self::Prefetch) -> Result<Self::CacheValueRef, Error>;
 
     /// Which format the cache statistics are represented in. For example a simple struct.
     type CacheStats: serde::Serialize;
