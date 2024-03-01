@@ -80,19 +80,23 @@ where
             TakeChildBufferWrapper::TakeChildBuffer(ref mut parent) => {
                 parent.split_child(sibling_np, pivot_key, select_right)
             }
-            TakeChildBufferWrapper::NVMTakeChildBuffer(ref mut parent) => parent.split_child::<_,_,X>(
-                sibling_np,
-                pivot_key,
-                select_right,
-                |np| OwningRefMut::new(self.get_mut_node(np).unwrap()).map_mut(|o| o.assert_buffer()),
-                |node| {
-                    self.dml.insert(
-                        super::Node::new_buffer(node),
-                        self.tree_id(),
-                        crate::tree::PivotKey::Right(CowBytes::from(vec![]), self.tree_id()),
-                    )
-                },
-            ),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(ref mut parent) => parent
+                .split_child::<_, _, X>(
+                    sibling_np,
+                    pivot_key,
+                    select_right,
+                    |np| {
+                        OwningRefMut::new(self.get_mut_node(np).unwrap())
+                            .map_mut(|o| o.assert_buffer_mut())
+                    },
+                    |node| {
+                        self.dml.insert(
+                            super::Node::new_buffer(node),
+                            self.tree_id(),
+                            crate::tree::PivotKey::Right(CowBytes::from(vec![]), self.tree_id()),
+                        )
+                    },
+                ),
         };
 
         Ok((node, size_delta))

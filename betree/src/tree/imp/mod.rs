@@ -472,7 +472,6 @@ where
                 ApplyResult::NextNode(np) => self.get_mut_node_mut(np)?,
                 ApplyResult::Leaf(info) => break info,
                 ApplyResult::NVMLeaf(info) => break info,
-                // TODO: Karim.. add comments..
                 ApplyResult::NVMNextNode { .. } => {
                     todo!()
                 }
@@ -507,6 +506,11 @@ where
             .map(|res| res.map(|(_info, data)| data))
     }
 
+    // NOTE: Our specific type actually implements a somewhat optimized variant
+    // of the usual b-epsilon tree insertion, we iterate as far down as we can
+    // on "Modified" nodes which do not contain the modified key already. This way we ensure that:
+    // 1. Recombination of messages are minimized.
+    // 2. Expensive flush operations are delayed. (Structure changes)
     fn insert<K>(
         &self,
         key: K,
@@ -523,18 +527,31 @@ where
         let mut node = {
             let mut node = self.get_mut_root_node()?;
             loop {
+                // This call performs an eventual iteration down to the next
+                // child. In the dissected internal node case we have to check
+                // if the buffer is loaded and contains the key.
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-                        let auto = match &mut *child_buffer {
+                        let maybe_child = match &mut *child_buffer {
                             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                                 self.try_get_mut_node(obj.node_pointer_mut())
                             }
                             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                                self.try_get_mut_node(obj.node_pointer_mut())
+                                // This branch is more complex, we first need to
+                                // fetch the buffer and then check the contents.
+                                let buffer = self.dml.get(&mut obj.buffer_pointer().write())?;
+                                if buffer.assert_buffer().is_empty(key.borrow()) {
+                                    // A lower level might contain a message
+                                    // for this key, if modified continue:
+                                    self.try_get_mut_node(obj.child_pointer_mut())
+                                } else {
+                                    // Some(self.get_mut_node(obj.buffer_pointer_mut())?)
+                                    None
+                                }
                             }
                         };
 
-                        if let Some(child) = auto {
+                        if let Some(child) = maybe_child {
                             node = child;
                             parent = Some(child_buffer);
                         } else {
@@ -547,10 +564,15 @@ where
         };
 
         let op_preference = storage_preference.or(self.storage_preference);
-        let added_size = node.insert(key, msg, self.msg_action(), op_preference);
+        let added_size = node.insert(
+            key,
+            msg,
+            self.msg_action(),
+            op_preference,
+            &self.dml,
+            self.tree_id(),
+        );
         node.add_size(added_size);
-
-        // TODO: Load all remaining data for NVM.... becase root_needs_merge iterates through all the children.. Also it just looks for children.len().. should keep this data in metadata as well?
 
         if parent.is_none() && node.root_needs_merge() {
             // TODO Merge, this is not implemented with the 'rebalance_tree'

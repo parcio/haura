@@ -185,7 +185,7 @@ impl<N> NVMInternalNode<N> {
 
     /// Returns the index of the child buffer
     /// corresponding to the given `key`.
-    fn idx(&self, key: &[u8]) -> usize {
+    pub(super) fn idx(&self, key: &[u8]) -> usize {
         match self
             .meta_data
             .pivot
@@ -281,6 +281,16 @@ impl<N> NVMInternalNode<N> {
             children,
         })
     }
+
+    pub fn after_insert_size_delta(&mut self, idx: usize, size_delta: isize) {
+        if size_delta > 0 {
+            self.meta_data.entries_sizes[idx] += size_delta as usize;
+            self.meta_data.entries_size += size_delta as usize;
+        } else {
+            self.meta_data.entries_sizes[idx] -= -size_delta as usize;
+            self.meta_data.entries_size -= -size_delta as usize;
+        }
+    }
 }
 
 impl<N> NVMInternalNode<N> {
@@ -289,6 +299,14 @@ impl<N> NVMInternalNode<N> {
         N: ObjectReference,
     {
         &self.children[self.idx(key)]
+    }
+
+    pub fn get_mut(&mut self, key: &[u8]) -> &mut ChildLink<N>
+    where
+        N: ObjectReference,
+    {
+        let idx = self.idx(key);
+        &mut self.children[idx]
     }
 
     pub fn pivot_get(&self, pk: &PivotKey) -> PivotGetResult<N>
@@ -573,15 +591,13 @@ where
     N: StaticSize,
     N: ObjectReference,
 {
-    pub fn try_walk(&mut self, key: &[u8]) -> Option<NVMTakeChildBuffer<N>> {
-        unimplemented!("Trying to walk, returning take child buffer required, empty check needs to be delayed to the caller.")
-        // let child_idx = self.idx(key);
+    pub fn try_walk_incomplete(&mut self, key: &[u8]) -> NVMTakeChildBuffer<N> {
+        let child_idx = self.idx(key);
 
-        // if self.cbuf_ptrs[child_idx].as_mut().unwrap().is_empty(key) {
-        //     Some(NVMTakeChildBuffer {})
-        // } else {
-        //     None
-        // }
+        NVMTakeChildBuffer {
+            node: self,
+            child_idx,
+        }
     }
 
     pub fn try_find_flush_candidate(
@@ -766,8 +782,8 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
             let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
             // Move messages around
             let (left_child, right_child) = (
-                load(&mut left[0].buffer).assert_buffer(),
-                load(&mut right[0].buffer).assert_buffer(),
+                load(&mut left[0].buffer).assert_buffer_mut(),
+                load(&mut right[0].buffer).assert_buffer_mut(),
             );
             left_child.rebalance(right_child, &new_pivot_key);
         }
@@ -784,18 +800,25 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 }
 
 impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
-    pub fn node_pointer_mut(&mut self) -> &mut RwLock<N>
+    pub fn child_pointer_mut(&mut self) -> &mut RwLock<N>
     where
         N: ObjectReference,
     {
         &mut self.node.children[self.child_idx].ptr
     }
 
-    pub fn child_buffer_pointer_mut(&mut self) -> &mut RwLock<N>
+    pub fn buffer_pointer_mut(&mut self) -> &mut RwLock<N>
     where
         N: ObjectReference,
     {
         &mut self.node.children[self.child_idx].buffer
+    }
+
+    pub fn buffer_pointer(&self) -> &RwLock<N>
+    where
+        N: ObjectReference,
+    {
+        &self.node.children[self.child_idx].buffer
     }
 
     pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize)

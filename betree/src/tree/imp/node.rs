@@ -55,7 +55,7 @@ impl<'a, N: Size + HasStoragePreference + ObjectReference + 'a + 'static>
     pub fn child_pointer_mut(&mut self) -> &mut RwLock<N> {
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.node_pointer_mut(),
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.node_pointer_mut(),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.child_pointer_mut(),
         }
     }
 }
@@ -295,21 +295,13 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
     {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => {
-                if let Some(data) = internal.try_walk(key) {
-                    Some(TakeChildBufferWrapper::TakeChildBuffer(data))
-                } else {
-                    None
-                }
-            }
+            Internal(ref mut internal) => internal
+                .try_walk(key)
+                .map(TakeChildBufferWrapper::TakeChildBuffer),
             NVMLeaf(_) => None,
-            NVMInternal(ref mut nvminternal) => {
-                if let Some(data) = nvminternal.try_walk(key) {
-                    Some(TakeChildBufferWrapper::NVMTakeChildBuffer(data))
-                } else {
-                    None
-                }
-            }
+            NVMInternal(ref mut nvminternal) => Some(TakeChildBufferWrapper::NVMTakeChildBuffer(
+                nvminternal.try_walk_incomplete(key),
+            )),
             Inner::ChildBuffer(_) => todo!(),
         }
     }
@@ -603,11 +595,22 @@ pub(super) enum GetRangeResult<'a, T, N: 'a + 'static> {
 }
 
 impl<N> Node<N> {
-    pub fn new_buffer(buffer: NVMChildBuffer) -> Self {
+    pub(super) fn new_buffer(buffer: NVMChildBuffer) -> Self {
         Node(Inner::ChildBuffer(buffer))
     }
 
-    pub fn assert_buffer(&mut self) -> &mut NVMChildBuffer {
+    /// Unpack the node to the internal [NVMChildBuffer] type. Panicks if the
+    /// node is not instance of variant [Inner::ChildBuffer].
+    pub(super) fn assert_buffer(&self) -> &NVMChildBuffer {
+        match self.0 {
+            Inner::ChildBuffer(ref cbuf) => cbuf,
+            _ => panic!(),
+        }
+    }
+
+    /// Unpack the node to the internal [NVMChildBuffer] type. Panicks if the
+    /// node is not instance of variant [Inner::ChildBuffer].
+    pub(super) fn assert_buffer_mut(&mut self) -> &mut NVMChildBuffer {
         match self.0 {
             Inner::ChildBuffer(ref mut cbuf) => cbuf,
             _ => panic!(),
@@ -736,17 +739,20 @@ impl<N: HasStoragePreference> Node<N> {
 }
 
 impl<N: HasStoragePreference + StaticSize> Node<N> {
-    pub(super) fn insert<K, M>(
+    pub(super) fn insert<K, M, X>(
         &mut self,
         key: K,
         msg: SlicedCowBytes,
         msg_action: M,
         storage_preference: StoragePreference,
+        dml: &X,
+        d_id: DatasetId,
     ) -> isize
     where
         K: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
         N: ObjectReference,
+        X: Dml<Object = Node<N>, ObjectRef = N>,
     {
         let size_delta = self.ensure_unpacked();
         let keyinfo = KeyInfo { storage_preference };
@@ -757,10 +763,16 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                 Internal(ref mut internal) => internal.insert(key, keyinfo, msg, msg_action),
                 NVMLeaf(ref mut nvmleaf) => nvmleaf.insert(key, keyinfo, msg, msg_action),
                 NVMInternal(ref mut nvminternal) => {
-                    todo!()
-                    // nvminternal.insert(key, keyinfo, msg, msg_action)
+                    let link = nvminternal.get_mut(key.borrow());
+                    // FIXME: Treat this error
+                    let mut buffer_node = dml.get_mut(link.buffer_mut().get_mut(), d_id).unwrap();
+                    let child_idx = nvminternal.idx(key.borrow());
+                    let size_delta =
+                        buffer_node.insert(key, msg, msg_action, storage_preference, dml, d_id);
+                    nvminternal.after_insert_size_delta(child_idx, size_delta);
+                    size_delta
                 }
-                Inner::ChildBuffer(_) => todo!(),
+                Inner::ChildBuffer(ref mut buffer) => buffer.insert(key, keyinfo, msg, msg_action),
             })
     }
 
