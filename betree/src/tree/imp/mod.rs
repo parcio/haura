@@ -429,9 +429,12 @@ where
             None => Ok(None),
             Some((info, data)) => {
                 let mut tmp = Some(data);
+                dbg!(prefetch_queue.len());
+                dbg!(&unordered_msgs);
 
-                // Since due to prefetching we don't know if the messages are in
-                // the correct order we reorder them at this point.
+                // Since due to possible prefetching we don't know if the
+                // messages are in the correct order we reorder them at this
+                // point.
                 let mut offline_msgs = VecDeque::from(unordered_msgs);
                 for prefetch in prefetch_queue.into_iter() {
                     match prefetch {
@@ -439,7 +442,11 @@ where
                             let buffer = self.dml.finish_prefetch(prefetch)?;
                             let _ = buffer.get(key, &mut msgs);
                         }
-                        Event::Done => msgs.push(offline_msgs.pop_front().unwrap()),
+                        Event::Done => {
+                            if let Some(msg) = offline_msgs.pop_front() {
+                                msgs.push(msg);
+                            }
+                        }
                     }
                 }
 

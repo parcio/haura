@@ -333,7 +333,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
             Internal(ref internal) => internal.size() > MAX_INTERNAL_NODE_SIZE,
             NVMLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
-            NVMInternal(ref nvminternal) => nvminternal.size() > MAX_INTERNAL_NODE_SIZE,
+            NVMInternal(ref nvminternal) => nvminternal.logical_size() > MAX_INTERNAL_NODE_SIZE,
             Inner::ChildBuffer(_) => unreachable!(),
         }
     }
@@ -837,7 +837,7 @@ impl<N: HasStoragePreference> Node<N> {
             NVMInternal(ref mut nvminternal) => Some(Box::new(
                 nvminternal
                     .iter_mut()
-                    .map(|child| child.ptr_mut().get_mut()),
+                    .flat_map(|child| child.iter_mut().map(|p| p.get_mut())),
             )),
             // NOTE: This returns none as it is not necessarily harmful to write
             // it back as no consistency constraints have to be met.

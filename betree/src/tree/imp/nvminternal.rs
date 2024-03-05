@@ -62,6 +62,10 @@ impl<N> ChildLink<N> {
     pub fn ptr(&self) -> &RwLock<N> {
         &self.ptr
     }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RwLock<N>> {
+        [&mut self.buffer, &mut self.ptr].into_iter()
+    }
 }
 
 impl<N> std::fmt::Debug for NVMInternalNode<N> {
@@ -86,9 +90,7 @@ pub(super) struct InternalNodeMetaData {
 const INTERNAL_BINCODE_STATIC: usize = 4 + 8;
 impl<N: StaticSize> Size for NVMInternalNode<N> {
     fn size(&self) -> usize {
-        dbg!(self.meta_data.size())
-            + self.children.len() * N::static_size() * 2
-            + INTERNAL_BINCODE_STATIC
+        self.meta_data.size() + self.children.len() * N::static_size() * 2 + INTERNAL_BINCODE_STATIC
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -651,23 +653,17 @@ where
     {
         let child_idx = {
             let size = self.size();
-            let fanout = self.fanout();
-
-            let mut child_idx;
-            let ref child: _;
-
-            (child_idx, child) = self
+            let (child_idx, child) = self
                 .meta_data
                 .entries_sizes
                 .iter()
                 .enumerate()
                 .max()
                 .unwrap();
-
             debug!("Largest child's buffer size: {}", child);
 
             if *child >= min_flush_size
-                && (size - *child <= max_node_size || fanout < 2 * min_fanout)
+                && (size - *child <= max_node_size || self.fanout() < 2 * min_fanout)
             {
                 Some(child_idx)
             } else {
@@ -872,6 +868,7 @@ impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
     }
 }
 
+#[cfg(test)]
 pub(crate) use tests::Key as TestKey;
 
 #[cfg(test)]
