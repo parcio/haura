@@ -429,8 +429,6 @@ where
             None => Ok(None),
             Some((info, data)) => {
                 let mut tmp = Some(data);
-                dbg!(prefetch_queue.len());
-                dbg!(&unordered_msgs);
 
                 // Since due to possible prefetching we don't know if the
                 // messages are in the correct order we reorder them at this

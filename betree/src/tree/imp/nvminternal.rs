@@ -279,8 +279,6 @@ impl<N> NVMInternalNode<N> {
         // let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
         let bytes_meta_data = bincode::serialize(&self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        dbg!(bytes_meta_data.len());
-        dbg!(self.children.len());
 
         w.write_all(&(bytes_meta_data.len() as u32).to_le_bytes())?;
         w.write_all(&bytes_meta_data.as_ref())?;
