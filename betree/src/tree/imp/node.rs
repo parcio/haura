@@ -125,7 +125,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
             Internal(ref internal) => internal.current_preference(),
             NVMLeaf(ref nvmleaf) => nvmleaf.current_preference(),
             NVMInternal(ref nvminternal) => nvminternal.current_preference(),
-            ChildBuffer(ref cbuf) => todo!(),
+            ChildBuffer(ref cbuf) => cbuf.current_preference(),
         }
     }
 
@@ -138,7 +138,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
             Internal(ref internal) => internal.recalculate(),
             NVMLeaf(ref nvmleaf) => nvmleaf.recalculate(),
             NVMInternal(ref nvminternal) => nvminternal.recalculate(),
-            ChildBuffer(ref cbuf) => todo!(),
+            ChildBuffer(ref cbuf) => cbuf.recalculate(),
         }
     }
 
@@ -150,7 +150,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
             Internal(ref int) => int.system_storage_preference(),
             NVMLeaf(ref nvmleaf) => nvmleaf.system_storage_preference(),
             NVMInternal(ref nvminternal) => nvminternal.system_storage_preference(),
-            ChildBuffer(ref cbuf) => todo!(),
+            ChildBuffer(ref cbuf) => cbuf.system_storage_preference(),
         }
     }
 
@@ -165,7 +165,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
             Internal(ref mut int) => int.set_system_storage_preference(pref),
             NVMLeaf(ref mut nvmleaf) => nvmleaf.set_system_storage_preference(pref),
             NVMInternal(ref mut nvminternal) => nvminternal.set_system_storage_preference(pref),
-            ChildBuffer(ref mut cbuf) => todo!(),
+            ChildBuffer(ref mut cbuf) => cbuf.set_system_storage_preference(pref),
         }
     }
 }
@@ -189,12 +189,12 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             }
             NVMInternal(ref nvminternal) => {
                 debug!("NVMInternal node packed successfully");
-
-                Ok(())
+                writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
+                nvminternal.pack(writer)
             }
             ChildBuffer(ref cbuf) => {
                 writer.write_all((NodeInnerType::ChildBuffer as u32).to_be_bytes().as_ref())?;
-                todo!()
+                cbuf.pack(writer)
             }
         }
     }
@@ -232,7 +232,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 size,
             )?)))
         } else if data[0..4] == (NodeInnerType::ChildBuffer as u32).to_be_bytes() {
-            todo!()
+            Ok(Node(ChildBuffer(NVMChildBuffer::unpack(&data[4..])?)))
         } else {
             panic!(
                 "Unkown bytes to unpack. [0..4]: {}",
@@ -467,7 +467,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
     where
         F: Fn(Self, LocalPivotKey) -> N,
     {
-        let mut isnvm = match self.0 {
+        let isnvm = match self.0 {
             PackedLeaf(_) | Leaf(_) | Internal(_) => false,
             NVMLeaf(_) | NVMInternal(_) => true,
             Inner::ChildBuffer(_) => unreachable!(),
@@ -490,13 +490,11 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                 (Node(Internal(right_sibling)), pivot_key, internal.level())
             }
             NVMLeaf(ref mut nvmleaf) => {
-                isnvm = true;
                 let (right_sibling, pivot_key, _, _pk) =
                     nvmleaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
                 (Node(NVMLeaf(right_sibling)), pivot_key, 0)
             }
             NVMInternal(ref mut nvminternal) => {
-                isnvm = true;
                 let (right_sibling, pivot_key, _, _pk) = nvminternal.split();
                 (
                     Node(NVMInternal(right_sibling)),
@@ -841,7 +839,9 @@ impl<N: HasStoragePreference> Node<N> {
                     .iter_mut()
                     .map(|child| child.ptr_mut().get_mut()),
             )),
-            Inner::ChildBuffer(_) => unreachable!(),
+            // NOTE: This returns none as it is not necessarily harmful to write
+            // it back as no consistency constraints have to be met.
+            Inner::ChildBuffer(_) => None,
         }
     }
 

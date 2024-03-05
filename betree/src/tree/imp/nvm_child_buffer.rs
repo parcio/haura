@@ -46,20 +46,10 @@ pub(super) struct NVMChildBuffer {
     // horrifyingly slow.
     //
     // parent_preference: AtomicStoragePreference,
-    buffer_entries_size: usize,
+    entries_size: usize,
     #[with(rkyv::with::AsVec)]
     pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
-    //#[serde(with = "ser_np")]
-    // #[with(EncodeNodePointer)]
-    // pub(super) node_pointer: RwLock<N>,
 }
-
-/*impl Size for (KeyInfo, SlicedCowBytes) {
-    fn size(&self) -> usize {
-        let (_keyinfo, data) = self;
-        KeyInfo::static_size() + data.size()
-    }
-}*/
 
 impl HasStoragePreference for NVMChildBuffer {
     fn current_preference(&self) -> Option<StoragePreference> {
@@ -104,26 +94,22 @@ impl HasStoragePreference for NVMChildBuffer {
 
 impl Size for NVMChildBuffer {
     fn size(&self) -> usize {
-        self.buffer_entries_size
+        // FIXME: This is a magic bincode offset for vector length and storage prefs sizes
+        18 + self
+            .buffer
+            .iter()
+            .map(|(key, msg)| key.size() + msg.size())
+            .sum::<usize>()
     }
 
     fn actual_size(&self) -> Option<usize> {
-        Some(
-            self.buffer
-                .iter()
-                .map(|(key, msg)| key.size() + msg.size())
-                .sum::<usize>(),
-        )
+        Some(self.size())
     }
 }
 
 impl NVMChildBuffer {
-    pub fn static_size() -> usize {
-        panic!()
-    }
-
     pub fn buffer_size(&self) -> usize {
-        self.buffer_entries_size
+        self.entries_size
     }
 
     /// Returns whether there is no message in this buffer for the given `key`.
@@ -156,26 +142,26 @@ impl NVMChildBuffer {
         self.messages_preference.invalidate();
         (
             std::mem::take(&mut self.buffer),
-            replace(&mut self.buffer_entries_size, 0),
+            replace(&mut self.entries_size, 0),
         )
     }
 
     pub fn append(&mut self, other: &mut Self) {
         self.buffer.append(&mut other.buffer);
-        self.buffer_entries_size += other.buffer_entries_size;
+        self.entries_size += other.entries_size;
         self.messages_preference
             .upgrade_atomic(&other.messages_preference);
     }
 
-    /// Splits this `NVMChildBuffer` at `pivot`
-    /// so that `self` contains all entries up to (and including) `pivot_key`
-    /// and the returned `Self` contains the other entries and `node_pointer`.
+    /// Splits this `NVMChildBuffer` at `pivot` so that `self` contains all
+    /// entries up to (and including) `pivot_key` and the returned `Self`
+    /// contains the other entries.
     pub fn split_at(&mut self, pivot: &CowBytes) -> Self {
         let (buffer, buffer_entries_size) = self.split_off(pivot);
         NVMChildBuffer {
             messages_preference: AtomicStoragePreference::unknown(),
             buffer,
-            buffer_entries_size,
+            entries_size: buffer_entries_size,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
         }
     }
@@ -194,7 +180,7 @@ impl NVMChildBuffer {
             .iter()
             .map(|(key, value)| key.size() + value.size())
             .sum();
-        self.buffer_entries_size -= right_entry_size;
+        self.entries_size -= right_entry_size;
         (right_buffer, right_entry_size)
     }
 
@@ -202,7 +188,7 @@ impl NVMChildBuffer {
         self.append(right_sibling);
         let (buffer, buffer_entries_size) = self.split_off(new_pivot_key);
         right_sibling.buffer = buffer;
-        right_sibling.buffer_entries_size = buffer_entries_size;
+        right_sibling.entries_size = buffer_entries_size;
     }
 
     /// Inserts a message to this buffer for the given `key`.
@@ -226,7 +212,7 @@ impl NVMChildBuffer {
             Entry::Vacant(e) => {
                 let size_delta = key_size + msg.size() + keyinfo.size();
                 e.insert((keyinfo, msg));
-                self.buffer_entries_size += size_delta;
+                self.entries_size += size_delta;
                 size_delta as isize
             }
             Entry::Occupied(mut e) => {
@@ -236,8 +222,8 @@ impl NVMChildBuffer {
                 let merged_msg = msg_action.merge(&key, msg, lower_msg);
                 let merged_msg_size = merged_msg.size();
                 e.get_mut().1 = merged_msg;
-                self.buffer_entries_size -= lower_size;
-                self.buffer_entries_size += merged_msg_size;
+                self.entries_size -= lower_size;
+                self.entries_size += merged_msg_size;
                 merged_msg_size as isize - lower_size as isize
             }
         }
@@ -248,9 +234,22 @@ impl NVMChildBuffer {
         NVMChildBuffer {
             messages_preference: AtomicStoragePreference::known(StoragePreference::NONE),
             buffer: BTreeMap::new(),
-            buffer_entries_size: 0,
+            entries_size: 0,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
         }
+    }
+
+    pub fn pack<W>(&self, w: W) -> Result<(), std::io::Error>
+    where
+        W: std::io::Write,
+    {
+        bincode::serialize_into(w, self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    pub fn unpack(buf: &[u8]) -> Result<Self, std::io::Error> {
+        bincode::deserialize(buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -279,7 +278,7 @@ impl NVMChildBuffer {
         for key in keys {
             self.buffer.remove(&key);
         }
-        self.buffer_entries_size -= size_delta;
+        self.entries_size -= size_delta;
         self.messages_preference.invalidate();
         size_delta
     }
@@ -288,16 +287,18 @@ impl NVMChildBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{arbitrary::GenExt, tree::default_message_action::DefaultMessageActionMsg};
-    //use bincode::serialized_size;
-    use quickcheck::{Arbitrary, Gen};
+    use crate::{
+        arbitrary::GenExt,
+        tree::{default_message_action::DefaultMessageActionMsg, imp::child_buffer},
+    };
+    use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
 
     impl Clone for NVMChildBuffer {
         fn clone(&self) -> Self {
             NVMChildBuffer {
                 messages_preference: self.messages_preference.clone(),
-                buffer_entries_size: self.buffer_entries_size,
+                entries_size: self.entries_size,
                 buffer: self.buffer.clone(),
                 system_storage_preference: self.system_storage_preference.clone(),
             }
@@ -306,7 +307,7 @@ mod tests {
 
     impl PartialEq for NVMChildBuffer {
         fn eq(&self, other: &Self) -> bool {
-            self.buffer_entries_size == other.buffer_entries_size && self.buffer == other.buffer
+            self.entries_size == other.entries_size && self.buffer == other.buffer
         }
     }
 
@@ -317,7 +318,7 @@ mod tests {
             let buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> = (0..entries_cnt)
                 .map(|_| {
                     (
-                        CowBytes::arbitrary(g),
+                        super::super::nvminternal::TestKey::arbitrary(g).0,
                         (
                             KeyInfo::arbitrary(g),
                             DefaultMessageActionMsg::arbitrary(g).0,
@@ -327,7 +328,7 @@ mod tests {
                 .collect();
             NVMChildBuffer {
                 messages_preference: AtomicStoragePreference::unknown(),
-                buffer_entries_size: buffer
+                entries_size: buffer
                     .iter()
                     .map(|(key, value)| key.size() + value.size())
                     .sum::<usize>(),
@@ -339,86 +340,63 @@ mod tests {
         }
     }
 
-    fn serialized_size(child_buffer: &NVMChildBuffer) -> Option<usize> {
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data.serialize_value(child_buffer).unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
-
-        Some(bytes_data.len())
+    fn check_size(child_buffer: &NVMChildBuffer) {
+        let mut buf = Vec::new();
+        child_buffer.pack(&mut buf).unwrap();
+        assert_eq!(buf.len(), child_buffer.size())
     }
 
     #[quickcheck]
-    fn check_serialize_size(child_buffer: NVMChildBuffer) {
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data.serialize_value(&child_buffer).unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
-
-        let archivedleafnodedata =
-            rkyv::check_archived_root::<NVMChildBuffer>(&bytes_data).unwrap();
-        let data: NVMChildBuffer = archivedleafnodedata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            .unwrap();
-
-        assert_eq!(child_buffer, data);
-
-        /* TODO: Fix it.. For the time being the above code is used to fullfil the task.
-        assert_eq!(
-            child_buffer.actual_size().unwrap(),
-            serialized_size(&child_buffer).unwrap() as usize
-        );
-
-        assert_eq!(Some(child_buffer.size()), child_buffer.actual_size());
-        */
+    fn actual_size(child_buffer: NVMChildBuffer) {
+        check_size(&child_buffer)
     }
 
     #[quickcheck]
-    fn check_size_split_at(mut child_buffer: NVMChildBuffer, pivot_key: CowBytes) {
-        let size_before = child_buffer.size();
-        let sibling = child_buffer.split_at(&pivot_key);
-
-        // TODO: Fix it.. For the time being the code at the bottom is used to fullfil the task.
-        /*assert_eq!(
-            child_buffer.size(),
-            serialized_size(&child_buffer).unwrap() as usize
-        );
-        assert_eq!(sibling.size(), serialized_size(&sibling).unwrap() as usize);
-        assert_eq!(
-            child_buffer.size() + sibling.buffer_entries_size,
-            size_before
-        );
-        */
-
-        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        serializer_data.serialize_value(&sibling).unwrap();
-        let bytes_data = serializer_data.into_serializer().into_inner();
-
-        let archivedleafnodedata =
-            rkyv::check_archived_root::<NVMChildBuffer>(&bytes_data).unwrap();
-        let data: NVMChildBuffer = archivedleafnodedata
-            .deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            .unwrap();
-
-        assert_eq!(sibling, data);
+    fn size_split_at(mut child_buffer: NVMChildBuffer, pivot_key: CowBytes) {
+        let sbl = child_buffer.split_at(&pivot_key);
+        check_size(&child_buffer);
+        assert!(child_buffer.checked_size().is_ok());
+        check_size(&sbl);
+        assert!(sbl.checked_size().is_ok());
     }
 
     #[quickcheck]
-    fn check_split_at(mut child_buffer: NVMChildBuffer, pivot_key: CowBytes) {
-        let this = child_buffer.clone();
-        let mut sibling = child_buffer.split_at(&pivot_key);
+    fn split_at(mut child_buffer: NVMChildBuffer, pivot_key: CowBytes) {
+        let sbl = child_buffer.split_at(&pivot_key);
         assert!(child_buffer
             .buffer
-            .iter()
-            .next_back()
-            .map_or(true, |(key, _value)| key.clone() <= pivot_key));
-        assert!(sibling
+            .last_key_value()
+            .map(|(k, _)| *k <= pivot_key)
+            .unwrap_or(true));
+        assert!(sbl
             .buffer
-            .iter()
-            .next()
-            .map_or(true, |(key, _value)| key.clone() > pivot_key));
-        let (mut buffer, _) = child_buffer.take();
-        buffer.append(&mut sibling.take().0);
-        assert_eq!(this.buffer, buffer);
+            .first_key_value()
+            .map(|(k, _)| *k > pivot_key)
+            .unwrap_or(true));
+    }
+
+    #[quickcheck]
+    fn append(mut child_buffer: NVMChildBuffer) -> TestResult {
+        if child_buffer.buffer.len() < 4 {
+            return TestResult::discard();
+        }
+        let before_size = child_buffer.size();
+        let pivot = child_buffer.buffer.iter().nth(3).unwrap().0.clone();
+
+        let mut other = child_buffer.split_at(&pivot);
+        child_buffer.append(&mut other);
+
+        assert_eq!(before_size, child_buffer.size());
+
+        TestResult::passed()
+    }
+
+    #[quickcheck]
+    fn serialize_then_deserialize(child_buffer: NVMChildBuffer) {
+        let mut buf = Vec::new();
+        child_buffer.pack(&mut buf).unwrap();
+
+        let other = NVMChildBuffer::unpack(&buf).unwrap();
+        assert_eq!(other, child_buffer)
     }
 }
