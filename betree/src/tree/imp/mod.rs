@@ -262,7 +262,6 @@ where
         &self,
         pivot: &PivotKey,
     ) -> Result<Option<X::CacheValueRef>, Error> {
-        let pivot = pivot.borrow();
         let mut node = self.get_root_node()?;
         Ok(loop {
             let next_node = match node.pivot_get(pivot) {
@@ -279,7 +278,6 @@ where
         &self,
         pivot: &PivotKey,
     ) -> Result<Option<X::CacheValueRefMut>, Error> {
-        let pivot = pivot.borrow();
         let mut node = self.get_mut_root_node()?;
         Ok(loop {
             let next_node = match node.pivot_get_mut(pivot) {
@@ -391,7 +389,6 @@ where
     ) -> Result<Option<(KeyInfo, SlicedCowBytes)>, Error> {
         let key = key.borrow();
         let mut msgs = Vec::new();
-        let mut node = self.get_root_node()?;
         let mut prefetch_queue = vec![];
 
         enum Event<N> {
@@ -401,6 +398,7 @@ where
 
         let mut unordered_msgs = Vec::new();
 
+        let mut node = self.get_root_node()?;
         let data = loop {
             let mut prefetching = false;
             let next_node = match node.get(key, &mut unordered_msgs) {
@@ -410,7 +408,8 @@ where
                     if let Some(prefetch) = self.dml.prefetch(&buffer.read())? {
                         prefetch_queue.push(Event::Fetching(prefetch));
                         prefetching = true;
-                    } else {
+                    }
+                    if !prefetching {
                         let buffer = self.get_node(buffer)?;
                         buffer.get(key, &mut unordered_msgs);
                     }

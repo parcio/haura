@@ -418,7 +418,7 @@ impl<N> NVMInternalNode<N> {
         key: &[u8],
         left_pivot_key: &mut Option<CowBytes>,
         right_pivot_key: &mut Option<CowBytes>,
-        all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
+        _all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
     ) -> &RwLock<N> {
         let idx = self.idx(key);
         if idx > 0 {
@@ -428,90 +428,12 @@ impl<N> NVMInternalNode<N> {
             *right_pivot_key = Some(self.meta_data.pivot[idx].clone());
         }
         &self.children[idx].ptr
-        // for (key, msg) in child.get_all_messages() {
-        //     all_msgs
-        //         .entry(key.clone())
-        //         .or_insert_with(Vec::new)
-        //         .push(msg.clone());
-        // }
     }
 
     pub fn get_next_node(&self, key: &[u8]) -> Option<&RwLock<N>> {
         let idx = self.idx(key) + 1;
         self.children.get(idx).map(|l| &l.ptr)
     }
-
-    // FIXME: Since the Partitioned Node does not really handle request we might
-    // want to consider taking another route for insertions in their buffers.
-    //
-    // For now we perform an add size after the buffer delta was given back to us in the node code :/
-    //
-    //  pub fn insert<Q, M>(
-    //      &mut self,
-    //      key: Q,
-    //      keyinfo: KeyInfo,
-    //      msg: SlicedCowBytes,
-    //      msg_action: M,
-    //  ) -> isize
-    //  where
-    //      Q: Borrow<[u8]> + Into<CowBytes>,
-    //      M: MessageAction,
-    //      N: ObjectReference,
-    //  {
-    //      self.meta_data.pref.invalidate();
-    //      let idx = self.idx(key.borrow());
-
-    //      let added_size = self
-    //          .data
-    //          .write()
-    //          .as_mut()
-    //          .unwrap()
-    //          .as_mut()
-    //          .unwrap()
-    //          .children[idx]
-    //          .as_mut()
-    //          .unwrap()
-    //          .insert(key, keyinfo, msg, msg_action);
-
-    //      if added_size > 0 {
-    //          self.meta_data.entries_size += added_size as usize;
-    //      } else {
-    //          self.meta_data.entries_size -= -added_size as usize;
-    //      }
-    //      added_size
-    //  }
-
-    // pub fn insert_msg_buffer<I, M>(&mut self, iter: I, msg_action: M) -> isize
-    // where
-    //     I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
-    //     M: MessageAction,
-    //     N: ObjectReference,
-    // {
-    //     self.meta_data.pref.invalidate();
-    //     let mut added_size = 0;
-
-    //     for (k, (keyinfo, v)) in iter.into_iter() {
-    //         let idx = self.idx(&k);
-    //         added_size += self
-    //             .data
-    //             .write()
-    //             .as_mut()
-    //             .unwrap()
-    //             .as_mut()
-    //             .unwrap()
-    //             .children[idx]
-    //             .as_mut()
-    //             .unwrap()
-    //             .insert(k, keyinfo, v, &msg_action);
-    //     }
-
-    //     if added_size > 0 {
-    //         self.meta_data.entries_size += added_size as usize;
-    //     } else {
-    //         self.meta_data.entries_size -= -added_size as usize;
-    //     }
-    //     added_size
-    // }
 
     pub fn drain_children(&mut self) -> impl Iterator<Item = ChildLink<N>> + '_
     where
