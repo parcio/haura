@@ -201,7 +201,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
     fn unpack_at(
         size: crate::vdev::Block<u32>,
-        checksum: crate::checksum::XxHash,
         pool: RootSpu,
         offset: DiskOffset,
         d_id: DatasetId,
@@ -228,7 +227,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 &data[4..],
                 pool,
                 offset,
-                checksum,
                 size,
             )?)))
         } else if data[0..4] == (NodeInnerType::ChildBuffer as u32).to_be_bytes() {

@@ -40,9 +40,6 @@ pub(super) struct NVMLeafNode {
     // NOTE: Use for now, non-blocking would be nicer.
     state: NVMLeafNodeState,
     meta_data: NVMLeafNodeMetaData,
-    // FIXME: Actual check the node hash, this can be either done when data is
-    // anyway read entirely or on a per-entry base.
-    checksum: Option<crate::checksum::XxHash>,
     nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
 }
 
@@ -108,10 +105,9 @@ impl StaticSize for Location {
 }
 
 fn unpack_entry(data: &[u8]) -> (KeyInfo, SlicedCowBytes) {
-    (
-        KeyInfo::unpack(&data[0..1]),
-        CowBytes::from(&data[1..]).into(),
-    )
+    (KeyInfo::unpack(&data[0..1]), unsafe {
+        SlicedCowBytes::from_raw(data[1..].as_ptr(), data[1..].len())
+    })
 }
 
 fn pack_entry<W: Write>(
@@ -486,7 +482,6 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
                 entries_size,
             },
             state: NVMLeafNodeState::Deserialized { data: entries },
-            checksum: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -508,7 +503,6 @@ impl NVMLeafNode {
                 entries_size: 0,
             },
             state: NVMLeafNodeState::new(),
-            checksum: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -569,7 +563,6 @@ impl NVMLeafNode {
         data: &[u8],
         pool: RootSpu,
         offset: DiskOffset,
-        checksum: crate::checksum::XxHash,
         _size: Block<u32>,
     ) -> Result<Self, std::io::Error> {
         let meta_data_len: usize = u32::from_le_bytes(
@@ -625,7 +618,6 @@ impl NVMLeafNode {
                 data: vec![OnceLock::new(); keys.len()],
                 keys,
             },
-            checksum: Some(checksum),
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: true,
                 time_for_nvm_last_fetch: SystemTime::now(),
@@ -810,7 +802,6 @@ impl NVMLeafNode {
                 entries_size: 0,
             },
             state: NVMLeafNodeState::new(),
-            checksum: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -998,14 +989,9 @@ mod tests {
         let pool = crate::database::RootSpu::new(&config).unwrap();
         let csum = XxHashBuilder.build().finish();
 
-        let _node = NVMLeafNode::unpack(
-            &bytes,
-            pool,
-            DiskOffset::from_u64(0),
-            csum,
-            crate::vdev::Block(4),
-        )
-        .unwrap();
+        let _node =
+            NVMLeafNode::unpack(&bytes, pool, DiskOffset::from_u64(0), crate::vdev::Block(4))
+                .unwrap();
     }
 
     #[quickcheck]
@@ -1091,14 +1077,9 @@ mod tests {
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config).unwrap();
         let csum = XxHashBuilder.build().finish();
-        let mut wire_node = NVMLeafNode::unpack(
-            &buf,
-            pool,
-            DiskOffset::from_u64(0),
-            csum,
-            crate::vdev::Block(0),
-        )
-        .unwrap();
+        let mut wire_node =
+            NVMLeafNode::unpack(&buf, pool, DiskOffset::from_u64(0), crate::vdev::Block(0))
+                .unwrap();
         wire_node.state.set_data(&buf.leak()[foo..]);
 
         for (key, v) in kvs.into_iter() {

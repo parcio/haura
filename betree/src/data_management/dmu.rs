@@ -307,7 +307,6 @@ where
             let data = decompression_state.decompress(compressed_data)?;
             Object::unpack_at(
                 op.size(),
-                op.checksum().clone().into(),
                 self.pool.clone().into(),
                 op.offset(),
                 op.info(),
@@ -1070,7 +1069,6 @@ where
                 .decompress(compressed_data)?;
             Object::unpack_at(
                 ptr.size(),
-                ptr.checksum().clone().into(),
                 self.pool.clone().into(),
                 ptr.offset(),
                 ptr.info(),

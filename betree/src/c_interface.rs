@@ -73,7 +73,7 @@ impl From<SlicedCowBytes> for byte_slice_t {
     fn from(x: SlicedCowBytes) -> Self {
         let ptr = &x[..] as *const [u8] as *const u8 as *const c_char;
         let len = x.len() as c_uint;
-        let arc = Arc::into_raw(x.data.inner) as *const byte_slice_rc_t;
+        let arc = x.into_raw() as *const byte_slice_rc_t;
         byte_slice_t { ptr, len, arc }
     }
 }

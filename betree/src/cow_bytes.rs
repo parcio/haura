@@ -295,13 +295,40 @@ impl<'a> Extend<&'a u8> for CowBytes {
 }
 
 /// Reference-counted pointer which points to a subslice of the referenced data.
-#[derive(Debug, Default, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
+#[derive(Debug, Default, Clone)]
 pub struct SlicedCowBytes {
-    pub(super) data: CowBytes,
+    pub(super) data: ByteSource,
     pos: u32,
     len: u32,
 }
+
+#[derive(Debug, Clone)]
+enum ByteSource {
+    Cow(CowBytes),
+    Raw { ptr: *const u8, len: usize },
+}
+
+impl Deref for ByteSource {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ByteSource::Cow(data) => &data,
+            ByteSource::Raw { ptr, len } => unsafe {
+                std::slice::from_raw_parts(ptr.clone(), *len)
+            },
+        }
+    }
+}
+
+impl Default for ByteSource {
+    fn default() -> Self {
+        Self::Cow(CowBytes::default())
+    }
+}
+
+unsafe impl Send for ByteSource {}
+unsafe impl Sync for ByteSource {}
 
 impl PartialEq for SlicedCowBytes {
     fn eq(&self, other: &Self) -> bool {
@@ -358,6 +385,24 @@ impl SlicedCowBytes {
             len: self.len - pos,
         }
     }
+
+    pub(crate) fn into_raw(self) -> *const Vec<u8> {
+        match self.data {
+            ByteSource::Cow(data) => Arc::into_raw(data.inner),
+            ByteSource::Raw { ptr, len } => unsafe {
+                let buf = Vec::with_capacity(len);
+                &buf
+            },
+        }
+    }
+
+    pub(crate) unsafe fn from_raw(ptr: *const u8, len: usize) -> Self {
+        Self {
+            data: ByteSource::Raw { ptr, len },
+            pos: 0,
+            len: len.try_into().expect("Capacity to large."),
+        }
+    }
 }
 
 impl From<CowBytes> for SlicedCowBytes {
@@ -365,7 +410,7 @@ impl From<CowBytes> for SlicedCowBytes {
         SlicedCowBytes {
             pos: 0,
             len: data.len() as u32,
-            data,
+            data: ByteSource::Cow(data),
         }
     }
 }

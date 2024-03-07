@@ -33,9 +33,7 @@ pub struct NodePointerResolver {
 }
 
 /// A buffer for messages that belong to a child of a tree node.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
-#[archive(check_bytes)]
-//#[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub(super) struct NVMChildBuffer {
     pub(super) messages_preference: AtomicStoragePreference,
     //#[serde(skip)]
@@ -47,7 +45,6 @@ pub(super) struct NVMChildBuffer {
     //
     // parent_preference: AtomicStoragePreference,
     entries_size: usize,
-    #[with(rkyv::with::AsVec)]
     pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
 }
 

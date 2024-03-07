@@ -119,7 +119,6 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Unpacks the object from the given `data`.
     fn unpack_at(
         size: crate::vdev::Block<u32>,
-        checksum: crate::checksum::XxHash,
         pool: RootSpu,
         disk_offset: DiskOffset,
         d_id: DatasetId,
