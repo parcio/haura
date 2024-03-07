@@ -381,9 +381,8 @@ unsafe extern "C" fn backend_iterate(
 
 static mut BETREE_BACKEND: JBackend = JBackend {
     type_: JBackendType::J_BACKEND_TYPE_OBJECT,
-    component: JBackendComponent::J_BACKEND_COMPONENT_SERVER
-        | JBackendComponent::J_BACKEND_COMPONENT_CLIENT
-        | JBackendComponent::J_BACKEND_COMPONENT_NOT_UNLOADABLE,
+    component: JBackendComponent::J_BACKEND_COMPONENT_SERVER,
+    flags: JBackendFlags::J_BACKEND_FLAGS_DO_NOT_UNLOAD,
     data: ptr::null_mut(),
     anon1: JBackend__bindgen_ty_1 {
         object: JBackend__bindgen_ty_1__bindgen_ty_1 {
