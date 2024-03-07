@@ -66,9 +66,9 @@ enum NVMLeafNodeState {
         // nodes when multiple keys are fetched from the same node, for example
         // when prefetching keys in an object. We should test if this in-node
         // parallelism brings some advantages.
-        //
-        // TODO: Fetch keys initially in serial manner.
-        data: BTreeMap<CowBytes, (Location, OnceLock<(KeyInfo, SlicedCowBytes)>)>,
+        // data: BTreeMap<CowBytes, (Location, OnceLock<(KeyInfo, SlicedCowBytes)>)>,
+        keys: Vec<(CowBytes, Location)>,
+        data: Vec<OnceLock<(KeyInfo, SlicedCowBytes)>>,
     },
     /// Only from this state a node may be serialized again.
     Deserialized {
@@ -153,20 +153,19 @@ impl NVMLeafNodeState {
     /// Transition a node from "partially in memory" to "deserialized".
     pub fn upgrade(&mut self) -> Result<(), NVMLeafError> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, .. } => {
-                if data.iter().filter(|x| x.1 .1.get().is_some()).count() < data.len() {
+            NVMLeafNodeState::PartiallyLoaded { data, keys, .. } => {
+                if data.iter().filter(|x| x.get().is_some()).count() < data.len() {
                     return Err(NVMLeafError::AttemptedInvalidTransition);
                 }
-                // NOTE: Empty BTreeMaps don't induce any allocations so that is cheap.
-                let data = std::mem::replace(data, BTreeMap::new());
-                std::mem::replace(
-                    self,
-                    NVMLeafNodeState::Deserialized {
-                        data: BTreeMap::from_iter(
-                            data.into_iter().map(|mut e| (e.0, e.1 .1.take().unwrap())),
-                        ),
-                    },
-                );
+
+                let other = NVMLeafNodeState::Deserialized {
+                    data: BTreeMap::from_iter(
+                        keys.into_iter()
+                            .zip(data.into_iter())
+                            .map(|e| (e.0 .0.clone(), e.1.take().unwrap())),
+                    ),
+                };
+                std::mem::replace(self, other);
                 Ok(())
             }
             NVMLeafNodeState::Deserialized { .. } => Err(NVMLeafError::AlreadyDeserialized),
@@ -194,8 +193,8 @@ impl NVMLeafNodeState {
     /// Note: This does not perform the transition to the "deserialized" state.
     pub fn fetch(&self) {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, .. } => {
-                for (k, _) in data.iter() {
+            NVMLeafNodeState::PartiallyLoaded { keys, .. } => {
+                for (k, _) in keys.iter() {
                     let _ = self.get(k);
                 }
             }
@@ -209,9 +208,12 @@ impl NVMLeafNodeState {
     /// storage. Memory is always preferred.
     pub fn get(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { buf, data } => data
-                .get(key)
-                .and_then(|e| Some(e.1.get_or_init(|| unpack_entry(&buf[e.0.range()])))),
+            NVMLeafNodeState::PartiallyLoaded { buf, data, keys } => keys
+                .binary_search_by(|e| e.0.as_ref().cmp(key))
+                .ok()
+                .and_then(|idx| {
+                    Some(data[idx].get_or_init(|| unpack_entry(&buf[keys[idx].1.range()])))
+                }),
             NVMLeafNodeState::Deserialized { data } => data.get(key),
         }
     }
@@ -219,7 +221,10 @@ impl NVMLeafNodeState {
     /// Returns an entry if it is located in memory.
     pub fn get_from_cache(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, .. } => data.get(key).and_then(|e| e.1.get()),
+            NVMLeafNodeState::PartiallyLoaded { data, keys, .. } => keys
+                .binary_search_by(|e| key.cmp(&e.0))
+                .ok()
+                .and_then(|idx| data[idx].get()),
             NVMLeafNodeState::Deserialized { data } => data.get(key),
         }
     }
@@ -256,9 +261,11 @@ impl NVMLeafNodeState {
     ) -> Option<impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator>
     {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, .. } => {
-                Some(data.iter().filter_map(|(k, v)| v.1.get().map(|e| (k, e))))
-            }
+            NVMLeafNodeState::PartiallyLoaded { data, keys, .. } => Some(
+                keys.iter()
+                    .zip(data.iter())
+                    .filter_map(|(k, v)| v.get().map(|e| (&k.0, e))),
+            ),
             NVMLeafNodeState::Deserialized { .. } => None,
         }
     }
@@ -592,7 +599,7 @@ impl NVMLeafNode {
                 off += 4;
                 let location = Location::unpack(&data[off..off + Location::static_size()]);
                 off += Location::static_size();
-                ks.push((location, CowBytes::from(&data[off..off + len])));
+                ks.push((CowBytes::from(&data[off..off + len]), location));
                 off += len;
             }
             ks
@@ -615,10 +622,8 @@ impl NVMLeafNode {
             meta_data,
             state: NVMLeafNodeState::PartiallyLoaded {
                 buf: raw_data,
-                data: keys
-                    .into_iter()
-                    .map(|(location, key)| (key, (location, OnceLock::new())))
-                    .collect(),
+                data: vec![OnceLock::new(); keys.len()],
+                keys,
             },
             checksum: Some(checksum),
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
