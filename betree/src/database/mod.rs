@@ -208,6 +208,7 @@ impl DatabaseConfiguration {
                 .collect_vec(),
             allocations: AtomicU64::new(0),
             old_root_allocation: SeqLock::new(None),
+            allocators: RwLock::new(HashMap::new()),
         }
     }
 
@@ -588,7 +589,7 @@ impl Database {
         Superblock::<ObjectPointer>::write_superblock(pool, &root_ptr, &info)?;
         pool.flush()?;
         let handler = self.root_tree.dmu().handler();
-        *handler.old_root_allocation.lock_write() = None;
+        *handler.old_root_allocation.lock_write() = Some((root_ptr.offset(), root_ptr.size()));
         handler.bump_generation();
         handler
             .root_tree_snapshot
