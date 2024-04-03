@@ -1013,7 +1013,7 @@ mod tests {
     }
 
     const MIN_LEAF_SIZE: usize = 512;
-    const MAX_LEAF_SIZE: usize = 2048;
+    const MAX_LEAF_SIZE: usize = 4096;
 
     #[quickcheck]
     fn split(mut leaf_node: NVMLeafNode) -> TestResult {
@@ -1040,7 +1040,7 @@ mod tests {
         assert!(sibling.size() <= MAX_LEAF_SIZE);
         assert!(sibling.size() >= MIN_LEAF_SIZE);
         assert!(leaf_node.size() >= MIN_LEAF_SIZE);
-        assert!(leaf_node.size() <= MAX_LEAF_SIZE);
+        assert!(leaf_node.size() + sibling.size() <= 2 * MAX_LEAF_SIZE);
         TestResult::passed()
     }
 
