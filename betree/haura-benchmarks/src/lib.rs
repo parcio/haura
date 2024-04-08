@@ -45,7 +45,7 @@ impl Control {
 
         cfg.access_mode = AccessMode::AlwaysCreateNew;
 
-        cfg.sync_interval_ms = Some(1000);
+        cfg.sync_interval_ms = None;
 
         cfg.metrics = Some(metrics::MetricsConfiguration {
             enabled: true,
@@ -103,11 +103,12 @@ impl KvClient {
         let mut keys = vec![];
         let mut value = vec![0u8; entry_size as usize];
         for idx in 0..entries {
-            let k = idx.to_le_bytes();
             self.rng.fill(&mut value[..]);
-            self.ds.insert(&k[..], &value);
+            let k = (idx as u64).to_be_bytes();
+            self.ds.insert(&k[..], &value).unwrap();
             keys.push(k);
         }
+        self.db.write().sync();
         keys
     }
 

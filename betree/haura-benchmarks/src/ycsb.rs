@@ -40,16 +40,17 @@ pub fn C(mut client: KvClient, size: u64) {
     let start = std::time::Instant::now();
     let mut total = 0;
 
-    while start.elapsed().as_secs() < 60 {
+    while start.elapsed().as_secs() < 50 {
         for _ in 0..100 {
-            client.ds.get(keys[dist.sample(&mut rng)]).unwrap();
+            client
+                .ds
+                .get(&keys[dist.sample(&mut rng) - 1][..])
+                .unwrap()
+                .unwrap();
             total += 1;
         }
     }
     let end = start.elapsed();
     println!("Achieved: {} ops/sec", total as f32 / end.as_secs_f32());
-    println!(
-        "          {} ms avg",
-        end.as_secs_f32() / total as f32 / 1000.
-    );
+    println!("          {} ns avg", end.as_nanos() / total);
 }
