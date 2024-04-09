@@ -76,8 +76,9 @@ pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
             total += t.join().unwrap();
         }
         let end = start.elapsed();
-        w.write_fmt(format_args!("{workers},{total},{}", end.as_nanos()))
+        w.write_fmt(format_args!("{workers},{total},{}\n", end.as_nanos()))
             .unwrap();
+        w.flush().unwrap();
         println!("Achieved: {} ops/sec", total as f32 / end.as_secs_f32());
         println!("          {} ns avg", end.as_nanos() / total);
     }
