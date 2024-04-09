@@ -11,6 +11,9 @@ def plot_c(path):
     # op / s
     first = data["ops"][0] / (data["time_ns"][0] / 10**9)
     second = data["ops"][1] / (data["time_ns"][1] / 10**9)
+    # in some cases in local tests the proper scaling behavior only happened
+    # with 2 or more threads, this is uncommon but can be easily checked like
+    # this to not make the optimal scaling curve entirely useless
     if first < second / 2:
         first = second / 2
     optimal_scaling = [x * first for x in data["threads"]]
