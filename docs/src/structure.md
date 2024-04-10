@@ -12,3 +12,4 @@ Implementation:
 Bindings:
 - [**julea-betree**](./julea-betree.md): Bindings exposed to be used by [JULEA](https://github.com/parcio/julea). Specifies a betree backend.
 - [**julea-sys**](./julea-sys.md): Generated bindings by bindgen for use in *julea-betree*.
+- [**fio-haura**](./fio-haura/mod.md): Engine for fio.

@@ -53,10 +53,7 @@ $ sudo pacman -Sy glib2 clang make libbson pkgconf
 To compile the bindings you'll need JULEA present and specify it's headers in your environemnt.
 
 ```sh
-# git clone https://github.com/parcio/julea.git
-# Support for seamless integration is not quite there yet in JULEA, we require a special fork
-$ git clone -b modules-conditional-unload https://github.com/tilpner/julea.git
-$ git clone https://github.com/parcio/haura.git
+$ git clone https://github.com/parcio/julea.git
 ```
 
 To build the complete _Haura_ project from this state, execute:
