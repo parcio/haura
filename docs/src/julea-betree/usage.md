@@ -17,11 +17,11 @@ have to set the appropriate flags for `julea-config`. The example below uses the
 user instance of haura as used in [bectl documentation](../bectl/usage.md).
 
 ```sh
-julea-config --user \                                   
+julea-config --user \
   --object-servers="$(hostname)" --kv-servers="$(hostname)" --db-servers="$(hostname)" \
-  --object-backend=betree --object-component=server --object-path="$HOME/.config/haura.json" \
-  --kv-backend=lmdb --kv-component=server --kv-path="/tmp/julea-$(id -u)/lmdb" \
-  --db-backend=sqlite --db-component=server --db-path="/tmp/julea-$(id -u)/sqlite"
+  --object-backend=betree --object-path="$HOME/.config/haura.json" \
+  --kv-backend=lmdb --kv-path="/tmp/julea-$(id -u)/lmdb" \
+  --db-backend=sqlite --db-path="/tmp/julea-$(id -u)/sqlite"
 ```
 
 ## Prepare the library
@@ -49,7 +49,7 @@ $ cp target/debug/libobject_betree.so $JULEA_BACKEND_PATH/libobject-betree.so
 
 ## Start JULEA
 
-To start now JULEA run
+To start JULEA, navigate back to it's directory and run
 
 ```sh
 $ ./scripts/setup.sh start
@@ -63,9 +63,12 @@ $ journalctl -e GLIB_DOMAIN=JULEA
 > On success this should look like this (some details will look different on
 > your machine):
 > ```
-> Nov 24 14:41:54 nicomedia julea-server[133661]: Initialized object backend betree.
-> Nov 24 14:41:54 nicomedia julea-server[133661]: Initialized kv backend lmdb.
-> Nov 24 14:41:54 nicomedia julea-server[133661]: Initialized db backend sqlite.
+> Apr 10 11:46:31 nicomedia julea-server[15742]: Loaded object backend betree.
+> Apr 10 11:46:32 nicomedia julea-server[15742]: Initialized object backend betree.
+> Apr 10 11:46:32 nicomedia julea-server[15742]: Loaded kv backend lmdb.
+> Apr 10 11:46:32 nicomedia julea-server[15742]: Initialized kv backend lmdb.
+> Apr 10 11:46:32 nicomedia julea-server[15742]: Loaded db backend sqlite.
+> Apr 10 11:46:32 nicomedia julea-server[15742]: Initialized db backend sqlite.
 > ```
 
 If everything worked fine so far you can run the JULEA test suite with

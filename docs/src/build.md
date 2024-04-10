@@ -29,17 +29,20 @@ bindings.
 ### Fedora/RHEL
 
 ```sh
-$ sudo dnf install glib2 glib2-devel libbson libbson-devel clang make pkgconf
+$ sudo dnf install glib2 glib2-devel libbson libbson-devel clang make pkgconf libpmem libpmem-devel
 ```
 
 ### Ubuntu/Debian/...
 
 ```sh
 $ sudo apt update
-$ sudo apt install libglib2.0-0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config
+$ sudo apt install libglib2.0-0 libglib2.0-dev libbson-1.0-0 libbson-dev clang make pkg-config libpmem1 libpmem-dev
 ```
 
 ### Arch Linux+
+
+> Arch Linux does not package libpmem, if you want to use it you may try the
+> AUR. Otherwise, compile without the `nvm` feature.
 
 ```sh
 $ sudo pacman -Sy glib2 clang make libbson pkgconf
@@ -53,10 +56,7 @@ $ sudo pacman -Sy glib2 clang make libbson pkgconf
 To compile the bindings you'll need JULEA present and specify it's headers in your environemnt.
 
 ```sh
-# git clone https://github.com/parcio/julea.git
-# Support for seamless integration is not quite there yet in JULEA, we require a special fork
-$ git clone -b modules-conditional-unload https://github.com/tilpner/julea.git
-$ git clone https://github.com/parcio/haura.git
+$ git clone https://github.com/parcio/julea.git
 ```
 
 To build the complete _Haura_ project from this state, execute:
