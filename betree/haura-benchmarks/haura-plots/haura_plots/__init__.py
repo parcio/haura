@@ -14,6 +14,7 @@ import subprocess
 from . import util
 from . import metrics_plots
 from . import cache_plots
+from . import ycsb_plots
 
 def sort_by_o_id(key):
     """
@@ -263,7 +264,12 @@ def main():
     # Prep the color scheme
     util.init_colormap()
 
+    ycsb_c = []
+
+    # Individual Plots
     for path in sys.argv[1:]:
+        if os.path.isfile(path):
+            continue
         with open(f"{path}/betree-metrics.jsonl", 'r', encoding="UTF-8") as metrics:
             data = util.read_jsonl(metrics)
         # Plot actions
@@ -274,7 +280,13 @@ def main():
         plot_object_distribution(path)
         metrics_plots.plot_system(path)
         cache_plots.plot_cache(data, path)
+        ycsb_c.append(ycsb_plots.plot_c(path))
         #plot_filesystem_test()
+
+    # Grouped Plots
+    for group in list({run["group"] for run in filter(lambda x: x is not None, ycsb_c)}):
+        ycsb_plots.plot_grouped_c(group, list(filter(lambda x: x["group"] == group, ycsb_c)))
+
 
 if __name__ == "__main__":
     main()

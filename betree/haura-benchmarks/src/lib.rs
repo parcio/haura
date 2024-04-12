@@ -44,7 +44,7 @@ impl Control {
 
         cfg.access_mode = AccessMode::AlwaysCreateNew;
 
-        cfg.sync_interval_ms = Some(1000);
+        cfg.sync_interval_ms = None;
 
         cfg.metrics = Some(metrics::MetricsConfiguration {
             enabled: true,
@@ -76,6 +76,43 @@ impl Control {
             rng: Xoshiro256Plus::seed_from_u64(id as u64),
             object_store: os,
         }
+    }
+
+    pub fn kv_client(&mut self, id: u32) -> KvClient {
+        KvClient::new(
+            self.database.clone(),
+            Xoshiro256Plus::seed_from_u64(id as u64),
+        )
+    }
+}
+
+pub struct KvClient {
+    pub db: Arc<RwLock<Database>>,
+    pub rng: Xoshiro256Plus,
+    pub ds: Dataset,
+}
+
+impl KvClient {
+    pub fn new(db: Arc<RwLock<Database>>, rng: Xoshiro256Plus) -> Self {
+        let ds = db.write().open_or_create_dataset(b"FOOBAR").unwrap();
+        Self { db, ds, rng }
+    }
+
+    pub fn fill_entries(&mut self, entries: u64, entry_size: u32) -> Vec<[u8; 8]> {
+        let mut keys = vec![];
+        let mut value = vec![0u8; entry_size as usize];
+        for idx in 0..entries {
+            self.rng.fill(&mut value[..]);
+            let k = (idx as u64).to_be_bytes();
+            self.ds.insert(&k[..], &value).unwrap();
+            keys.push(k);
+        }
+        self.db.write().sync().unwrap();
+        keys
+    }
+
+    pub fn rng(&mut self) -> &mut Xoshiro256Plus {
+        &mut self.rng
     }
 }
 

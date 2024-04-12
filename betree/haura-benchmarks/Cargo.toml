@@ -24,3 +24,4 @@ log = "0.4"
 # Dependent on versions from haura
 parking_lot = "0.11"
 zip = "0.5"
+zipf = "7.0.1"
