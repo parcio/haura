@@ -3,6 +3,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 def plot_c(path):
+    """
+    Bar chart for YCSB-C-esque scalability of a singular run.
+    """
     if not os.path.exists(f"{path}/ycsb_c.csv"):
         return
 
@@ -20,7 +23,35 @@ def plot_c(path):
     ax.plot(data["threads"], optimal_scaling, linestyle=":", label="Optimal", color='grey')
     ax.bar(data["threads"], data["ops"] / (data["time_ns"] / 10**9))
     ax.set_ylabel("Throughput [op/s]")
-    ax.set_title("YCSB-C Scaling Behavior")
+    ax.set_title(f"YCSB-C Scaling | {' | '.join(path.split('/')[-2:])}")
     ax.set_xlabel("Threads [#]")
     fig.legend()
     fig.savefig(f"{path}/ycsb_c.svg")
+    return {
+        "title": path.split('/')[-1:][0],
+        "group": '/'.join(path.split('/')[:-1]),
+        "threads": data["threads"],
+        "results": data["ops"] / (data["time_ns"] / 10**9),
+    }
+
+def plot_grouped_c(path, runs):
+    """
+    Bar chart for YCSB-C-esque scalability over multiple runs.
+    """
+    if not os.path.exists(path):
+        return
+
+    fig, ax = plt.subplots()
+    off = 1 / (len(runs) + 1)
+    for idx, run in enumerate(runs):
+        ax.bar(
+            [l - off * ((len(runs)-1)/2) + idx * off for l in run["threads"]],
+            run["results"],
+            off,
+            label=run["title"]
+        )
+
+    group = runs[0]["group"].split('/')[-1:][0]
+    ax.set_title(f'YCSB Scaling | {group}')
+    extra = fig.legend(loc="upper left", bbox_to_anchor=(0.9, 0.89))
+    fig.savefig(f"{path}/ycsb_c_comparison.svg", bbox_extra_artists=(extra,), bbox_inches="tight")
