@@ -51,7 +51,7 @@ impl Builder<FxHash> for FxHashBuilder {
     }
 }
 
-/// The internal state of `XxHash`.
+/// The internal state of `FxHash`.
 pub struct FxHashState(FxHasher);
 
 impl State for FxHashState {
