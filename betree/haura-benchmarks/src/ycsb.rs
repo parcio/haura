@@ -3,21 +3,15 @@
 //! Link: https://web.archive.org/web/20170809211159id_/http://www.cs.toronto.edu/~delara/courses/csc2231/papers/cooper.pdf
 
 use betree_perf::KvClient;
+use rand::distributions::Distribution;
+use rand::prelude::SliceRandom;
 use rand::SeedableRng;
+use std::io::Write;
 
 // Default in YCSB, 10 x 100 bytes field in one struct.
 const ENTRY_SIZE: usize = 1000;
 // Default of YCSB
 const ZIPF_EXP: f64 = 0.99;
-
-/// A - Update heavy
-/// Operations: Read: 50%, Update 50%
-/// Distribution: Zipfian
-/// Application example: Session store recording recent actions in a user session
-// pub fn A() {}
-use rand::distributions::Distribution;
-use rand::prelude::SliceRandom;
-use std::io::Write;
 
 /// C - Read heavy
 /// Operations: Read 100%
