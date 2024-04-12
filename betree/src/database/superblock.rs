@@ -1,7 +1,7 @@
-use super::{errors::*, StorageInfo};
+use super::{errors::*, Checksum as DbChecksum, StorageInfo};
 use crate::{
     buffer::{Buf, BufWrite},
-    checksum::{Builder, State, XxHash, XxHashBuilder},
+    checksum::{Builder, Checksum, State},
     size::StaticSize,
     storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
     vdev::{Block, BLOCK_SIZE},
@@ -21,8 +21,8 @@ pub struct Superblock<P> {
     pub(crate) tiers: [StorageInfo; NUM_STORAGE_CLASSES],
 }
 
-fn checksum(b: &[u8]) -> XxHash {
-    let mut state = XxHashBuilder.build();
+fn checksum(b: &[u8]) -> DbChecksum {
+    let mut state = DbChecksum::builder().build();
     state.ingest(b);
     state.finish()
 }
@@ -34,7 +34,7 @@ impl<P: DeserializeOwned> Superblock<P> {
     /// this sequence is explicitly not part of the stability guarantees),
     /// or the contained checksum doesn't match the actual checksum of the superblock.
     pub fn unpack(b: &[u8]) -> Result<Superblock<P>> {
-        let checksum_size = XxHash::static_size();
+        let checksum_size = DbChecksum::static_size();
         let correct_checksum = checksum(&b[..b.len() - checksum_size]);
         let actual_checksum = deserialize(&b[b.len() - checksum_size..])?;
         if correct_checksum != actual_checksum {
@@ -100,7 +100,7 @@ impl<P: Serialize> Superblock<P> {
             this.magic.copy_from_slice(MAGIC);
             serialize_into(&mut data, &this)?;
         }
-        let checksum_size = XxHash::static_size();
+        let checksum_size = DbChecksum::static_size();
         data.seek(io::SeekFrom::End(-i64::from(checksum_size as u32)))?;
         let checksum = checksum(&data.as_ref()[..BLOCK_SIZE - checksum_size]);
         serialize_into(&mut data, &checksum)?;
