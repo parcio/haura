@@ -59,6 +59,7 @@ lfu_cache = { git = "https://github.com/parcio/lfu-cache", rev = "haura-v5" }
 rand = { version = "0.8", features = ["std_rng"] }
 
 pmdk = { path = "./pmdk", optional = true }
+rustc-hash = "1.1.0"
 
 [dev-dependencies]
 rand_xorshift = "0.3"
