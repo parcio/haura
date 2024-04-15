@@ -1,29 +1,28 @@
-/// `XxHash` contains a digest of `xxHash`
-/// which is an "extremely fast non-cryptographic hash algorithm"
-/// (<https://github.com/Cyan4973/xxHash>)
+/// Impl for Checksum for FxHashw.
 use super::{Builder, Checksum, ChecksumError, State};
 use crate::size::StaticSize;
+use gxhash::GxHasher;
 use serde::{Deserialize, Serialize};
 use std::hash::Hasher;
 
-/// A checksum created by `XxHash`.
+/// A checksum created by `GxHash`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct XxHash(u64);
+pub struct GxHash(u64);
 
-impl StaticSize for XxHash {
+impl StaticSize for GxHash {
     fn static_size() -> usize {
         8
     }
 }
 
-impl Checksum for XxHash {
-    type Builder = XxHashBuilder;
+impl Checksum for GxHash {
+    type Builder = GxHashBuilder;
 
     fn verify_buffer<I: IntoIterator<Item = T>, T: AsRef<[u8]>>(
         &self,
         data: I,
     ) -> Result<(), ChecksumError> {
-        let mut state = XxHashBuilder.build();
+        let mut state = GxHashBuilder.build();
         for x in data {
             state.ingest(x.as_ref());
         }
@@ -36,33 +35,35 @@ impl Checksum for XxHash {
     }
 
     fn builder() -> Self::Builder {
-        XxHashBuilder
+        GxHashBuilder
     }
 }
 
-/// The corresponding `Builder` for `XxHash`.
+/// The corresponding `Builder` for `GxHash`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct XxHashBuilder;
+pub struct GxHashBuilder;
 
-impl Builder<XxHash> for XxHashBuilder {
-    type State = XxHashState;
+impl Builder<GxHash> for GxHashBuilder {
+    type State = GxHashState;
 
     fn build(&self) -> Self::State {
-        XxHashState(twox_hash::XxHash::with_seed(0))
+        // Due to security concerns the default `GxHasher` is randomized, which
+        // does not work for us, therefore, use pinned seed.
+        GxHashState(GxHasher::with_seed(0))
     }
 }
 
-/// The internal state of `XxHash`.
-pub struct XxHashState(twox_hash::XxHash);
+/// The internal state of `GxHash`.
+pub struct GxHashState(GxHasher);
 
-impl State for XxHashState {
-    type Checksum = XxHash;
+impl State for GxHashState {
+    type Checksum = GxHash;
 
     fn ingest(&mut self, data: &[u8]) {
         self.0.write(data);
     }
 
     fn finish(self) -> Self::Checksum {
-        XxHash(self.0.finish())
+        GxHash(self.0.finish())
     }
 }

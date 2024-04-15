@@ -2,7 +2,7 @@
 use crate::{
     atomic_option::AtomicOption,
     cache::ClockCache,
-    checksum::{FxHash, FxHashBuilder, XxHash, XxHashBuilder},
+    checksum::XxHash,
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{

@@ -5,9 +5,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{error::Error, fmt, iter::once};
 
 mod fxhash;
+mod gxhash;
 mod xxhash;
 
 pub use fxhash::{FxHash, FxHashBuilder};
+pub use gxhash::{GxHash, GxHashBuilder};
 pub use xxhash::{XxHash, XxHashBuilder};
 
 /// A checksum to verify data integrity.
