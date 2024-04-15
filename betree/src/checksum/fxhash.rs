@@ -1,4 +1,4 @@
-/// Impl for Checksum for FxHash.
+/// Impl Checksum with FxHash.
 use super::{Builder, Checksum, ChecksumError, State};
 use crate::size::StaticSize;
 use rustc_hash::FxHasher;

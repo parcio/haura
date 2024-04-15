@@ -1,4 +1,5 @@
-//! This module provides a `Checksum` trait for verifying data integrity.
+//! This module provides a `Checksum` trait and implementors for verifying data
+//! integrity.
 
 use crate::size::Size;
 use serde::{de::DeserializeOwned, Serialize};

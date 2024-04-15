@@ -1,4 +1,4 @@
-/// Impl for Checksum for FxHashw.
+/// Impl Checksum with GxHash.
 use super::{Builder, Checksum, ChecksumError, State};
 use crate::size::StaticSize;
 use gxhash::GxHasher;
