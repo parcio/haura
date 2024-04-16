@@ -220,7 +220,7 @@ impl DatabaseConfiguration {
 
         for (dst, src) in strategy.iter_mut().zip(self.alloc_strategy.iter()) {
             assert!(
-                src.len() < NUM_STORAGE_CLASSES,
+                src.len() <= NUM_STORAGE_CLASSES,
                 "Invalid allocation strategy, can't try more than once per class"
             );
 
