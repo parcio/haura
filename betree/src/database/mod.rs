@@ -2,7 +2,7 @@
 use crate::{
     atomic_option::AtomicOption,
     cache::ClockCache,
-    checksum::XxHash,
+    checksum::GxHash,
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
@@ -69,7 +69,7 @@ const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 
 // This is the hash used overall in the entire database. For reconfiguration
 // recompilation is necessary and this type changed.
-type Checksum = XxHash;
+type Checksum = GxHash;
 
 type ObjectPointer = data_management::ObjectPointer<Checksum>;
 pub(crate) type ObjectRef = data_management::impls::ObjRef<ObjectPointer>;
