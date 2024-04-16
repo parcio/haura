@@ -25,7 +25,7 @@ def plot_c(path):
     ax.set_ylabel("Throughput [op/s]")
     ax.set_title(f"YCSB-C Scaling | {' | '.join(path.split('/')[-2:])}")
     ax.set_xlabel("Threads [#]")
-    fig.legend()
+    ax.legend(loc='upper left')
     fig.savefig(f"{path}/ycsb_c.svg")
     return {
         "title": path.split('/')[-1:][0],
@@ -34,7 +34,7 @@ def plot_c(path):
         "results": data["ops"] / (data["time_ns"] / 10**9),
     }
 
-def plot_grouped_c(path, runs):
+def plot_grouped_c(path, runs, overall=False):
     """
     Bar chart for YCSB-C-esque scalability over multiple runs.
     """
@@ -44,14 +44,24 @@ def plot_grouped_c(path, runs):
     fig, ax = plt.subplots()
     off = 1 / (len(runs) + 1)
     for idx, run in enumerate(runs):
+        if not overall:
+            title = run["title"]
+        else:
+            group = run["group"].split('/')[-1:][0]
+            title = run["title"] + "[" + group + "]"
         ax.bar(
             [l - off * ((len(runs)-1)/2) + idx * off for l in run["threads"]],
             run["results"],
             off,
-            label=run["title"]
+            label=title
         )
 
-    group = runs[0]["group"].split('/')[-1:][0]
-    ax.set_title(f'YCSB Scaling | {group}')
+    if not overall:
+        group = runs[0]["group"].split('/')[-1:][0]
+        ax.set_title(f'YCSB Scaling | {group}')
+    else:
+        ax.set_title(f'YCSB Scaling')
+    ax.set_ylabel("Throughput [op/s]")
+    ax.set_xlabel("Threads [#]")
     extra = fig.legend(loc="upper left", bbox_to_anchor=(0.9, 0.89))
     fig.savefig(f"{path}/ycsb_c_comparison.svg", bbox_extra_artists=(extra,), bbox_inches="tight")
