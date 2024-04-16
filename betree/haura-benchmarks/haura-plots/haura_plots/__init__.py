@@ -285,7 +285,9 @@ def main():
 
     # Grouped Plots
     for group in list({run["group"] for run in filter(lambda x: x is not None, ycsb_c)}):
-        ycsb_plots.plot_grouped_c(group, list(filter(lambda x: x["group"] == group, ycsb_c)))
+        ycsb_plots.plot_grouped_c(group, list(filter(lambda x: x is not None and x["group"] == group, ycsb_c)))
+    # Entire plot
+    ycsb_plots.plot_grouped_c('/'.join(sys.argv[1].split('/')[:-2]), list(filter(lambda x: x is not None, ycsb_c)), overall=True)
 
 
 if __name__ == "__main__":
