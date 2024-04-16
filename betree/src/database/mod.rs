@@ -2,7 +2,7 @@
 use crate::{
     atomic_option::AtomicOption,
     cache::ClockCache,
-    checksum::{XxHash, XxHashBuilder},
+    checksum::GxHash,
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
     data_management::{
@@ -67,14 +67,16 @@ const ROOT_TREE_STORAGE_PREFERENCE: StoragePreference = StoragePreference::FASTE
 const DEFAULT_CACHE_SIZE: usize = 256 * 1024 * 1024;
 const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 
-type Checksum = XxHash;
+// This is the hash used overall in the entire database. For reconfiguration
+// recompilation is necessary and this type changed.
+type Checksum = GxHash;
 
 type ObjectPointer = data_management::ObjectPointer<Checksum>;
 pub(crate) type ObjectRef = data_management::impls::ObjRef<ObjectPointer>;
 pub(crate) type Object = Node<ObjectRef>;
 type DbHandler = Handler<ObjectRef>;
 
-pub(crate) type RootSpu = StoragePoolUnit<XxHash>;
+pub(crate) type RootSpu = StoragePoolUnit<Checksum>;
 pub(crate) type RootDmu = Dmu<
     ClockCache<
         data_management::impls::ObjectKey<Generation>,
@@ -179,7 +181,7 @@ impl DatabaseConfiguration {
 
 impl DatabaseConfiguration {
     pub fn new_spu(&self) -> Result<RootSpu> {
-        Ok(StoragePoolUnit::<XxHash>::new(&self.storage)?)
+        Ok(StoragePoolUnit::<Checksum>::new(&self.storage)?)
     }
 
     pub fn new_handler(&self, spu: &RootSpu) -> DbHandler {
@@ -229,7 +231,7 @@ impl DatabaseConfiguration {
 
         Dmu::new(
             self.compression.to_builder(),
-            XxHashBuilder,
+            <Checksum as crate::checksum::Checksum>::builder(),
             self.default_storage_class,
             spu,
             strategy,
