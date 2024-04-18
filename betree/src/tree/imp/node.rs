@@ -13,11 +13,12 @@ use super::{
     MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,
 };
 use crate::{
+    checksum::Checksum,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, Object, ObjectReference},
     database::{DatasetId, RootSpu},
     size::{Size, SizeMut, StaticSize},
-    storage_pool::DiskOffset,
+    storage_pool::{DiskOffset, StoragePoolLayer},
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
     StoragePreference,
 };
@@ -199,9 +200,9 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         }
     }
 
-    fn unpack_at(
+    fn unpack_at<SPL: StoragePoolLayer>(
         size: crate::vdev::Block<u32>,
-        pool: RootSpu,
+        pool: Box<SPL>,
         offset: DiskOffset,
         d_id: DatasetId,
         data: Box<[u8]>,

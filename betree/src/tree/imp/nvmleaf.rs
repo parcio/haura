@@ -559,9 +559,9 @@ impl NVMLeafNode {
         Ok(())
     }
 
-    pub fn unpack(
+    pub fn unpack<SPL: StoragePoolLayer>(
         data: &[u8],
-        pool: RootSpu,
+        pool: Box<SPL>,
         offset: DiskOffset,
         _size: Block<u32>,
     ) -> Result<Self, std::io::Error> {
@@ -989,9 +989,13 @@ mod tests {
         let pool = crate::database::RootSpu::new(&config).unwrap();
         let csum = XxHashBuilder.build().finish();
 
-        let _node =
-            NVMLeafNode::unpack(&bytes, pool, DiskOffset::from_u64(0), crate::vdev::Block(4))
-                .unwrap();
+        let _node = NVMLeafNode::unpack(
+            &bytes,
+            Box::new(pool),
+            DiskOffset::from_u64(0),
+            crate::vdev::Block(4),
+        )
+        .unwrap();
     }
 
     #[quickcheck]
@@ -1077,9 +1081,13 @@ mod tests {
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config).unwrap();
         let csum = XxHashBuilder.build().finish();
-        let mut wire_node =
-            NVMLeafNode::unpack(&buf, pool, DiskOffset::from_u64(0), crate::vdev::Block(0))
-                .unwrap();
+        let mut wire_node = NVMLeafNode::unpack(
+            &buf,
+            Box::new(pool),
+            DiskOffset::from_u64(0),
+            crate::vdev::Block(0),
+        )
+        .unwrap();
         wire_node.state.set_data(&buf.leak()[foo..]);
 
         for (key, v) in kvs.into_iter() {
