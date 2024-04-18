@@ -98,14 +98,12 @@ impl PMem {
 
     /// Read a range of bytes from the specified offset.
     pub fn read(&self, offset: usize, data: &mut [u8]) {
-        let _ = unsafe {
-            pmem_memcpy(
-                data.as_ptr() as *mut c_void,
-                self.ptr.as_ptr().add(offset),
-                data.len(),
-                PMEM_F_MEM_NOFLUSH,
-            )
-        };
+        unsafe {
+            self.ptr
+                .as_ptr()
+                .add(offset)
+                .copy_to(data.as_mut_ptr() as *mut c_void, data.len())
+        }
     }
 
     /// Write a range of bytes to the specified offset.
