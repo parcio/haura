@@ -23,7 +23,7 @@ pub struct PMem {
 
 impl Drop for PMem {
     fn drop(&mut self) {
-        self.close()
+        self.close().unwrap()
     }
 }
 
@@ -134,11 +134,18 @@ impl PMem {
         self.len
     }
 
-    fn close(&mut self) {
+    fn close(&mut self) -> Result<(), std::io::Error> {
         unsafe {
-            // TODO: Read out error correctly. Atleast let the output know that something went wrong.
-            pmem_unmap(self.ptr.as_ptr(), self.len);
+            if -1 == pmem_unmap(self.ptr.as_ptr(), self.len) {
+                let err = CString::from_raw(pmem_errormsg() as *mut i8);
+                let err_msg = format!(
+                    "Failed to close persistent memory pool. Reason: {}",
+                    err.to_string_lossy()
+                );
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, err_msg));
+            }
         }
+        Ok(())
     }
 }
 
