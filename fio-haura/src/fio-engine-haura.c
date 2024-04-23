@@ -304,8 +304,11 @@ static int fio_haura_setup(struct thread_data *td) {
     /* Haura needs some additional space to provide extra data like object
      * pointers and metadata. This is more of a hack, but nonetheless. */
     creat(td->files[idx]->file_name, 0644);
-    if (truncate(td->files[idx]->file_name, max(td->o.file_size_high, td->o.size) + (50 * 1024 * 1024))) {
-       fprintf(stderr,"Could not retruncate file to provide enough storage for Haura.\n");
+    if (truncate(td->files[idx]->file_name,
+                 max(td->o.file_size_high, td->o.size) + (50 * 1024 * 1024))) {
+      fprintf(
+          stderr,
+          "Could not retruncate file to provide enough storage for Haura.\n");
     }
   }
 
@@ -325,8 +328,8 @@ static int fio_haura_setup(struct thread_data *td) {
     if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
       return bail(error);
     }
-    if ((global_data.obj_s = betree_create_object_store(
-             global_data.db, "fio", 3, pref, &error)) == NULL) {
+    if ((global_data.obj_s = betree_create_object_store_on(
+             global_data.db, "fio", 3, pref, NVM, &error)) == NULL) {
       return bail(error);
     }
     char init[2] = {1};
