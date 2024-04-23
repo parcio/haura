@@ -17,9 +17,10 @@ pub use self::{
     message_action::MessageAction,
 };
 
-#[derive(Debug)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum StorageKind {
-    Block,
+    Block = 0,
     NVM,
 }
 

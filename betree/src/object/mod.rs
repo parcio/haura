@@ -311,10 +311,21 @@ impl Database {
     }
 
     /// Create a namespaced object store, with the datasets "{name}\0data" and "{name}\0meta".
+    /// This method will open a block style object store.
     pub fn open_named_object_store(
         &mut self,
         name: &[u8],
         storage_preference: StoragePreference,
+    ) -> Result<ObjectStore> {
+        self.open_named_object_store_on(name, storage_preference, StorageKind::Block)
+    }
+
+    /// Create a namespaced object store, with the datasets "{name}\0data" and "{name}\0meta".
+    pub fn open_named_object_store_on(
+        &mut self,
+        name: &[u8],
+        storage_preference: StoragePreference,
+        kind: StorageKind,
     ) -> Result<ObjectStore> {
         if name.contains(&0) {
             return Err(Error::KeyContainsNullByte);
@@ -328,10 +339,8 @@ impl Database {
         data_name.extend_from_slice(b"data");
         let mut meta_name = v;
         meta_name.extend_from_slice(b"meta");
-        let data =
-            self.open_or_create_custom_dataset(&data_name, storage_preference, StorageKind::Block)?;
-        let meta =
-            self.open_or_create_custom_dataset(&meta_name, storage_preference, StorageKind::Block)?;
+        let data = self.open_or_create_custom_dataset(&data_name, storage_preference, kind)?;
+        let meta = self.open_or_create_custom_dataset(&meta_name, storage_preference, kind)?;
         self.store_os_data(
             id,
             ObjectStoreData {

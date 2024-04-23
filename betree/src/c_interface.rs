@@ -1,27 +1,21 @@
 //! This module provides the C interface to the database.
 #![allow(non_camel_case_types)]
 use std::{
-    env::SplitPaths,
-    ffi::{CStr, OsStr},
+    ffi::CStr,
     io::{stderr, BufReader, Write},
-    os::{
-        raw::{c_char, c_int, c_uint, c_ulong},
-        unix::prelude::OsStrExt,
-    },
+    os::raw::{c_char, c_int, c_uint, c_ulong},
     process::abort,
     ptr::{null_mut, read, write},
     slice::{from_raw_parts, from_raw_parts_mut},
     sync::Arc,
 };
 
-use libc::{c_void, memcpy};
-
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     database::{AccessMode, Database, Dataset, Error, Snapshot},
     object::{ObjectHandle, ObjectStore},
     storage_pool::{LeafVdev, StoragePoolConfiguration, TierConfiguration, Vdev},
-    tree::DefaultMessageAction,
+    tree::{DefaultMessageAction, StorageKind},
     DatabaseConfiguration, StoragePreference,
 };
 
@@ -832,7 +826,7 @@ pub unsafe extern "C" fn betree_print_error(err: *mut err_t) {
     }
 }
 
-/// Create an object store interface.
+/// Create an object store interface using a block based database.
 #[no_mangle]
 pub unsafe extern "C" fn betree_create_object_store(
     db: *mut db_t,
@@ -845,6 +839,23 @@ pub unsafe extern "C" fn betree_create_object_store(
     let name = from_raw_parts(name as *const u8, name_len as usize);
 
     db.open_named_object_store(name, storage_pref.0)
+        .handle_result(err)
+}
+
+/// Create an object store interface.
+#[no_mangle]
+pub unsafe extern "C" fn betree_create_object_store_on(
+    db: *mut db_t,
+    name: *const c_char,
+    name_len: c_uint,
+    storage_pref: storage_pref_t,
+    kind: StorageKind,
+    err: *mut *mut err_t,
+) -> *mut obj_store_t {
+    let db = &mut (*db).0;
+    let name = from_raw_parts(name as *const u8, name_len as usize);
+
+    db.open_named_object_store_on(name, storage_pref.0, kind)
         .handle_result(err)
 }
 
