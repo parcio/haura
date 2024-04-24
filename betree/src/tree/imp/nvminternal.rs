@@ -624,7 +624,8 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         // invalidated
 
         let sibling = load(&mut self.node.children[self.child_idx].buffer).split_at(&pivot_key);
-        let size_delta = sibling.size() + pivot_key.size();
+        let sibling_size = sibling.size();
+        let size_delta = sibling_size + pivot_key.size();
         self.node.children.insert(
             self.child_idx + 1,
             ChildLink {
@@ -633,7 +634,15 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
             },
         );
         self.node.meta_data.pivot.insert(self.child_idx, pivot_key);
-        self.node.meta_data.entries_size += size_delta;
+        self.node.meta_data.entries_sizes[self.child_idx] -= sibling_size;
+        self.node
+            .meta_data
+            .entries_sizes
+            .insert(self.child_idx + 1, sibling_size);
+        self.node.meta_data.entries_prefs.insert(
+            self.child_idx + 1,
+            self.node.meta_data.entries_prefs[self.child_idx],
+        );
         if select_right {
             self.child_idx += 1;
         }

@@ -761,7 +761,10 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                 NVMLeaf(ref mut nvmleaf) => nvmleaf.insert(key, keyinfo, msg, msg_action),
                 NVMInternal(ref mut nvminternal) => {
                     let link = nvminternal.get_mut(key.borrow());
-                    // FIXME: Treat this error
+                    // FIXME: Treat this error, this may happen if the database
+                    // is in an invalid state for example when nodes are moved
+                    // around. It shouldn't happen in theory at this point, but
+                    // there is the possibility of bugs.
                     let mut buffer_node = dml.get_mut(link.buffer_mut().get_mut(), d_id).unwrap();
                     let child_idx = nvminternal.idx(key.borrow());
                     let size_delta =
