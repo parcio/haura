@@ -516,6 +516,9 @@ impl NVMLeafNode {
         mut writer: W,
         metadata_size: &mut usize,
     ) -> Result<(), std::io::Error> {
+        // FIXME: Some sporadic errors triggered untreated force_data here as no
+        // insertion took place before, automatic syncing? Increased likelihood
+        // with more threads.
         let pivots_size: usize = self
             .state
             .force_data()

@@ -2,21 +2,21 @@
 use self::Inner::*;
 use super::{
     child_buffer::ChildBuffer,
-    internal::{InternalNode, TakeChildBuffer},
+    internal::InternalNode,
     leaf::LeafNode,
     nvm_child_buffer::NVMChildBuffer,
-    nvminternal::{self, ChildLink, NVMInternalNode, NVMTakeChildBuffer},
+    nvminternal::{ChildLink, NVMInternalNode},
     nvmleaf::NVMFillUpResult,
     nvmleaf::NVMLeafNode,
     packed::PackedMap,
+    take_child_buffer::TakeChildBufferWrapper,
     FillUpResult, KeyInfo, PivotKey, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT,
     MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,
 };
 use crate::{
-    checksum::Checksum,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, Object, ObjectReference},
-    database::{DatasetId, RootSpu},
+    database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
@@ -45,22 +45,6 @@ pub(super) enum Inner<N: 'static> {
     ChildBuffer(NVMChildBuffer),
 }
 
-pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
-    TakeChildBuffer(TakeChildBuffer<'a, N>),
-    NVMTakeChildBuffer(NVMTakeChildBuffer<'a, N>),
-}
-
-impl<'a, N: Size + HasStoragePreference + ObjectReference + 'a + 'static>
-    TakeChildBufferWrapper<'a, N>
-{
-    pub fn child_pointer_mut(&mut self) -> &mut RwLock<N> {
-        match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.node_pointer_mut(),
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.child_pointer_mut(),
-        }
-    }
-}
-
 trait ChildBufferIteratorTrait<'a, N> {
     fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut N> + 'a>;
     fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a N> + 'a>;
@@ -69,34 +53,28 @@ trait ChildBufferIteratorTrait<'a, N> {
 
 impl<'a, N> ChildBufferIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>> {
     fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut ChildBuffer<N>> + 'a> {
-        //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
         Box::new(self.iter_mut())
     }
 
     fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a ChildBuffer<N>> + 'a> {
-        //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
         Box::new(self.iter())
     }
 
     fn cb_iter(self) -> Box<dyn Iterator<Item = ChildBuffer<N>> + 'a> {
-        //Box::new(self.iter_mut().map(|child| child.node_pointer.get_mut()))
         Box::new(self.into_iter())
     }
 }
 
 impl<'a> ChildBufferIteratorTrait<'a, Option<NVMChildBuffer>> for Vec<Option<NVMChildBuffer>> {
     fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Option<NVMChildBuffer>> + 'a> {
-        //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
         Box::new(self.iter_mut())
     }
 
     fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a Option<NVMChildBuffer>> + 'a> {
-        //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
         Box::new(self.iter())
     }
 
     fn cb_iter(self) -> Box<dyn Iterator<Item = Option<NVMChildBuffer>> + 'a> {
-        //Box::new(self.iter_mut().flat_map(|x| x.as_mut()).map(|x| x.node_pointer.get_mut()))
         Box::new(self.into_iter())
     }
 }
@@ -776,11 +754,18 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             })
     }
 
-    pub(super) fn insert_msg_buffer<I, M>(&mut self, msg_buffer: I, msg_action: M) -> isize
+    pub(super) fn insert_msg_buffer<I, M, X>(
+        &mut self,
+        msg_buffer: I,
+        msg_action: M,
+        dml: &X,
+        d_id: DatasetId,
+    ) -> isize
     where
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
         N: ObjectReference,
+        X: Dml<Object = Node<N>, ObjectRef = N>,
     {
         let size_delta = self.ensure_unpacked();
         size_delta
@@ -790,8 +775,22 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                 Internal(ref mut internal) => internal.insert_msg_buffer(msg_buffer, msg_action),
                 NVMLeaf(ref mut nvmleaf) => nvmleaf.insert_msg_buffer(msg_buffer, msg_action),
                 NVMInternal(ref mut nvminternal) => {
-                    todo!()
-                    // nvminternal.insert_msg_buffer(msg_buffer, msg_action)
+                    // This might take some time and fills the cache considerably.
+                    let mut size_delta = 0;
+                    for (k, (kinfo, v)) in msg_buffer {
+                        let link = nvminternal.get_mut(&k);
+                        let mut buffer_node =
+                            dml.get_mut(link.buffer_mut().get_mut(), d_id).unwrap();
+                        size_delta += buffer_node.insert(
+                            k,
+                            v,
+                            msg_action.clone(),
+                            kinfo.storage_preference,
+                            dml,
+                            d_id,
+                        );
+                    }
+                    size_delta
                 }
                 Inner::ChildBuffer(_) => todo!(),
             })

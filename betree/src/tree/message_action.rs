@@ -7,7 +7,7 @@ use crate::cow_bytes::SlicedCowBytes;
 use std::{fmt::Debug, ops::Deref};
 
 /// Defines the action of a message.
-pub trait MessageAction: Debug + Send + Sync {
+pub trait MessageAction: Clone + Debug + Send + Sync {
     /// Applies the message `msg`. `data` holds the current data.
     fn apply(&self, key: &[u8], msg: &SlicedCowBytes, data: &mut Option<SlicedCowBytes>);
 
@@ -26,7 +26,7 @@ pub trait MessageAction: Debug + Send + Sync {
     ) -> SlicedCowBytes;
 }
 
-impl<T: Deref + Debug + Send + Sync> MessageAction for T
+impl<T: Deref + Debug + Send + Sync + Clone> MessageAction for T
 where
     T::Target: MessageAction,
 {

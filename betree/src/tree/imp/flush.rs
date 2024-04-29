@@ -3,17 +3,18 @@
 //! Calling [Tree::rebalance_tree] is not only possible with the root node but may be
 //! applied to a variety of nodes given that their parent node is correctly
 //! given. Use with caution.
-use std::{borrow::Borrow, ops::Deref};
+use std::borrow::Borrow;
 
 use super::{
-    child_buffer::ChildBuffer, derivate_ref::DerivateRef, derivate_ref_nvm::DerivateRefNVM,
-    internal::TakeChildBuffer, node::TakeChildBufferWrapper, FillUpResult, Inner, Node, Tree,
+    derivate_ref_nvm::DerivateRefNVM,
+    take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
+    FillUpResult, Inner, Node, Tree,
 };
 use crate::{
     cache::AddSize,
     data_management::{Dml, HasStoragePreference, ObjectReference},
     size::Size,
-    tree::{errors::*, imp::internal::MergeChildResult, MessageAction},
+    tree::{errors::*, MessageAction},
 };
 
 impl<X, R, M, I> Tree<X, M, I>
@@ -97,14 +98,14 @@ where
             // 3. If child is internal, small and has not many children -> merge the children of node.
             if child.has_too_low_fanout() {
                 let size_delta = {
-                    let mut m = child_buffer.prepare_merge();
+                    let mut m = child_buffer.prepare_merge(&self.dml, self.tree_id());
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
                     let is_right_sibling = m.is_right_sibling();
                     let MergeChildResult {
                         pivot_key,
                         old_np,
                         size_delta,
-                    } = m.merge_children();
+                    } = m.merge_children(&self.dml);
                     if is_right_sibling {
                         let size_delta = child.merge(&mut sibling, pivot_key);
                         child.add_size(size_delta);
@@ -131,13 +132,14 @@ where
             child_buffer.add_size(size_delta);
             self.dml.verify_cache();
             // 5. Insert messages from the child buffer into the child.
-            let size_delta_child = child.insert_msg_buffer(buffer, self.msg_action());
+            let size_delta_child =
+                child.insert_msg_buffer(buffer, self.msg_action(), &self.dml, self.tree_id());
             child.add_size(size_delta_child);
 
             // 6. Check if minimal leaf size is fulfilled, otherwise merge again.
             if child.is_too_small_leaf() {
                 let size_delta = {
-                    let mut m = child_buffer.prepare_merge();
+                    let mut m = child_buffer.prepare_merge(&self.dml, self.tree_id());
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
                     let left;
                     let right;
@@ -154,7 +156,7 @@ where
                             right.add_size(-size_delta);
                             let MergeChildResult {
                                 old_np, size_delta, ..
-                            } = m.merge_children();
+                            } = m.merge_children(&self.dml);
                             self.dml.remove(old_np);
                             size_delta
                         }
@@ -164,7 +166,7 @@ where
                         } => {
                             left.add_size(size_delta);
                             right.add_size(-size_delta);
-                            m.rebalanced(pivot_key)
+                            m.rebalanced(pivot_key, &self.dml)
                         }
                     }
                 };

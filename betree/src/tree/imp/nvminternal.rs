@@ -1,8 +1,9 @@
 //! Implementation of the [NVMInternalNode] node type.
 use super::{
-    node::{PivotGetMutResult, PivotGetResult, TakeChildBufferWrapper},
+    node::{PivotGetMutResult, PivotGetResult},
     nvm_child_buffer::NVMChildBuffer,
-    PivotKey,
+    take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
+    Node, PivotKey,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
@@ -15,9 +16,8 @@ use crate::{
 };
 use owning_ref::OwningRefMut;
 use parking_lot::RwLock;
-use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
+use std::{borrow::Borrow, collections::BTreeMap, mem::replace, ops::Deref};
 
-use rkyv::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
 pub(super) struct NVMInternalNode<N> {
@@ -658,9 +658,13 @@ where
         Size::size(&*self.node)
     }
 
-    pub(super) fn load_and_prepare_merge<F>(&mut self, f: F) -> PrepareMergeChild<N>
+    pub(super) fn load_and_prepare_merge<X>(
+        &mut self,
+        dml: &X,
+        d_id: DatasetId,
+    ) -> PrepareMergeChild<N, X>
     where
-        F: Fn(&mut RwLock<N>) -> &mut super::Node<N>,
+        X: Dml<Object = Node<N>, ObjectRef = N>,
     {
         let (pivot_key_idx, other_child_idx) = if self.child_idx + 1 < self.node.children.len() {
             (self.child_idx, self.child_idx + 1)
@@ -668,30 +672,43 @@ where
             (self.child_idx - 1, self.child_idx - 1)
         };
 
-        unimplemented!()
+        let pivot_child = dml
+            .get_mut(
+                self.node.children[pivot_key_idx].buffer_mut().get_mut(),
+                d_id,
+            )
+            .expect("error in prepare merge nvm");
+        let other_child = dml
+            .get_mut(
+                self.node.children[other_child_idx].buffer_mut().get_mut(),
+                d_id,
+            )
+            .expect("error in prepare merge nvm");
 
-        // let pivot_child: &'static mut NVMChildBuffer = unsafe { std::mem::transmute(f(&mut self.node.children[pivot_key_idx].buffer).assert_buffer()) };
-        // let other_child = f(&mut self.node.children[other_child_idx].buffer).assert_buffer();
-
-        // PrepareMergeChild {
-        //     node: self.node,
-        //     left_child: pivot_child,
-        //     right_child: other_child,
-        //     pivot_key_idx,
-        //     other_child_idx,
-        // }
+        PrepareMergeChild {
+            node: self.node,
+            left_child: pivot_child,
+            right_child: other_child,
+            pivot_key_idx,
+            other_child_idx,
+            d_id,
+        }
     }
 }
 
-pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
+pub(super) struct PrepareMergeChild<'a, N: 'a + 'static, X>
+where
+    X: Dml,
+{
     node: &'a mut NVMInternalNode<N>,
-    left_child: &'a mut NVMChildBuffer,
-    right_child: &'a mut NVMChildBuffer,
+    left_child: X::CacheValueRefMut,
+    right_child: X::CacheValueRefMut,
     pivot_key_idx: usize,
     other_child_idx: usize,
+    d_id: DatasetId,
 }
 
-impl<'a, N> PrepareMergeChild<'a, N> {
+impl<'a, N, X: Dml> PrepareMergeChild<'a, N, X> {
     pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
     where
         N: ObjectReference,
@@ -703,17 +720,14 @@ impl<'a, N> PrepareMergeChild<'a, N> {
     }
 }
 
-pub(super) struct MergeChildResult<NP> {
-    pub(super) pivot_key: CowBytes,
-    pub(super) old_np: NP,
-    pub(super) size_delta: isize,
-}
-
-impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    pub(super) fn merge_children<X>(mut self, dml: X) -> MergeChildResult<N>
+impl<'a, N, X> PrepareMergeChild<'a, N, X>
+where
+    X: Dml<Object = Node<N>, ObjectRef = N>,
+    N: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+{
+    pub(super) fn merge_children(mut self, dml: &X) -> MergeChildResult<N>
     where
         N: ObjectReference,
-        X: Dml,
     {
         // FIXME: Shouldn't this be other_idx instead of + 1
 
@@ -724,10 +738,13 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
         let size_delta = pivot_key.size();
         self.node.meta_data.entries_size -= size_delta;
 
-        self.left_child.append(&mut self.right_child);
         self.left_child
+            .assert_buffer_mut()
+            .append(&mut self.right_child.assert_buffer_mut());
+        self.left_child
+            .assert_buffer()
             .messages_preference
-            .upgrade_atomic(&self.right_child.messages_preference);
+            .upgrade_atomic(&self.right_child.assert_buffer().messages_preference);
 
         MergeChildResult {
             pivot_key,
@@ -737,20 +754,26 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
     }
 }
 
-impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
+impl<'a, N, X> PrepareMergeChild<'a, N, X>
+where
+    X: Dml<Object = Node<N>, ObjectRef = N>,
+    N: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+{
     pub(super) fn rebalanced<F>(&mut self, new_pivot_key: CowBytes, load: F) -> isize
     where
         N: ObjectReference,
-        F: Fn(&mut RwLock<N>) -> &mut super::Node<N>,
+        F: Fn(&mut RwLock<N>, DatasetId) -> X::CacheValueRefMut,
     {
         {
             let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
             // Move messages around
-            let (left_child, right_child) = (
-                load(&mut left[0].buffer).assert_buffer_mut(),
-                load(&mut right[0].buffer).assert_buffer_mut(),
+            let (mut left_child, mut right_child) = (
+                load(&mut left[0].buffer, self.d_id),
+                load(&mut right[0].buffer, self.d_id),
             );
-            left_child.rebalance(right_child, &new_pivot_key);
+            left_child
+                .assert_buffer_mut()
+                .rebalance(right_child.assert_buffer_mut(), &new_pivot_key);
         }
 
         let mut size_delta = new_pivot_key.size() as isize;
@@ -785,16 +808,6 @@ impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
     {
         &self.node.children[self.child_idx].buffer
     }
-
-    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize)
-    where
-        N: ObjectReference,
-    {
-        // let (buffer, size_delta) = self.node.cbuf_ptrs[self.child_idx].get_mut().take();
-        // self.node.meta_data.entries_size -= size_delta;
-        // (buffer, -(size_delta as isize))
-        todo!()
-    }
 }
 
 #[cfg(test)]
@@ -828,23 +841,6 @@ mod tests {
                     ));
                 }
                 PK.as_ref().unwrap()
-            }
-        }
-
-        fn serialize_unmodified(&self, w: &mut Vec<u8>) -> Result<(), std::io::Error> {
-            bincode::serialize_into(w, self).map_err(|e| {
-                debug!("Failed to serialize ObjectPointer.");
-                std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-            })
-        }
-
-        fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
-            match bincode::deserialize::<()>(bytes) {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    debug!("Failed to deserialize ObjectPointer.");
-                    Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                }
             }
         }
     }

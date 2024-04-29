@@ -24,7 +24,7 @@ use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{borrow::Borrow, collections::VecDeque, marker::PhantomData, mem, ops::RangeBounds};
 
-use node::TakeChildBufferWrapper;
+use take_child_buffer::TakeChildBufferWrapper;
 
 /// Additional information for a single entry. Concerns meta information like
 /// the desired storage level of a key.
@@ -659,6 +659,7 @@ mod packed;
 mod range;
 mod serialize_nodepointer;
 mod split;
+mod take_child_buffer;
 
 pub use self::{
     node::{Node, NodeInfo},

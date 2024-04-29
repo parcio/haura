@@ -1,12 +1,13 @@
 //! Implementation of the [InternalNode] node type.
 use super::{
     child_buffer::ChildBuffer,
-    node::{PivotGetMutResult, PivotGetResult, TakeChildBufferWrapper},
+    node::{PivotGetMutResult, PivotGetResult},
+    take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
     PivotKey,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HasStoragePreference, ObjectReference},
+    data_management::{Dml, HasStoragePreference, ObjectReference},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
@@ -601,31 +602,6 @@ where
     }
 }
 
-impl<'a, N> TakeChildBufferWrapper<'a, N>
-where
-    N: StaticSize,
-{
-    pub(super) fn size(&self) -> usize {
-        match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.size(),
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.size(),
-        }
-    }
-
-    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N>
-    where
-        N: ObjectReference,
-    {
-        match self {
-            TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.prepare_merge(),
-            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                /// FIXME: This needs some viable impl, probably with a separate preload..
-                todo!("prepare merge nvm");
-            }
-        }
-    }
-}
-
 pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
     node: &'a mut InternalNode<N>,
     pivot_key_idx: usize,
@@ -643,13 +619,6 @@ impl<'a, N> PrepareMergeChild<'a, N> {
         self.pivot_key_idx != self.other_child_idx
     }
 }
-
-pub(super) struct MergeChildResult<NP> {
-    pub(super) pivot_key: CowBytes,
-    pub(super) old_np: NP,
-    pub(super) size_delta: isize,
-}
-
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
     pub(super) fn merge_children(self) -> MergeChildResult<N>
     where
