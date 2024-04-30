@@ -336,7 +336,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Internal(ref internal) => Some(internal.fanout()),
             NVMLeaf(_) => None,
             NVMInternal(ref nvminternal) => Some(nvminternal.fanout()),
-            Inner::ChildBuffer(_) => unreachable!(),
+            Inner::ChildBuffer(_) => None,
         }
     }
 
