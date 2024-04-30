@@ -3,22 +3,12 @@
 //! Encapsulating common nodes like [super::internal::NVMInternalNode] and
 //! [super::leaf::NVMNVMLeafNode].
 use crate::{
-    compression::CompressionBuilder,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{impls::ObjRef, HasStoragePreference, ObjectPointer, ObjectReference},
-    size::{Size, StaticSize},
+    data_management::HasStoragePreference,
+    size::Size,
     storage_pool::AtomicSystemStoragePreference,
-    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction, PivotKey},
+    tree::{KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
-};
-use parking_lot::RwLock;
-//use serde::{Deserialize, Serialize};
-use rkyv::{
-    archived_root,
-    ser::{serializers::AllocSerializer, ScratchSpace, Serializer},
-    vec::{ArchivedVec, VecResolver},
-    with::{ArchiveWith, DeserializeWith, SerializeWith},
-    AlignedVec, Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
 };
 use std::{
     borrow::Borrow,
@@ -26,11 +16,8 @@ use std::{
     mem::replace,
 };
 
-pub struct EncodeNodePointer;
-pub struct NodePointerResolver {
-    len: usize,
-    inner: VecResolver,
-}
+// FIXME: This is a magic bincode offset for vector length and storage prefs sizes
+pub(super) const BUFFER_BINCODE_STATIC: usize = 18;
 
 /// A buffer for messages that belong to a child of a tree node.
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -91,12 +78,12 @@ impl HasStoragePreference for NVMChildBuffer {
 
 impl Size for NVMChildBuffer {
     fn size(&self) -> usize {
-        // FIXME: This is a magic bincode offset for vector length and storage prefs sizes
-        18 + self
-            .buffer
-            .iter()
-            .map(|(key, msg)| key.size() + msg.size())
-            .sum::<usize>()
+        BUFFER_BINCODE_STATIC
+            + self
+                .buffer
+                .iter()
+                .map(|(key, msg)| key.size() + msg.size())
+                .sum::<usize>()
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -284,10 +271,7 @@ impl NVMChildBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        arbitrary::GenExt,
-        tree::{default_message_action::DefaultMessageActionMsg, imp::child_buffer},
-    };
+    use crate::{arbitrary::GenExt, tree::default_message_action::DefaultMessageActionMsg};
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
 
