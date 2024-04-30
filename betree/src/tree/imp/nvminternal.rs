@@ -985,7 +985,7 @@ mod tests {
             return TestResult::discard();
         }
         let twin = node.clone();
-        let (right_sibling, pivot, _size_delta, _pivot_key) = node.split();
+        let (mut right_sibling, pivot, _size_delta, _pivot_key) = node.split();
 
         assert!(*node.meta_data.pivot.last().unwrap() <= pivot);
         assert!(*right_sibling.meta_data.pivot.first().unwrap() > pivot);
@@ -995,6 +995,12 @@ mod tests {
         assert!(node.children.len() == node.meta_data.pivot.len() + 1);
         assert!(right_sibling.children.len() == right_sibling.meta_data.pivot.len() + 1);
         assert!((node.children.len() as isize - right_sibling.children.len() as isize).abs() <= 1);
+
+        let size_before = node.size();
+        let size_delta = node.merge(&mut right_sibling, pivot);
+        let size_after = node.size();
+        assert_eq!(size_before as isize + size_delta, size_after as isize);
+        assert_eq!(node.size(), twin.size());
 
         TestResult::passed()
     }
