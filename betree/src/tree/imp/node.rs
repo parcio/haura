@@ -778,10 +778,11 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                     // This might take some time and fills the cache considerably.
                     let mut size_delta = 0;
                     for (k, (kinfo, v)) in msg_buffer {
+                        let idx = nvminternal.idx(&k);
                         let link = nvminternal.get_mut(&k);
                         let mut buffer_node =
                             dml.get_mut(link.buffer_mut().get_mut(), d_id).unwrap();
-                        size_delta += buffer_node.insert(
+                        let delta = buffer_node.insert(
                             k,
                             v,
                             msg_action.clone(),
@@ -789,6 +790,8 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                             dml,
                             d_id,
                         );
+                        nvminternal.after_insert_size_delta(idx, delta);
+                        size_delta += delta;
                     }
                     size_delta
                 }
