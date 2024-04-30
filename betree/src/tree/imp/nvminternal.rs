@@ -572,13 +572,13 @@ where
         N: ObjectReference,
     {
         let child_idx = {
-            let size = self.size();
+            let size = self.logical_size();
             let (child_idx, child) = self
                 .meta_data
                 .entries_sizes
                 .iter()
                 .enumerate()
-                .max()
+                .max_by_key(|(_, v)| *v)
                 .unwrap();
             debug!("Largest child's buffer size: {}", child);
 
