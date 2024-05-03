@@ -541,10 +541,15 @@ where
                                 self.try_get_mut_node(obj.node_pointer_mut())
                             }
                             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                                // This branch is more complex, we first need to
-                                // fetch the buffer and then check the contents.
-                                let buffer = self.dml.get(&mut obj.buffer_pointer().write())?;
-                                if buffer.assert_buffer().is_empty(key.borrow()) {
+                                // This branch is more complex, two presence
+                                // checks are required for a pass-through case:
+                                // the buffer needs to be present in memory and
+                                // the associated child node.
+                                let buffer = self.dml.try_get(&mut obj.buffer_pointer().write());
+                                if buffer
+                                    .map(|b| b.assert_buffer().is_empty(key.borrow()))
+                                    .unwrap_or(false)
+                                {
                                     // A lower level might contain a message
                                     // for this key, if modified continue:
                                     self.try_get_mut_node(obj.child_pointer_mut())

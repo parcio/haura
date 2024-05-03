@@ -656,7 +656,7 @@ where
     N: StaticSize,
 {
     pub(super) fn size(&self) -> usize {
-        Size::size(&*self.node)
+        (&*self.node).logical_size()
     }
 
     pub(super) fn load_and_prepare_merge<X>(
@@ -694,6 +694,11 @@ where
             other_child_idx,
             d_id,
         }
+    }
+
+    pub(super) fn add_size(&mut self, size_delta: isize) {
+        self.node
+            .after_insert_size_delta(self.child_idx, size_delta);
     }
 }
 

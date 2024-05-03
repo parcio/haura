@@ -4,12 +4,12 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("The storage pool encountered an error.")]
+    #[error("VDev failed: {source}")]
     VdevError {
         #[from]
         source: crate::vdev::Error,
     },
-    #[error("The chosen compression type encountered an error.")]
+    #[error("Compression failed: {source}")]
     CompressionError {
         #[from]
         source: crate::compression::Error,
@@ -22,7 +22,7 @@ pub enum Error {
     SerializationError,
     #[error("The allocation handler encountered an error.")]
     HandlerError(String),
-    #[error("Input/Output procedure encountered an error.")]
+    #[error("Io failed: {source}")]
     IoError {
         #[from]
         source: std::io::Error,
@@ -31,7 +31,7 @@ pub enum Error {
     OutOfSpaceError,
     #[error("A callback function to the cache has errored.")]
     CallbackError,
-    #[error("A raw allocation has failed.")]
+    #[error("A raw allocation of size {size} as {at} has failed.")]
     RawAllocationError { at: DiskOffset, size: Block<u32> },
 }
 

@@ -778,6 +778,7 @@ impl NVMLeafNode {
         M: MessageAction,
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
     {
+        self.state.force_upgrade();
         let mut size_delta = 0;
         for (key, (keyinfo, msg)) in msg_buffer {
             size_delta += self.insert(key, keyinfo, msg, &msg_action);
@@ -793,6 +794,7 @@ impl NVMLeafNode {
         min_size: usize,
         max_size: usize,
     ) -> (Self, CowBytes, isize, LocalPivotKey) {
+        self.state.force_upgrade();
         // assert!(self.size() > S::MAX);
         let mut right_sibling = NVMLeafNode {
             // During a split, preference can't be inherited because the new subset of entries
@@ -870,6 +872,8 @@ impl NVMLeafNode {
         min_size: usize,
         max_size: usize,
     ) -> NVMFillUpResult {
+        self.state.force_upgrade();
+        right_sibling.state.force_upgrade();
         let size_delta = self.merge(right_sibling);
         if self.size() <= max_size {
             NVMFillUpResult::Merged { size_delta }

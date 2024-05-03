@@ -459,7 +459,6 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
-        // TODO: Karim.. add comments
         let mut metadata_size = 0;
         let compression = &self.default_compression;
         let compressed_data = {
@@ -480,11 +479,6 @@ where
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
         assert_eq!(size.to_bytes() as usize, compressed_data.len());
-        /*if size.to_bytes() as usize != compressed_data.len() {
-            let mut v = compressed_data.into_vec();
-            v.resize(size.to_bytes() as usize, 0);
-            compressed_data = v.into_boxed_slice();
-        }*/
 
         let info = self.modified_info.lock().remove(&mid).unwrap();
 

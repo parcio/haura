@@ -17,7 +17,7 @@ pub enum Error {
         #[from]
         source: crate::storage_pool::Error,
     },
-    #[error("A tree operation encountered an error. This is likely an internal error.")]
+    #[error("TreeError: {source}")]
     TreeError {
         #[from]
         source: crate::tree::Error,
@@ -50,8 +50,6 @@ pub enum Error {
     DoesNotExist,
     #[error("Dataset name already occupied. Try to `.open()` the dataset instead.")]
     AlreadyExists,
-    // TODO: This should anyway not happen, as there are no problems occuring
-    // anymore when two instances are opened. Remove?
     #[error("Given dataset is already in use. Try to close another instance first before opening a new one.")]
     InUse,
     #[error("Message surpasses the maximum length. If you cannot shrink your value, use an object store instead.")]

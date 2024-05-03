@@ -134,7 +134,7 @@ pub struct DatabaseConfiguration {
     pub default_storage_class: u8,
     /// Which compression type to use, and the type-specific compression parameters
     pub compression: CompressionConfiguration,
-    /// Size of cache in TODO
+    /// Size of cache in bytes
     pub cache_size: usize,
     /// Whether to check for and open an existing database, or overwrite it
     pub access_mode: AccessMode,

@@ -28,6 +28,12 @@ use std::{
 #[serde(transparent)]
 pub struct Block<T: Uint>(pub T);
 
+impl<T: Uint + std::fmt::Display> std::fmt::Display for Block<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("Block({})", self.0))
+    }
+}
+
 impl<T: Uint> StaticSize for Block<T> {
     fn static_size() -> usize {
         // Works for standard sizes

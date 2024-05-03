@@ -19,6 +19,17 @@ use std::{fmt, mem};
 #[archive(check_bytes)]
 pub struct DiskOffset(u64);
 
+impl std::fmt::Display for DiskOffset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "Offset({},{},{})",
+            self.storage_class(),
+            self.disk_id(),
+            self.block_offset()
+        ))
+    }
+}
+
 const MASK_STORAGE_CLASS: u64 = ((1 << 2) - 1) << (10 + 52);
 const MASK_DISK_ID: u64 = ((1 << 10) - 1) << 52;
 const MASK_OFFSET: u64 = (1 << 52) - 1;

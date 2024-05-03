@@ -196,6 +196,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // and every modification requires them to be unpacked.
             // The leaf contents are scanned cheaply during unpacking, which
             // recalculates the correct storage_preference for the contained keys.
+            // FIXME: Inefficient copy.
             Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
             Ok(Node(NVMInternal(
@@ -1168,52 +1169,6 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
                 },
             },
             Inner::ChildBuffer(_) => unreachable!(),
-            /*NodeInfo::NVMInternal {
-                pool: None,
-                disk_offset: None,
-                meta_data: InternalNodeMetaData {
-                    storage: self.correct_preference(),
-                    system_storage: self.system_storage_preference(),
-                    level: self.level(),
-                },
-                data: Some(InternalNodeData {
-                    children: {
-                        int.iter_with_bounds()
-                            .map(|(maybe_left, child_buf, maybe_right)| {
-                                let (child, storage_preference, pivot_key) = {
-                                    let mut np = child_buf.node_pointer.write();
-                                    let pivot_key = np.index().clone();
-                                    let storage_preference = np.correct_preference();
-                                    let child = dml.get(&mut np).unwrap();
-                                    (child, storage_preference, pivot_key)
-                                };
-
-                                let node_info = child.node_info(dml);
-                                drop(child);
-
-                                dml.evict().unwrap();
-
-                                ChildInfo {
-                                    from: maybe_left.map(|cow| ByteString(cow.to_vec())),
-                                    to: maybe_right.map(|cow| ByteString(cow.to_vec())),
-                                    storage: storage_preference,
-                                    pivot_key,
-                                    child: node_info,
-                                }
-                            })
-                            .collect()
-                    }
-                }),
-                meta_data_size: 0,
-                data_size: 0,
-                data_start: 0,
-                data_end: 0,
-                node_size: crate::vdev::Block(0),
-                checksum: None,
-                need_to_load_data_from_nvm: true,
-                time_for_nvm_last_fetch: SystemTime::now(),
-                nvm_fetch_counter: 0,
-            },*/
         }
     }
 }
