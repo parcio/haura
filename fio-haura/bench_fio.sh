@@ -3,7 +3,7 @@
 # This script contains a structured approach to run multiple fio runs with
 # multiple parameters. It is intended to be modified to customize your benchmark
 # runs.
-export_options=(--group_reporting --output-format=json --output=output.json --write_bw_log=bench --write_lat_log=bench --write_hist_log=bench --write_iops_log=bench)
+export_options=(--group_reporting --output-format=json --output=output.json --write_bw_log=bench --write_lat_log=bench --write_hist_log=bench --write_iops_log=bench --directory=./.bench-fio-tmp-data)
 root=$PWD
 
 # Below are possible configuration options. Add elements to run multiple
@@ -27,8 +27,10 @@ do
                 name="${mode}_$(echo "$ioengine" | awk -F'/' '{print $NF}')_${blocksize}_${job}"
                 mkdir "${name}"
                 pushd "${name}" || exit
-                size=$(( size_gb * 1024 / job ))
+                size=$((size_gb * 1024 / job))
+                mkdir .bench-fio-tmp-data
                 fio "--name=${name}" "--readwrite=${mode}" "--ioengine=${ioengine}" "--blocksize=${blocksize}" "--numjobs=${job}" "--runtime=${runtime}" "--size=${size}M" "${export_options[@]}" "${extra_options[@]}"
+                rm -rf .bench-fio-tmp-data
                 popd || exit
             done
         done
