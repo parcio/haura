@@ -3,7 +3,7 @@
 # This script contains a structured approach to run multiple fio runs with
 # multiple parameters. It is intended to be modified to customize your benchmark
 # runs.
-export_options=(--group_reporting --output-format=json --output=output.json --write_bw_log=bench --write_lat_log=bench --write_hist_log=bench --write_iops_log=bench --directory=./.bench-fio-tmp-data)
+export_options=(--group_reporting --output-format=json --output=output.json --write_bw_log=bench --write_lat_log=bench --write_hist_log=bench --write_iops_log=bench --log_hist_msec=100 --log_avg_msec=100 --directory=./.bench-fio-tmp-data)
 root=$PWD
 
 # Below are possible configuration options. Add elements to run multiple
