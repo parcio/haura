@@ -827,7 +827,7 @@ impl<'ds> ObjectHandle<'ds> {
         let mut last_offset = offset;
 
         let chunks = self
-            .read_chunk_range(chunk_range.start.chunk_id..chunk_range.end.chunk_id + 1)
+            .read_chunk_range(chunk_range.start.chunk_id..chunk_range.end.chunk_id)
             .map_err(|e| (total_read, e))?;
 
         for chunk in chunks {
@@ -892,7 +892,7 @@ impl<'ds> ObjectHandle<'ds> {
         let start = Instant::now();
         let iter = self.store.data.range(
             &object_chunk_key(self.object.id, chunk_range.start)[..]
-                ..&object_chunk_key(self.object.id, chunk_range.end),
+                ..=&object_chunk_key(self.object.id, chunk_range.end),
         )?;
 
         let with_chunks = iter.map(|res| match res {
