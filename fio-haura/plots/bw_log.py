@@ -42,24 +42,31 @@ def plot_lat_dist(path):
     Plot the latency distribution for completion latency (clat) from the fio
     output, this works regardless of grouped reporting or single job reporting.
     Although grouped reporting improves readability.
+
+    This method creates both read and write version of this plot.
     """
     with open(path + '/output.json') as data:
         js = json.load(data)
 
-    fig, ax = plt.subplots(1,1)
-    total_jobs = len(js["jobs"])
-    for (idx, job) in enumerate(js["jobs"]):
-        bins = job["write"]["clat_ns"]["percentile"].keys()
-        vals = job["write"]["clat_ns"]["percentile"].values()
-        ax.bar(numpy.array(range(0,len(vals))) + 1/total_jobs * idx, vals, min(1/total_jobs, 0.8))
-    ax.set_xticks(range(0,len(vals)), labels=[s[:5] for s in bins], rotation='vertical')
-    ax.set_xlabel("Percentile [%]")
-    ax.set_ylabel("Latency [ns]")
-    ax.set_yscale('log')
-    ax.set_title(f'{path} - Latencies')
-    fig.tight_layout()
-    fig.savefig(f'{path}/latency.svg')
+    def plot(mode):
+        fig, ax = plt.subplots(1,1)
+        total_jobs = len(js["jobs"])
+        if "percentile" not in js["jobs"][0][mode]["clat_ns"].keys():
+            return
+        for (idx, job) in enumerate(js["jobs"]):
+            bins = job[mode]["clat_ns"]["percentile"].keys()
+            vals = job[mode]["clat_ns"]["percentile"].values()
+            ax.bar(numpy.array(range(0,len(vals))) + 1/total_jobs * idx, vals, min(1/total_jobs, 0.8))
+        ax.set_xticks(range(0,len(vals)), labels=[s[:5] for s in bins], rotation='vertical')
+        ax.set_xlabel("Percentile [%]")
+        ax.set_ylabel("Latency [ns]")
+        ax.set_yscale('log')
+        ax.set_title(f'{path} - {mode} Latency Percentiles')
+        fig.tight_layout()
+        fig.savefig(f'{path}/{mode}_latency.svg')
 
+    plot("read")
+    plot("write")
 
 if len(sys.argv) < 2:
     print("Usage:")
