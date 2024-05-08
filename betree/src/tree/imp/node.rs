@@ -211,7 +211,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 size,
             )?)))
         } else if data[0..4] == (NodeInnerType::ChildBuffer as u32).to_be_bytes() {
-            Ok(Node(ChildBuffer(NVMChildBuffer::unpack(&data[4..])?)))
+            Ok(Node(ChildBuffer(NVMChildBuffer::unpack(data)?)))
         } else {
             panic!(
                 "Unkown bytes to unpack. [0..4]: {}",

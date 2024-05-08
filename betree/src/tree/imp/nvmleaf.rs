@@ -896,7 +896,7 @@ mod tests {
         arbitrary::GenExt,
         checksum::{Builder, State, XxHashBuilder},
         cow_bytes::SlicedCowBytes,
-        data_management::HasStoragePreference,
+        data_management::{HasStoragePreference, PartialReadSize},
         size::StaticSize,
         storage_pool::{DiskOffset, StoragePoolLayer},
         tree::{
@@ -957,8 +957,7 @@ mod tests {
 
     fn serialized_size(leaf: &NVMLeafNode) -> usize {
         let mut w = vec![];
-        let mut m_size = 0;
-        leaf.pack(&mut w, &mut m_size).unwrap();
+        let _m_size = leaf.pack(&mut w);
         w.len()
     }
 
@@ -986,12 +985,11 @@ mod tests {
     #[quickcheck]
     fn ser_deser(leaf_node: NVMLeafNode) {
         let mut bytes = vec![];
-        let mut metadata_size = 0;
-        leaf_node.pack(&mut bytes, &mut metadata_size).unwrap();
+        let _metadata_size = leaf_node.pack(&mut bytes).unwrap();
 
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config).unwrap();
-        let csum = XxHashBuilder.build().finish();
+        let _csum = XxHashBuilder.build().finish();
 
         let _node = NVMLeafNode::unpack(
             &bytes,
@@ -1080,8 +1078,7 @@ mod tests {
             .collect();
 
         let mut buf = vec![];
-        let mut foo = 0;
-        leaf_node.pack(&mut buf, &mut foo).unwrap();
+        let foo = leaf_node.pack(&mut buf).unwrap();
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config).unwrap();
         let csum = XxHashBuilder.build().finish();
@@ -1092,7 +1089,9 @@ mod tests {
             crate::vdev::Block(0),
         )
         .unwrap();
-        wire_node.state.set_data(&buf.leak()[foo..]);
+        wire_node
+            .state
+            .set_data(&buf.leak()[foo.unwrap_or(PartialReadSize(0)).0..]);
 
         for (key, v) in kvs.into_iter() {
             assert_eq!(Some(v), wire_node.get_with_info(&key));

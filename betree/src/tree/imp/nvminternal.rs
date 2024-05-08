@@ -635,7 +635,7 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         );
         self.node.meta_data.pivot.insert(self.child_idx, pivot_key);
         self.node.meta_data.entries_sizes[self.child_idx] -=
-            sibling_size - super::nvm_child_buffer::BUFFER_BINCODE_STATIC;
+            sibling_size - super::nvm_child_buffer::BUFFER_STATIC_SIZE;
         self.node
             .meta_data
             .entries_sizes
