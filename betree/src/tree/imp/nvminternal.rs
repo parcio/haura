@@ -419,7 +419,7 @@ impl<N> NVMInternalNode<N> {
         left_pivot_key: &mut Option<CowBytes>,
         right_pivot_key: &mut Option<CowBytes>,
         _all_msgs: &mut BTreeMap<CowBytes, Vec<(KeyInfo, SlicedCowBytes)>>,
-    ) -> &RwLock<N> {
+    ) -> &ChildLink<N> {
         let idx = self.idx(key);
         if idx > 0 {
             *left_pivot_key = Some(self.meta_data.pivot[idx - 1].clone());
@@ -427,7 +427,7 @@ impl<N> NVMInternalNode<N> {
         if idx < self.meta_data.pivot.len() {
             *right_pivot_key = Some(self.meta_data.pivot[idx].clone());
         }
-        &self.children[idx].ptr
+        &self.children[idx]
     }
 
     pub fn get_next_node(&self, key: &[u8]) -> Option<&RwLock<N>> {

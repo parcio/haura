@@ -562,10 +562,14 @@ pub(super) enum PivotGetMutResult<'a, N: 'a + 'static> {
     NextNode(&'a mut N),
 }
 
+/// Return type of range query fetching all children to the lowest nodes.
 pub(super) enum GetRangeResult<'a, T, N: 'a + 'static> {
     Data(T),
     NextNode {
         np: &'a RwLock<N>,
+        /// If a node is only partially present in storage we might need to
+        /// fetch some additional object to complete the buffered messages.
+        child_buffer: Option<&'a RwLock<N>>,
         prefetch_option: Option<&'a RwLock<N>>,
     },
 }
@@ -658,6 +662,7 @@ impl<N: HasStoragePreference> Node<N> {
                 let np = internal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
                 GetRangeResult::NextNode {
                     prefetch_option,
+                    child_buffer: None,
                     np,
                 }
             }
@@ -671,9 +676,10 @@ impl<N: HasStoragePreference> Node<N> {
                     None
                 };
 
-                let np = nvminternal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
+                let cl = nvminternal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
                 GetRangeResult::NextNode {
-                    np,
+                    np: cl.ptr(),
+                    child_buffer: Some(cl.buffer()),
                     prefetch_option,
                 }
             }
