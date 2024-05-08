@@ -30,6 +30,7 @@ use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
     mem::replace,
+    num::NonZeroU32,
     ops::DerefMut,
     path::PathBuf,
     pin::Pin,
@@ -288,12 +289,7 @@ where
         // Depending on the encoded node type we might not need the entire range
         // right away. Or at all in some cases.
         let compressed_data = if let Some(m_size) = op.can_be_loaded_partial() {
-            // FIXME: This is only correct for mirrored vdev and leaf vdevs
-            warn!("Performing dangerous read...");
-            replace(
-                &mut self.pool.read_raw(m_size, op.offset().block_offset())?[0],
-                Buf::zeroed(Block(0)),
-            )
+            self.pool.read(m_size, op.offset(), op.checksum().clone())?
         } else {
             self.pool
                 .read(op.size(), op.offset(), op.checksum().clone())?
@@ -459,17 +455,17 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
-        let mut metadata_size = 0;
         let compression = &self.default_compression;
-        let compressed_data = {
+        let (partial_read, compressed_data) = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
             let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
-            {
-                object.pack(&mut buf, &mut metadata_size)?;
+            let part = {
+                let part = object.pack(&mut buf)?;
                 drop(object);
-            }
-            state.finish(buf.into_buf())?
+                part
+            };
+            (part, state.finish(buf.into_buf())?)
         };
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
@@ -484,7 +480,13 @@ where
 
         let checksum = {
             let mut state = self.default_checksum_builder.build();
-            state.ingest(compressed_data.as_ref());
+            if let Some(ref size) = partial_read {
+                state.ingest(
+                    &compressed_data.as_ref()[..(Block::round_up_from_bytes(size.0).to_bytes())],
+                )
+            } else {
+                state.ingest(compressed_data.as_ref());
+            }
             state.finish()
         };
 
@@ -497,7 +499,7 @@ where
             decompression_tag: compression.decompression_tag(),
             generation,
             info,
-            metadata_size: metadata_size as u32,
+            metadata_size: partial_read.map(|n| NonZeroU32::new(n.0 as u32).unwrap()),
         };
 
         let was_present;

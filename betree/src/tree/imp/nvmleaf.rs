@@ -7,7 +7,7 @@
 //! difficult to handle than because nodes cannot evict other entries.
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::HasStoragePreference,
+    data_management::{HasStoragePreference, PartialReadSize},
     database::RootSpu,
     size::{Size, StaticSize},
     storage_pool::{AtomicSystemStoragePreference, DiskOffset, StoragePoolLayer},
@@ -514,8 +514,7 @@ impl NVMLeafNode {
     pub fn pack<W: std::io::Write>(
         &self,
         mut writer: W,
-        metadata_size: &mut usize,
-    ) -> Result<(), std::io::Error> {
+    ) -> Result<Option<PartialReadSize>, std::io::Error> {
         // FIXME: Some sporadic errors triggered untreated force_data here as no
         // insertion took place before, automatic syncing? Increased likelihood
         // with more threads.
@@ -556,10 +555,8 @@ impl NVMLeafNode {
             writer.write_all(&val)?;
         }
 
-        *metadata_size = NVMLEAF_METADATA_OFFSET + meta_len;
-
         debug!("NVMLeaf node packed successfully");
-        Ok(())
+        Ok(Some(PartialReadSize(NVMLEAF_METADATA_OFFSET + meta_len)))
     }
 
     pub fn unpack<SPL: StoragePoolLayer>(

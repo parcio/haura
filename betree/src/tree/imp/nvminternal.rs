@@ -16,7 +16,7 @@ use crate::{
 };
 use owning_ref::OwningRefMut;
 use parking_lot::RwLock;
-use std::{borrow::Borrow, collections::BTreeMap, mem::replace, ops::Deref};
+use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 use serde::{Deserialize, Serialize};
 

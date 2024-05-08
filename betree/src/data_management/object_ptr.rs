@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use super::HasStoragePreference;
 use crate::{
     compression::DecompressionTag,
@@ -19,8 +21,7 @@ pub struct ObjectPointer<D> {
     pub(super) checksum: D,
     pub(super) offset: DiskOffset,
     pub(super) size: Block<u32>,
-    // This could be replaced with a optional NonZero to save a byte. In Bytes.
-    pub(super) metadata_size: u32,
+    pub(super) metadata_size: Option<NonZeroU32>,
     pub(super) info: DatasetId,
     pub(super) generation: Generation,
 }
@@ -88,10 +89,8 @@ impl<D> ObjectPointer<D> {
     /// Whether a node needs all data initially or a skeleton size can be deconstructed.
     /// FIXME: This needs to load data in large blocks right now.
     pub fn can_be_loaded_partial(&self) -> Option<Block<u32>> {
-        if self.metadata_size > 0 {
-            return Some(Block::round_up_from_bytes(self.metadata_size));
-        }
-        None
+        self.metadata_size
+            .map(|size| Block::round_up_from_bytes(size.get()))
     }
 
     /// Get the size in blocks of the serialized object.

@@ -108,10 +108,13 @@ pub trait HasStoragePreference {
     // fn flood_storage_preference(&self, pref: StoragePreference);
 }
 
+/// The minimal amount of data that needs to be read from a buffer.
+pub struct PartialReadSize(pub usize);
+
 /// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
-    fn pack<W: Write>(&self, writer: W, metadata_size: &mut usize) -> Result<(), io::Error>;
+    fn pack<W: Write>(&self, writer: W) -> Result<Option<PartialReadSize>, io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at<SPL: StoragePoolLayer>(
         size: crate::vdev::Block<u32>,

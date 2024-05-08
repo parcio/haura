@@ -776,7 +776,6 @@ impl<'ds> ObjectHandle<'ds> {
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
-
         // no-op for now
         Ok(())
     }

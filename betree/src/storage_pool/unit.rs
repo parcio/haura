@@ -5,7 +5,7 @@ use super::{
 use crate::{
     bounded_future_queue::BoundedFutureQueue,
     buffer::Buf,
-    checksum::{Checksum, XxHash},
+    checksum::Checksum,
     vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
     PreferredAccessType, StoragePreference,
 };
@@ -183,9 +183,6 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
                 .by_offset(offset)
                 .write(data, offset.block_offset())
                 .await;
-
-            // TODO: what about multiple writes to same offset?
-            // NOTE: This is currently covered in the tests and fails as expected
             inner.write_back_queue.mark_completed(&offset).await;
             res
         })?;

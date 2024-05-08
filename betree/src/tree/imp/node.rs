@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, Object, ObjectReference},
+    data_management::{Dml, HasStoragePreference, Object, ObjectReference, PartialReadSize},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
@@ -150,30 +150,31 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 }
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
-    fn pack<W: Write>(&self, mut writer: W, metadata_size: &mut usize) -> Result<(), io::Error> {
+    fn pack<W: Write>(&self, mut writer: W) -> Result<Option<PartialReadSize>, io::Error> {
         match self.0 {
-            PackedLeaf(ref map) => writer.write_all(map.inner()),
+            PackedLeaf(ref map) => writer.write_all(map.inner()).map(|_| None),
             Leaf(ref leaf) => {
                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
-                PackedMap::pack(leaf, writer)
+                PackedMap::pack(leaf, writer).map(|_| None)
             }
             Internal(ref internal) => {
                 writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
                 serialize_into(writer, internal)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+                    .map(|_| None)
             }
             NVMLeaf(ref leaf) => {
                 writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
-                leaf.pack(writer, metadata_size)
+                leaf.pack(writer)
             }
             NVMInternal(ref nvminternal) => {
                 debug!("NVMInternal node packed successfully");
                 writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
-                nvminternal.pack(writer)
+                nvminternal.pack(writer).map(|_| None)
             }
             ChildBuffer(ref cbuf) => {
                 writer.write_all((NodeInnerType::ChildBuffer as u32).to_be_bytes().as_ref())?;
-                cbuf.pack(writer)
+                cbuf.pack(writer).map(|_| None)
             }
         }
     }
