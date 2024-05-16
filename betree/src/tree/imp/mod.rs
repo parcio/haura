@@ -405,7 +405,7 @@ where
                 GetResult::NextNode(np) => self.get_node(np)?,
                 GetResult::Data(data) => break data,
                 GetResult::NVMNextNode { child, buffer } => {
-                    if let Some(prefetch) = self.dml.prefetch(&buffer.read())? {
+                    if let Some(prefetch) = self.dml.prefetch(&buffer.read()).unwrap() {
                         prefetch_queue.push(Event::Fetching(prefetch));
                         prefetching = true;
                     }
@@ -436,7 +436,7 @@ where
                 for prefetch in prefetch_queue.into_iter() {
                     match prefetch {
                         Event::Fetching(prefetch) => {
-                            let buffer = self.dml.finish_prefetch(prefetch)?;
+                            let buffer = self.dml.finish_prefetch(prefetch).unwrap();
                             let _ = buffer.get(key, &mut msgs);
                         }
                         Event::Done => {

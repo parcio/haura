@@ -21,19 +21,9 @@ pub struct ObjectPointer<D> {
     pub(super) checksum: D,
     pub(super) offset: DiskOffset,
     pub(super) size: Block<u32>,
-    pub(super) metadata_size: Option<NonZeroU32>,
+    pub(super) metadata_size: Option<Block<u32>>,
     pub(super) info: DatasetId,
     pub(super) generation: Generation,
-}
-
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
-)]
-#[archive(check_bytes)]
-pub enum NodeType {
-    // FIXME: Replace with adjustal block size. 256 bytes for NVM.
-    Memory { m_size: Block<u32> },
-    Block,
 }
 
 impl<D> HasStoragePreference for ObjectPointer<D> {
@@ -84,13 +74,6 @@ impl<D> ObjectPointer<D> {
     /// Get the disk location this object is stored at.
     pub fn offset(&self) -> DiskOffset {
         self.offset
-    }
-
-    /// Whether a node needs all data initially or a skeleton size can be deconstructed.
-    /// FIXME: This needs to load data in large blocks right now.
-    pub fn can_be_loaded_partial(&self) -> Option<Block<u32>> {
-        self.metadata_size
-            .map(|size| Block::round_up_from_bytes(size.get()))
     }
 
     /// Get the size in blocks of the serialized object.

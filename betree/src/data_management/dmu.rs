@@ -30,7 +30,6 @@ use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
     mem::replace,
-    num::NonZeroU32,
     ops::DerefMut,
     path::PathBuf,
     pin::Pin,
@@ -288,7 +287,7 @@ where
 
         // Depending on the encoded node type we might not need the entire range
         // right away. Or at all in some cases.
-        let compressed_data = if let Some(m_size) = op.can_be_loaded_partial() {
+        let compressed_data = if let Some(m_size) = op.metadata_size {
             self.pool.read(m_size, op.offset(), op.checksum().clone())?
         } else {
             self.pool
@@ -330,9 +329,15 @@ where
     > {
         let ptr = op.clone();
 
+        let size = if let Some(m_size) = op.metadata_size {
+            m_size
+        } else {
+            op.size()
+        };
+
         Ok(self
             .pool
-            .read_async(op.size(), op.offset(), op.checksum().clone())?
+            .read_async(size, op.offset(), op.checksum().clone())?
             .map_err(Error::from)
             .and_then(move |data| ok((ptr, data, pivot_key))))
     }
@@ -481,9 +486,8 @@ where
         let checksum = {
             let mut state = self.default_checksum_builder.build();
             if let Some(ref size) = partial_read {
-                state.ingest(
-                    &compressed_data.as_ref()[..(Block::round_up_from_bytes(size.0).to_bytes())],
-                )
+                state.ingest(&compressed_data.as_ref()[..size.to_bytes() as usize])
+                // state.ingest(compressed_data.as_ref());
             } else {
                 state.ingest(compressed_data.as_ref());
             }
@@ -499,7 +503,7 @@ where
             decompression_tag: compression.decompression_tag(),
             generation,
             info,
-            metadata_size: partial_read.map(|n| NonZeroU32::new(n.0 as u32).unwrap()),
+            metadata_size: partial_read,
         };
 
         let was_present;

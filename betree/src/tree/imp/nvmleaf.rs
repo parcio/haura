@@ -7,7 +7,7 @@
 //! difficult to handle than because nodes cannot evict other entries.
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HasStoragePreference, PartialReadSize},
+    data_management::HasStoragePreference,
     database::RootSpu,
     size::{Size, StaticSize},
     storage_pool::{AtomicSystemStoragePreference, DiskOffset, StoragePoolLayer},
@@ -514,10 +514,7 @@ impl NVMLeafNode {
     pub fn pack<W: std::io::Write>(
         &self,
         mut writer: W,
-    ) -> Result<Option<PartialReadSize>, std::io::Error> {
-        // FIXME: Some sporadic errors triggered untreated force_data here as no
-        // insertion took place before, automatic syncing? Increased likelihood
-        // with more threads.
+    ) -> Result<Option<Block<u32>>, std::io::Error> {
         let pivots_size: usize = self
             .state
             .force_data()
@@ -556,7 +553,9 @@ impl NVMLeafNode {
         }
 
         debug!("NVMLeaf node packed successfully");
-        Ok(Some(PartialReadSize(NVMLEAF_METADATA_OFFSET + meta_len)))
+        Ok(Some(Block::round_up_from_bytes(
+            NVMLEAF_METADATA_OFFSET as u32 + meta_len as u32,
+        )))
     }
 
     pub fn unpack<SPL: StoragePoolLayer>(
@@ -903,11 +902,13 @@ mod tests {
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
             KeyInfo,
         },
+        vdev::Block,
         StoragePoolConfiguration,
     };
 
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
+    use zstd_safe::WriteBuf;
     /*
     impl Arbitrary for KeyInfo {
         fn arbitrary(g: &mut Gen) -> Self {
@@ -1098,5 +1099,33 @@ mod tests {
         }
 
         TestResult::passed()
+    }
+
+    #[quickcheck]
+    fn serialize_deser_partial(leaf_node: NVMLeafNode) -> TestResult {
+        if leaf_node.size() < MAX_LEAF_SIZE / 2 && leaf_node.state.force_data().len() < 3 {
+            return TestResult::discard();
+        }
+
+        let mut buf = crate::buffer::BufWrite::with_capacity(Block(1));
+        let foo = leaf_node.pack(&mut buf).unwrap();
+        let buf = buf.into_buf();
+        let meta_range = ..Block::round_up_from_bytes(foo.unwrap().0).to_bytes();
+        let csum = {
+            let mut builder = XxHashBuilder.build();
+            builder.ingest(&buf.as_ref()[meta_range]);
+            builder.finish()
+        };
+        let config = StoragePoolConfiguration::default();
+        let pool = crate::database::RootSpu::new(&config).unwrap();
+        let wire_node = NVMLeafNode::unpack(
+            &buf.as_slice()[meta_range],
+            Box::new(pool),
+            DiskOffset::from_u64(0),
+            crate::vdev::Block(0),
+        )
+        .unwrap();
+
+        TestResult::discard()
     }
 }

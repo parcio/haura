@@ -15,11 +15,12 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, Object, ObjectReference, PartialReadSize},
+    data_management::{Dml, HasStoragePreference, Object, ObjectReference},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
+    vdev::Block,
     StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
@@ -150,7 +151,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 }
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
-    fn pack<W: Write>(&self, mut writer: W) -> Result<Option<PartialReadSize>, io::Error> {
+    fn pack<W: Write>(&self, mut writer: W) -> Result<Option<Block<u32>>, io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()).map(|_| None),
             Leaf(ref leaf) => {
