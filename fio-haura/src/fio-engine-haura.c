@@ -408,4 +408,5 @@ struct ioengine_ops ioengine = {
     .setup = fio_haura_setup,
     .options = options,
     .option_struct_size = sizeof(struct fio_haura_options),
+    .flags = FIO_SYNCIO | FIO_DISKLESSIO | FIO_NOEXTEND | FIO_NODISKUTIL,
 };
