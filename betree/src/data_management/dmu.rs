@@ -278,7 +278,11 @@ where
 
     /// Fetches synchronously an object from disk and inserts it into the
     /// cache.
-    fn fetch(&self, op: &<Self as Dml>::ObjectPointer, pivot_key: PivotKey) -> Result<(), Error> {
+    fn fetch(
+        &self,
+        op: &<Self as Dml>::ObjectPointer,
+        pivot_key: PivotKey,
+    ) -> Result<E::ValueRef, Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
         let mut decompression_state = op.decompression_tag().new_decompression()?;
@@ -306,8 +310,8 @@ where
             )?
         };
         let key = ObjectKey::Unmodified { offset, generation };
-        self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key));
-        Ok(())
+        Ok(self
+            .insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key)))
     }
 
     /// Fetches asynchronously an object from disk and inserts it into the
@@ -342,7 +346,11 @@ where
             .and_then(move |data| ok((ptr, data, pivot_key))))
     }
 
-    fn insert_object_into_cache(&self, key: ObjectKey<Generation>, mut object: E::Value) {
+    fn insert_object_into_cache(
+        &self,
+        key: ObjectKey<Generation>,
+        mut object: E::Value,
+    ) -> E::ValueRef {
         // FIXME: This is always the maximum size of nodes as it concerns their
         // disk representation. An useful metric would be the actual memory
         // footprint which may differ based on the node type (NVM etc.).
@@ -351,6 +359,7 @@ where
         if !cache.contains_key(&key) {
             cache.insert(key, object, size);
         }
+        cache.get(&key, false).unwrap()
     }
 
     fn evict(&self, mut cache: RwLockWriteGuard<E>) -> Result<(), Error> {
@@ -846,7 +855,7 @@ where
             if let ObjRef::Unmodified(ref ptr, ref pk) = *or {
                 drop(cache);
 
-                self.fetch(ptr, pk.clone())?;
+                let _ = self.fetch(ptr, pk.clone())?;
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
                         .send(DmlMsg::fetch(ptr.offset(), ptr.size(), pk.clone()))
@@ -1074,13 +1083,13 @@ where
             offset: ptr.offset(),
             generation: ptr.generation(),
         };
-        self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pk.clone()));
+        let cache_ref = self
+            .insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pk.clone()));
         if let Some(report_tx) = &self.report_tx {
             let _ = report_tx
                 .send(DmlMsg::fetch(ptr.offset(), ptr.size(), pk))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
-        let cache_ref = self.cache.read().get(&key, false).unwrap();
         Ok(CacheValueRef::read(cache_ref))
     }
 
