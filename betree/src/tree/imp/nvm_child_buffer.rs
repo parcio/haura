@@ -173,7 +173,7 @@ impl Map {
             Map::Packed { entry_count, data } => {
                 // Perform binary search
                 let mut left = 0;
-                let mut right = *entry_count - 1;
+                let mut right = (*entry_count).saturating_sub(1);
                 loop {
                     let mid = (left + right) / 2;
                     let kidx = KeyIdx::unpack(
