@@ -174,7 +174,7 @@ impl Map {
                 // Perform binary search
                 let mut left = 0;
                 let mut right = (*entry_count).saturating_sub(1);
-                loop {
+                while left < right {
                     let mid = (left + right) / 2;
                     let kidx = KeyIdx::unpack(
                         data.cut(HEADER + (KEY_IDX_SIZE * mid), KEY_IDX_SIZE)
@@ -189,7 +189,7 @@ impl Map {
 
                     match key.cmp(unsafe { &*k }) {
                         Ordering::Less => {
-                            right = mid - 1;
+                            right = mid.saturating_sub(1);
                         }
                         Ordering::Equal => {
                             let val_pos_off = kidx.pos as usize + kidx.len as usize;
@@ -204,9 +204,6 @@ impl Map {
                         Ordering::Greater => {
                             left = mid + 1;
                         }
-                    }
-                    if left > right {
-                        break;
                     }
                 }
                 None
