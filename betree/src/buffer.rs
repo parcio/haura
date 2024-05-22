@@ -157,10 +157,6 @@ impl From<Box<[u8]>> for AlignedStorage {
             log::warn!("Unaligned buffer, copying {} bytes", b.len());
             let size = Block::round_up_from_bytes(b.len() as u32);
             let storage = AlignedStorage::zeroed(size);
-            let align = std::mem::align_of::<u8>();
-            assert!(!b.as_ptr().is_null());
-            assert!(storage.ptr.as_ptr().align_offset(align) == 0);
-            assert!(b.as_ptr().align_offset(align) == 0);
             unsafe {
                 storage
                     .ptr
