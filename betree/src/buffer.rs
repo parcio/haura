@@ -270,6 +270,7 @@ impl BufWrite {
         })
     }
 
+    /// Return the size of this buffer. Capacity maybe larger.
     pub fn len(&self) -> usize {
         self.size as usize
     }

@@ -303,7 +303,7 @@ pub struct SlicedCowBytes {
 }
 
 #[derive(Debug, Clone)]
-enum ByteSource {
+pub(super) enum ByteSource {
     Cow(CowBytes),
     Raw { ptr: *const u8, len: usize },
 }
@@ -390,7 +390,11 @@ impl SlicedCowBytes {
         match self.data {
             ByteSource::Cow(data) => Arc::into_raw(data.inner),
             ByteSource::Raw { ptr, len } => unsafe {
-                let buf = Vec::with_capacity(len);
+                // FIXME: This copies data currently when the original buffer
+                // is from a raw source ot avoid breaking behavior from
+                // outside.
+                let mut buf = Vec::with_capacity(len);
+                (buf.as_mut_ptr() as *mut u8).copy_from(ptr, len);
                 &buf
             },
         }

@@ -5,9 +5,7 @@ use crate::{
     checksum::GxHash,
     compression::CompressionConfiguration,
     cow_bytes::SlicedCowBytes,
-    data_management::{
-        self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints, Dmu, TaggedCacheValue,
-    },
+    data_management::{self, Dml, DmlWithReport, DmlWithStorageHints, Dmu, TaggedCacheValue},
     metrics::{metrics_init, MetricsConfiguration},
     migration::{DatabaseMsg, DmlMsg, GlobalObjectId, MigrationPolicies},
     size::StaticSize,
@@ -107,8 +105,11 @@ pub enum AccessMode {
 pub enum SyncMode {
     /// No automatic sync, only on user call
     Explicit,
-    /// Every `interval_ms` milliseconds, sync is called
-    Periodic { interval_ms: u64 },
+    /// Repeatedly call sync, wall clock dependent.
+    Periodic {
+        /// Every `interval_ms` milliseconds, sync is called
+        interval_ms: u64,
+    },
 }
 
 /// A bundle type of component configuration types, used during [Database::build]
@@ -184,10 +185,12 @@ impl DatabaseConfiguration {
 }
 
 impl DatabaseConfiguration {
+    /// Create new [StoragePoolUnit] instance. This is the first step of the DB initialization.
     pub fn new_spu(&self) -> Result<RootSpu> {
         Ok(StoragePoolUnit::<Checksum>::new(&self.storage)?)
     }
 
+    /// Create new [Handler] instance. This is the second step of the DB initialization.
     pub fn new_handler(&self, spu: &RootSpu) -> DbHandler {
         Handler {
             root_tree_inner: AtomicOption::new(),
@@ -218,6 +221,7 @@ impl DatabaseConfiguration {
         }
     }
 
+    /// Create a new [Dmu] instance. This is the third step of the DB initialization.
     pub fn new_dmu(&self, spu: RootSpu, handler: DbHandler) -> RootDmu {
         let mut strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES] =
             [[None; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES];
@@ -723,6 +727,7 @@ impl DatasetId {
         DatasetId(self.0 + 1)
     }
 
+    /// Return the raw integer used as ID.
     pub fn as_u64(&self) -> u64 {
         self.0
     }

@@ -88,7 +88,7 @@ impl DiskOffset {
         DiskOffset(x)
     }
 
-    // Glue together a class identifier with a class depdendent disk_id.
+    /// Glue together a class identifier with a class depdendent disk_id.
     pub fn construct_disk_id(class: u8, disk_id: u16) -> GlobalDiskId {
         GlobalDiskId(((class as u16) << 10) | disk_id)
     }

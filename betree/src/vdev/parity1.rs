@@ -95,9 +95,9 @@ impl<V: Vdev + VdevLeafRead + VdevLeafWrite> Vdev for Parity1<V> {
 impl<V: VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Parity1<V> {
     async fn get_slice(
         &self,
-        offset: Block<u64>,
-        start: usize,
-        end: usize,
+        _offset: Block<u64>,
+        _start: usize,
+        _end: usize,
     ) -> Result<&'static [u8]> {
         unimplemented!("This case should not occur!");
     }
@@ -176,7 +176,7 @@ impl<V: VdevLeafRead + VdevLeafWrite> Parity1<V> {
                 }
                 let (left, right) = buf.split_at(col_length);
                 buf = right;
-                reads.push(disk.read_raw(left, disk_offset).into_future());
+                reads.push_back(disk.read_raw(left, disk_offset).into_future());
             }
         }
         let mut failed_idx = None;

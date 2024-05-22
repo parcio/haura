@@ -3,7 +3,7 @@ use parking_lot::RwLock;
 
 use crate::{
     cow_bytes::CowBytes,
-    data_management::{DmlWithHandler, DmlWithStorageHints},
+    data_management::DmlWithStorageHints,
     database::{RootDmu, StorageInfo},
     object::{ObjectStore, ObjectStoreId},
     vdev::Block,

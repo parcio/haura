@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use speedy::{Readable, Writable};
 use std::{
     cmp,

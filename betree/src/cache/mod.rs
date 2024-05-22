@@ -115,6 +115,8 @@ pub trait Cache: Send + Sync {
     /// Returns a struct that holds access statistics.
     fn stats(&self) -> Self::Stats;
 
+    /// Debug feature to compare actual size requirements with tracked delta
+    /// changes.
     fn verify(&mut self);
 }
 

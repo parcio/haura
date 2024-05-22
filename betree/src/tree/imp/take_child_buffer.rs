@@ -91,7 +91,7 @@ where
         }
     }
 
-    pub(super) fn merge_children(mut self, dml: &X) -> MergeChildResult<N>
+    pub(super) fn merge_children(self, dml: &X) -> MergeChildResult<N>
     where
         N: ObjectReference + HasStoragePreference,
     {

@@ -19,13 +19,16 @@ pub use self::{
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+/// Which node representation the tree should use.
 pub enum StorageKind {
+    /// Conventional large nodes. HDD optimized.
     Block = 0,
+    /// Partially fetched nodes. Memory only.
     NVM,
 }
 
 #[cfg(not(feature = "internal-api"))]
-pub(crate) use self::{imp::NodeInfo, pivot_key::PivotKey};
+pub(crate) use self::pivot_key::PivotKey;
 
 #[cfg(feature = "internal-api")]
 pub use self::{imp::NodeInfo, pivot_key::PivotKey};

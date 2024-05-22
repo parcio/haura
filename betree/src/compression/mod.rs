@@ -3,26 +3,30 @@
 //! `None` and `Lz4` are provided as implementation.
 
 use crate::{
-    buffer::{Buf, BufWrite},
+    buffer::Buf,
     size::{Size, StaticSize},
     vdev::Block,
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, io::Write, mem};
+use std::{fmt::Debug, mem};
 
 mod errors;
 pub use errors::*;
 
 const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
 
+/// Determine the used compression algorithm.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CompressionConfiguration {
+    /// No-op.
     None,
     // Lz4,
+    /// Configurable Zstd algorithm.
     Zstd(Zstd),
 }
 
 impl CompressionConfiguration {
+    ///
     pub fn to_builder(&self) -> Box<dyn CompressionBuilder> {
         match self {
             CompressionConfiguration::None => Box::new(None),
@@ -51,12 +55,16 @@ impl CompressionConfiguration {
 #[archive(check_bytes)]
 #[repr(u8)]
 pub enum DecompressionTag {
+    /// No-op.
     None,
+    /// Decompress using Lz4.
     Lz4,
+    /// Decompress using Zstd.
     Zstd,
 }
 
 impl DecompressionTag {
+    /// Start a new decompression. The resulting structure consumes a buffer to decompress the data.
     pub fn new_decompression(&self) -> Result<Box<dyn DecompressionState>> {
         use DecompressionTag as Tag;
         match self {
@@ -78,17 +86,20 @@ impl StaticSize for DecompressionTag {
 pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
     /// Returns an object for compressing data into a `Box<[u8]>`.
     fn new_compression(&self) -> Result<Box<dyn CompressionState>>;
+    /// Which decompression algorithm needs to be used.
     fn decompression_tag(&self) -> DecompressionTag;
 }
 
 /// Trait for the object that compresses data.
-pub trait CompressionState: Write {
+pub trait CompressionState {
     /// Finishes the compression stream and returns a buffer that contains the
     /// compressed data.
     fn finish(&mut self, data: Buf) -> Result<Buf>;
 }
 
+/// An implementation of consumption-based decompression.
 pub trait DecompressionState {
+    /// Decompress the given [Buf]. On No-op this is a simple pass through, no memory is copied.
     fn decompress(&mut self, data: Buf) -> Result<Buf>;
 }
 

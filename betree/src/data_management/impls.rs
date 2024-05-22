@@ -5,8 +5,6 @@ use crate::{
 };
 use serde::{de::DeserializeOwned, ser::Error as SerError};
 
-use rkyv::ser::Serializer;
-
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ModifiedObjectId {
     pub(super) id: u64,

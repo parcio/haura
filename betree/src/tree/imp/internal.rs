@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, ObjectReference},
+    data_management::{HasStoragePreference, ObjectReference},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::AtomicSystemStoragePreference,

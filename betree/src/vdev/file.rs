@@ -62,9 +62,9 @@ fn get_block_device_size(file: &fs::File) -> io::Result<Block<u64>> {
 impl VdevRead for File {
     async fn get_slice(
         &self,
-        offset: Block<u64>,
-        start: usize,
-        end: usize,
+        _offset: Block<u64>,
+        _start: usize,
+        _end: usize,
     ) -> Result<&'static [u8]> {
         unimplemented!("This case should not occur!");
     }

@@ -32,6 +32,7 @@ impl StorageInfo {
         )
     }
 
+    /// Returns the amount of blocks needed to fill the storage space to the given threshold (0 <= t <= 1).
     pub fn blocks_until_filled_to(&self, threshold: f32) -> Block<u64> {
         let threshold = threshold.clamp(0.0, 1.0);
         Block(

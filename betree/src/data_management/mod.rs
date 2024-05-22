@@ -14,10 +14,10 @@
 
 use crate::{
     cache::AddSize,
-    database::{DatasetId, RootSpu},
+    database::DatasetId,
     migration::DmlMsg,
     size::{Size, StaticSize},
-    storage_pool::{DiskOffset, GlobalDiskId, StoragePoolLayer},
+    storage_pool::{DiskOffset, StoragePoolLayer},
     tree::PivotKey,
     vdev::Block,
     StoragePreference,
@@ -30,7 +30,6 @@ use std::{
     fmt::Debug,
     hash::Hash,
     io::{self, Write},
-    num::NonZeroU32,
     ops::DerefMut,
     sync::Arc,
 };
@@ -258,8 +257,10 @@ pub enum CopyOnWriteReason {
 
 /// Denotes if an implementor of the [Dml] can utilize an allocation handler.
 pub trait DmlWithHandler {
+    /// Precise type of handler used.
     type Handler;
 
+    /// Return the inner allocation handler.
     fn handler(&self) -> &Self::Handler;
 }
 

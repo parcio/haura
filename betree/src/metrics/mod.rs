@@ -1,7 +1,7 @@
 //! A naive metrics system, logging newline-delimited JSON to a configurable file.
 
 use crate::{
-    data_management::{Dml, DmlWithHandler},
+    data_management::Dml,
     database::{RootDmu, StorageInfo},
     storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
 };

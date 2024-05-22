@@ -715,7 +715,7 @@ impl<N: HasStoragePreference> Node<N> {
         match self.0 {
             PackedLeaf(_) | Leaf(_) => None,
             Internal(ref mut internal) => Some(internal.pivot_get_mut(pk)),
-            NVMLeaf(ref nvmleaf) => None,
+            NVMLeaf(_) => None,
             NVMInternal(ref mut nvminternal) => Some(nvminternal.pivot_get_mut(pk)),
             Inner::ChildBuffer(_) => unreachable!(),
         }
@@ -946,7 +946,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                 left.merge(right, pivot_key)
             }
             (&mut NVMLeaf(ref mut left), &mut NVMLeaf(ref mut right)) => left.merge(right),
-            (&mut Internal(ref mut left), &mut Internal(ref mut right)) => {
+            (&mut NVMInternal(ref mut left), &mut NVMInternal(ref mut right)) => {
                 left.merge(right, pivot_key)
             }
             _ => unreachable!(),

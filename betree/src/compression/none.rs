@@ -7,7 +7,7 @@ use crate::{
     size::StaticSize,
 };
 use serde::{Deserialize, Serialize};
-use std::{io, mem};
+use std::io;
 
 /// No-op compression.
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
@@ -36,6 +36,7 @@ impl CompressionBuilder for None {
 }
 
 impl None {
+    /// Start no-op decompression.
     pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
         Ok(Box::new(NoneDecompression))
     }
@@ -63,7 +64,6 @@ impl CompressionState for NoneCompression {
 
 impl DecompressionState for NoneDecompression {
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        // FIXME: pass-through Buf, reusing alloc
         Ok(data)
     }
 }

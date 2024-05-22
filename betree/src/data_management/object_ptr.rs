@@ -1,5 +1,3 @@
-use std::num::NonZeroU32;
-
 use super::HasStoragePreference;
 use crate::{
     compression::DecompressionTag,

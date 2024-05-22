@@ -42,8 +42,11 @@ pub struct obj_store_t(ObjectStore);
 /// The handle of an object in the corresponding object store
 pub struct obj_t<'os>(ObjectHandle<'os>);
 
+/// Default storage preference.
 pub const STORAGE_PREF_NONE: storage_pref_t = storage_pref_t(StoragePreference::NONE);
+/// Highest storage preference.
 pub const STORAGE_PREF_FASTEST: storage_pref_t = storage_pref_t(StoragePreference::FASTEST);
+/// Lowest storage preference.
 pub const STORAGE_PREF_SLOWEST: storage_pref_t = storage_pref_t(StoragePreference::SLOWEST);
 
 /// A reference counted byte slice

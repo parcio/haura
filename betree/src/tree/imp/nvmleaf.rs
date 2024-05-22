@@ -8,7 +8,6 @@
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::HasStoragePreference,
-    database::RootSpu,
     size::{Size, StaticSize},
     storage_pool::{AtomicSystemStoragePreference, DiskOffset, StoragePoolLayer},
     tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
@@ -161,7 +160,7 @@ impl NVMLeafNodeState {
                             .map(|e| (e.0 .0.clone(), e.1.take().unwrap())),
                     ),
                 };
-                std::mem::replace(self, other);
+                let _ = std::mem::replace(self, other);
                 Ok(())
             }
             NVMLeafNodeState::Deserialized { .. } => Err(NVMLeafError::AlreadyDeserialized),
@@ -641,11 +640,6 @@ impl NVMLeafNode {
         self.state.len()
     }
 
-    pub(in crate::tree) fn entry_info(&mut self, key: &[u8]) -> Option<&mut KeyInfo> {
-        unimplemented!("seems to be an orpahn method!")
-        //self.data.write().as_mut().unwrap().as_mut().unwrap().entries.get_mut(key).map(|e| &mut e.0)
-    }
-
     /// Split the node and transfer entries to a given other node `right_sibling`.
     /// Use entries which are, when summed up in-order, above the `min_size` limit.
     /// Returns new pivot key and size delta to the left sibling.
@@ -695,7 +689,7 @@ impl NVMLeafNode {
         (pivot_key, size_delta)
     }
 
-    pub fn apply<K>(&mut self, key: K, pref: StoragePreference) -> Option<KeyInfo>
+    pub fn apply<K>(&mut self, _key: K, _pref: StoragePreference) -> Option<KeyInfo>
     where
         K: Borrow<[u8]>,
     {

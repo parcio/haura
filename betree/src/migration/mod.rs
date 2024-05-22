@@ -82,8 +82,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    data_management::DmlWithHandler, database::RootDmu, storage_pool::NUM_STORAGE_CLASSES,
-    tree::PivotKey, vdev::Block, Database, StoragePreference,
+    database::RootDmu, storage_pool::NUM_STORAGE_CLASSES, tree::PivotKey, vdev::Block, Database,
+    StoragePreference,
 };
 
 use self::{lfu::Lfu, reinforcment_learning::ZhangHellanderToor};

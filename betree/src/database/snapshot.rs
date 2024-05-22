@@ -6,7 +6,6 @@ use super::{
 use crate::{
     allocator::Action,
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::DmlWithHandler,
     tree::{DefaultMessageAction, Tree, TreeLayer},
     StoragePreference,
 };

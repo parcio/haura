@@ -1,6 +1,5 @@
 //! Implementation of tree structures.
 use self::{
-    derivate_ref::DerivateRef,
     derivate_ref_nvm::DerivateRefNVM,
     node::{ApplyResult, GetResult, PivotGetMutResult, PivotGetResult},
 };
@@ -668,7 +667,7 @@ mod serialize_nodepointer;
 mod split;
 mod take_child_buffer;
 
-pub use self::{
-    node::{Node, NodeInfo},
-    range::RangeIterator,
-};
+#[cfg(feature = "internal-api")]
+pub use self::node::NodeInfo;
+
+pub use self::{node::Node, range::RangeIterator};

@@ -9,7 +9,7 @@ use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{Dml, HasStoragePreference, ObjectReference},
     database::DatasetId,
-    size::{Size, SizeMut, StaticSize},
+    size::{Size, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
     tree::{pivot_key::LocalPivotKey, KeyInfo},
     AtomicStoragePreference, StoragePreference,
@@ -521,7 +521,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
     }
 
     /// Translate any object ref in a `NVMChildBuffer` from `Incomplete` to `Unmodified` state.
-    pub fn complete_object_refs(mut self, d_id: DatasetId) -> Self {
+    pub fn complete_object_refs(self, d_id: DatasetId) -> Self {
         let first_pk = match self.meta_data.pivot.first() {
             Some(p) => PivotKey::LeftOuter(p.clone(), d_id),
             None => unreachable!(
@@ -730,7 +730,7 @@ where
     X: Dml<Object = Node<N>, ObjectRef = N>,
     N: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
 {
-    pub(super) fn merge_children(mut self, dml: &X) -> MergeChildResult<N>
+    pub(super) fn merge_children(mut self, _dml: &X) -> MergeChildResult<N>
     where
         N: ObjectReference,
     {

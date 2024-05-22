@@ -1,26 +1,13 @@
-use super::{
-    CompressionBuilder, CompressionState, DecompressionState, DecompressionTag, Result,
-    DEFAULT_BUFFER_SIZE,
-};
+use super::{CompressionBuilder, CompressionState, DecompressionState, DecompressionTag, Result};
 use crate::{
     buffer::{Buf, BufWrite},
-    database,
     size::StaticSize,
     vdev::Block,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    io::{self, Cursor, Write},
-    mem,
-};
-use zstd::{
-    block::{Compressor, Decompressor},
-    stream::{
-        raw::{CParameter, DParameter, Decoder, Encoder},
-        zio::{Reader, Writer},
-    },
-};
-use zstd_safe::{FrameFormat, InBuffer, OutBuffer, WriteBuf};
+use std::{io::Write, mem};
+use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder};
+use zstd_safe::{FrameFormat, WriteBuf};
 
 // TODO: investigate pre-created dictionary payoff
 
@@ -67,26 +54,13 @@ impl CompressionBuilder for Zstd {
 }
 
 impl Zstd {
+    /// Start Zstd decompression. The decompression level is by default encoded with the received data stream.
     pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
         let mut decoder = Decoder::new()?;
         decoder.set_parameter(DParameter::Format(FrameFormat::Magicless))?;
         // decoder.set_parameter(DParameter::ForceIgnoreChecksum(true))?;
 
         Ok(Box::new(ZstdDecompression { writer: decoder }))
-    }
-}
-
-impl io::Write for ZstdCompression {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unimplemented!()
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        unimplemented!()
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        unimplemented!()
     }
 }
 

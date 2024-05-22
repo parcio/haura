@@ -13,10 +13,14 @@ pub trait Size {
     /// if serialized using [`bincode`](../../bincode/index.html).
     fn size(&self) -> usize;
 
+    /// Return the, possibly recomputed size, of the current state of the
+    /// object.
     fn actual_size(&self) -> Option<usize> {
         None
     }
 
+    /// Return and verify the serialized size of the object based on
+    /// [Size::size] and [Size::actual_size].
     fn checked_size(&self) -> Result<usize, (usize, usize)> {
         match (self.size(), self.actual_size()) {
             (predicted, Some(actual)) if predicted == actual => Ok(actual),

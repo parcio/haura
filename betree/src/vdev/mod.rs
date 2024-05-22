@@ -104,6 +104,7 @@ pub trait VdevRead: Send + Sync {
         checksum: C,
     ) -> Result<Buf>;
 
+    /// Generate a reference to byte range. This is only valid on memory, single [Vdev].
     async fn get_slice(
         &self,
         offset: Block<u64>,

@@ -88,9 +88,9 @@ impl<V: VdevLeafWrite> Mirror<V> {
 impl<V: Vdev + VdevRead + VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Mirror<V> {
     async fn get_slice(
         &self,
-        offset: Block<u64>,
-        start: usize,
-        end: usize,
+        _offset: Block<u64>,
+        _start: usize,
+        _end: usize,
     ) -> Result<&'static [u8]> {
         unimplemented!("This case should not occur!");
     }
