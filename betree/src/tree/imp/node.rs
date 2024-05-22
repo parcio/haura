@@ -829,7 +829,10 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             NVMInternal(ref mut nvminternal) => {
                 ApplyResult::NextNode(nvminternal.apply_with_info(key, pref))
             }
-            Inner::ChildBuffer(_) => unreachable!(),
+            Inner::ChildBuffer(ref mut buffer) => {
+                buffer.apply_with_info(key, pref);
+                ApplyResult::NVMLeaf(None)
+            }
         }
     }
 }

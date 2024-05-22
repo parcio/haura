@@ -405,7 +405,6 @@ impl<N> NVMInternalNode<N> {
     where
         N: ObjectReference,
     {
-        unimplemented!("Apply info to messages in buffer");
         let idx = self.idx(key);
         let child = self.children[idx].ptr.get_mut();
         self.meta_data.entries_prefs[idx].upgrade(pref);

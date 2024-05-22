@@ -476,8 +476,10 @@ where
                 ApplyResult::NextNode(np) => self.get_mut_node_mut(np)?,
                 ApplyResult::Leaf(info) => break info,
                 ApplyResult::NVMLeaf(info) => break info,
-                ApplyResult::NVMNextNode { .. } => {
-                    todo!()
+                ApplyResult::NVMNextNode { child, buffer } => {
+                    let mut buffer = self.get_mut_node_mut(buffer)?;
+                    buffer.apply_with_info(key, pref);
+                    self.get_mut_node_mut(child)?
                 }
             };
             node = next_node;
