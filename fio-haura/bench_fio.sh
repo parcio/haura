@@ -1,5 +1,7 @@
 #!/bin/env bash
 
+set -e
+
 # This script contains a structured approach to run multiple fio runs with
 # multiple parameters. It is intended to be modified to customize your benchmark
 # runs.
@@ -15,6 +17,10 @@ jobs=(1 2 3 4)
 size_gb=8
 runtime=60s
 extra_options=(--disrespect-fio-options)
+id="results_ID"
+
+mkdir "$id"
+pushd "$id" || exit
 
 for ioengine in "${ioengines[@]}"
 do
@@ -29,10 +35,12 @@ do
                 pushd "${name}" || exit
                 size=$((size_gb * 1024 / job))
                 mkdir .bench-fio-tmp-data
-                fio "--name=${name}" "--readwrite=${mode}" "--ioengine=${ioengine}" "--blocksize=${blocksize}" "--numjobs=${job}" "--runtime=${runtime}" "--size=${size}M" "${export_options[@]}" "${extra_options[@]}"
+                "${root}/fio-fio-3.33/fio" "--name=${name}" "--readwrite=${mode}" "--ioengine=${ioengine}" "--blocksize=${blocksize}" "--numjobs=${job}" "--runtime=${runtime}" "--size=${size}M" "${export_options[@]}" "${extra_options[@]}"
                 rm -rf .bench-fio-tmp-data
                 popd || exit
             done
         done
     done
 done
+
+popd || exit
