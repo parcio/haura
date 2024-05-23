@@ -301,6 +301,9 @@ impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 's
             };
             if let Some(size) = eviction_successful {
                 let key = self.clock.pop_front().unwrap();
+                #[cfg(not(debug_assertions))]
+                let entry = self.map.remove(&key).unwrap();
+                #[cfg(debug_assertions)]
                 let mut entry = self.map.remove(&key).unwrap();
 
                 #[cfg(debug_assertions)]

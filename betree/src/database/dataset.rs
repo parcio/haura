@@ -643,6 +643,7 @@ impl Dataset<DefaultMessageAction> {
     }
 
     #[cfg(feature = "internal-api")]
+    /// Fetch a node by it's pivot key. For testing purposes.
     pub fn test_get_node_pivot(
         &self,
         pk: &PivotKey,

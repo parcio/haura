@@ -321,14 +321,16 @@ impl LeafVdev {
             LeafVdev::PMemFile { ref path, len } => {
                 let file = match pmdk::PMem::open(path) {
                     Ok(handle) => handle,
-                    Err(e) => match pmdk::PMem::create(path, len) {
+                    Err(open_err) => match pmdk::PMem::create(path, len) {
                         Ok(handle) => handle,
-                        Err(e) => {
+                        Err(create_err) => {
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
                                 format!(
-                                    "Failed to create or open handle for pmem file. Path: {}",
-                                    path.display()
+                                    "Failed to create or open handle for pmem file. Path: {} - Open Error {} -Create Error {}",
+                                    path.display(),
+                                    open_err,
+                                    create_err,
                                 ),
                             ));
                         }

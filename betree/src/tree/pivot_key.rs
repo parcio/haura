@@ -30,8 +30,11 @@ use crate::{cow_bytes::CowBytes, database::DatasetId};
 /// ```
 #[derive(Hash, Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum PivotKey {
+    /// Left most child of this node. Left of `.0`.
     LeftOuter(CowBytes, DatasetId),
+    /// Right child of `.0`.
     Right(CowBytes, DatasetId),
+    /// Root of the given tree.
     Root(DatasetId),
 }
 

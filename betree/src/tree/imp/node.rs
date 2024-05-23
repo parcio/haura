@@ -1007,6 +1007,7 @@ pub struct ChildInfo {
 
 #[derive(serde::Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
+#[allow(missing_docs)]
 pub enum NodeInfo {
     Internal {
         level: u32,
