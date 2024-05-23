@@ -172,12 +172,15 @@ impl Map {
         match self {
             Map::Packed { entry_count, data } => {
                 // Perform binary search
-                let mut left = 0;
-                let mut right = (*entry_count).saturating_sub(1);
-                while left < right {
-                    let mid = (left + right) / 2;
+                let mut left = 0 as isize;
+                let mut right = (*entry_count as isize) - 1;
+                loop {
+                    if left > right {
+                        break;
+                    }
+                    let mid = (left + right) / 2 + (left + right) % 2;
                     let kidx = KeyIdx::unpack(
-                        data.cut(HEADER + (KEY_IDX_SIZE * mid), KEY_IDX_SIZE)
+                        data.cut(HEADER + (KEY_IDX_SIZE * mid as usize), KEY_IDX_SIZE)
                             .try_into()
                             .unwrap(),
                     );
@@ -189,7 +192,7 @@ impl Map {
 
                     match key.cmp(unsafe { &*k }) {
                         Ordering::Less => {
-                            right = mid.saturating_sub(1);
+                            right = mid as isize - 1;
                         }
                         Ordering::Equal => {
                             let val_pos_off = kidx.pos as usize + kidx.len as usize;
