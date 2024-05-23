@@ -881,19 +881,19 @@ impl NVMLeafNode {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CowBytes, NVMLeafNode, NVMLeafNodeMetaData, Size, NVMLEAF_METADATA_OFFSET,
-        NVMLEAF_PER_KEY_META_LEN,
-    };
+    use super::{CowBytes, NVMLeafNode, Size};
     use crate::{
         arbitrary::GenExt,
+        buffer::BufWrite,
         checksum::{Builder, State, XxHashBuilder},
         cow_bytes::SlicedCowBytes,
-        data_management::{HasStoragePreference, PartialReadSize},
-        size::StaticSize,
+        data_management::HasStoragePreference,
         storage_pool::{DiskOffset, StoragePoolLayer},
         tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
+            imp::nvmleaf::{
+                NVMLEAF_DATA_LEN_OFFSET, NVMLEAF_METADATA_LEN_OFFSET, NVMLEAF_METADATA_OFFSET,
+            },
             KeyInfo,
         },
         vdev::Block,
@@ -1072,11 +1072,11 @@ mod tests {
             .map(|(k, v)| (k.clone(), (v.0.clone(), v.1.clone())))
             .collect();
 
-        let mut buf = vec![];
-        let foo = leaf_node.pack(&mut buf).unwrap();
+        let mut buf = BufWrite::with_capacity(Block(1));
+        let _ = leaf_node.pack(&mut buf).unwrap();
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config).unwrap();
-        let csum = XxHashBuilder.build().finish();
+        let buf = buf.into_buf();
         let mut wire_node = NVMLeafNode::unpack(
             &buf,
             Box::new(pool),
@@ -1084,9 +1084,17 @@ mod tests {
             crate::vdev::Block(0),
         )
         .unwrap();
+
+        let meta_data_len: usize = u32::from_le_bytes(
+            buf[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let meta_data_end = NVMLEAF_METADATA_OFFSET + meta_data_len;
+
         wire_node
             .state
-            .set_data(&buf.leak()[foo.unwrap_or(PartialReadSize(0)).0..]);
+            .set_data(&Box::<[u8]>::leak(buf.into_boxed_slice())[meta_data_end..]);
 
         for (key, v) in kvs.into_iter() {
             assert_eq!(Some(v), wire_node.get_with_info(&key));
@@ -1104,15 +1112,10 @@ mod tests {
         let mut buf = crate::buffer::BufWrite::with_capacity(Block(1));
         let foo = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf();
-        let meta_range = ..Block::round_up_from_bytes(foo.unwrap().0).to_bytes();
-        let csum = {
-            let mut builder = XxHashBuilder.build();
-            builder.ingest(&buf.as_ref()[meta_range]);
-            builder.finish()
-        };
+        let meta_range = ..foo.unwrap().to_bytes() as usize;
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config).unwrap();
-        let wire_node = NVMLeafNode::unpack(
+        let _wire_node = NVMLeafNode::unpack(
             &buf.as_slice()[meta_range],
             Box::new(pool),
             DiskOffset::from_u64(0),
