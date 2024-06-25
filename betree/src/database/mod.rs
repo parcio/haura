@@ -346,6 +346,7 @@ impl DatabaseConfiguration {
                     }
                 }
             }
+            println!("select_root_node");
             let root_ptr = tree.sync()?;
             Ok((tree, root_ptr))
         }
@@ -422,6 +423,8 @@ impl Database {
         dml_tx: Option<Sender<DmlMsg>>,
         db_tx: Option<Sender<DatabaseMsg>>,
     ) -> Result<Self> {
+        println!("build_internal");
+
         let spl = builder.new_spu()?;
         let handler = builder.new_handler(&spl);
         let mut dmu = builder.new_dmu(spl, handler);
@@ -448,6 +451,8 @@ impl Database {
     /// Opens or create a database given by the storage pool configuration, sets the given cache size and spawns threads to periodically perform
     /// sync (if configured with [SyncMode::Periodic]) and auto migration (if configured with [MigrationPolicies]).
     pub fn build_threaded(builder: DatabaseConfiguration) -> Result<Arc<RwLock<Self>>> {
+        println!("build_threaded");
+
         let db = match builder.migration_policy() {
             Some(pol) => {
                 let (dml_tx, dml_rx) = crossbeam_channel::unbounded();

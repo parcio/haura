@@ -53,13 +53,13 @@ fn migration_config_lfu(mode: LfuMode) -> DatabaseConfiguration {
             tiers: vec![
                 TierConfiguration {
                     top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
-                        mem: 2048 * TO_MEBIBYTE,
+                        mem: 8*2048 * TO_MEBIBYTE,
                     })],
                     ..Default::default()
                 },
                 TierConfiguration {
                     top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
-                        mem: 2048 * TO_MEBIBYTE,
+                        mem: 8*2048 * TO_MEBIBYTE,
                     })],
                     ..Default::default()
                 },

@@ -144,14 +144,17 @@ impl ObjectReference for () {
     type ObjectPointer = ();
 
     fn get_unmodified(&self) -> Option<&Self::ObjectPointer> {
+        panic!("get_unmodified opt..........");
         Some(&())
     }
 
     fn set_index(&mut self, _pk: PivotKey) {
+        panic!("set_index opt..........");
         // NO-OP
     }
 
     fn index(&self) -> &PivotKey {
+        panic!("index opt..........");
         unsafe {
             if PK.is_none() {
                 PK = Some(PivotKey::LeftOuter(
@@ -164,6 +167,7 @@ impl ObjectReference for () {
     }
 
     fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
+        panic!("serialize_unmodified opt..........");
         if let p
         = self {
 
@@ -177,6 +181,7 @@ impl ObjectReference for () {
     }
 
     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
+        panic!("deserialize_and_set_unmodified opt..........");
         match bincode::deserialize::<()>(bytes) {
             Ok(_) => Ok(()),
             Err(e) => {
@@ -267,6 +272,8 @@ impl<N: ObjectReference> NVMInternalNode<N> {
         // Also since at this point I am loading all the data so assuming that 'None' suggests all the data is already fetched.
 
         if self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm {
+            panic!("--");
+
             if self.data.read().unwrap().is_none() {
                 let mut node: InternalNodeData<N> = InternalNodeData { 
                     children: vec![]
@@ -344,6 +351,8 @@ impl<N: ObjectReference> NVMInternalNode<N> {
         // }
 
         if self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm && self.disk_offset.is_some() {
+            panic!("--");
+
             self.nvm_load_details.write().unwrap().need_to_load_data_from_nvm = false;
             let compressed_data = self.pool.as_ref().unwrap().read(self.node_size, self.disk_offset.unwrap(), self.checksum.unwrap());
             match compressed_data {
@@ -572,7 +581,7 @@ impl<N> NVMInternalNode<N> {
 
     pub fn get_next_node(&self, key: &[u8]) -> (&std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>, usize) {
         let idx = self.idx(key) + 1;
-
+        println!("---{} {}", idx, self.data.read().as_ref().unwrap().as_ref().unwrap().children.len());
         //self.data.read().as_ref().unwrap().as_ref().unwrap().children.get(idx).map(|child| &child.as_ref().unwrap().node_pointer)
         (&self.data, idx)
     }
@@ -797,7 +806,7 @@ where
 {
     pub fn try_walk(&mut self, key: &[u8]) -> Option<NVMTakeChildBuffer<N>> {
         let child_idx = self.idx(key);
-
+        //skarim..println!("try_walk child_idx: {}, total: {}", child_idx, self.data.write().as_ref().unwrap().as_ref().unwrap().children.len());
         if self.data.write().as_mut().unwrap().as_mut().unwrap().children[child_idx].as_mut().unwrap().is_empty(key) {
             Some(NVMTakeChildBuffer {
                 node: self,

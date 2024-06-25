@@ -943,6 +943,7 @@ impl<'ds> ObjectHandle<'ds> {
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(self.object.id, chunk.start.chunk_id);
+            println!("chunk.start.chunk_id >> {}", chunk.start.chunk_id);
 
             self.store
                 .data

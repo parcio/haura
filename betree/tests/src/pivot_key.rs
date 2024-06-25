@@ -29,6 +29,17 @@ fn random_pivot_key(ni: &NodeInfo) -> Option<&PivotKey> {
                     .choose(&mut rng)
                     .unwrap(),
             )
+        },
+        NodeInfo::NVMInternal { children, .. } => {
+            let mut rng = rand::thread_rng();
+            Some(
+                children
+                    .iter()
+                    .flat_map(|c_buf| [Some(&c_buf.pivot_key), random_pivot_key(&c_buf.child)])
+                    .flatten()
+                    .choose(&mut rng)
+                    .unwrap(),
+            )
         }
         // Only inspect Internal nodes as they hold child buffers
         _ => None,

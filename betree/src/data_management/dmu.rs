@@ -178,12 +178,14 @@ where
     ///       `or` to `Unmodified(_)`.
     fn fix_or(&self, or: &mut <Self as Dml>::ObjectRef) {
         match or {
-            ObjRef::Unmodified(..) => unreachable!(),
+            ObjRef::Unmodified(..) => {print!("->fix_or ObjRef::Unmodified ");unreachable!()},
             ObjRef::Modified(mid, pk) => {
+                print!("->fix_or ObjRef::Modified ");
                 debug!("{mid:?} moved to InWriteback");
                 *or = ObjRef::InWriteback(*mid, pk.clone());
             }
             ObjRef::InWriteback(mid, pk) => {
+                print!("->fix_or ObjRef::InWriteback ");
                 // The object must have been written back recently.
                 debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(mid).unwrap();
@@ -301,7 +303,7 @@ where
         // Try to remove from cache
         // If ok -> done
         // If this fails, call copy_on_write as object has been modified again
-
+        println!("evict");
         let evict_result = cache.evict(|&key, entry, cache_contains_key| {
             let object = entry.value_mut().get_mut();
             let can_be_evicted = match key {
@@ -405,9 +407,11 @@ where
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();
+        println!("handle_write_back: size={:?}", size );
         debug!("Compressed object size is {size} bytes");
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());
+        
         let offset = self.allocate(storage_class, size)?;
         assert_eq!(size.to_bytes() as usize, compressed_data.len());
         /*if size.to_bytes() as usize != compressed_data.len() {
@@ -483,6 +487,7 @@ where
     }
 
     fn allocate(&self, storage_preference: u8, size: Block<u32>) -> Result<DiskOffset, Error> {
+        
         assert!(storage_preference < NUM_STORAGE_CLASSES as u8);
         if size >= Block(2048) {
             warn!("Very large allocation requested: {:?}", size);
@@ -538,7 +543,7 @@ where
                 })
                 .unwrap();
             let size = self.pool.actual_size(class, disk_id, size);
-            let disk_size = self.pool.size_in_blocks(class, disk_id);
+            let disk_size: Block<u64> = self.pool.size_in_blocks(class, disk_id);
 
             let disk_offset = {
                 let mut x = self.allocation_data[class as usize][disk_id as usize].lock();
@@ -591,6 +596,7 @@ where
             "No available layer can provide enough free storage {:?}",
             size
         );
+        
         Err(Error::OutOfSpaceError)
     }
 
@@ -627,7 +633,7 @@ where
         mid: ModifiedObjectId,
         dep_mids: &mut Vec<(ModifiedObjectId, PivotKey)>,
     ) -> Result<Option<<Self as Dml>::CacheValueRefMut>, ()> {
-        trace!("prepare_write_back: Enter");
+        print!("->prepare_write_back: Enter {:?}", mid);
         loop {
             // trace!("prepare_write_back: Trying to acquire cache write lock");
             let mut cache = self.cache.write();
@@ -636,7 +642,7 @@ where
                 // TODO wait
                 drop(cache);
                 yield_now();
-                // trace!("prepare_write_back: Cache contained key, waiting..");
+                print!("->prepare_write_back: Cache contained key, waiting..");
                 continue;
             }
             let result =
@@ -646,9 +652,9 @@ where
                     object
                         .for_each_child::<(), _>(|or| loop {
                             let mid = match or {
-                                ObjRef::Unmodified(..) => break Ok(()),
-                                ObjRef::InWriteback(mid, ..) | ObjRef::Modified(mid, ..) => *mid,
-                                ObjRef::Incomplete(_) => unreachable!(),
+                                ObjRef::Unmodified(..) => { print!("->ObjRef::Unmodified "); break Ok(())},
+                                ObjRef::InWriteback(mid, ..) | ObjRef::Modified(mid, ..) => { print!("->ObjRef::InWriteback ");*mid},
+                                ObjRef::Incomplete(_) => { print!("->ObjRef::Incomplete ");unreachable!()},
                             };
                             let pk = or.index().clone();
                             if cache_contains_key(&or.as_key()) {
@@ -660,22 +666,26 @@ where
                         })
                         .unwrap();
                     if modified_children {
+                        print!("-> modified_children");
                         Err(())
                     } else {
+                        print!("-> ObjectKey::InWriteback(mid)");
                         Ok(ObjectKey::InWriteback(mid))
                     }
                 });
             return match result {
-                Ok(()) => Ok(Some(
+                Ok(()) => {
+                    print!("-> Ok(())");
+                    Ok(Some(
                     cache
                         .get(&ObjectKey::InWriteback(mid), false)
                         .map(CacheValueRef::write)
                         .unwrap(),
-                )),
-                Err(ChangeKeyError::NotPresent) => Ok(None),
+                ))},
+                Err(ChangeKeyError::NotPresent) => {print!("-> Ok(None)"); Ok(None)},
                 Err(ChangeKeyError::Pinned) => {
                     // TODO wait
-                    warn!("Pinned node");
+                    //print!("->Pinned node");
                     drop(cache);
                     yield_now();
                     continue;
@@ -723,8 +733,10 @@ where
                 let cache = self.cache.read();
                 cache.get(&or.as_key(), true)
             };
+            //skarim..print!(" try_get_mut returning node.. ");
             result.map(CacheValueRef::write)
         } else {
+            //skarim..print!(" try_get_mut returning none.. ");
             None
         }
     }
@@ -877,33 +889,33 @@ where
         F: FnMut() -> FO,
         FO: DerefMut<Target = Self::ObjectRef>,
     {
-        trace!("write_back: Enter");
+        println!("write_back..");
         let (object, mid, mid_pk) = loop {
             trace!("write_back: Trying to acquire lock");
             let mut or = acquire_or_lock();
             trace!("write_back: Acquired lock");
             let mid = match &*or {
-                ObjRef::Unmodified(ref p, ..) => return Ok(p.clone()),
-                ObjRef::InWriteback(mid, ..) | ObjRef::Modified(mid, ..) => *mid,
-                ObjRef::Incomplete(..) => unreachable!(),
+                ObjRef::Unmodified(ref p, ..) => {print!("->ObjRef::Unmodified"); return Ok(p.clone())},
+                ObjRef::InWriteback(mid, ..) | ObjRef::Modified(mid, ..) => {print!("->ObjRef::InWriteback");*mid},
+                ObjRef::Incomplete(..) => {print!("->ObjRef::Incomplete"); unreachable!()},
             };
             let mut mids = Vec::new();
-            trace!("write_back: Preparing write back");
+            print!("->write_back: Preparing write back");
             match self.prepare_write_back(mid, &mut mids) {
                 Ok(None) => {
-                    trace!("write_back: Was Ok(None)");
+                    print!("write_back: Was Ok(None)");
                     self.fix_or(&mut or)
                 }
                 Ok(Some(object)) => break (object, mid, or.index().clone()),
                 Err(()) => {
-                    trace!("write_back: Was Err");
+                    print!("->write_back: Was Err");
                     drop(or);
                     while let Some((mid, mid_pk)) = mids.last().cloned() {
-                        trace!("write_back: Trying to prepare write back");
+                        print!("->write_back: Trying to prepare write back");
                         match self.prepare_write_back(mid, &mut mids) {
                             Ok(None) => {}
                             Ok(Some(object)) => {
-                                trace!("write_back: Was Ok Some");
+                                print!("->write_back: Was Ok Some");
                                 self.handle_write_back(object, mid, false, mid_pk).map_err(
                                     |err| {
                                         let mut cache = self.cache.write();
@@ -923,7 +935,7 @@ where
                 }
             }
         };
-        trace!("write_back: Leave");
+        print!("->write_back: Leave");
 
         self.handle_write_back(object, mid, false, mid_pk)
     }

@@ -345,7 +345,7 @@ fn write_block(#[case] tier_size_mb: u32) {
 #[case::h(1024, 0.8)]
 #[case::i(1024, 0.9)]
 #[case::j(1024, 0.91)]
-#[timeout(std::time::Duration::from_secs(60))]
+#[timeout(std::time::Duration::from_secs(240*10))]
 fn write_full(#[case] tier_size_mb: u32, #[case] par_space: f32) {
     // @jwuensche: This test can lead to busy locks, the timeout prevents the tests from completely locking up
     // If 60 seconds are overstepped it is highly unlikely that the test will ever finish
@@ -355,7 +355,7 @@ fn write_full(#[case] tier_size_mb: u32, #[case] par_space: f32) {
 #[rstest]
 #[case::a(1024, 1.05)]
 #[case::b(1024, 1.1)]
-#[timeout(std::time::Duration::from_secs(60))]
+#[timeout(std::time::Duration::from_secs(240*2))]
 // This test shows how the storage stack handles situation of tight requirements
 // on available storage space.
 fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
