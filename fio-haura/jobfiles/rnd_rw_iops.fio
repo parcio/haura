@@ -1,0 +1,10 @@
+[rnd-rw-iops]
+rw=randrw
+numjobs=1
+bs=32k
+direct=1
+ioengine=external:src/fio-engine-haura.o
+size=4g
+runtime=10s
+group_reporting
+disrespect-fio-options

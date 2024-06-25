@@ -44,6 +44,7 @@ struct fio_haura_options {
   int disrespect_fio_queue_depth;
   int disrespect_fio_direct;
   int disrespect_fio_options;
+  int haura_nvm;
 };
 
 struct haura_data {
@@ -105,6 +106,15 @@ static struct fio_option options[] = {
                 "comparability with results of other engines.",
         .category = FIO_OPT_C_ENGINE, /* always use this */
         .group = FIO_OPT_G_INVALID,   /* this can be different */
+    },
+    {
+        .name = "haura-nvm",
+        .lname = "haura-nvm",
+        .type = FIO_OPT_BOOL,
+        .help = "Use the NVM compatible representation of a dataset.",
+        .off1 = offsetof(struct fio_haura_options, haura_nvm),
+        .category = FIO_OPT_C_ENGINE,
+        .group = FIO_OPT_G_INVALID,
     },
 };
 
@@ -328,12 +338,19 @@ static int fio_haura_setup(struct thread_data *td) {
     if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
       return bail(error);
     }
-    if ((global_data.obj_s = betree_create_object_store_on(
-             global_data.db, "fio", 3, pref, NVM, &error)) == NULL) {
-      return bail(error);
+    if (((struct fio_haura_options *)td->eo)->haura_nvm) {
+      if ((global_data.obj_s = betree_create_object_store_on(
+               global_data.db, "fio", 3, pref, NVM, &error)) == NULL) {
+        return bail(error);
+      }
+    } else {
+      if ((global_data.obj_s = betree_create_object_store_on(
+               global_data.db, "fio", 3, pref, Block, &error)) == NULL) {
+        return bail(error);
+      }
     }
-    char init[2] = {1};
 
+    char init[2] = {1};
     global_data.objs = malloc(sizeof(struct obj_t *) * global_data.jobs);
     // Create a private object for each thread
     for (size_t idx = 0; idx < global_data.jobs; idx += 1) {
