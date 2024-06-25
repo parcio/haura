@@ -196,25 +196,20 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
     fn pack<W: Write>(&self, mut writer: W, metadata_size: &mut usize) -> Result<(), io::Error> {
-        print!("...packing starts...");
         match self.0 {
             PackedLeaf(ref map) => {
-                print!(" packedleaf ");
                 writer.write_all(map.inner())
             },
             Leaf(ref leaf) => {
-                print!(" leaf ");
                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
                 PackedMap::pack(leaf, writer)
             },
             Internal(ref internal) => {
-                print!(" internal ");
                 writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
                 serialize_into(writer, internal)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             },
             NVMLeaf(ref leaf) => {
-                print!(" nvmleaf ");
                 let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                 serializer_meta_data.serialize_value(&leaf.meta_data).unwrap();
                 let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
@@ -237,7 +232,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 Ok(())
             },
             NVMInternal(ref nvminternal) => {
-                print!(" nvminternal ");
                 let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                 serializer_meta_data.serialize_value(&nvminternal.meta_data).unwrap();
                 let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
@@ -264,7 +258,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     }
 
     fn unpack_at(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
-        //panic!("....");
         if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
                 match deserialize::<InternalNode<_>>(&data[4..]) {
                 Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),

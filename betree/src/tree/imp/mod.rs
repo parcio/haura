@@ -564,7 +564,6 @@ where
     where
         K: Borrow<[u8]> + Into<CowBytes>,
     {
-        //skarim..println!("insert start");
         if key.borrow().is_empty() {
             return Err(Error::EmptyKey);
         }
@@ -574,7 +573,6 @@ where
             loop {
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-                        //skarim..println!("yes child_buffer is there.");
                         // TODO: Karim.. add comments..
                         let mut auto;
 
@@ -590,22 +588,17 @@ where
 
                         if let Some(child) = auto
                         {
-                            //skarim..println!("child is some...");
                             node = child;
                             parent = Some(child_buffer);
                         } else {
-                            //skarim..println!("child is none");
                             break child_buffer.into_owner();
                         }
                     },
-                    Err(node) => {
-                        //skarim..println!("no child_buffer returned.");
-                        break node;
-                    },
+                    Err(node) => break node,
                 };
             }
         };
-        //skarim..println!("loop ends..");
+
         let op_preference = storage_preference.or(self.storage_preference);
         let added_size = node.insert(key, msg, self.msg_action(), op_preference);
         node.add_size(added_size);
@@ -651,7 +644,7 @@ where
     }
 
     fn sync(&self) -> Result<Self::Pointer, Error> {
-        println!("sync: Enter");
+        trace!("sync: Enter");
         let obj_ptr = self
             .dml
             .write_back(|| self.inner.borrow().root_node.write())?;

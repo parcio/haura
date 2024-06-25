@@ -47,7 +47,6 @@ where
 {
     type ObjectPointer = ObjectPointer<D>;
     fn get_unmodified(&self) -> Option<&ObjectPointer<D>> {
-        //panic!("get_unmodified ..........");
         if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
             Some(p)
         } else {
@@ -56,7 +55,6 @@ where
     }
 
     fn set_index(&mut self, pk: PivotKey) {
-        panic!("set_index ..........");
         // Transfer from an invalid object reference to a valid one.
         // if let ObjRef::Incomplete(ref p) = self {
         //     *self = ObjRef::Unmodified(p.clone(), pk);
@@ -71,7 +69,6 @@ where
     }
 
     fn index(&self) -> &PivotKey {
-        //panic!("index ..........");
         match self {
             ObjRef::Incomplete(_) => unreachable!(),
             ObjRef::Unmodified(_, pk) | ObjRef::Modified(_, pk) | ObjRef::InWriteback(_, pk) => pk,
@@ -115,7 +112,6 @@ where
 
     // TODO: Karim.. add comments
     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
-        panic!("deserialize_and_set_unmodified ..........");
         match bincode::deserialize::<ObjectPointer<D>>(bytes) {
             Ok(p) => Ok(ObjRef::Incomplete(p)),
             Err(e) => {
@@ -187,23 +183,15 @@ impl<P: serde::Serialize> serde::Serialize for ObjRef<P> {
         S: serde::Serializer,
     {
         match *self {
-            ObjRef::Modified(..) => {
-                panic!("------------------");
-                Err(S::Error::custom(
+            ObjRef::Modified(..) => Err(S::Error::custom(
                 "ObjectRef: Tried to serialize a modified ObjectRef",
-            ))},
-            ObjRef::InWriteback(..) => {
-                panic!("------------------");
-                Err(S::Error::custom(
+            )),
+            ObjRef::InWriteback(..) => Err(S::Error::custom(
                 "ObjectRef: Tried to serialize a modified ObjectRef which is currently written back",
-            ))},
-            ObjRef::Incomplete(..) => {
-                panic!("------------------");
-                Err(S::Error::custom("ObjRef: Tried to serialize incomple reference."))},
+            )),
+            ObjRef::Incomplete(..) => Err(S::Error::custom("ObjRef: Tried to serialize incomple reference.")),
             // NOTE: Ignore the pivot key as this can be generated while reading a node.
-            ObjRef::Unmodified(ref ptr, ..) => {
-                //panic!("------------------");
-                ptr.serialize(serializer)},
+            ObjRef::Unmodified(ref ptr, ..) => ptr.serialize(serializer),
         }
     }
 }

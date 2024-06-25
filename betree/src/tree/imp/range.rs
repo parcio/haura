@@ -190,7 +190,6 @@ where
                         np,
                     } => {
                         let previous_prefetch = if let Some(prefetch_np) = prefetch_option {
-                            println!("++++");
                             let f = self.dml.prefetch(&prefetch_np.read())?;
                             replace(prefetch, f)
                         } else {
@@ -208,8 +207,6 @@ where
                         let previous_prefetch = if let Some(prefetch_np) = prefetch_option {
                             if let Ok(_node) = prefetch_np.0.read() {
                                 let _node_pointer = _node.as_ref().unwrap().children.get(prefetch_np.1).map(|child| &child.as_ref().unwrap().node_pointer);
-                                println!("++++{} {}", prefetch_np.1, _node.as_ref().unwrap().children.len());
-                                //let _node_pointer = &_node.as_ref().unwrap().children[prefetch_np.1].as_ref().unwrap().node_pointer;
 
                                 //let f = self.dml.prefetch(&_node_pointer.expect("REASON").read())?;
                                 //replace(prefetch, f)

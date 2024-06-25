@@ -293,8 +293,6 @@ impl<N> InternalNode<N> {
 
     pub fn get_next_node(&self, key: &[u8]) -> Option<&RwLock<N>> {
         let idx = self.idx(key) + 1;
-        println!("---{} {}", idx, self.children.len());
-
         self.children.get(idx).map(|child| &child.node_pointer)
     }
 
@@ -488,7 +486,6 @@ where
 {
     pub fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<N>> {
         let child_idx = self.idx(key);
-        println!("try_walk child_idx: {}, total: {}", child_idx, self.children.len());
         if self.children[child_idx].is_empty(key) {
             Some(TakeChildBuffer {
                 node: self,
