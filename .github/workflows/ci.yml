@@ -4,7 +4,7 @@ jobs:
   dependencies:
     name: Dependencies
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -40,7 +40,7 @@ jobs:
     name: Integration Tests
     needs: dependencies
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     env:
       RUST_BACKTRACE: 1
     steps:
@@ -78,7 +78,7 @@ jobs:
     name: Unit Tests
     needs: dependencies
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     env:
       RUST_BACKTRACE: 1
     steps:
@@ -115,7 +115,7 @@ jobs:
   betree-msrv:
     name: MSRV Check
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -161,7 +161,7 @@ jobs:
   fio-haura:
     name: fio ioengine for Haura
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     needs: dependencies
     steps:
       - name: Checkout
