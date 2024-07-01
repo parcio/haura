@@ -2,7 +2,11 @@
 #[cfg(feature = "nvm")]
 use pmdk;
 
-use crate::vdev::{self, Dev, Leaf};
+use crate::{
+    tree::StorageKind,
+    vdev::{self, Dev, Leaf},
+    StoragePreference,
+};
 use itertools::Itertools;
 use libc;
 use serde::{Deserialize, Serialize};
@@ -71,6 +75,8 @@ pub struct TierConfiguration {
     /// Which storage access is preferred to be used with this tier. See
     /// [PreferredAccessType] for all variants.
     pub preferred_access_type: PreferredAccessType,
+    /// Which medium this layer is made of.
+    pub storage_kind: StorageKind,
 }
 
 /// Configuration for the storage pool unit.
@@ -94,6 +100,16 @@ impl Default for StoragePoolConfiguration {
             queue_depth_factor: 20,
             thread_pool_size: None,
             thread_pool_pinned: false,
+        }
+    }
+}
+
+impl StoragePoolConfiguration {
+    /// Returns whether the given storage preference is backed by memory.
+    pub fn pref_is_memory(&self, pref: StoragePreference) -> bool {
+        match self.tiers.get(pref.as_u8() as usize) {
+            Some(tier) => tier.is_memory(),
+            _ => false,
         }
     }
 }
@@ -157,6 +173,7 @@ impl TierConfiguration {
         TierConfiguration {
             top_level_vdevs,
             preferred_access_type: PreferredAccessType::Unknown,
+            storage_kind: StorageKind::Hdd,
         }
     }
 
@@ -207,6 +224,7 @@ impl TierConfiguration {
         Ok(TierConfiguration {
             top_level_vdevs: v,
             preferred_access_type: PreferredAccessType::Unknown,
+            storage_kind: StorageKind::Hdd,
         })
     }
 
@@ -252,6 +270,7 @@ impl FromIterator<Vdev> for TierConfiguration {
         TierConfiguration {
             top_level_vdevs: iter.into_iter().collect(),
             preferred_access_type: PreferredAccessType::Unknown,
+            storage_kind: StorageKind::Hdd,
         }
     }
 }

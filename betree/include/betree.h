@@ -16,6 +16,8 @@
  */
 #define BLOCK_SIZE 4096
 
+#define BUFFER_STATIC_SIZE HEADER
+
 #define CHUNK_MAX (UINT32_MAX - 1024)
 
 /**
@@ -37,11 +39,6 @@
  * Number of bytes required to store a segments allocation bitmap
  */
 #define SEGMENT_SIZE_BYTES (SEGMENT_SIZE / 8)
-
-typedef enum StorageKind {
-  Block = 0,
-  NVM,
-} StorageKind;
 
 /**
  * A byte slice reference counter
@@ -149,10 +146,19 @@ typedef struct byte_slice_t {
   const struct byte_slice_rc_t *arc;
 } byte_slice_t;
 
+/**
+ * Highest storage preference.
+ */
 #define STORAGE_PREF_FASTEST (storage_pref_t){ ._0 = StoragePreference_FASTEST }
 
+/**
+ * Default storage preference.
+ */
 #define STORAGE_PREF_NONE (storage_pref_t){ ._0 = StoragePreference_NONE }
 
+/**
+ * Lowest storage preference.
+ */
 #define STORAGE_PREF_SLOWEST (storage_pref_t){ ._0 = StoragePreference_SLOWEST }
 
 /**
@@ -230,23 +236,13 @@ int betree_create_ds(struct db_t *db,
                      struct err_t **err);
 
 /**
- * Create an object store interface using a block based database.
+ * Create an object store.
  */
 struct obj_store_t *betree_create_object_store(struct db_t *db,
                                                const char *name,
                                                unsigned int name_len,
                                                struct storage_pref_t storage_pref,
                                                struct err_t **err);
-
-/**
- * Create an object store interface.
- */
-struct obj_store_t *betree_create_object_store_on(struct db_t *db,
-                                                  const char *name,
-                                                  unsigned int name_len,
-                                                  struct storage_pref_t storage_pref,
-                                                  enum StorageKind kind,
-                                                  struct err_t **err);
 
 /**
  * Create a new snapshot for the given data set with the given name.

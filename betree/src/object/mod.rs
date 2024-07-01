@@ -290,16 +290,8 @@ impl Database {
     /// Create an object store backed by a single database.
     pub fn open_object_store(&mut self) -> Result<ObjectStore> {
         let id = self.get_or_create_os_id(&[0])?;
-        let data = self.open_or_create_custom_dataset(
-            b"data",
-            StoragePreference::NONE,
-            StorageKind::Block,
-        )?;
-        let meta = self.open_or_create_custom_dataset(
-            b"meta",
-            StoragePreference::NONE,
-            StorageKind::Block,
-        )?;
+        let data = self.open_or_create_custom_dataset(b"data", StoragePreference::NONE)?;
+        let meta = self.open_or_create_custom_dataset(b"meta", StoragePreference::NONE)?;
         self.store_os_data(
             id,
             ObjectStoreData {
@@ -317,16 +309,6 @@ impl Database {
         name: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<ObjectStore> {
-        self.open_named_object_store_on(name, storage_preference, StorageKind::Block)
-    }
-
-    /// Create a namespaced object store, with the datasets "{name}\0data" and "{name}\0meta".
-    pub fn open_named_object_store_on(
-        &mut self,
-        name: &[u8],
-        storage_preference: StoragePreference,
-        kind: StorageKind,
-    ) -> Result<ObjectStore> {
         if name.contains(&0) {
             return Err(Error::KeyContainsNullByte);
         }
@@ -339,8 +321,8 @@ impl Database {
         data_name.extend_from_slice(b"data");
         let mut meta_name = v;
         meta_name.extend_from_slice(b"meta");
-        let data = self.open_or_create_custom_dataset(&data_name, storage_preference, kind)?;
-        let meta = self.open_or_create_custom_dataset(&meta_name, storage_preference, kind)?;
+        let data = self.open_or_create_custom_dataset(&data_name, storage_preference)?;
+        let meta = self.open_or_create_custom_dataset(&meta_name, storage_preference)?;
         self.store_os_data(
             id,
             ObjectStoreData {

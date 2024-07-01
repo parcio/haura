@@ -15,6 +15,8 @@ use crate::{
     database::DatasetId,
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
+    storage_pool::StoragePoolLayer,
+    storage_pool::NUM_STORAGE_CLASSES,
     tree::MessageAction,
     StoragePreference,
 };
@@ -78,6 +80,9 @@ pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     evict: bool,
     marker: PhantomData<M>,
     storage_preference: StoragePreference,
+    /// A 1-to-1 map of each storage class to the desired data representation.
+    storage_map: [StorageKind; NUM_STORAGE_CLASSES],
+    storage_default: StorageKind,
 }
 
 impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tree<X, M, I> {
@@ -88,6 +93,8 @@ impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tre
             evict: self.evict,
             marker: PhantomData,
             storage_preference: self.storage_preference,
+            storage_map: self.storage_map,
+            storage_default: self.storage_default,
         }
     }
 }
@@ -136,9 +143,19 @@ where
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
-        kind: StorageKind,
     ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(kind), tree_id, PivotKey::Root(tree_id));
+        let sto_map = dml.spl().storage_kind_map();
+        let default_class = dml.spl().default_storage_class();
+        let root_node = dml.insert(
+            // TODO: Root Leaf is placed on fastest medium.
+            Node::empty_leaf(
+                sto_map[storage_preference
+                    .or(StoragePreference::from_u8(default_class))
+                    .as_u8() as usize],
+            ),
+            tree_id,
+            PivotKey::Root(tree_id),
+        );
         Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 
@@ -168,6 +185,9 @@ where
     ) -> Self {
         Tree {
             inner: I::from(Inner::new(tree_id, root_node, msg_action)),
+            storage_map: dml.spl().storage_kind_map(),
+            storage_default: dml.spl().storage_kind_map()
+                [dml.spl().default_storage_class() as usize],
             dml,
             evict: true,
             marker: PhantomData,
@@ -197,6 +217,9 @@ where
     ) -> Self {
         Tree {
             inner,
+            storage_map: dml.spl().storage_kind_map(),
+            storage_default: dml.spl().storage_kind_map()
+                [dml.spl().default_storage_class() as usize],
             dml,
             evict,
             marker: PhantomData,

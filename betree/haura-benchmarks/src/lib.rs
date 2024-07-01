@@ -33,11 +33,22 @@ impl Control {
     pub fn with_custom_config(modify_cfg: impl Fn(&mut DatabaseConfiguration)) -> Self {
         init_env_logger();
 
-        let conf_path = env::var("BETREE_CONFIG").expect("Didn't provide a BETREE_CONFIG");
+        let conf_path =
+            PathBuf::from(env::var("BETREE_CONFIG").expect("Didn't provide a BETREE_CONFIG"));
 
-        let mut cfg: DatabaseConfiguration = figment::Figment::new()
-            .merge(DatabaseConfiguration::figment_default())
-            .merge(figment::providers::Json::file(conf_path))
+        let mut cfg = figment::Figment::new().merge(DatabaseConfiguration::figment_default());
+
+        match conf_path.extension() {
+            Some(ext) if ext == "yml" || ext == "yaml" => {
+                cfg = cfg.merge(figment::providers::Yaml::file(conf_path.clone()))
+            }
+            Some(ext) if ext == "json" => {
+                cfg = cfg.merge(figment::providers::Json::file(conf_path.clone()))
+            }
+            _ => todo!(),
+        }
+
+        let mut cfg: DatabaseConfiguration = cfg
             .merge(DatabaseConfiguration::figment_env())
             .extract()
             .expect("Failed to extract DatabaseConfiguration");

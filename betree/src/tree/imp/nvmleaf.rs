@@ -36,10 +36,8 @@ pub(super) struct NVMLeafNodeLoadDetails {
 // slices to this buffer.
 #[derive(Clone)]
 pub(super) struct NVMLeafNode {
-    // NOTE: Use for now, non-blocking would be nicer.
     state: NVMLeafNodeState,
     meta_data: NVMLeafNodeMetaData,
-    nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
 }
 
 #[derive(Clone, Debug)]
@@ -481,11 +479,6 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
                 entries_size,
             },
             state: NVMLeafNodeState::Deserialized { data: entries },
-            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
-                need_to_load_data_from_nvm: false,
-                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
-                nvm_fetch_counter: 0,
-            })),
         }
     }
 }
@@ -502,11 +495,6 @@ impl NVMLeafNode {
                 entries_size: 0,
             },
             state: NVMLeafNodeState::new(),
-            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
-                need_to_load_data_from_nvm: false,
-                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
-                nvm_fetch_counter: 0,
-            })),
         }
     }
 
@@ -616,11 +604,6 @@ impl NVMLeafNode {
                 data: vec![OnceLock::new(); keys.len()],
                 keys,
             },
-            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
-                need_to_load_data_from_nvm: true,
-                time_for_nvm_last_fetch: SystemTime::now(),
-                nvm_fetch_counter: 0,
-            })),
         })
     }
 
@@ -797,11 +780,6 @@ impl NVMLeafNode {
                 entries_size: 0,
             },
             state: NVMLeafNodeState::new(),
-            nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails {
-                need_to_load_data_from_nvm: false,
-                time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
-                nvm_fetch_counter: 0,
-            })),
         };
 
         // This adjusts sibling's size and pref according to its new entries

@@ -5,6 +5,7 @@
 use crate::{
     buffer::Buf,
     checksum::Checksum,
+    tree::StorageKind,
     vdev::{Block, Error as VdevError, Result as VdevResult},
 };
 use futures::{executor::block_on, prelude::*, TryFuture};
@@ -32,7 +33,10 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
     type Metrics: Serialize;
 
     /// Constructs a new object using the given `Configuration`.
-    fn new(configuration: &Self::Configuration) -> StoragePoolResult<Self>;
+    fn new(
+        configuration: &Self::Configuration,
+        default_storage_class: u8,
+    ) -> StoragePoolResult<Self>;
 
     /// Reads `size` blocks from the given `offset`.
     fn read(
@@ -114,6 +118,12 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
 
     /// Return a fitting [StoragePreference] to the given [PreferredAccessType].
     fn access_type_preference(&self, t: PreferredAccessType) -> StoragePreference;
+
+    /// Get list of storage kinds divided by tier.
+    fn storage_kind_map(&self) -> [StorageKind; NUM_STORAGE_CLASSES];
+
+    /// Get default storage class.
+    fn default_storage_class(&self) -> u8;
 }
 
 mod disk_offset;

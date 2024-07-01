@@ -5,7 +5,7 @@ use super::{configs, test_db, TO_MEBIBYTE};
 #[test]
 // Open and close the default object store and test if the objects are preserved
 fn default_object_store_object_persists() {
-    let mut db = test_db(2, 64);
+    let mut db = test_db(2, 64, Default::default());
     let os = db.open_object_store().unwrap();
     let obj = os.open_or_create_object(b"hewo").unwrap();
     obj.write_at(&[1, 2, 3], 0).unwrap();
@@ -25,7 +25,7 @@ fn default_object_store_object_persists() {
 #[test]
 // Open and close the default object store and test if the objects are preserved
 fn object_store_object_persists() {
-    let mut db = test_db(2, 64);
+    let mut db = test_db(2, 64, Default::default());
     let os = db
         .open_named_object_store(b"uwu", StoragePreference::NONE)
         .unwrap();
@@ -46,7 +46,7 @@ fn object_store_object_persists() {
 
 #[test]
 fn object_store_iter() {
-    let mut db = test_db(2, 64);
+    let mut db = test_db(2, 64, Default::default());
     let os = db.open_object_store().unwrap();
     db.close_object_store(os);
     let os = db
@@ -65,7 +65,7 @@ fn object_store_iter() {
 
 #[test]
 fn object_store_object_iter() {
-    let mut db = test_db(2, 64);
+    let mut db = test_db(2, 64, Default::default());
     let os = db.open_object_store().unwrap();
     let _ = os.open_or_create_object(b"hewo").unwrap();
     let _ = os.open_or_create_object(b"uwu").unwrap();
@@ -78,7 +78,7 @@ fn object_store_object_iter() {
 fn object_store_reinit_from_iterator() {
     // Test opening of multiple stores by their names.
     // Test if the default store name '0' gets skipped.
-    let mut db = test_db(2, 64);
+    let mut db = test_db(2, 64, Default::default());
     let os = db
         .open_named_object_store(b"foo", StoragePreference::NONE)
         .unwrap();
@@ -128,7 +128,7 @@ fn object_store_access_pattern() {
 
 #[test]
 fn object_store_reinit_from_id() {
-    let mut db = test_db(2, 64);
+    let mut db = test_db(2, 64, Default::default());
     let os = db.open_object_store().unwrap();
     db.close_object_store(os);
     let mut osl = db.iter_object_stores_pub().unwrap();

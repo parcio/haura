@@ -15,7 +15,7 @@ use crate::{
     database::{AccessMode, Database, Dataset, Error, Snapshot},
     object::{ObjectHandle, ObjectStore},
     storage_pool::{LeafVdev, StoragePoolConfiguration, TierConfiguration, Vdev},
-    tree::{DefaultMessageAction, StorageKind},
+    tree::DefaultMessageAction,
     DatabaseConfiguration, StoragePreference,
 };
 
@@ -257,7 +257,7 @@ pub unsafe extern "C" fn betree_parse_configuration(
 /// On error, return null.  If `err` is not null, store an error in `err`.
 #[no_mangle]
 pub unsafe extern "C" fn betree_configuration_from_env(err: *mut *mut err_t) -> *mut cfg_t {
-    let path = match std::env::var_os("BETREE_CONFIG") {
+    let path = std::path::PathBuf::from(match std::env::var_os("BETREE_CONFIG") {
         Some(val) => val,
         None => {
             handle_err(
@@ -266,11 +266,30 @@ pub unsafe extern "C" fn betree_configuration_from_env(err: *mut *mut err_t) -> 
             );
             return null_mut();
         }
-    };
-    let file = std::fs::OpenOptions::new().read(true).open(path).unwrap();
-    serde_json::from_reader::<_, DatabaseConfiguration>(BufReader::new(file))
-        .map_err(Error::from)
-        .handle_result(err)
+    });
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .open(path.clone())
+        .unwrap();
+
+    match path.extension() {
+        Some(ext) if ext == "yml" || ext == "yaml" => {
+            serde_yaml::from_reader::<_, DatabaseConfiguration>(file)
+                .map_err(Error::from)
+                .handle_result(err)
+        }
+        Some(ext) if ext == "json" => serde_json::from_reader::<_, DatabaseConfiguration>(file)
+            .map_err(Error::from)
+            .handle_result(err),
+        _ => {
+            handle_err(
+                Error::Generic("File has no common extension, pick 'json', 'yaml' or 'yml'".into()),
+                err,
+            );
+            return null_mut();
+        }
+    }
 }
 
 /// Enable the global env_logger, configured via environment variables.
@@ -470,12 +489,8 @@ pub unsafe extern "C" fn betree_create_ds(
 ) -> c_int {
     let db = &mut (*db).0;
     let name = from_raw_parts(name as *const u8, len as usize);
-    db.create_custom_dataset::<DefaultMessageAction>(
-        name,
-        storage_pref.0,
-        crate::tree::StorageKind::Block,
-    )
-    .handle_result(err)
+    db.create_custom_dataset::<DefaultMessageAction>(name, storage_pref.0)
+        .handle_result(err)
 }
 
 /// Close a data set.
@@ -829,7 +844,7 @@ pub unsafe extern "C" fn betree_print_error(err: *mut err_t) {
     }
 }
 
-/// Create an object store interface using a block based database.
+/// Create an object store.
 #[no_mangle]
 pub unsafe extern "C" fn betree_create_object_store(
     db: *mut db_t,
@@ -842,23 +857,6 @@ pub unsafe extern "C" fn betree_create_object_store(
     let name = from_raw_parts(name as *const u8, name_len as usize);
 
     db.open_named_object_store(name, storage_pref.0)
-        .handle_result(err)
-}
-
-/// Create an object store interface.
-#[no_mangle]
-pub unsafe extern "C" fn betree_create_object_store_on(
-    db: *mut db_t,
-    name: *const c_char,
-    name_len: c_uint,
-    storage_pref: storage_pref_t,
-    kind: StorageKind,
-    err: *mut *mut err_t,
-) -> *mut obj_store_t {
-    let db = &mut (*db).0;
-    let name = from_raw_parts(name as *const u8, name_len as usize);
-
-    db.open_named_object_store_on(name, storage_pref.0, kind)
         .handle_result(err)
 }
 

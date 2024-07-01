@@ -4,6 +4,7 @@ use betree_storage_stack::{
     database::AccessMode,
     migration::{LfuConfig, LfuMode, MigrationConfig, MigrationPolicies},
     storage_pool::{configuration::Vdev, LeafVdev, TierConfiguration},
+    tree::StorageKind,
     DatabaseConfiguration, StoragePoolConfiguration,
 };
 
@@ -19,6 +20,7 @@ pub fn access_specific_config() -> DatabaseConfiguration {
                     })],
                     preferred_access_type:
                         betree_storage_stack::PreferredAccessType::RandomReadWrite,
+                    storage_kind: StorageKind::Ssd,
                 },
                 TierConfiguration {
                     top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory {
@@ -26,6 +28,7 @@ pub fn access_specific_config() -> DatabaseConfiguration {
                     })],
                     preferred_access_type:
                         betree_storage_stack::PreferredAccessType::SequentialReadWrite,
+                    storage_kind: StorageKind::Hdd,
                 },
             ],
             ..Default::default()

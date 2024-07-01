@@ -9,7 +9,7 @@ use betree_storage_stack::{
     cow_bytes::CowBytes,
     database::{Database, DatabaseConfiguration, Superblock},
     storage_pool::DiskOffset,
-    tree::{DefaultMessageAction, StorageKind, TreeLayer},
+    tree::{DefaultMessageAction, TreeLayer},
     StoragePreference,
 };
 use chrono::{DateTime, Utc};
@@ -256,7 +256,6 @@ fn bectl_main() -> Result<(), Error> {
                 let ds = db.open_or_create_custom_dataset::<DefaultMessageAction>(
                     dataset.as_bytes(),
                     storage_preference.0,
-                    StorageKind::Block,
                 )?;
                 let value = ds.get(name.as_bytes()).unwrap().unwrap();
                 println!("{}", PseudoAscii(&value));
@@ -264,11 +263,8 @@ fn bectl_main() -> Result<(), Error> {
 
             KvMode::Put { name, value } => {
                 let mut db = open_db(cfg)?;
-                let ds = db.open_or_create_custom_dataset(
-                    dataset.as_bytes(),
-                    storage_preference.0,
-                    StorageKind::Block,
-                )?;
+                let ds =
+                    db.open_or_create_custom_dataset(dataset.as_bytes(), storage_preference.0)?;
                 ds.insert(name.as_bytes(), value.as_bytes())?;
                 db.sync()?;
             }
@@ -278,7 +274,6 @@ fn bectl_main() -> Result<(), Error> {
                 let ds = db.open_or_create_custom_dataset::<DefaultMessageAction>(
                     dataset.as_bytes(),
                     storage_preference.0,
-                    StorageKind::Block,
                 )?;
 
                 let stdout = io::stdout();

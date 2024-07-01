@@ -3,11 +3,7 @@ use super::{
     NUM_STORAGE_CLASSES,
 };
 use crate::{
-    bounded_future_queue::BoundedFutureQueue,
-    buffer::Buf,
-    checksum::Checksum,
-    vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
-    PreferredAccessType, StoragePreference,
+    bounded_future_queue::BoundedFutureQueue, buffer::Buf, checksum::Checksum, tree::StorageKind, vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite}, PreferredAccessType, StoragePreference
 };
 use futures::{
     executor::{block_on, ThreadPool},
@@ -31,6 +27,7 @@ pub(super) type WriteBackQueue = BoundedFutureQueue<
 struct StorageTier {
     devs: Box<[Dev]>,
     preferred_access_type: PreferredAccessType,
+    kind: StorageKind,
 }
 
 impl StorageTier {
@@ -56,15 +53,17 @@ impl Default for StorageTier {
         Self {
             devs: Box::new([]),
             preferred_access_type: PreferredAccessType::Unknown,
+            kind: StorageKind::Hdd,
         }
     }
 }
 
-impl From<(Box<[Dev]>, PreferredAccessType)> for StorageTier {
-    fn from(item: (Box<[Dev]>, PreferredAccessType)) -> Self {
+impl From<(Box<[Dev]>, PreferredAccessType, StorageKind)> for StorageTier {
+    fn from(item: (Box<[Dev]>, PreferredAccessType, StorageKind)) -> Self {
         Self {
             devs: item.0,
             preferred_access_type: item.1,
+            kind: item.2,
         }
     }
 }
@@ -74,6 +73,8 @@ struct Inner<C: Checksum> {
     _check: PhantomData<Box<C>>,
     write_back_queue: WriteBackQueue,
     pool: ThreadPool,
+    cfg: StoragePoolConfiguration,
+    default_storage_class: u8,
 }
 
 impl<C: Checksum> Inner<C> {
@@ -87,7 +88,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
     type Configuration = StoragePoolConfiguration;
     type Metrics = StoragePoolMetrics;
 
-    fn new(configuration: &Self::Configuration) -> StoragePoolResult<Self> {
+    fn new(configuration: &Self::Configuration, default_storage_class: u8) -> StoragePoolResult<Self> {
         let tiers: [StorageTier; NUM_STORAGE_CLASSES] = {
             let mut vec: Vec<StorageTier> = configuration
                 .tiers
@@ -96,7 +97,7 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
                     tier_cfg
                         .build()
                         .map(Vec::into_boxed_slice)
-                        .map(|tier| (tier, tier_cfg.preferred_access_type).into())
+                        .map(|tier| (tier, tier_cfg.preferred_access_type, tier_cfg.storage_kind).into())
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -111,6 +112,8 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
         let queue_depth = configuration.queue_depth_factor as usize * devices_len;
         Ok(StoragePoolUnit {
             inner: Arc::new(Inner {
+                cfg: configuration.clone(),
+                default_storage_class,
                 tiers,
                 _check: PhantomData::default(),
                 write_back_queue: BoundedFutureQueue::new(queue_depth),
@@ -282,6 +285,18 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
             }
         }
         StoragePreference::NONE
+    }
+
+    fn storage_kind_map(&self) -> [StorageKind; NUM_STORAGE_CLASSES] {
+        let mut map = [StorageKind::default(); NUM_STORAGE_CLASSES];
+        for idx in 0..NUM_STORAGE_CLASSES {
+            map[idx] = self.inner.tiers[idx].kind;
+        }
+        map
+    }
+
+    fn default_storage_class(&self) -> u8 {
+        self.inner.default_storage_class
     }
 }
 

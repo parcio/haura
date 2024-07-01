@@ -3,9 +3,9 @@ use betree_storage_stack::{tree::StorageKind, Database, Dataset};
 use rand::RngCore;
 
 pub fn random_db(tier: u32, mb_per_tier: u32, kind: StorageKind) -> (Database, Dataset, u32) {
-    let mut db = test_db(tier, mb_per_tier);
+    let mut db = test_db(tier, mb_per_tier, kind);
     dbg!(&kind);
-    let ds = db.open_or_create_dataset_on(b"hey", kind).unwrap();
+    let ds = db.open_or_create_dataset(b"hey").unwrap();
     let mut key = vec![0u8; 64];
     let mut val = vec![0u8; 1024];
     let mut rng = rand::thread_rng();

@@ -27,13 +27,14 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use insta::assert_json_snapshot;
 use serde_json::json;
 
-fn test_db(tiers: u32, mb_per_tier: u32) -> Database {
+fn test_db(tiers: u32, mb_per_tier: u32, kind: StorageKind) -> Database {
     let tier_size = mb_per_tier as usize * 1024 * 1024;
     let cfg = DatabaseConfiguration {
         storage: StoragePoolConfiguration {
             tiers: (0..tiers)
                 .map(|_| TierConfiguration {
                     top_level_vdevs: vec![Vdev::Leaf(LeafVdev::Memory { mem: tier_size })],
+                    storage_kind: kind,
                     ..Default::default()
                 })
                 .collect(),
@@ -81,7 +82,7 @@ struct TestDriver {
 
 impl TestDriver {
     fn setup(test_name: &str, tiers: u32, mb_per_tier: u32) -> TestDriver {
-        let mut database = test_db(tiers, mb_per_tier);
+        let mut database = test_db(tiers, mb_per_tier, StorageKind::Hdd);
 
         TestDriver {
             name: String::from(test_name),
@@ -187,11 +188,11 @@ impl TestDriver {
 use betree_storage_stack::tree::StorageKind;
 
 #[rstest]
-#[case(StorageKind::NVM)]
-#[case(StorageKind::Block)]
+#[case(StorageKind::Memory)]
+#[case(StorageKind::Hdd)]
 fn insert_single_key(#[case] kind: StorageKind) {
-    let mut db = test_db(1, 512);
-    let ds = db.open_or_create_dataset_on(b"foo", kind).unwrap();
+    let mut db = test_db(1, 512, kind);
+    let ds = db.open_or_create_dataset(b"foo").unwrap();
 
     let key = &[42][..];
     let val = b"Hello World";
@@ -201,8 +202,8 @@ fn insert_single_key(#[case] kind: StorageKind) {
 }
 
 #[rstest]
-#[case(StorageKind::NVM)]
-#[case(StorageKind::Block)]
+#[case(StorageKind::Memory)]
+#[case(StorageKind::Hdd)]
 fn insert_random_keys(#[case] kind: StorageKind) {
     let (db, ds, ks) = random_db(1, 512, kind);
     for (idx, r) in ds.range::<RangeFull, &[u8]>(..).unwrap().enumerate() {
@@ -347,7 +348,7 @@ const TO_MEBIBYTE: usize = 1024 * 1024;
 // We repeat this test here to trigger this potential behavior
 fn write_flaky(tier_size_mb: u32, write_size_mb: usize) {
     for _ in 0..3 {
-        let mut db = test_db(1, tier_size_mb);
+        let mut db = test_db(1, tier_size_mb, StorageKind::Hdd);
         let os = db
             .open_named_object_store(b"test", StoragePreference::FASTEST)
             .expect("Oh no! Could not open object store");
@@ -416,7 +417,7 @@ fn write_full(#[case] tier_size_mb: u32, #[case] par_space: f32) {
 // on available storage space.
 fn write_overfull(#[case] tier_size_mb: u32, #[case] par_space: f32) {
     // env_logger::init();
-    let mut db = test_db(1, tier_size_mb);
+    let mut db = test_db(1, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .expect("Oh no! Could not open object store");
@@ -458,7 +459,7 @@ fn rng() -> ThreadRng {
 #[case::d(2048)]
 fn write_sequence(#[case] tier_size_mb: u32) {
     let mut rng = rand::thread_rng();
-    let mut db = test_db(1, tier_size_mb);
+    let mut db = test_db(1, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .expect("Oh no! Could not open object store");
@@ -486,7 +487,7 @@ use rand::prelude::SliceRandom;
 #[case::c(1024)]
 #[case::d(2048)]
 fn write_delete_sequence(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
-    let mut db = test_db(1, tier_size_mb);
+    let mut db = test_db(1, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .expect("Oh no! Could not open object store");
@@ -539,7 +540,7 @@ fn write_delete_sequence(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
 // The size s_1 of the tier should be in relation to the buffer size s_2
 // s_1 < 3*s_2 && s_1 > 2*s_2
 fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usize) {
-    let mut db = test_db(1, tier_size_mb);
+    let mut db = test_db(1, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .expect("Oh no! Could not open object store");
@@ -603,7 +604,7 @@ fn write_delete_essential_size(#[case] tier_size_mb: u32, #[case] buf_size: usiz
 // We should include some measure to handle these cases.
 // -> Space Accounting!
 fn overwrite_buffer(#[case] tier_size_mb: u32, #[case] buf_size: usize) {
-    let mut db = test_db(1, tier_size_mb);
+    let mut db = test_db(1, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .expect("Oh no! Could not open object store");
@@ -641,7 +642,7 @@ fn overwrite_buffer(#[case] tier_size_mb: u32, #[case] buf_size: usize) {
 #[rstest]
 #[case::a(2048)]
 fn write_sequence_random_fill(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
-    let mut db = test_db(1, tier_size_mb);
+    let mut db = test_db(1, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .expect("Oh no! Could not open object store");
@@ -669,7 +670,7 @@ fn write_sequence_random_fill(#[case] tier_size_mb: u32, mut rng: ThreadRng) {
 #[rstest]
 #[case::a(32)]
 fn dataset_migrate_down(#[case] tier_size_mb: u32) {
-    let mut db = test_db(2, tier_size_mb);
+    let mut db = test_db(2, tier_size_mb, Default::default());
     let ds = db.open_or_create_dataset(b"miniprod").unwrap();
     let buf = vec![42u8; 512 * 1024];
     let key = b"test".to_vec();
@@ -691,7 +692,7 @@ fn dataset_migrate_down(#[case] tier_size_mb: u32) {
 #[case::d(2048)]
 fn object_migrate_down(#[case] tier_size_mb: u32) {
     // env_logger::init();
-    let mut db = test_db(2, tier_size_mb);
+    let mut db = test_db(2, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .unwrap();
@@ -708,7 +709,7 @@ fn object_migrate_down(#[case] tier_size_mb: u32) {
 #[rstest]
 #[case::a(32)]
 fn dataset_migrate_up(#[case] tier_size_mb: u32) {
-    let mut db = test_db(2, tier_size_mb);
+    let mut db = test_db(2, tier_size_mb, Default::default());
     let ds = db.open_or_create_dataset(b"miniprod").unwrap();
     let buf = vec![42u8; 512 * 1024];
     let key = b"test".to_vec();
@@ -730,7 +731,7 @@ fn dataset_migrate_up(#[case] tier_size_mb: u32) {
 #[case::d(2048)]
 fn object_migrate_up(#[case] tier_size_mb: u32) {
     // env_logger::init();
-    let mut db = test_db(2, tier_size_mb);
+    let mut db = test_db(2, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FAST)
         .unwrap();
@@ -773,7 +774,7 @@ fn object_migrate_invalid_size(#[case] tier_size_mb: u32, #[case] buffer_size: u
 #[case::c(512)]
 #[case::d(2048)]
 fn object_migrate_invalid_tier(#[case] tier_size_mb: u32) {
-    let mut db = test_db(2, tier_size_mb);
+    let mut db = test_db(2, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .unwrap();
@@ -793,7 +794,7 @@ fn object_migrate_invalid_tier(#[case] tier_size_mb: u32) {
 #[case::d(2048)]
 // @jwuensche: This case should not raise any errors and should just allow silent dropping of the operation.
 fn object_migrate_nochange(#[case] tier_size_mb: u32) {
-    let mut db = test_db(2, tier_size_mb);
+    let mut db = test_db(2, tier_size_mb, Default::default());
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)
         .unwrap();
@@ -808,7 +809,7 @@ fn object_migrate_nochange(#[case] tier_size_mb: u32) {
 #[rstest]
 fn space_accounting_smoke() {
     // env_logger::init();
-    let mut db = test_db(2, 64);
+    let mut db = test_db(2, 64, Default::default());
     let before = db.free_space_tier();
     let os = db
         .open_named_object_store(b"test", StoragePreference::FASTEST)

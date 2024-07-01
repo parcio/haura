@@ -18,7 +18,7 @@ use crate::{
     data_management::{Dml, HasStoragePreference, Object, ObjectReference},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer},
+    storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
     vdev::Block,
     StoragePreference,
@@ -307,10 +307,16 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn is_too_large(&self) -> bool {
+    pub(super) fn is_too_large(&self, storage_map: [StorageKind; NUM_STORAGE_CLASSES]) -> bool {
         match self.0 {
             PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
-            Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
+            Leaf(ref leaf) => {
+                // This depends on the preferred backing storage. Experimenting with smaller nodes on SSD.
+                match storage_map[leaf.correct_preference().as_u8() as usize] {
+                    StorageKind::Hdd => leaf.size() > MAX_LEAF_NODE_SIZE,
+                    StorageKind::Memory | StorageKind::Ssd => leaf.size() > MAX_LEAF_NODE_SIZE / 2,
+                }
+            }
             Internal(ref internal) => internal.size() > MAX_INTERNAL_NODE_SIZE,
             NVMLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
             NVMInternal(ref nvminternal) => nvminternal.logical_size() > MAX_INTERNAL_NODE_SIZE,
@@ -359,8 +365,8 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 
     fn take(&mut self) -> Self {
         let kind = match self.0 {
-            PackedLeaf(_) | Leaf(_) | Internal(_) => StorageKind::Block,
-            NVMLeaf(_) | NVMInternal(_) => StorageKind::NVM,
+            PackedLeaf(_) | Leaf(_) | Internal(_) => StorageKind::Hdd,
+            NVMLeaf(_) | NVMInternal(_) => StorageKind::Memory,
             Inner::ChildBuffer(_) => unreachable!(),
         };
         replace(self, Self::empty_leaf(kind))
@@ -390,10 +396,14 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         }
     }
 
-    pub(super) fn is_too_large_leaf(&self) -> bool {
+    pub(super) fn is_too_large_leaf(
+        &self,
+        storage_map: [StorageKind; NUM_STORAGE_CLASSES],
+    ) -> bool {
         match self.0 {
             PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
-            Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
+            // NOTE: Don't replicate leaf size constraints here.
+            Leaf(_) => self.is_too_large(storage_map),
             Internal(_) => false,
             NVMLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
             NVMInternal(_) => false,
@@ -413,8 +423,9 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 
     pub(super) fn empty_leaf(kind: StorageKind) -> Self {
         match kind {
-            StorageKind::Block => Node(Leaf(LeafNode::new())),
-            StorageKind::NVM => Node(NVMLeaf(NVMLeafNode::new())),
+            StorageKind::Hdd => Node(Leaf(LeafNode::new())),
+            StorageKind::Memory => Node(NVMLeaf(NVMLeafNode::new())),
+            StorageKind::Ssd => Node(Leaf(LeafNode::new())),
         }
     }
 

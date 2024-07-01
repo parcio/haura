@@ -54,10 +54,15 @@ pub enum Error {
     InUse,
     #[error("Message surpasses the maximum length. If you cannot shrink your value, use an object store instead.")]
     MessageTooLarge,
-    #[error("Could not serialize the given data. This is an internal error.")]
+    #[error("Could not serialize the given data. This is an internal error. Backtrace: {source}")]
     SerializeFailed {
         #[from]
         source: serde_json::Error,
+    },
+    #[error("Could not deserialize the given data. Backtrace: {source}")]
+    YamlConfigFailed {
+        #[from]
+        source: serde_yaml::Error,
     },
     #[error("Migration is not possible as {1:?} blocks are not available in tier {0}.")]
     MigrationWouldExceedStorage(u8, Block<u64>),

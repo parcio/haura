@@ -8,6 +8,8 @@ mod layer;
 mod message_action;
 mod pivot_key;
 
+use serde::{Deserialize, Serialize};
+
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
 pub use self::{
@@ -18,13 +20,21 @@ pub use self::{
 };
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 /// Which node representation the tree should use.
 pub enum StorageKind {
     /// Conventional large nodes. HDD optimized.
-    Block = 0,
+    Hdd = 0,
     /// Partially fetched nodes. Memory only.
-    NVM,
+    Memory,
+    /// Segmented nodes. For fast SSDs.
+    Ssd,
+}
+
+impl Default for StorageKind {
+    fn default() -> Self {
+        Self::Hdd
+    }
 }
 
 #[cfg(not(feature = "internal-api"))]

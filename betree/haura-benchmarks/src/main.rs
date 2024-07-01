@@ -77,7 +77,6 @@ enum Mode {
     },
     YcsbC {
         size: u64,
-        kind: u8,
         threads: u32,
         #[structopt(default_value = "120")]
         runtime: u64,
@@ -225,7 +224,6 @@ fn run_all(mode: Mode) -> Result<(), Box<dyn Error>> {
         }
         Mode::YcsbC {
             size,
-            kind,
             threads,
             runtime,
         } => {

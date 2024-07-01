@@ -187,7 +187,10 @@ impl DatabaseConfiguration {
 impl DatabaseConfiguration {
     /// Create new [StoragePoolUnit] instance. This is the first step of the DB initialization.
     pub fn new_spu(&self) -> Result<RootSpu> {
-        Ok(StoragePoolUnit::<Checksum>::new(&self.storage)?)
+        Ok(StoragePoolUnit::<Checksum>::new(
+            &self.storage,
+            self.default_storage_class,
+        )?)
     }
 
     /// Create new [Handler] instance. This is the second step of the DB initialization.
@@ -329,9 +332,6 @@ impl DatabaseConfiguration {
                 DefaultMessageAction,
                 dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
-                // NOTE: This is set for compatibility right now, we can ensure
-                // somewhat that this should work as expected.
-                crate::tree::StorageKind::Block,
             );
 
             for (tier_id, tier) in tree.dmu().handler().free_space_tier.iter().enumerate() {
