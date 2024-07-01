@@ -13,14 +13,7 @@
 //! data blobs as in the [crate::object] module.
 
 use crate::{
-    cache::AddSize,
-    database::{DatasetId, RootSpu},
-    migration::DmlMsg,
-    size::{Size, StaticSize},
-    storage_pool::{DiskOffset, GlobalDiskId, StoragePoolLayer},
-    tree::PivotKey,
-    vdev::Block,
-    StoragePreference,
+    buffer::Buf, cache::AddSize, compression::{CompressionBuilder, DecompressionTag}, database::{DatasetId, RootSpu}, migration::DmlMsg, size::{Size, StaticSize}, storage_pool::{DiskOffset, GlobalDiskId, StoragePoolLayer}, tree::PivotKey, vdev::Block, StoragePreference
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
@@ -115,6 +108,7 @@ pub trait HasStoragePreference {
 /// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Packs the object into the given `writer`.
+    fn pack_and_compress(&self, metadata_size: &mut usize, c: Arc<std::sync::RwLock<dyn CompressionBuilder>>) -> Result<Buf, io::Error>;
     fn pack<W: Write>(&self, writer: W, metadata_size: &mut usize) -> Result<(), io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at(
@@ -124,6 +118,26 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         disk_offset: DiskOffset,
         d_id: DatasetId,
         data: Box<[u8]>,
+    ) -> Result<Self, io::Error>;
+
+    // fn unpack_at_(
+    //     size: crate::vdev::Block<u32>,
+    //     checksum: crate::checksum::XxHash,
+    //     pool: RootSpu,
+    //     disk_offset: DiskOffset,
+    //     d_id: DatasetId,
+    //     data: Box<[u8]>,
+    //     c: Arc<std::sync::RwLock<dyn CompressionBuilder>>,
+    // ) -> Result<Self, io::Error>;
+
+    fn unpack_and_decompress(
+        size: crate::vdev::Block<u32>,
+        checksum: crate::checksum::XxHash,
+        pool: RootSpu,
+        disk_offset: DiskOffset,
+        d_id: DatasetId,
+        data: Box<[u8]>,
+        d: DecompressionTag,
     ) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.

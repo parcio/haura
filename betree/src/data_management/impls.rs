@@ -113,7 +113,7 @@ where
     // TODO: Karim.. add comments
     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
         match bincode::deserialize::<ObjectPointer<D>>(bytes) {
-            Ok(p) => Ok(ObjRef::Incomplete(p)),
+            Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
             Err(e) => {
                 debug!("Failed to deserialize ObjectPointer.");
                 Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)

@@ -16,6 +16,7 @@ use zstd::stream::{
     zio::Writer,
 };
 use zstd_safe::FrameFormat;
+use std::sync::{Arc, Mutex};
 
 // TODO: investigate pre-created dictionary payoff
 
@@ -41,7 +42,7 @@ impl StaticSize for Zstd {
 }
 
 impl CompressionBuilder for Zstd {
-    fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
+    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>> {
         // "The library supports regular compression levels from 1 up to ZSTD_maxCLevel(),
         // which is currently 22."
         let mut encoder = Encoder::new(self.level as i32)?;
@@ -53,9 +54,9 @@ impl CompressionBuilder for Zstd {
 
         let buf = BufWrite::with_capacity(DEFAULT_BUFFER_SIZE);
 
-        Ok(Box::new(ZstdCompression {
+        Ok(Arc::new(std::sync::RwLock::new(ZstdCompression {
             writer: Writer::new(buf, encoder),
-        }))
+        })))
     }
 
     fn decompression_tag(&self) -> DecompressionTag {

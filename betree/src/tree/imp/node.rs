@@ -13,25 +13,17 @@ use super::{
     MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,
 };
 use crate::{
-    cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, Object, ObjectReference},
-    database::{DatasetId,RootSpu},
-    size::{Size, SizeMut, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer},
-    tree::{pivot_key::LocalPivotKey, MessageAction, imp::{nvminternal::{InternalNodeMetaData, ArchivedInternalNodeMetaData, ArchivedInternalNodeData, InternalNodeData}}},
-    StoragePreference,
+    compression::CompressionBuilder, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{Dml, HasStoragePreference, Object, ObjectReference}, database::{DatasetId,RootSpu}, size::{Size, SizeMut, StaticSize}, storage_pool::{DiskOffset, StoragePoolLayer}, tree::{pivot_key::LocalPivotKey, MessageAction, imp::{nvminternal::{InternalNodeMetaData, ArchivedInternalNodeMetaData, ArchivedInternalNodeData, InternalNodeData}}}, StoragePreference,
+    compression::DecompressionTag,
 };
 use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
 use std::{
-    borrow::Borrow,
-    collections::BTreeMap,
-    io::{self, Write},
-    mem::replace,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH}
+    borrow::{Borrow, BorrowMut}, collections::BTreeMap, io::{self, Write}, mem::replace, ops::{Deref, DerefMut}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}
 };
 
 use std::iter::Map;
+use std::sync::{Arc, Mutex};
 
 use rkyv::{
     archived_root,
@@ -40,6 +32,12 @@ use rkyv::{
     with::{ArchiveWith, DeserializeWith, SerializeWith},
     Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
 };
+
+use crate::{
+    compression::CompressionConfiguration,
+    buffer::Buf,
+};
+
 
 /// The tree node type.
 #[derive(Debug)]
@@ -195,6 +193,204 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 }
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
+    fn pack_and_compress(&self, metadata_size: &mut usize, compressor: Arc<std::sync::RwLock<dyn CompressionBuilder>>) -> Result<Buf, io::Error> {
+
+        match self.0 {
+            PackedLeaf(ref map) => {
+                let builder = &*compressor.read().unwrap();
+                let state = builder.new_compression().unwrap();
+                let mut writer = state.write().unwrap();
+                {
+                    writer.write_all(map.inner())?
+                }
+                return Ok(writer.finish());
+            },
+            Leaf(ref leaf) => {
+                let builder = &*compressor.read().unwrap();
+                let state = builder.new_compression().unwrap();
+                let mut writer = state.write().unwrap();
+                {
+                    writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
+                    PackedMap::pack(leaf, &mut *writer)?
+                }
+                return Ok(writer.finish());
+            },
+            Internal(ref internal) => {
+                let builder = &*compressor.read().unwrap();
+                let state = builder.new_compression().unwrap();
+                let mut writer = state.write().unwrap();
+                {
+                    writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
+                    serialize_into(&mut *writer, internal)
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+                }
+                return Ok(writer.finish());
+
+            },
+            NVMLeaf(ref leaf) => {
+                //let compression_nvm = CompressionConfiguration::None;
+                //let default_compression_nvm = compression_nvm.to_builder();
+        
+                let compression_nvm = &*compressor.read().unwrap();
+                //let compressed_data = [0u8, 10];
+                let compressed_data_nvm = {
+                    // FIXME: cache this
+                    let state = compression_nvm.new_compression().unwrap();
+                    let mut writer = state.write().unwrap();
+                    {
+                        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                        serializer_meta_data.serialize_value(&leaf.meta_data).unwrap();
+                        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+                        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                        serializer_data.serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+                        let bytes_data = serializer_data.into_serializer().into_inner();
+
+                        writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
+                        writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
+                        writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
+
+                        writer.write_all(&bytes_meta_data.as_ref())?;
+                        writer.write_all(&bytes_data.as_ref())?;
+
+                        *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this.. magic nos!
+                    }
+                    return Ok(writer.finish());
+                };
+            },
+            NVMInternal(ref nvminternal) => {
+                //let compression_nvm = CompressionConfiguration::None;
+                //let default_compression_nvm = compression_nvm.to_builder();
+        
+                let compression_nvm = &*compressor.read().unwrap();
+                //let compressed_data = [0u8, 10];
+                let compressed_data_nvm = {
+                    // FIXME: cache this
+                    let state = compression_nvm.new_compression().unwrap();
+                    let mut writer = state.write().unwrap();
+                    {
+                        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                        serializer_meta_data.serialize_value(&nvminternal.meta_data).unwrap();
+                        let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+        
+                        let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                        serializer_data.serialize_value(nvminternal.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+                        let bytes_data = serializer_data.into_serializer().into_inner();
+        
+                        writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
+                        writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
+                        writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
+        
+                        writer.write_all(&bytes_meta_data.as_ref())?;
+                        writer.write_all(&bytes_data.as_ref())?;
+        
+                        *metadata_size = 4 + 8 + 8 + bytes_meta_data.len();//TODO: fix this
+        
+                    }
+                    return Ok(writer.finish());
+                };
+            },
+    }
+
+        // // default flow
+        // let compressed_data = {
+        //     // FIXME: cache this
+        //     let builder = &*compressor.read().unwrap();
+        //     let state = builder.new_compression().unwrap();
+        //     let mut writer = state.write().unwrap();
+        //     {
+        //         match self.0 {
+        //             PackedLeaf(ref map) => {
+        //                 writer.write_all(map.inner())?
+        //             },
+        //             Leaf(ref leaf) => {
+        //                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
+        //                 PackedMap::pack(leaf, &mut *writer)?
+        //             },
+        //             Internal(ref internal) => {
+        //                 writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
+        //                 serialize_into(&mut *writer, internal)
+        //                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+        //             },
+        //             _ => {},
+        //         }
+        //     }
+        //     writer.finish()
+        // };
+
+        // return Ok(compressed_data);
+
+
+
+        // let compressed_data = {
+        //     // FIXME: cache this
+        //     let builder = &*compressor.read().unwrap();
+        //     let state = builder.new_compression().unwrap();
+        //     let mut writer = state.write().unwrap();
+        //     {
+        //         match self.0 {
+        //             PackedLeaf(ref map) => {
+        //                 writer.write_all(map.inner())?
+        //             },
+        //             Leaf(ref leaf) => {
+        //                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
+        //                 PackedMap::pack(leaf, &mut *writer)?
+        //             },
+        //             Internal(ref internal) => {
+        //                 writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
+        //                 serialize_into(&mut *writer, internal)
+        //                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+        //             },
+        //             NVMLeaf(ref leaf) => {
+        //                 //todo use NONE compression???
+        //                 let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        //                 serializer_meta_data.serialize_value(&leaf.meta_data).unwrap();
+        //                 let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+        //                 let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        //                 serializer_data.serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+        //                 let bytes_data = serializer_data.into_serializer().into_inner();
+
+        //                 writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
+        //                 writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
+        //                 writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
+
+        //                 writer.write_all(&bytes_meta_data.as_ref())?;
+        //                 writer.write_all(&bytes_data.as_ref())?;
+
+        //                 *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this.. magic nos!
+        //             },
+        //             NVMInternal(ref nvminternal) => {
+        //                 let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        //                 serializer_meta_data.serialize_value(&nvminternal.meta_data).unwrap();
+        //                 let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+        //                 let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        //                 serializer_data.serialize_value(nvminternal.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+        //                 let bytes_data = serializer_data.into_serializer().into_inner();
+
+        //                 writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
+        //                 writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
+        //                 writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
+
+        //                 writer.write_all(&bytes_meta_data.as_ref())?;
+        //                 writer.write_all(&bytes_data.as_ref())?;
+
+        //                 *metadata_size = 4 + 8 + 8 + bytes_meta_data.len();//TODO: fix this
+
+        //             },
+        //         }
+        //     }
+        //     writer.finish()
+        // };
+
+        // return Ok(compressed_data);
+
+
+
+
+    }
+
     fn pack<W: Write>(&self, mut writer: W, metadata_size: &mut usize) -> Result<(), io::Error> {
         match self.0 {
             PackedLeaf(ref map) => {
@@ -337,6 +533,106 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 data_end: data_end,
                 node_size: size,
                 checksum: Some(checksum),
+                compressor: None,
+                nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
+                    need_to_load_data_from_nvm: true,
+                    time_for_nvm_last_fetch: SystemTime::now(),
+                    nvm_fetch_counter: 0})),
+            };
+
+            debug!("NVMLeaf node un-packed successfully"); 
+
+            Ok(Node(NVMLeaf(nvmleaf)))
+        } else {
+            panic!("Unkown bytes to unpack. [0..4]: {}", u32::from_be_bytes(data[..4].try_into().unwrap()));
+        }
+    }
+
+    fn unpack_and_decompress(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>, d: DecompressionTag) -> Result<Self, io::Error> {
+
+        let mut decompression_state = d.new_decompression();
+        let data = decompression_state.unwrap().decompress(&data).unwrap();
+
+        if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
+                match deserialize::<InternalNode<_>>(&data[4..]) {
+                Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
+                Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+            }
+        } else if data[0..4] == (NodeInnerType::Leaf as u32).to_be_bytes() {
+            // storage_preference is not preserved for packed leaves,
+            // because they will not be written back to disk until modified,
+            // and every modification requires them to be unpacked.
+            // The leaf contents are scanned cheaply during unpacking, which
+            // recalculates the correct storage_preference for the contained keys.
+            Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
+        } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
+            let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
+            let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
+
+            let meta_data_start = 4 + 8 + 8;
+            let meta_data_end = meta_data_start + meta_data_len;   
+
+            let data_start = meta_data_end;
+            let data_end = data_start + data_len;   
+
+            let archivedinternalnodemetadata: &ArchivedInternalNodeMetaData = rkyv::check_archived_root::<InternalNodeMetaData>(&data[meta_data_start..meta_data_end]).unwrap();
+            //let archivedinternalnode: &ArchivedInternalNode<NVMChildBuffer<_>>  = unsafe { archived_root::<NVMInternalNode<NVMChildBuffer<R>>>(&data[12..len+12]) };
+            let meta_data: InternalNodeMetaData = archivedinternalnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+            let archivedinternalnodedata: &ArchivedInternalNodeData<_> = rkyv::check_archived_root::<InternalNodeData<R>>(&data[data_start..data_end]).unwrap();
+            //let archivedinternalnode: &ArchivedInternalNode<NVMChildBuffer<_>>  = unsafe { archived_root::<NVMInternalNode<NVMChildBuffer<R>>>(&data[12..len+12]) };
+            let data: InternalNodeData<_> = archivedinternalnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            
+            Ok(Node(NVMInternal (NVMInternalNode {
+                pool: Some(pool),
+                disk_offset: Some(_offset),
+                meta_data : meta_data,
+                data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
+                    children: vec![]
+                }))), //Some(data),
+                meta_data_size: meta_data_len,
+                data_size: data_len,
+                data_start: data_start,
+                data_end: data_end,
+                node_size: size,
+                checksum: Some(checksum),                
+                nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails{
+                    need_to_load_data_from_nvm: true,
+                    time_for_nvm_last_fetch: SystemTime::now(),
+                    nvm_fetch_counter: 0}),
+            }.complete_object_refs(d_id))))
+        } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
+            let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
+            let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
+
+            let meta_data_start = 4 + 8 + 8;
+            let meta_data_end = meta_data_start + meta_data_len;   
+
+            let data_start = meta_data_end;
+            let data_end = data_start + data_len;   
+
+            let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(&data[meta_data_start..meta_data_end]).unwrap();
+            //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
+            let meta_data:NVMLeafNodeMetaData = archivedleafnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            
+            let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
+            //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
+            let data:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            
+            let mut nvmleaf = NVMLeafNode {
+                pool: Some(pool),
+                disk_offset: Some(_offset),
+                meta_data : meta_data,
+                data : std::sync::Arc::new(std::sync::RwLock::new(Some(NVMLeafNodeData { 
+                    entries: BTreeMap::new()
+                }))),//Some(data),
+                meta_data_size: meta_data_len,
+                data_size: data_len,
+                data_start: data_start,
+                data_end: data_end,
+                node_size: size,
+                checksum: Some(checksum),
+                compressor: None,//Some(c),
                 nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
                     need_to_load_data_from_nvm: true,
                     time_for_nvm_last_fetch: SystemTime::now(),

@@ -13,6 +13,8 @@ use std::{fmt::Debug, io::Write, mem};
 mod errors;
 pub use errors::*;
 
+use std::sync::{Arc, Mutex};
+
 const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -23,10 +25,10 @@ pub enum CompressionConfiguration {
 }
 
 impl CompressionConfiguration {
-    pub fn to_builder(&self) -> Box<dyn CompressionBuilder> {
+    pub fn to_builder(&self) -> Arc<std::sync::RwLock<dyn CompressionBuilder>> {
         match self {
-            CompressionConfiguration::None => Box::new(None),
-            CompressionConfiguration::Zstd(zstd) => Box::new(*zstd),
+            CompressionConfiguration::None => Arc::new(std::sync::RwLock::new(None)),
+            CompressionConfiguration::Zstd(zstd) => Arc::new(std::sync::RwLock::new(*zstd)),
         }
     }
 }
@@ -65,7 +67,7 @@ impl StaticSize for DecompressionTag {
 /// must be able to decompress anything ever compressed in any configuration.
 pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
     /// Returns an object for compressing data into a `Box<[u8]>`.
-    fn new_compression(&self) -> Result<Box<dyn CompressionState>>;
+    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>>;
     fn decompression_tag(&self) -> DecompressionTag;
 }
 

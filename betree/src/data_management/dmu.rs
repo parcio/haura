@@ -40,7 +40,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
 where
     SPL::Checksum: StaticSize,
 {
-    default_compression: Box<dyn CompressionBuilder>,
+    default_compression: Arc<std::sync::RwLock<dyn CompressionBuilder>>,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
@@ -70,7 +70,7 @@ where
 {
     /// Returns a new `Dmu`.
     pub fn new(
-        default_compression: Box<dyn CompressionBuilder>,
+        default_compression: Arc<std::sync::RwLock<dyn CompressionBuilder>>,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
         default_storage_class: u8,
         pool: SPL,
@@ -225,6 +225,8 @@ where
     fn fetch(&self, op: &<Self as Dml>::ObjectPointer, pivot_key: PivotKey) -> Result<(), Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
+        let a = op.decompression_tag();
+        let mut b = a.new_decompression()?;
         let mut decompression_state = op.decompression_tag().new_decompression()?;
         let offset = op.offset();
         let generation = op.generation();
@@ -240,10 +242,16 @@ where
             .pool
             .read(bytes_to_read, op.offset(), op.checksum().clone())?;
 
+        // let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
+        //     let data = decompression_state.decompress(&compressed_data)?;
+        //     Object::unpack_at(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data)?
+        // };
+
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack_at(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data)?
+            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data, a)?
         };
+
         let key = ObjectKey::Unmodified { offset, generation };
         self.insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key));
         Ok(())
@@ -392,16 +400,20 @@ where
 
         // TODO: Karim.. add comments
         let mut metadata_size = 0;
-        let compression = &self.default_compression;
+        let compression = &*self.default_compression.read().unwrap();
         let compressed_data = {
             // FIXME: cache this
-            let mut state = compression.new_compression()?;
+            let a = compression.new_compression().unwrap();
+            let mut state = a.write().unwrap();
             {
-                object.pack(&mut state, &mut metadata_size)?;
+                object.pack(&mut *state, &mut metadata_size)?;
                 drop(object);
             }
             state.finish()
         };
+
+        //let compressed_data : Buf = object.pack_and_compress(&mut metadata_size, self.default_compression.clone()).unwrap();
+        //drop(object);
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();
@@ -415,7 +427,7 @@ where
             v.resize(size.to_bytes() as usize, 0);
             compressed_data = v.into_boxed_slice();
         }*/
-
+        
         let info = self.modified_info.lock().remove(&mid).unwrap();
 
         let checksum = {
@@ -521,6 +533,7 @@ where
                 );
                 continue;
             }
+
 
             let start_disk_id = (self.next_disk_id.fetch_add(1, Ordering::Relaxed)
                 % u64::from(disks_in_class)) as u16;
@@ -955,7 +968,8 @@ where
                 .decompression_tag()
                 .new_decompression()?
                 .decompress(&compressed_data)?;
-            Object::unpack_at(ptr.size(), ptr.checksum().clone().into() , self.pool.clone().into(), ptr.offset(), ptr.info(), data)?
+            //Object::unpack_at(ptr.size(), ptr.checksum().clone().into() , self.pool.clone().into(), ptr.offset(), ptr.info(), data)?
+            Object::unpack_and_decompress(ptr.size(), ptr.checksum().clone().into() , self.pool.clone().into(), ptr.offset(), ptr.info(), data, ptr.decompression_tag())?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),

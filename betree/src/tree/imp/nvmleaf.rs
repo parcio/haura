@@ -22,6 +22,16 @@ use rkyv::{
     Archive, Archived, Deserialize, Fallible, Infallible, Serialize,
 };
 
+use crate::{
+    compression::CompressionConfiguration,
+    compression::CompressionBuilder,
+};
+
+use std::sync::{Arc, Mutex};
+use crate::{
+    buffer::Buf,
+};
+
 pub(crate) const NVMLEAF_TYPE_ID: usize = 4;
 pub(crate) const NVMLEAF_METADATA_OFFSET: usize = 8;
 pub(crate) const NVMLEAF_DATA_OFFSET: usize = 8;
@@ -34,11 +44,10 @@ pub(super) struct NVMLeafNodeLoadDetails {
 }
 
 /// A leaf node of the tree holds pairs of keys values which are plain data.
-#[derive(Clone)]
+//#[derive(Clone)]
 //#[archive(check_bytes)]
 //#[cfg_attr(test, derive(PartialEq))]
-pub(super) struct NVMLeafNode/*<S> 
-where S: StoragePoolLayer + 'static*/
+pub(super) struct NVMLeafNode
 { 
     //#[with(Skip)]
     pub pool: Option<RootSpu>,
@@ -52,9 +61,30 @@ where S: StoragePoolLayer + 'static*/
     pub data_end: usize,
     pub node_size: crate::vdev::Block<u32>,
     pub checksum: Option<crate::checksum::XxHash>,
+    pub compressor: Option<Arc<std::sync::RwLock<dyn CompressionBuilder>>>,
     pub nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
 }
 
+impl Clone for NVMLeafNode {
+    fn clone(&self) -> Self {
+        NVMLeafNode {
+            // Clone other fields
+            pool: self.pool.clone(),
+            disk_offset: self.disk_offset.clone(),
+            meta_data: self.meta_data.clone(),
+            data: self.data.clone(),
+            meta_data_size: self.meta_data_size,
+            data_size: self.data_size,
+            data_start: self.data_start,
+            data_end: self.data_end,
+            node_size: self.node_size,
+            checksum: self.checksum.clone(),
+            // Exclude compressor field
+            compressor: self.compressor.clone(), // Or handle it differently
+            nvm_load_details: self.nvm_load_details.clone(),
+        }
+    }
+}
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Archive, Serialize, Deserialize)]
 #[archive(check_bytes)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -65,6 +95,11 @@ pub(super) struct NVMLeafNodeMetaData {
     pub entries_size: usize,
 }
 
+//use rkyv::with::AsVec;
+use rkyv::collections::util::Entry;
+
+pub struct AsVecEx;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Archive, Serialize, Deserialize)]
 #[archive(check_bytes)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -73,6 +108,83 @@ pub struct NVMLeafNodeData {
     #[with(rkyv::with::AsVec)]
     pub entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
 }
+
+// impl<K: Archive, V: Archive> ArchiveWith<BTreeMap<K, V>> for AsVecEx {
+//     type Archived = ArchivedVec<Entry<K::Archived, V::Archived>>;
+//     type Resolver = VecResolver;
+
+//     unsafe fn resolve_with(
+//         field: &BTreeMap<K, V>,
+//         pos: usize,
+//         resolver: Self::Resolver,
+//         out: *mut Self::Archived,
+//     ) {
+//         ArchivedVec::resolve_from_len(field.len(), pos, resolver, out);
+//     }
+// }
+
+// impl<K, V, S> SerializeWith<BTreeMap<K, V>, S> for AsVecEx
+// where
+//     K: Serialize<S>,
+//     V: Serialize<S>,
+//     S: ScratchSpace + Serializer + ?Sized,
+// {
+//     fn serialize_with(
+//         field: &BTreeMap<K, V>,
+//         serializer: &mut S,
+//     ) -> Result<Self::Resolver, S::Error> {
+
+//         // let compression = CompressionConfiguration::None;
+//         // let default_compression = compression.to_builder();
+
+//         // let compression = &*default_compression.read().unwrap();
+//         // //let compressed_data = [0u8, 10];
+//         // let compressed_data = {
+//         //     // FIXME: cache this
+//         //     let a = compression.new_compression().unwrap();
+//         //     let mut state = a.write().unwrap();
+//         //     {
+//         //         state.write_all(&[0u8, 10]);
+//         //     }
+//         //     state.finish()
+//         // };
+
+//         ArchivedVec::serialize_from_iter(
+//             field.iter().map(|(key, value)| {
+//                 Entry { key: key, value: value }
+//             }),
+//             serializer,
+//         )
+//     }
+// }
+
+// impl<K, V, D> DeserializeWith<ArchivedVec<Entry<K::Archived, V::Archived>>, BTreeMap<K, V>, D>
+//     for AsVecEx
+// where
+//     K: Archive + Ord,
+//     V: Archive,
+//     K::Archived: Deserialize<K, D>,
+//     V::Archived: Deserialize<V, D>,
+//     D: Fallible + ?Sized,
+// {
+//     fn deserialize_with(
+//         field: &ArchivedVec<Entry<K::Archived, V::Archived>>,
+//         deserializer: &mut D,
+//     ) -> Result<BTreeMap<K, V>, D::Error> {
+//         let mut result = BTreeMap::new();
+//         for entry in field.iter() {
+//               let new_key = vec![1, 2, 3];
+//                 let new_value = vec![1, 2, 3];
+//             result.insert(
+//                 entry.key.deserialize(deserializer)?,
+//                 entry.value.deserialize(deserializer)?,
+//             );
+//         }
+//         Ok(result)
+//     }
+// }
+
+
 
 impl std::fmt::Debug for NVMLeafNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -242,6 +354,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
+            compressor: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -271,6 +384,7 @@ impl NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
+            compressor: None,
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -538,6 +652,7 @@ impl NVMLeafNode
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
+            compressor: self.compressor.clone(),
             nvm_load_details: std::sync::Arc::new(std::sync::RwLock::new(NVMLeafNodeLoadDetails{
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,

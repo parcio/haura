@@ -8,6 +8,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{io, mem};
+use std::sync::{Arc, Mutex};
 
 /// No-op compression.
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
@@ -24,10 +25,10 @@ impl StaticSize for None {
 }
 
 impl CompressionBuilder for None {
-    fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
-        Ok(Box::new(NoneCompression {
+    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>> {
+        Ok(Arc::new(std::sync::RwLock::new(NoneCompression {
             buf: BufWrite::with_capacity(DEFAULT_BUFFER_SIZE),
-        }))
+        })))
     }
 
     fn decompression_tag(&self) -> DecompressionTag {
