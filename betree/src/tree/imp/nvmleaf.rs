@@ -95,8 +95,9 @@ pub(super) struct NVMLeafNodeMetaData {
     pub entries_size: usize,
 }
 
-//use rkyv::with::AsVec;
-use rkyv::collections::util::Entry;
+
+use rkyv::with::AsVec;
+
 
 pub struct AsVecEx;
 
@@ -105,84 +106,164 @@ pub struct AsVecEx;
 #[cfg_attr(test, derive(PartialEq))]
 
 pub struct NVMLeafNodeData {
-    #[with(rkyv::with::AsVec)]
-    pub entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
+    #[with(AsVec)]
+    pub entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes, u16, u16)>,
 }
 
-// impl<K: Archive, V: Archive> ArchiveWith<BTreeMap<K, V>> for AsVecEx {
-//     type Archived = ArchivedVec<Entry<K::Archived, V::Archived>>;
-//     type Resolver = VecResolver;
+//pub mod validation;
+use bytecheck::CheckBytes;
+use core::{fmt, ptr};
 
-//     unsafe fn resolve_with(
-//         field: &BTreeMap<K, V>,
-//         pos: usize,
-//         resolver: Self::Resolver,
-//         out: *mut Self::Archived,
-//     ) {
-//         ArchivedVec::resolve_from_len(field.len(), pos, resolver, out);
-//     }
-// }
 
-// impl<K, V, S> SerializeWith<BTreeMap<K, V>, S> for AsVecEx
-// where
-//     K: Serialize<S>,
-//     V: Serialize<S>,
-//     S: ScratchSpace + Serializer + ?Sized,
-// {
-//     fn serialize_with(
-//         field: &BTreeMap<K, V>,
-//         serializer: &mut S,
-//     ) -> Result<Self::Resolver, S::Error> {
 
-//         // let compression = CompressionConfiguration::None;
-//         // let default_compression = compression.to_builder();
 
-//         // let compression = &*default_compression.read().unwrap();
-//         // //let compressed_data = [0u8, 10];
-//         // let compressed_data = {
-//         //     // FIXME: cache this
-//         //     let a = compression.new_compression().unwrap();
-//         //     let mut state = a.write().unwrap();
-//         //     {
-//         //         state.write_all(&[0u8, 10]);
-//         //     }
-//         //     state.finish()
-//         // };
 
-//         ArchivedVec::serialize_from_iter(
-//             field.iter().map(|(key, value)| {
-//                 Entry { key: key, value: value }
-//             }),
-//             serializer,
-//         )
-//     }
-// }
+/// A simple key-value pair.
+///
+/// This is typically used by associative containers that store keys and values together.
+#[derive(Debug, Eq)]
+//#[cfg_attr(feature = "strict", repr(C))]
+pub struct EntryEx<K, V> {
+    /// The key of the pair.
+    pub key: K,
+    /// The value of the pair.
+    pub value: V,
+}
 
-// impl<K, V, D> DeserializeWith<ArchivedVec<Entry<K::Archived, V::Archived>>, BTreeMap<K, V>, D>
-//     for AsVecEx
-// where
-//     K: Archive + Ord,
-//     V: Archive,
-//     K::Archived: Deserialize<K, D>,
-//     V::Archived: Deserialize<V, D>,
-//     D: Fallible + ?Sized,
-// {
-//     fn deserialize_with(
-//         field: &ArchivedVec<Entry<K::Archived, V::Archived>>,
-//         deserializer: &mut D,
-//     ) -> Result<BTreeMap<K, V>, D::Error> {
-//         let mut result = BTreeMap::new();
-//         for entry in field.iter() {
-//               let new_key = vec![1, 2, 3];
-//                 let new_value = vec![1, 2, 3];
-//             result.insert(
-//                 entry.key.deserialize(deserializer)?,
-//                 entry.value.deserialize(deserializer)?,
-//             );
-//         }
-//         Ok(result)
-//     }
-// }
+impl<K: Archive, V: Archive> Archive for EntryEx<&'_ K, &'_ V> {
+    type Archived = EntryEx<K::Archived, V::Archived>;
+    type Resolver = (K::Resolver, V::Resolver);
+
+    #[inline]
+    unsafe fn resolve(&self, pos: usize, resolver: Self::Resolver, out: *mut Self::Archived) {
+        let (fp, fo) = rkyv::out_field!(out.key);
+        self.key.resolve(pos + fp, resolver.0, fo);
+
+        let (fp, fo) = rkyv::out_field!(out.value);
+        self.value.resolve(pos + fp, resolver.1, fo);
+    }
+}
+
+impl<K: Serialize<S>, V: Serialize<S>, S: Fallible + ?Sized> Serialize<S> for EntryEx<&'_ K, &'_ V> {
+    #[inline]
+    fn serialize(&self, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
+        Ok((
+            self.key.serialize(serializer)?,
+            self.value.serialize(serializer)?,
+        ))
+    }
+}
+
+impl<K, V, UK, UV> PartialEq<EntryEx<UK, UV>> for EntryEx<K, V>
+where
+    K: PartialEq<UK>,
+    V: PartialEq<UV>,
+{
+    #[inline]
+    fn eq(&self, other: &EntryEx<UK, UV>) -> bool {
+        self.key.eq(&other.key) && self.value.eq(&other.value)
+    }
+}
+
+
+impl<K: Archive, V: Archive, C> CheckBytes<C> for EntryEx<K, V>
+where
+    K: CheckBytes<C>,
+    V: CheckBytes<C>,
+    C: rkyv::validation::ArchiveContext + ?Sized,
+{
+    type Error = rkyv::collections::util::validation::ArchivedEntryError<K::Error, V::Error>;
+
+    #[inline]
+    unsafe fn check_bytes<'a>(
+        value: *const Self,
+        context: &mut C,
+    ) -> Result<&'a Self, Self::Error> {
+        K::check_bytes(ptr::addr_of!((*value).key), context)
+            .map_err(rkyv::collections::util::validation::ArchivedEntryError::KeyCheckError)?;
+        V::check_bytes(ptr::addr_of!((*value).value), context)
+            .map_err(rkyv::collections::util::validation::ArchivedEntryError::ValueCheckError)?;
+        Ok(&*value)
+    }
+}
+
+use rkyv::collections::util::Entry;
+
+impl<K: Archive, V: Archive> ArchiveWith<BTreeMap<K, V>> for AsVecEx {
+    type Archived = ArchivedVec<EntryEx<K::Archived, V::Archived>>;
+    type Resolver = VecResolver;
+
+    unsafe fn resolve_with(
+        field: &BTreeMap<K, V>,
+        pos: usize,
+        resolver: Self::Resolver,
+        out: *mut Self::Archived,
+    ) {
+        ArchivedVec::resolve_from_len(field.len(), pos, resolver, out);
+    }
+}
+
+impl<K, V, S> SerializeWith<BTreeMap<K, V>, S> for AsVecEx
+where
+    K: Serialize<S>,
+    V: Serialize<S>,
+    S: ScratchSpace + Serializer + ?Sized,
+{
+    fn serialize_with(
+        field: &BTreeMap<K, V>,
+        serializer: &mut S,
+    ) -> Result<Self::Resolver, S::Error> {
+
+        let compression = CompressionConfiguration::None;
+        let default_compression = compression.to_builder();
+
+        let compression = &*default_compression.read().unwrap();
+        //let compressed_data = [0u8, 10];
+        let compressed_data = {
+            // FIXME: cache this
+            let a = compression.new_compression().unwrap();
+            let mut state = a.write().unwrap();
+            {
+                state.write_all(&[0u8, 10]);
+            }
+            state.finish()
+        };
+
+        ArchivedVec::serialize_from_iter(
+            field.iter().map(|(key, value)| {
+                //let (a, b, c, d) = value as (&KeyInfo, &SlicedCowBytes, &u16, &u16);
+                EntryEx { key: key, value: value }
+            }),
+            serializer,
+        )
+    }
+}
+
+impl<K, V, D> DeserializeWith<ArchivedVec<EntryEx<K::Archived, V::Archived>>, BTreeMap<K, V>, D>
+    for AsVecEx
+where
+    K: Archive + Ord,
+    V: Archive,
+    K::Archived: Deserialize<K, D>,
+    V::Archived: Deserialize<V, D>,
+    D: Fallible + ?Sized,
+{
+    fn deserialize_with(
+        field: &ArchivedVec<EntryEx<K::Archived, V::Archived>>,
+        deserializer: &mut D,
+    ) -> Result<BTreeMap<K, V>, D::Error> {
+        let mut result = BTreeMap::new();
+        for entry in field.iter() {
+              let new_key = vec![1, 2, 3];
+                let new_value = vec![1, 2, 3];
+            result.insert(
+                entry.key.deserialize(deserializer)?,
+                entry.value.deserialize(deserializer)?,
+            );
+        }
+        Ok(result)
+    }
+}
 
 
 
@@ -277,7 +358,7 @@ impl HasStoragePreference for NVMLeafNode
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        for (keyinfo, _v) in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.values() {
+        for (keyinfo, _v, kcs, vcs) in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.values() {
             pref.upgrade(keyinfo.storage_preference);
         }
 
@@ -294,11 +375,11 @@ impl HasStoragePreference for NVMLeafNode
     }
 }
 
-impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
+impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes, u16, u16))> for NVMLeafNode
 {
     fn from_iter<T>(iter: T) -> Self
     where
-        T: IntoIterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))>,
+        T: IntoIterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes, u16, u16))>,
     {
         let mut storage_pref = StoragePreference::NONE;
         let mut entries_size = 0;
@@ -306,7 +387,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
         let mut entries = BTreeMap::new();
         let mut needs_second_pass = false;
 
-        for (key, (keyinfo, value)) in iter.into_iter() {
+        for (key, (keyinfo, value, kcs, vcs)) in iter.into_iter() {
             // pref of overall node is highest pref from keys.
             // We're already looking at every entry here, so finding the overall pref here
             // avoids a full scan later.
@@ -314,7 +395,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
             entries_size += packed::ENTRY_LEN + key.len() + value.len();
 
             let curr_storage_pref = keyinfo.storage_preference;
-            if let Some((ckeyinfo, cvalue)) = entries.insert(CowBytes::from(key), (keyinfo, value))
+            if let Some((ckeyinfo, cvalue, kcs, vcs)) = entries.insert(CowBytes::from(key), (keyinfo, value, 0, 0))
             {
                 // iterator has collisions, try to compensate
                 //
@@ -332,7 +413,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode
 
         if needs_second_pass {
             storage_pref = StoragePreference::NONE;
-            for (keyinfo, _value) in entries.values() {
+            for (keyinfo, _value, kcs, vcs) in entries.values() {
                 storage_pref.upgrade(keyinfo.storage_preference);
             }
         }
@@ -428,7 +509,7 @@ impl NVMLeafNode
 
                                 let key: CowBytes = val.key.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).unwrap();
 
-                                self.data.write().as_mut().unwrap().as_mut().unwrap().entries.insert(key, (val_1, val_2));
+                                self.data.write().as_mut().unwrap().as_mut().unwrap().entries.insert(key, (val_1, val_2, 0, 0));
                             }
                         }
                         
@@ -478,12 +559,12 @@ impl NVMLeafNode
     /// Returns the value for the given key.
     pub fn get(&self, key: &[u8]) -> Option<SlicedCowBytes> {
         self.load_entry(key);
-        self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).map(|(_info, data)| data).cloned()
+        self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).map(|(_info, data, kcs, vcs)| data).cloned()
     }
 
     pub(in crate::tree) fn get_with_info(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
         self.load_all_entries();
-        self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).cloned()
+        self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).map(|(_info, data, kcs, vcs)| (_info.clone(), data.clone()))
     }
 
     pub(in crate::tree) fn entries(&self) -> &std::sync::Arc<std::sync::RwLock<Option<NVMLeafNodeData>>> {
@@ -513,7 +594,7 @@ impl NVMLeafNode
         let mut sibling_size = 0;
         let mut sibling_pref = StoragePreference::NONE;
         let mut split_key = None;
-        for (k, (keyinfo, v)) in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.iter().rev() {
+        for (k, (keyinfo, v, kcs, vcs)) in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.iter().rev() {
             sibling_size += packed::ENTRY_LEN + k.len() + v.len();
             sibling_pref.upgrade(keyinfo.storage_preference);
 
@@ -573,8 +654,8 @@ impl NVMLeafNode
             self.meta_data.entries_size += data.len();
             self.meta_data.storage_preference.upgrade(keyinfo.storage_preference);
 
-            if let Some((old_info, old_data)) =
-                self.data.write().as_mut().unwrap().as_mut().unwrap().entries.insert(key.into(), (keyinfo.clone(), data))
+            if let Some((old_info, old_data, old_kcs, old_vcs)) =
+                self.data.write().as_mut().unwrap().as_mut().unwrap().entries.insert(key.into(), (keyinfo.clone(), data, 0, 0))
             {
                 // There was a previous value in entries, which was now replaced
                 self.meta_data.entries_size -= old_data.len();
@@ -588,7 +669,7 @@ impl NVMLeafNode
                 self.meta_data.entries_size += packed::ENTRY_LEN;
                 self.meta_data.entries_size += key_size;
             }
-        } else if let Some((old_info, old_data)) = self.data.write().as_mut().unwrap().as_mut().unwrap().entries.remove(key.borrow()) {
+        } else if let Some((old_info, old_data, old_kcs, old_vcs)) = self.data.write().as_mut().unwrap().as_mut().unwrap().entries.remove(key.borrow()) {
             // The value was removed by msg, this may be a downgrade opportunity.
             // The preference of the removed entry can't be stricter than the current node
             // preference, by invariant. That leaves "less strict" and "as strict" as the
@@ -782,7 +863,7 @@ mod tests {
 
             let node: NVMLeafNode = entries
                 .iter()
-                .map(|(k, v)| (&k[..], (KeyInfo::arbitrary(g), v.clone())))
+                .map(|(k, v)| (&k[..], (KeyInfo::arbitrary(g), v.clone(), 0, 0)))
                 .collect();
             node.recalculate();
             node
@@ -794,12 +875,12 @@ mod tests {
                 .clone()
                 .read().as_ref().unwrap().as_ref().unwrap().entries.clone()
                 .into_iter()
-                .map(|(k, (info, v))| (k, (info, CowBytes::from(v.to_vec()))))
+                .map(|(k, (info, v, kcs, vcs))| (k, (info, CowBytes::from(v.to_vec()), 0, 0)))
                 .collect();
             Box::new(v.shrink().map(|entries| {
                 entries
                     .iter()
-                    .map(|(k, (info, v))| (&k[..], (info.clone(), v.clone().into())))
+                    .map(|(k, (info, v, kcs, vcs))| (&k[..], (info.clone(), v.clone().into(), 0, 0)))
                     .collect()
             }))
         }

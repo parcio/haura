@@ -401,19 +401,19 @@ where
         // TODO: Karim.. add comments
         let mut metadata_size = 0;
         let compression = &*self.default_compression.read().unwrap();
-        let compressed_data = {
-            // FIXME: cache this
-            let a = compression.new_compression().unwrap();
-            let mut state = a.write().unwrap();
-            {
-                object.pack(&mut *state, &mut metadata_size)?;
-                drop(object);
-            }
-            state.finish()
-        };
+        // let compressed_data = {
+        //     // FIXME: cache this
+        //     let a = compression.new_compression().unwrap();
+        //     let mut state = a.write().unwrap();
+        //     {
+        //         object.pack(&mut *state, &mut metadata_size)?;
+        //         drop(object);
+        //     }
+        //     state.finish()
+        // };
 
-        //let compressed_data : Buf = object.pack_and_compress(&mut metadata_size, self.default_compression.clone()).unwrap();
-        //drop(object);
+        let compressed_data : Buf = object.pack_and_compress(&mut metadata_size, self.default_compression.clone()).unwrap();
+        drop(object);
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();

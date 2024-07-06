@@ -60,7 +60,14 @@ rand = { version = "0.8", features = ["std_rng"] }
 
 pmdk = { path = "./pmdk", optional = true }
 
-rkyv = { version = "0.7.42", features = ["validation"] }
+#rkyv = { version = "0.7.42", features = ["validation"] }
+rkyv = { path = "../rkyv/rkyv"}
+rkyv_dyn = { path = "../rkyv/rkyv_dyn"}
+rkyv_dyn_test = { path = "../rkyv/rkyv_dyn_test"}
+rkyv_test = { path = "../rkyv/rkyv_test"}
+rkyv_typename = { path = "../rkyv/rkyv_typename"}
+#rkyv = { path = "../rkyv/rkyv"}
+
 bytecheck = { version = "0.7.0" }
 extend = { version = "1.2.0" }
 

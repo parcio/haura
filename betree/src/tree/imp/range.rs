@@ -245,7 +245,7 @@ where
                         if let Ok(nvmdata) = np.read()
                         {
                             let ref auto = nvmdata.as_ref().unwrap().entries;
-                            let range = Box::new(auto.iter().map(|(k, v)| (&k[..], v.clone())));
+                            let range = Box::new(auto.iter().map(|(k, (a, b, c, d))| (&k[..], (a.clone(), b.clone()))));
 
                             self.apply_messages(
                                 &left_pivot_key,
