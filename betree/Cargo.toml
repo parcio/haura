@@ -21,8 +21,9 @@ harness = false
 name = "tree"
 harness = false
 
-[workspace.dependencies]
-rkyv = { version = "0.7.42", features = ["validation"] }
+#[workspace.dependencies]
+#rkyv = { version = "0.7.42", features = ["validation"] }
+#betree-tests = { version = "0.1.0"}
 
 [dependencies]
 futures = { version = "0.3", features = ["thread-pool"] }
@@ -63,12 +64,13 @@ rand = { version = "0.8", features = ["std_rng"] }
 
 pmdk = { path = "./pmdk", optional = true }
 
-#rkyv = { version = "0.7.42", features = ["validation"] }
-rkyv = { path = "../rkyv/rkyv"}
-rkyv_dyn = { path = "../rkyv/rkyv_dyn"}
-rkyv_dyn_test = { path = "../rkyv/rkyv_dyn_test"}
-rkyv_test = { path = "../rkyv/rkyv_test"}
-rkyv_typename = { path = "../rkyv/rkyv_typename"}
+rkyv = { version = "0.7.42", features = ["validation"] }
+#rkyv = { path = "../rkyv/rkyv"}
+#rkyv_dyn = { path = "../rkyv/rkyv_dyn"}
+#rkyv_dyn_test = { path = "../rkyv/rkyv_dyn_test"}
+#rkyv_test = { path = "../rkyv/rkyv_test"}
+#rkyv_typename = { path = "../rkyv/rkyv_typename"}
+#betree-tests = { path = "./tests"}
 
 bytecheck = { version = "0.7.0" }
 extend = { version = "1.2.0" }

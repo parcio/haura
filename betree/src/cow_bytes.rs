@@ -1,9 +1,10 @@
 //! This module provides `CowBytes` which is a Copy-on-Write smart pointer
 //! similar to `std::borrow::Cow`.
 
-use crate::size::Size;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use crate::{compression::DecompressionTag, size::Size};
+//use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use stable_deref_trait::StableDeref;
+use zstd_safe::WriteBuf;
 use std::{
     borrow::Borrow,
     cmp,
@@ -11,13 +12,219 @@ use std::{
     sync::Arc,
 };
 
+use crate::{
+    compression::CompressionConfiguration,
+    compression::CompressionBuilder,
+    compression::Zstd,
+};
+
+use rkyv::{
+    Archive, Deserialize, Serialize,
+    ser::{Serializer, serializers::AllocSerializer},
+    archived_root,
+    ser::{serializers::AlignedSerializer, ScratchSpace},
+    vec::{ArchivedVec, VecResolver},
+    out_field,
+    AlignedVec,
+    Archived,
+    ArchiveUnsized,
+    MetadataResolver,
+    RelPtr,
+    SerializeUnsized,
+    Fallible,
+};
+
+use std::marker::PhantomData;
+
+struct OwnedStr<T> {
+    inner: Arc<Vec<u8>>,
+    _marker: PhantomData<T>
+}
+
+struct ArchivedOwnedStr {
+    // This will be a relative pointer to our string
+    inner: ArchivedVec<u8>,
+}
+
+impl ArchivedOwnedStr {
+    // This will help us get the bytes of our type as a str again.
+    // fn as_slice(&self) -> &[u8] {
+
+    //     unsafe {
+
+    //         // The as_ptr() function of RelPtr will get a pointer to the str
+
+    //         &*self.ptr.as_ptr()
+
+    //     }
+
+    // }
+}
+
+struct OwnedStrResolver {
+    // This will be the position that the bytes of our string are stored at.
+    // We'll use this to resolve the relative pointer of our
+    // ArchivedOwnedStr.
+    pos: usize,
+    // The archived metadata for our str may also need a resolver.
+    metadata_resolver: VecResolver,
+}
+
+// The Archive implementation defines the archived version of our type and
+// determines how to turn the resolver into the archived form. The Serialize
+// implementations determine how to make a resolver from the original value.
+impl<T> Archive for OwnedStr<T> {
+    type Archived = ArchivedVec<u8>;
+    // This is the resolver we can create our Archived version from.
+    type Resolver = VecResolver;
+
+    // The resolve function consumes the resolver and produces the archived
+
+    // value at the given position.
+
+    unsafe fn resolve(
+        &self,
+        pos: usize,
+        resolver: Self::Resolver,
+        out: *mut Self::Archived,
+    ) {
+        //println!("resolver.pos={}, pos={}", resolver.pos, pos);
+        ArchivedVec::resolve_from_len(self.inner.len(), pos, resolver, out);
+    }
+}
+
+// We restrict our serializer types with Serializer because we need its
+// capabilities to archive our type. For other types, we might need more or
+// less restrictive bounds on the type of S.
+impl<T, S: Serializer + ?Sized + ScratchSpace> Serialize<S> for OwnedStr<T> {
+    fn serialize(
+        &self,
+        serializer: &mut S
+    ) -> Result<Self::Resolver, S::Error> {
+        let mut serialized_data: Vec<u8> = Vec::new();
+
+        // bincode::serialize_into(&mut serialized_data, &self.inner)
+        // .map_err(|e| {
+        //     //debug!("Failed to serialize ObjectPointer.");
+        //     std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+        // });
+        // // This is where we want to write the bytes of our string and return
+        // // a resolver that knows where those bytes were written.
+        // // We also need to serialize the metadata for our str.
+        // println!("-->self.inner.serialize_unsized(serializer)={:?}", self.inner.serialize_unsized(serializer)?);
+
+        // Ok(VecResolver::new())
+        // // Ok(VecResolver {
+        // //     pos: self.inner.serialize_unsized(serializer)?,
+        // //     //pos: serialized_data.len(),
+        // //     //metadata_resolver: ArchivedVec::serialize_from_slice(&mut self.inner.serialize_metadata(serializer))?
+        // //     //metadata_resolver: ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)?,
+        // // })
+        ArchivedVec::serialize_from_slice(&self.inner, serializer)
+    }
+}
+
+// impl<D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, OwnedStr, D> for OwnedStr {
+//     fn deserialize_with(field: &Archived<Vec<u8>>, deserializer: &mut D) -> Result<Self, D::Error> {
+//         panic!("Failed to deserialize childbuffer's node_pointer");
+//     }
+// }
+// impl<D: Fallible + ?Sized> Deserialize<Arc<Vec<u8>>, D> for OwnedStr {
+//     fn deserialize(&self, deserializer: &mut D) -> Result<Arc<Vec<u8>>, D::Error> {
+        
+//             panic!("Failed to deserialize childbuffer's node_pointer");
+//     }
+// }
+
+impl<T, D: Fallible + ?Sized> Deserialize<OwnedStr<T>, D> for Archived<Vec<u8>> {
+    fn deserialize(&self, deserializer: &mut D) -> Result<OwnedStr<T>, D::Error> {
+        let vec: Vec<u8> = self.deserialize(deserializer)?;
+
+        // Create an Arc from the Vec<u8>
+        let arc_vec = Arc::new(vec);
+
+        // Create the OwnedStr
+        Ok(OwnedStr { inner: arc_vec, _marker: PhantomData })
+    }
+}
+
 /// Copy-on-Write smart pointer which supports cheap cloning as it is
 /// reference-counted.
-#[derive(Hash, Debug, Clone, Eq, Ord, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
+#[derive(Hash, Debug, Clone, Eq, Ord, Default)]//, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+//#[archive(check_bytes)]
 pub struct CowBytes {
     // TODO Replace by own implementation
     pub(super) inner: Arc<Vec<u8>>,
+}
+
+struct ArchivedCowBytes {
+    // This will be a relative pointer to our string
+    inner: ArchivedVec<u8>,
+}
+
+impl Archive for CowBytes {
+    type Archived = ArchivedVec<u8>;
+    type Resolver = VecResolver;
+
+    unsafe fn resolve(
+        &self,
+        pos: usize,
+        resolver: Self::Resolver,
+        out: *mut Self::Archived,
+    ) {
+        ArchivedVec::resolve_from_len(self.inner.len(), pos, resolver, out);
+    }
+}
+
+impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
+    fn serialize(
+        &self,
+        serializer: &mut S
+    ) -> Result<Self::Resolver, S::Error> {
+        //panic!("----------------------");  
+        //let compression = CompressionConfiguration::None;
+        let compression = CompressionConfiguration::Zstd(Zstd {
+            level: 10,
+        });
+        let default_compression = compression.to_builder();
+
+        let compression = &*default_compression.read().unwrap();
+        //let compressed_data = [0u8, 10];
+        //panic!("<>");
+        let compressed_data = {
+            // FIXME: cache this
+            let a = compression.new_compression().unwrap();
+            let mut state = a.write().unwrap();
+            {
+                state.write_all(self.inner.as_slice());
+            }
+            state.finish()
+        };
+
+        ArchivedVec::serialize_from_slice(compressed_data.as_slice(), serializer)
+        
+        //ArchivedVec::serialize_from_slice(&self.inner, serializer)
+    }
+}
+
+impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
+    fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {
+panic!("----------------------");
+        let vec: Vec<u8> = self.deserialize(deserializer)?;
+        
+        let d = DecompressionTag::None;
+        let mut decompression_state = d.new_decompression();
+
+        let data = decompression_state.unwrap().decompress(vec.as_slice()).unwrap();
+        let arc_vec = Arc::new(data.to_vec());
+
+        Ok(CowBytes { inner: arc_vec })
+        
+        
+        /*let arc_vec = Arc::new(vec);
+        Ok(CowBytes { inner: arc_vec })*/
+        
+    }
 }
 
 impl AsRef<[u8]> for ArchivedCowBytes {
@@ -38,21 +245,21 @@ impl<T: AsRef<[u8]>> PartialOrd<T> for CowBytes {
     }
 }
 
-impl Serialize for CowBytes {
+impl serde::Serialize for CowBytes {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer,
+        S: serde::Serializer,
     {
         serializer.serialize_bytes(self)
     }
 }
 
-impl<'de> Deserialize<'de> for CowBytes {
+impl<'de> serde::Deserialize<'de> for CowBytes {
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<CowBytes, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
         use serde::de::{Error, Visitor};
         use std::fmt;
@@ -242,23 +449,23 @@ impl PartialEq for SlicedCowBytes {
 
 impl Eq for SlicedCowBytes {}
 
-impl Serialize for SlicedCowBytes {
+impl serde::Serialize for SlicedCowBytes {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer,
+        S: serde::Serializer,
     {
         serializer.serialize_bytes(self)
     }
 }
 
-impl<'de> Deserialize<'de> for SlicedCowBytes {
+impl<'de> serde::Deserialize<'de> for SlicedCowBytes {
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
-        CowBytes::deserialize(deserializer).map(Self::from)
+        <CowBytes as serde::Deserialize>::deserialize(deserializer).map(Self::from)
     }
 }
 
