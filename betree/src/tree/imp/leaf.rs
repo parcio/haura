@@ -357,6 +357,10 @@ impl LeafNode {
         }
     }
 
+    pub fn to_memory_leaf(mut self) -> super::nvmleaf::NVMLeafNode {
+        todo!()
+    }
+
     /*pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> usize {
         // https://github.com/rust-lang/rust/issues/42849
         let size_before = self.entries_size;

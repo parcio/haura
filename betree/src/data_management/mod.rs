@@ -18,7 +18,7 @@ use crate::{
     migration::DmlMsg,
     size::{Size, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer},
-    tree::PivotKey,
+    tree::{PivotKey, StorageKind},
     vdev::Block,
     StoragePreference,
 };
@@ -108,11 +108,27 @@ pub trait HasStoragePreference {
     // fn flood_storage_preference(&self, pref: StoragePreference);
 }
 
+/// Intermediary structure to prove that media constraints have been checked.
+/// This is more of a hack since i don't want to pull apart the trait.
+pub struct PreparePack();
+
 /// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
+    /// Informs the object about the kind of storage it will be placed upon.
+    /// This allows for optimizations within the node for different kind of
+    /// storage medias.
+    fn prepare_pack<X>(
+        &mut self,
+        storage_kind: StorageKind,
+        dmu: &X,
+    ) -> Result<PreparePack, crate::data_management::Error>
+    where
+        R: ObjectReference,
+        X: Dml<Object = crate::tree::Node<R>, ObjectRef = R>;
+
     /// Packs the object into the given `writer`. Returns an option if the node
     /// can be read with a subset of data starting from the start of the range.
-    fn pack<W: Write>(&self, writer: W) -> Result<Option<Block<u32>>, io::Error>;
+    fn pack<W: Write>(&self, writer: W, pp: PreparePack) -> Result<Option<Block<u32>>, io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at<SPL: StoragePoolLayer>(
         size: crate::vdev::Block<u32>,

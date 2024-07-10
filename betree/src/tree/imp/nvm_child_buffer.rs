@@ -73,7 +73,7 @@ impl KeyIdx {
 
 impl Map {
     /// Fetch a mutable version of the internal btree map.
-    fn unpacked(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
+    pub(super) fn unpacked(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
             Map::Packed { entry_count, data } => {
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);

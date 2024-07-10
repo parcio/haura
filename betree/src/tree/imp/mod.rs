@@ -147,7 +147,6 @@ where
         let sto_map = dml.spl().storage_kind_map();
         let default_class = dml.spl().default_storage_class();
         let root_node = dml.insert(
-            // TODO: Root Leaf is placed on fastest medium.
             Node::empty_leaf(
                 sto_map[storage_preference
                     .or(StoragePreference::from_u8(default_class))

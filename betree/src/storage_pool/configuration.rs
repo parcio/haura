@@ -104,16 +104,6 @@ impl Default for StoragePoolConfiguration {
     }
 }
 
-impl StoragePoolConfiguration {
-    /// Returns whether the given storage preference is backed by memory.
-    pub fn pref_is_memory(&self, pref: StoragePreference) -> bool {
-        match self.tiers.get(pref.as_u8() as usize) {
-            Some(tier) => tier.is_memory(),
-            _ => false,
-        }
-    }
-}
-
 /// Represents a top-level vdev.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]

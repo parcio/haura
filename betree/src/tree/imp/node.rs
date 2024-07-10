@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, Object, ObjectReference},
+    data_management::{Dml, HasStoragePreference, Object, ObjectReference, PreparePack},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
@@ -151,7 +151,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 }
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
-    fn pack<W: Write>(&self, mut writer: W) -> Result<Option<Block<u32>>, io::Error> {
+    fn pack<W: Write>(&self, mut writer: W, _: PreparePack) -> Result<Option<Block<u32>>, io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()).map(|_| None),
             Leaf(ref leaf) => {
@@ -241,6 +241,48 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             }
         }
         Ok(())
+    }
+
+    fn prepare_pack<X>(
+        &mut self,
+        storage_kind: StorageKind,
+        dmu: &X,
+    ) -> Result<crate::data_management::PreparePack, crate::data_management::Error>
+    where
+        R: ObjectReference,
+        X: Dml<Object = Node<R>, ObjectRef = R>,
+    {
+        // NOTE: Only necessary transitions are represented here, all others are no-op. Can be improved.
+        match (std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }), storage_kind) {
+            (Internal(_), StorageKind::Memory) | (Internal(_), StorageKind::Ssd) => {
+                // Spawn new child buffers from one internal node.
+                todo!()
+            },
+            (NVMInternal(mut internal), StorageKind::Hdd) => {
+                // Fetch children and pipe them into one node.
+                let mut cbufs = Vec::with_capacity(internal.children.len());
+                for link in internal.children.iter_mut() {
+                    let buf_ptr = std::mem::replace(link.buffer_mut().get_mut(), unsafe {
+                        std::mem::zeroed()
+                    });
+                    cbufs.push(match dmu.get_and_remove(buf_ptr)?.0 {
+                        Inner::ChildBuffer(buf) => buf,
+                        _ => unreachable!()
+                    });
+                }
+                self.0 = Inner::Internal(InternalNode::from_memory_node(internal, cbufs));
+            }
+            (Leaf(leaf), StorageKind::Memory) => {
+                todo!()
+            }
+            (NVMLeaf(leaf), StorageKind::Ssd) | (NVMLeaf(leaf), StorageKind::Hdd) => {
+               todo!()
+            }
+            (default, _) => {
+                self.0 = default;
+            }
+        }
+        todo!()
     }
 }
 

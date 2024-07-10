@@ -3,7 +3,7 @@ use crate::{
     compression::DecompressionTag,
     database::{DatasetId, Generation},
     size::StaticSize,
-    storage_pool::DiskOffset,
+    storage_pool::{DiskOffset, StoragePoolLayer},
     vdev::Block,
     StoragePreference,
 };
@@ -86,5 +86,35 @@ impl<D> ObjectPointer<D> {
     /// Get the id of the dataset this object is part of.
     pub fn info(&self) -> DatasetId {
         self.info
+    }
+
+    /// Instantiate the object.
+    pub fn fetch<SPL>(
+        &self,
+        pool: &SPL,
+    ) -> Result<
+        crate::tree::Node<super::impls::ObjRef<ObjectPointer<SPL::Checksum>>>,
+        super::errors::Error,
+    >
+    where
+        SPL: StoragePoolLayer<Checksum = D>,
+        D: crate::size::StaticSize + crate::checksum::Checksum,
+    {
+        let mut decompression_state = self.decompression_tag().new_decompression()?;
+        // Depending on the encoded node type we might not need the entire range
+        // right away. Or at all in some cases.
+        let compressed_data = if let Some(m_size) = self.metadata_size {
+            pool.read(m_size, self.offset(), self.checksum.clone())?
+        } else {
+            pool.read(self.size(), self.offset(), self.checksum.clone())?
+        };
+        let data = decompression_state.decompress(compressed_data)?;
+        Ok(super::Object::unpack_at(
+            self.size(),
+            pool.clone().into(),
+            self.offset(),
+            self.info(),
+            data.into_boxed_slice(),
+        )?)
     }
 }

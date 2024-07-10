@@ -2,7 +2,7 @@
 //!
 //! Encapsulating common nodes like [super::internal::InternalNode] and
 //! [super::leaf::LeafNode].
-use super::serialize_nodepointer;
+use super::{nvm_child_buffer::NVMChildBuffer, serialize_nodepointer};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, ObjectReference},
@@ -131,6 +131,18 @@ impl<N> ChildBuffer<N> {
         self.buffer.get_mut(key).map(|(keyinfo, _bytes)| {
             keyinfo.storage_preference = pref;
         })
+    }
+
+    pub fn from_mem_child_buffer(mut other: NVMChildBuffer, np: N) -> Self {
+        let msgs = std::mem::replace(other.buffer.unpacked(), Default::default());
+        let buffer_entries_size = msgs.iter().map(|(k, v)| k.size() + v.size()).sum();
+        Self {
+            messages_preference: other.messages_preference,
+            system_storage_preference: other.system_storage_preference,
+            buffer_entries_size,
+            buffer: msgs,
+            node_pointer: RwLock::new(np),
+        }
     }
 }
 

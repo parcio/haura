@@ -2,6 +2,8 @@
 use super::{
     child_buffer::ChildBuffer,
     node::{PivotGetMutResult, PivotGetResult},
+    nvm_child_buffer::NVMChildBuffer,
+    nvminternal::NVMInternalNode,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
     PivotKey,
 };
@@ -182,6 +184,30 @@ impl<N> InternalNode<N> {
 
             (maybe_left, child, maybe_right)
         })
+    }
+
+    pub fn from_memory_node(mut mem: NVMInternalNode<N>, cbufs: Vec<NVMChildBuffer>) -> Self {
+        let cbufs: Vec<ChildBuffer<N>> = cbufs
+            .into_iter()
+            .enumerate()
+            .map(|(idx, cbuf)| {
+                ChildBuffer::from_mem_child_buffer(
+                    cbuf,
+                    std::mem::replace(mem.children[idx].ptr_mut().get_mut(), unsafe {
+                        std::mem::zeroed()
+                    }),
+                )
+            })
+            .collect();
+        let entries_size = cbufs.iter().map(|cbuf| cbuf.buffer_size()).sum();
+        Self {
+            level: mem.level(),
+            entries_size,
+            system_storage_preference: mem.meta_data.system_storage_preference,
+            pref: mem.meta_data.pref,
+            pivot: mem.meta_data.pivot,
+            children: cbufs,
+        }
     }
 }
 

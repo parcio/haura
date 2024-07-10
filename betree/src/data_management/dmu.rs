@@ -285,30 +285,11 @@ where
     ) -> Result<E::ValueRef, Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
-        let mut decompression_state = op.decompression_tag().new_decompression()?;
         let offset = op.offset();
         let generation = op.generation();
 
-        // Depending on the encoded node type we might not need the entire range
-        // right away. Or at all in some cases.
-        let compressed_data = if let Some(m_size) = op.metadata_size {
-            self.pool.read(m_size, op.offset(), op.checksum().clone())?
-        } else {
-            self.pool
-                .read(op.size(), op.offset(), op.checksum().clone())?
-        };
-
+        let object = op.fetch(self.pool())?;
         // FIXME: The NVM node is only available when no compression is used.
-        let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = decompression_state.decompress(compressed_data)?;
-            Object::unpack_at(
-                op.size(),
-                self.pool.clone().into(),
-                op.offset(),
-                op.info(),
-                data.into_boxed_slice(),
-            )?
-        };
         let key = ObjectKey::Unmodified { offset, generation };
         Ok(self
             .insert_object_into_cache(key, TaggedCacheValue::new(RwLock::new(object), pivot_key)))
@@ -469,13 +450,29 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
+        // TODO: Transitions between the storage layouts *need* to happen here
+        // because of this pesky lazy promotion present in the DMU. This might
+        // require us to side-step and writeback just created buffer objects
+        // from here on.
+        //
+        // Mem -> Block: Fetch children, Create InternalNode, Continue with
+        // writeback (If the sum of buffers are ever >4MiB in size this violates
+        // the size restriction put in place by rebalance.) There might be
+        // useless writes when we writeback the children buffers of nodes first
+        // and then read them and write them out with the parent as a normal
+        // internal node here. FIXME
+        //
+        // Block -> Mem: Writeback new children, Create InternalNode, Continue
+        // with writeback
+
         let compression = &self.default_compression;
         let (partial_read, compressed_data) = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
             let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
             let part = {
-                let part = object.pack(&mut buf)?;
+                let pp = object.prepare_pack(self.spl().storage_kind_map()[storage_class as usize], &self)?;
+                let part = object.pack(&mut buf, pp)?;
                 drop(object);
                 part
             };
