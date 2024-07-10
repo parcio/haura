@@ -76,11 +76,8 @@ impl HasStoragePreference for LeafNode {
     }
 }
 
-impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for LeafNode {
-    fn from_iter<T>(iter: T) -> Self
-    where
-        T: IntoIterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))>,
-    {
+impl<'a> FromIterator<(CowBytes, (KeyInfo, SlicedCowBytes))> for LeafNode {
+    fn from_iter<T: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>>(iter: T) -> Self {
         let mut storage_pref = StoragePreference::NONE;
         let mut entries_size = 0;
 
@@ -92,15 +89,15 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for LeafNode {
             // We're already looking at every entry here, so finding the overall pref here
             // avoids a full scan later.
             storage_pref.upgrade(keyinfo.storage_preference);
-            entries_size += packed::ENTRY_LEN + key.len() + value.len();
+            let key_len = key.len();
+            entries_size += packed::ENTRY_LEN + key_len + value.len();
 
             let curr_storage_pref = keyinfo.storage_preference;
-            if let Some((ckeyinfo, cvalue)) = entries.insert(CowBytes::from(key), (keyinfo, value))
-            {
+            if let Some((ckeyinfo, cvalue)) = entries.insert(key, (keyinfo, value)) {
                 // iterator has collisions, try to compensate
                 //
                 // this entry will no longer be part of the final map, subtract its size
-                entries_size -= packed::ENTRY_LEN + key.len() + cvalue.len();
+                entries_size -= packed::ENTRY_LEN + key_len + cvalue.len();
 
                 // In case the old value increased the overall storage priority (faster), and the new
                 // value wouldn't have increased it as much, we might need to recalculate the
@@ -124,6 +121,15 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for LeafNode {
             entries_size,
             entries,
         }
+    }
+}
+
+impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for LeafNode {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))>,
+    {
+        LeafNode::from_iter(iter.into_iter().map(|(a, b)| (CowBytes::from(a), b)))
     }
 }
 

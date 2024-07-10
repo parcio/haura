@@ -855,6 +855,17 @@ impl NVMLeafNode {
             }
         }
     }
+
+    pub fn to_block_leaf(mut self) -> super::leaf::LeafNode {
+        self.state.force_upgrade();
+
+        match self.state {
+            NVMLeafNodeState::PartiallyLoaded { .. } => unreachable!(),
+            NVMLeafNodeState::Deserialized { data } => {
+                super::leaf::LeafNode::from_iter(data.into_iter())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
