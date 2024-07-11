@@ -3,17 +3,17 @@ use super::{
     child_buffer::ChildBuffer,
     node::{PivotGetMutResult, PivotGetResult},
     nvm_child_buffer::NVMChildBuffer,
-    nvminternal::NVMInternalNode,
+    nvminternal::{ChildLink, InternalNodeMetaData, NVMInternalNode},
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
-    PivotKey,
+    Node, PivotKey,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HasStoragePreference, ObjectReference},
+    data_management::{Dml, HasStoragePreference, ObjectReference},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
-    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
+    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction, StorageKind},
     AtomicStoragePreference, StoragePreference,
 };
 use bincode::serialized_size;
@@ -207,6 +207,42 @@ impl<N> InternalNode<N> {
             pref: mem.meta_data.pref,
             pivot: mem.meta_data.pivot,
             children: cbufs,
+        }
+    }
+
+    pub fn to_disjoint_node<F>(self, insert_new_cbuf: F) -> NVMInternalNode<N>
+    where
+        F: Fn(NVMChildBuffer) -> N,
+    {
+        let (entries_sizes, entries_size, entries_prefs, children) = self
+            .children
+            .into_iter()
+            .map(|cbuf| NVMChildBuffer::from_block_child_buffer(cbuf))
+            .map(|(cbuf, child_ptr)| {
+                let size = cbuf.size();
+                let pref = cbuf.correct_preference();
+                let buf_ptr = insert_new_cbuf(cbuf);
+                (size, pref, ChildLink::new(buf_ptr, child_ptr))
+            })
+            .fold((vec![], 0usize, vec![], vec![]), |mut acc, elem| {
+                acc.0.push(elem.0);
+                acc.1 += elem.0;
+                acc.2.push(elem.1);
+                acc.3.push(elem.2);
+                acc
+            });
+
+        NVMInternalNode {
+            meta_data: InternalNodeMetaData {
+                level: self.level,
+                system_storage_preference: self.system_storage_preference,
+                pref: self.pref,
+                pivot: self.pivot,
+                entries_size,
+                entries_sizes,
+                entries_prefs,
+            },
+            children,
         }
     }
 }

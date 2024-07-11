@@ -247,16 +247,19 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         &mut self,
         storage_kind: StorageKind,
         dmu: &X,
+        pivot_key: &PivotKey,
     ) -> Result<crate::data_management::PreparePack, crate::data_management::Error>
     where
         R: ObjectReference,
         X: Dml<Object = Node<R>, ObjectRef = R>,
     {
         // NOTE: Only necessary transitions are represented here, all others are no-op. Can be improved.
-        match (std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }), storage_kind) {
-            (Internal(_), StorageKind::Memory) | (Internal(_), StorageKind::Ssd) => {
+        self.0 = match (std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }), storage_kind) {
+            (Internal(internal), StorageKind::Memory) | (Internal(internal), StorageKind::Ssd) => {
                 // Spawn new child buffers from one internal node.
-                todo!()
+                Inner::NVMInternal(internal.to_disjoint_node(|new_cbuf| {
+                   dmu.insert(Node(Inner::ChildBuffer(new_cbuf)), pivot_key.d_id(), pivot_key.clone())
+                }))
             },
             (NVMInternal(mut internal), StorageKind::Hdd) => {
                 // Fetch children and pipe them into one node.
@@ -270,19 +273,19 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         _ => unreachable!()
                     });
                 }
-                self.0 = Inner::Internal(InternalNode::from_memory_node(internal, cbufs));
+                Inner::Internal(InternalNode::from_memory_node(internal, cbufs))
             }
             (Leaf(leaf), StorageKind::Memory) => {
-                todo!()
+                Inner::NVMLeaf(leaf.to_memory_leaf())
             }
             (NVMLeaf(leaf), StorageKind::Ssd) | (NVMLeaf(leaf), StorageKind::Hdd) => {
-               todo!()
+                Inner::Leaf(leaf.to_block_leaf())
             }
             (default, _) => {
-                self.0 = default;
+                default
             }
-        }
-        todo!()
+        };
+        Ok(PreparePack())
     }
 }
 

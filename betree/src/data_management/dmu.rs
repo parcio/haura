@@ -471,7 +471,7 @@ where
             let mut state = compression.new_compression()?;
             let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
             let part = {
-                let pp = object.prepare_pack(self.spl().storage_kind_map()[storage_class as usize], &self)?;
+                let pp = object.prepare_pack(self.spl().storage_kind_map()[storage_class as usize], &self, &pivot_key)?;
                 let part = object.pack(&mut buf, pp)?;
                 drop(object);
                 part

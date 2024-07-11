@@ -47,6 +47,13 @@ impl<N: PartialEq> PartialEq for ChildLink<N> {
 }
 
 impl<N> ChildLink<N> {
+    pub fn new(buffer: N, ptr: N) -> Self {
+        ChildLink {
+            buffer: RwLock::new(buffer),
+            ptr: RwLock::new(ptr),
+        }
+    }
+
     pub fn buffer_mut(&mut self) -> &mut RwLock<N> {
         &mut self.buffer
     }

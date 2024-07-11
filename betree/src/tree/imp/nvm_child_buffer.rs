@@ -20,6 +20,8 @@ use std::{
     ptr::slice_from_raw_parts,
 };
 
+use super::child_buffer::ChildBuffer;
+
 trait CutSlice<T> {
     fn cut(&self, pos: usize, len: usize) -> &[T];
 }
@@ -559,6 +561,10 @@ impl NVMChildBuffer {
                 data: buf.into(),
             },
         })
+    }
+
+    pub fn from_block_child_buffer<N>(other: ChildBuffer<N>) -> (Self, N) {
+        todo!()
     }
 }
 

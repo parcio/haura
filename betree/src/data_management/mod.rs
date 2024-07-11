@@ -121,6 +121,7 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         &mut self,
         storage_kind: StorageKind,
         dmu: &X,
+        pivot_key: &PivotKey,
     ) -> Result<PreparePack, crate::data_management::Error>
     where
         R: ObjectReference,
