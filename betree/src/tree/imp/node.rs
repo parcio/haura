@@ -17,13 +17,12 @@ use crate::{
     data_management::{Dml, HasStoragePreference, Object, ObjectReference, PreparePack},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
+    storage_pool::{DiskOffset, StoragePoolLayer},
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
     vdev::Block,
     StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
-use libc::RTM_NEWCACHEREPORT;
 use parking_lot::RwLock;
 use std::{
     borrow::Borrow,
@@ -58,20 +57,15 @@ macro_rules! mib {
     };
 }
 
+// NOTE: This section is the main description of the properties of the chosen tree nodes.
+//
+// Essentially a mapping from node type and storage kind to min or max size is
+// created. To be noted here is that the current representation of the leaf can
+// change before it is actually written to the desired storage kind. So a block
+// leaf might be changed to a memory leaf when written to memory.
 impl StorageMap {
     pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
-        node.inner_size()
-            > match (&node.0, self.get(node.correct_preference())) {
-                (PackedLeaf(_), StorageKind::Hdd) => mib!(4),
-                (PackedLeaf(_), StorageKind::Memory) => unreachable!(),
-                (PackedLeaf(_), StorageKind::Ssd) => mib!(2),
-                (Leaf(_), StorageKind::Ssd) => mib!(2),
-                (Leaf(_), _) => mib!(4),
-                (MemLeaf(_), _) => mib!(4),
-                (Internal(_), _) => mib!(4),
-                (DisjointInternal(_), _) => mib!(4),
-                (Inner::ChildBuffer(_), _) => unreachable!(),
-            }
+        self.max_size(node).map(|max_size| node.inner_size() > max_size).unwrap_or(false)
     }
 
     pub fn leaf_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
@@ -79,16 +73,39 @@ impl StorageMap {
     }
 
     pub fn leaf_is_too_small<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
-        node.inner_size()
-            < match (&node.0, self.get(node.correct_preference())) {
-                (PackedLeaf(_), StorageKind::Hdd) => mib!(1),
-                (PackedLeaf(_), StorageKind::Memory) => unreachable!(),
-                (PackedLeaf(_), StorageKind::Ssd) => kib!(128),
-                (Leaf(_), StorageKind::Ssd) => kib!(128),
-                (Leaf(_), _) => mib!(1),
-                (MemLeaf(_), _) => kib!(128),
-                _ => return false,
-            }
+        node.is_leaf() && self.min_size(node).map(|min_size| node.inner_size() < min_size).unwrap_or(false)
+    }
+
+    pub fn min_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
+        Some(match (&node.0, self.get(node.correct_preference())) {
+            (PackedLeaf(_), StorageKind::Hdd) => mib!(1),
+            (PackedLeaf(_), StorageKind::Memory) => kib!(128),
+            (PackedLeaf(_), StorageKind::Ssd) => kib!(128),
+            (Leaf(_), StorageKind::Hdd) => mib!(1),
+            (Leaf(_), StorageKind::Memory) => kib!(1),
+            (Leaf(_), StorageKind::Ssd) => kib!(128),
+            (MemLeaf(_), StorageKind::Hdd) => mib!(1),
+            (MemLeaf(_), StorageKind::Memory) => kib!(128),
+            (MemLeaf(_), StorageKind::Ssd) => kib!(128),
+            (Internal(_), _) => return None,
+            (DisjointInternal(_), _) => return None,
+            (Inner::ChildBuffer(_), _) => return None,
+        })
+    }
+
+    pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
+        Some(match (&node.0, self.get(node.correct_preference())) {
+            (PackedLeaf(_), StorageKind::Hdd) => mib!(4),
+            (PackedLeaf(_), StorageKind::Memory) => mib!(4),
+            (PackedLeaf(_), StorageKind::Ssd) => mib!(2),
+            (Leaf(_), StorageKind::Hdd) => mib!(4),
+            (Leaf(_), StorageKind::Memory) => mib!(4),
+            (Leaf(_), StorageKind::Ssd) => mib!(2),
+            (MemLeaf(_), _) => mib!(4),
+            (Internal(_), _) => mib!(4),
+            (DisjointInternal(_), _) => mib!(4),
+            (Inner::ChildBuffer(_), _) => return None,
+        })
     }
 }
 
@@ -402,25 +419,6 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             Inner::ChildBuffer(_) => unreachable!(),
         }
     }
-
-    // pub(super) fn is_too_large(&self, storage_map: &StorageMap) -> bool {
-    //     match self.0 {
-    //         PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
-    //         Leaf(ref leaf) => {
-    //             // This depends on the preferred backing storage. Experimenting with smaller nodes on SSD.
-    //             match storage_map.get(leaf.correct_preference()) {
-    //                 StorageKind::Hdd => leaf.size() > MAX_LEAF_NODE_SIZE,
-    //                 StorageKind::Memory | StorageKind::Ssd => leaf.size() > MAX_LEAF_NODE_SIZE / 2,
-    //             }
-    //         }
-    //         Internal(ref internal) => internal.size() > MAX_INTERNAL_NODE_SIZE,
-    //         MemLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
-    //         DisjointInternal(ref nvminternal) => {
-    //             nvminternal.logical_size() > MAX_INTERNAL_NODE_SIZE
-    //         }
-    //         Inner::ChildBuffer(_) => unreachable!(),
-    //     }
-    // }
 }
 
 impl<N: HasStoragePreference + StaticSize> Node<N> {
@@ -482,29 +480,6 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Inner::ChildBuffer(_) => unreachable!(),
         }
     }
-
-    // pub(super) fn is_too_small_leaf(&self) -> bool {
-    //     match self.0 {
-    //         PackedLeaf(ref map) => map.size() < MIN_LEAF_NODE_SIZE,
-    //         Leaf(ref leaf) => leaf.size() < MIN_LEAF_NODE_SIZE,
-    //         Internal(_) => false,
-    //         MemLeaf(ref nvmleaf) => nvmleaf.size() < MIN_LEAF_NODE_SIZE,
-    //         DisjointInternal(_) => false,
-    //         Inner::ChildBuffer(_) => unreachable!(),
-    //     }
-    // }
-
-    // pub(super) fn is_too_large_leaf(&self, storage_map: &StorageMap) -> bool {
-    //     match self.0 {
-    //         PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
-    //         // NOTE: Don't replicate leaf size constraints here.
-    //         Leaf(_) => self.is_too_large(storage_map),
-    //         Internal(_) => false,
-    //         MemLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
-    //         DisjointInternal(_) => false,
-    //         Inner::ChildBuffer(_) => unreachable!(),
-    //     }
-    // }
 
     pub(super) fn is_leaf(&self) -> bool {
         match self.0 {
@@ -571,14 +546,15 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
 
         let size_before = self.size();
         self.ensure_unpacked();
-        // FIXME: Update this PivotKey, as the index of the node is changing due to the structural change.
         let mut left_sibling = self.take();
 
+        let min_size = storage_map.min_size(&left_sibling);
+        let max_size = storage_map.min_size(&left_sibling);
         let (right_sibling, pivot_key, cur_level) = match left_sibling.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
                 let (right_sibling, pivot_key, _, _pk) =
-                    leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    leaf.split(min_size.unwrap(), max_size.unwrap());
                 (Node(Leaf(right_sibling)), pivot_key, 0)
             }
             Internal(ref mut internal) => {
@@ -587,7 +563,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             }
             MemLeaf(ref mut nvmleaf) => {
                 let (right_sibling, pivot_key, _, _pk) =
-                    nvmleaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    nvmleaf.split(min_size.unwrap(), max_size.unwrap());
                 (Node(MemLeaf(right_sibling)), pivot_key, 0)
             }
             DisjointInternal(ref mut nvminternal) => {
