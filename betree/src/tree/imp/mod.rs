@@ -81,8 +81,22 @@ pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     marker: PhantomData<M>,
     storage_preference: StoragePreference,
     /// A 1-to-1 map of each storage class to the desired data representation.
-    storage_map: [StorageKind; NUM_STORAGE_CLASSES],
-    storage_default: StorageKind,
+    storage_map: StorageMap,
+}
+
+#[derive(Clone, Debug)]
+pub struct StorageMap {
+    map: [StorageKind; NUM_STORAGE_CLASSES],
+    default: StorageKind,
+}
+
+impl StorageMap {
+    pub fn get(&self, pref: StoragePreference) -> StorageKind {
+        self.map
+            .get(pref.as_u8() as usize)
+            .cloned()
+            .unwrap_or(self.default)
+    }
 }
 
 impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tree<X, M, I> {
@@ -93,8 +107,7 @@ impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tre
             evict: self.evict,
             marker: PhantomData,
             storage_preference: self.storage_preference,
-            storage_map: self.storage_map,
-            storage_default: self.storage_default,
+            storage_map: self.storage_map.clone(),
         }
     }
 }
@@ -184,9 +197,10 @@ where
     ) -> Self {
         Tree {
             inner: I::from(Inner::new(tree_id, root_node, msg_action)),
-            storage_map: dml.spl().storage_kind_map(),
-            storage_default: dml.spl().storage_kind_map()
-                [dml.spl().default_storage_class() as usize],
+            storage_map: StorageMap {
+                map: dml.spl().storage_kind_map(),
+                default: dml.spl().storage_kind_map()[dml.spl().default_storage_class() as usize],
+            },
             dml,
             evict: true,
             marker: PhantomData,
@@ -216,9 +230,10 @@ where
     ) -> Self {
         Tree {
             inner,
-            storage_map: dml.spl().storage_kind_map(),
-            storage_default: dml.spl().storage_kind_map()
-                [dml.spl().default_storage_class() as usize],
+            storage_map: StorageMap {
+                map: dml.spl().storage_kind_map(),
+                default: dml.spl().storage_kind_map()[dml.spl().default_storage_class() as usize],
+            },
             dml,
             evict,
             marker: PhantomData,
@@ -676,12 +691,12 @@ where
 mod child_buffer;
 mod derivate_ref;
 mod derivate_ref_nvm;
+mod disjoint_internal;
 mod flush;
 mod internal;
 mod leaf;
 mod node;
 mod nvm_child_buffer;
-mod disjoint_internal;
 mod nvmleaf;
 mod packed;
 mod range;

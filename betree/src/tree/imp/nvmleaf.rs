@@ -16,7 +16,7 @@ use crate::{
 };
 use std::{
     borrow::Borrow, collections::BTreeMap, io::Write, iter::FromIterator, mem::size_of, ops::Range,
-    sync::OnceLock, time::SystemTime,
+    sync::OnceLock,
 };
 
 pub(crate) const NVMLEAF_METADATA_LEN_OFFSET: usize = 0;
@@ -24,12 +24,6 @@ pub(crate) const NVMLEAF_DATA_LEN_OFFSET: usize = size_of::<u32>();
 pub(crate) const NVMLEAF_METADATA_OFFSET: usize = NVMLEAF_DATA_LEN_OFFSET + size_of::<u32>();
 pub(crate) const NVMLEAF_HEADER_FIXED_LEN: usize = NVMLEAF_METADATA_OFFSET;
 const NVMLEAF_PER_KEY_META_LEN: usize = 3 * size_of::<u32>();
-
-pub(super) struct NVMLeafNodeLoadDetails {
-    pub need_to_load_data_from_nvm: bool,
-    pub time_for_nvm_last_fetch: SystemTime,
-    pub nvm_fetch_counter: usize,
-}
 
 // Enable actual zero-copy at all? All data is copied twice at the moment, we
 // could hold a variant which holds the original buffer and simply returns
