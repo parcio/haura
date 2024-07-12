@@ -1,4 +1,4 @@
-//! Implementation of the [NVMInternalNode] node type.
+//! Implementation of the [DisjointInternalNode] node type.
 use super::{
     node::{PivotGetMutResult, PivotGetResult},
     nvm_child_buffer::NVMChildBuffer,
@@ -20,7 +20,7 @@ use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 use serde::{Deserialize, Serialize};
 
-pub(super) struct NVMInternalNode<N> {
+pub(super) struct DisjointInternalNode<N> {
     // FIXME: This type can be used as zero-copy
     pub meta_data: InternalNodeMetaData,
     // We need this type everytime in memory. Requires modifications during runtime each time.
@@ -75,7 +75,7 @@ impl<N> ChildLink<N> {
     }
 }
 
-impl<N> std::fmt::Debug for NVMInternalNode<N> {
+impl<N> std::fmt::Debug for DisjointInternalNode<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.meta_data.fmt(f)
     }
@@ -95,7 +95,7 @@ pub(super) struct InternalNodeMetaData {
 }
 
 const INTERNAL_BINCODE_STATIC: usize = 4 + 8;
-impl<N: StaticSize> Size for NVMInternalNode<N> {
+impl<N: StaticSize> Size for DisjointInternalNode<N> {
     fn size(&self) -> usize {
         self.meta_data.size() + self.children.len() * N::static_size() * 2 + INTERNAL_BINCODE_STATIC
     }
@@ -108,7 +108,7 @@ impl<N: StaticSize> Size for NVMInternalNode<N> {
 
 // NOTE: This has become necessary as the decision when to flush a node is no
 // longer dependent on just this object but it's subobjects too.
-impl<N: StaticSize> NVMInternalNode<N> {
+impl<N: StaticSize> DisjointInternalNode<N> {
     pub fn logical_size(&self) -> usize {
         self.size() + self.meta_data.entries_sizes.iter().sum::<usize>()
     }
@@ -128,7 +128,7 @@ impl Size for InternalNodeMetaData {
     }
 }
 
-impl<N: HasStoragePreference> HasStoragePreference for NVMInternalNode<N> {
+impl<N: HasStoragePreference> HasStoragePreference for DisjointInternalNode<N> {
     fn current_preference(&self) -> Option<StoragePreference> {
         self.meta_data
             .pref
@@ -184,7 +184,7 @@ impl<N> Into<ChildLink<N>> for InternalNodeLink<N> {
     }
 }
 
-impl<N> NVMInternalNode<N> {
+impl<N> DisjointInternalNode<N> {
     pub fn new(
         left_child: InternalNodeLink<N>,
         right_child: InternalNodeLink<N>,
@@ -194,7 +194,7 @@ impl<N> NVMInternalNode<N> {
     where
         N: StaticSize,
     {
-        NVMInternalNode {
+        DisjointInternalNode {
             meta_data: InternalNodeMetaData {
                 level,
                 entries_size: pivot_key.size(),
@@ -315,7 +315,7 @@ impl<N> NVMInternalNode<N> {
         let children = bincode::deserialize(&buf[4 + len..])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        Ok(NVMInternalNode {
+        Ok(DisjointInternalNode {
             meta_data,
             children,
         })
@@ -332,7 +332,7 @@ impl<N> NVMInternalNode<N> {
     }
 }
 
-impl<N> NVMInternalNode<N> {
+impl<N> DisjointInternalNode<N> {
     pub fn get(&self, key: &[u8]) -> &ChildLink<N>
     where
         N: ObjectReference,
@@ -457,7 +457,7 @@ impl<N: StaticSize> Size for Vec<N> {
     }
 }
 
-impl<N: ObjectReference> NVMInternalNode<N> {
+impl<N: ObjectReference> DisjointInternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.meta_data.pref.invalidate();
         let split_off_idx = self.fanout() / 2;
@@ -485,7 +485,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
         let size_delta = entries_size + pivot_key.size();
         self.meta_data.entries_size -= size_delta;
 
-        let right_sibling = NVMInternalNode {
+        let right_sibling = DisjointInternalNode {
             meta_data: InternalNodeMetaData {
                 level: self.meta_data.level,
                 entries_size,
@@ -554,7 +554,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
     }
 }
 
-impl<N: HasStoragePreference> NVMInternalNode<N>
+impl<N: HasStoragePreference> DisjointInternalNode<N>
 where
     N: StaticSize,
     N: ObjectReference,
@@ -606,7 +606,7 @@ where
 }
 
 pub(super) struct NVMTakeChildBuffer<'a, N: 'a + 'static> {
-    node: &'a mut NVMInternalNode<N>,
+    node: &'a mut DisjointInternalNode<N>,
     child_idx: usize,
 }
 
@@ -712,7 +712,7 @@ pub(super) struct PrepareMergeChild<'a, N: 'a + 'static, X>
 where
     X: Dml,
 {
-    node: &'a mut NVMInternalNode<N>,
+    node: &'a mut DisjointInternalNode<N>,
     left_child: X::CacheValueRefMut,
     right_child: X::CacheValueRefMut,
     pivot_key_idx: usize,
@@ -882,9 +882,9 @@ mod tests {
         }
     }
 
-    impl<T: Clone> Clone for NVMInternalNode<T> {
+    impl<T: Clone> Clone for DisjointInternalNode<T> {
         fn clone(&self) -> Self {
-            NVMInternalNode {
+            DisjointInternalNode {
                 meta_data: InternalNodeMetaData {
                     level: self.meta_data.level,
                     entries_size: self.meta_data.entries_size,
@@ -899,7 +899,7 @@ mod tests {
         }
     }
 
-    impl<T: Arbitrary + StaticSize> Arbitrary for NVMInternalNode<T> {
+    impl<T: Arbitrary + StaticSize> Arbitrary for DisjointInternalNode<T> {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
             let pivot_key_cnt = rng.gen_range(0..10);
@@ -927,7 +927,7 @@ mod tests {
 
             entries_size += 4 + 8 + pivot_key_cnt * 8 + pivot_key_cnt * 1;
 
-            NVMInternalNode {
+            DisjointInternalNode {
                 meta_data: InternalNodeMetaData {
                     pivot,
                     entries_size,
@@ -944,23 +944,23 @@ mod tests {
         }
     }
 
-    fn serialized_size<T: ObjectReference>(node: &NVMInternalNode<T>) -> usize {
+    fn serialized_size<T: ObjectReference>(node: &DisjointInternalNode<T>) -> usize {
         let mut buf = Vec::new();
         node.pack(&mut buf).unwrap();
         buf.len()
     }
 
-    fn check_size<T: Size + ObjectReference + std::cmp::PartialEq>(node: &NVMInternalNode<T>) {
+    fn check_size<T: Size + ObjectReference + std::cmp::PartialEq>(node: &DisjointInternalNode<T>) {
         assert_eq!(node.size(), serialized_size(node))
     }
 
     #[quickcheck]
-    fn actual_size(node: NVMInternalNode<()>) {
+    fn actual_size(node: DisjointInternalNode<()>) {
         assert_eq!(node.size(), serialized_size(&node))
     }
 
     #[quickcheck]
-    fn idx(node: NVMInternalNode<()>, key: Key) {
+    fn idx(node: DisjointInternalNode<()>, key: Key) {
         let key = key.0;
         let idx = node.idx(&key);
 
@@ -976,7 +976,7 @@ mod tests {
     static mut PK: Option<PivotKey> = None;
 
     #[quickcheck]
-    fn size_split(mut node: NVMInternalNode<()>) -> TestResult {
+    fn size_split(mut node: DisjointInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -991,7 +991,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split(mut node: NVMInternalNode<()>) -> TestResult {
+    fn split(mut node: DisjointInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -1017,7 +1017,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split_key(mut node: NVMInternalNode<()>) -> TestResult {
+    fn split_key(mut node: DisjointInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -1029,7 +1029,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split_and_merge(mut node: NVMInternalNode<()>) -> TestResult {
+    fn split_and_merge(mut node: DisjointInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -1043,10 +1043,10 @@ mod tests {
     }
 
     #[quickcheck]
-    fn serialize_then_deserialize(node: NVMInternalNode<()>) {
+    fn serialize_then_deserialize(node: DisjointInternalNode<()>) {
         let mut buf = Vec::new();
         node.pack(&mut buf).unwrap();
-        let unpacked = NVMInternalNode::<()>::unpack(&buf).unwrap();
+        let unpacked = DisjointInternalNode::<()>::unpack(&buf).unwrap();
         assert_eq!(unpacked.meta_data, node.meta_data);
         assert_eq!(unpacked.children, node.children);
     }

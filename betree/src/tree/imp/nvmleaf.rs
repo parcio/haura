@@ -972,7 +972,7 @@ mod tests {
         let _metadata_size = leaf_node.pack(&mut bytes).unwrap();
 
         let config = StoragePoolConfiguration::default();
-        let pool = crate::database::RootSpu::new(&config).unwrap();
+        let pool = crate::database::RootSpu::new(&config, 0).unwrap();
         let _csum = XxHashBuilder.build().finish();
 
         let _node = NVMLeafNode::unpack(
@@ -1064,7 +1064,7 @@ mod tests {
         let mut buf = BufWrite::with_capacity(Block(1));
         let _ = leaf_node.pack(&mut buf).unwrap();
         let config = StoragePoolConfiguration::default();
-        let pool = crate::database::RootSpu::new(&config).unwrap();
+        let pool = crate::database::RootSpu::new(&config, 0).unwrap();
         let buf = buf.into_buf();
         let mut wire_node = NVMLeafNode::unpack(
             &buf,
@@ -1103,7 +1103,7 @@ mod tests {
         let buf = buf.into_buf();
         let meta_range = ..foo.unwrap().to_bytes() as usize;
         let config = StoragePoolConfiguration::default();
-        let pool = crate::database::RootSpu::new(&config).unwrap();
+        let pool = crate::database::RootSpu::new(&config, 0).unwrap();
         let _wire_node = NVMLeafNode::unpack(
             &buf.as_slice()[meta_range],
             Box::new(pool),

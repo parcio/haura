@@ -7,7 +7,7 @@ use crate::{
     size::{Size, StaticSize},
 };
 
-use super::{internal::TakeChildBuffer, nvminternal::NVMTakeChildBuffer, Node};
+use super::{internal::TakeChildBuffer, disjoint_internal::NVMTakeChildBuffer, Node};
 
 pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
     TakeChildBuffer(TakeChildBuffer<'a, N>),
@@ -63,7 +63,7 @@ pub(super) struct MergeChildResult<NP> {
 }
 
 use super::internal::PrepareMergeChild as Block_PMC;
-use super::nvminternal::PrepareMergeChild as Mem_PMC;
+use super::disjoint_internal::PrepareMergeChild as Mem_PMC;
 
 pub(super) enum PrepareChildBufferMerge<'a, N: 'static, X: Dml> {
     Block(Block_PMC<'a, N>),
