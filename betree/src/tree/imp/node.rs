@@ -198,8 +198,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // and every modification requires them to be unpacked.
             // The leaf contents are scanned cheaply during unpacking, which
             // recalculates the correct storage_preference for the contained keys.
-            // FIXME: Inefficient copy.
-            Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
+            Ok(Node(PackedLeaf(PackedMap::new(data))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
             Ok(Node(DisjointInternal(
                 DisjointInternalNode::unpack(&data[4..])?.complete_object_refs(d_id),

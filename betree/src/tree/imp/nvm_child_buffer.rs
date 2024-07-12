@@ -631,7 +631,7 @@ mod tests {
             let buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> = (0..entries_cnt)
                 .map(|_| {
                     (
-                        super::super::nvminternal::TestKey::arbitrary(g).0,
+                        super::super::disjoint_internal::TestKey::arbitrary(g).0,
                         (
                             KeyInfo::arbitrary(g),
                             DefaultMessageActionMsg::arbitrary(g).0,

@@ -473,7 +473,7 @@ mod tests {
     fn check_serialization(leaf_node: LeafNode) {
         let mut data = Vec::new();
         PackedMap::pack(&leaf_node, &mut data).unwrap();
-        let twin = PackedMap::new(data).unpack_leaf();
+        let twin = PackedMap::new(data.into_boxed_slice()).unpack_leaf();
 
         assert_eq!(leaf_node, twin);
     }

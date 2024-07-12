@@ -62,7 +62,7 @@ pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 pub(crate) struct PackedMap {
     entry_count: u32,
     system_preference: u8,
-    data: CowBytes,
+    data: SlicedCowBytes,
 }
 
 /// New type for safe-handling of data offsets u32s.
@@ -74,13 +74,15 @@ fn prefix_size(entry_count: u32) -> usize {
 }
 
 impl PackedMap {
-    pub fn new(data: Vec<u8>) -> Self {
-        debug_assert!(data.len() >= 4);
-        let entry_count = LittleEndian::read_u32(&data[..4]);
-        let system_preference = data[4];
+    pub fn new(data: Box<[u8]>) -> Self {
+        let data = CowBytes::from(data);
+        debug_assert!(data.len() >= 8);
+        let entry_count = LittleEndian::read_u32(&data[4..8]);
+        let system_preference = data[8];
 
         PackedMap {
-            data: data.into(),
+            // Skip the 4 bytes node identifier prefix
+            data: data.slice_from(4),
             entry_count,
             system_preference,
         }
@@ -139,7 +141,7 @@ impl PackedMap {
     }
 
     fn get_slice_cow(&self, (Offset(pos), len): (Offset, u32)) -> SlicedCowBytes {
-        self.data.clone().slice(pos, len)
+        self.data.clone().subslice(pos, len)
     }
 
     // Adapted from std::slice::binary_search_by
@@ -253,7 +255,7 @@ impl PackedMap {
         Ok(())
     }
 
-    pub(super) fn inner(&self) -> &CowBytes {
+    pub(super) fn inner(&self) -> &SlicedCowBytes {
         &self.data
     }
 
@@ -281,7 +283,7 @@ mod tests {
         let mut v = Vec::new();
         PackedMap::pack(&leaf, &mut v).unwrap();
 
-        let packed = PackedMap::new(v);
+        let packed = PackedMap::new(v.into_boxed_slice());
 
         for (k, (ki, v)) in leaf.entries() {
             let (pki, pv) = packed.get(k).unwrap();
