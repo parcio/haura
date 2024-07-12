@@ -1,7 +1,7 @@
 [rnd-write-iops]
 rw=randwrite
-numjobs=3
-bs=4m
+numjobs=1
+bs=4k
 direct=1
 ioengine=external:src/fio-engine-haura.o
 size=2g

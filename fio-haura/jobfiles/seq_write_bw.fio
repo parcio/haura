@@ -1,7 +1,9 @@
 [seq-write-bw]
 rw=write
-numjobs=4
+numjobs=1
 bs=4m
 direct=1
 ioengine=external:src/fio-engine-haura.o
+disrespect-fio-options
 size=2g
+fsync=16384
