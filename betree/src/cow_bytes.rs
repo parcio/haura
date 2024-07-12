@@ -367,8 +367,8 @@ impl Size for SlicedCowBytes {
 impl SlicedCowBytes {
     /// Returns a new subslice which points to `self[pos..pos+len]`.
     pub fn subslice(self, pos: u32, len: u32) -> Self {
-        let pos = self.pos + pos;
         assert!(pos + len <= self.len);
+        let pos = self.pos + pos;
         SlicedCowBytes {
             data: self.data,
             pos,

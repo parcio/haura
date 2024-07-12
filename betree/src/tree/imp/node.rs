@@ -205,7 +205,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             )))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
             Ok(Node(MemLeaf(NVMLeafNode::unpack(
-                &data[4..],
+                data,
                 pool,
                 offset,
                 size,

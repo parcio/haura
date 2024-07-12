@@ -55,7 +55,7 @@ enum NVMLeafNodeState {
     /// _must_ transition to the Deserialized state. This is essentially lazy
     /// deserialization.
     PartiallyLoaded {
-        buf: &'static [u8],
+        buf: SlicedCowBytes,
         // Construct with empty cells while reading metadata? Saves locking of
         // nodes when multiple keys are fetched from the same node, for example
         // when prefetching keys in an object. We should test if this in-node
@@ -295,7 +295,7 @@ impl NVMLeafNodeState {
     }
 
     #[cfg(test)]
-    pub fn set_data(&mut self, data: &'static [u8]) {
+    pub fn set_data(&mut self, data: SlicedCowBytes) {
         match self {
             NVMLeafNodeState::PartiallyLoaded { ref mut buf, .. } => *buf = data,
             NVMLeafNodeState::Deserialized { data } => todo!(),
@@ -546,11 +546,13 @@ impl NVMLeafNode {
     }
 
     pub fn unpack<SPL: StoragePoolLayer>(
-        data: &[u8],
+        data: Box<[u8]>,
         pool: Box<SPL>,
         offset: DiskOffset,
-        _size: Block<u32>,
+        size: Block<u32>,
     ) -> Result<Self, std::io::Error> {
+        // Skip the node
+        let data = CowBytes::from(data).slice_from(super::node::NODE_PREFIX_LEN as u32);
         let meta_data_len: usize = u32::from_le_bytes(
             data[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
                 .try_into()
@@ -586,16 +588,26 @@ impl NVMLeafNode {
 
         #[cfg(not(test))]
         // Fetch the slice where data is located.
-        let raw_data = pool
-            .slice(
-                offset,
-                data_start + super::node::NODE_PREFIX_LEN,
-                data_start + data_len + super::node::NODE_PREFIX_LEN,
-            )
-            .unwrap();
+        let raw_data = if data.len() < size.to_bytes() as usize {
+            unsafe {
+                SlicedCowBytes::from_raw(
+                    pool.slice(
+                        offset,
+                        data_start + super::node::NODE_PREFIX_LEN,
+                        data_start + data_len + super::node::NODE_PREFIX_LEN,
+                    )
+                    .unwrap()
+                    .as_ptr(),
+                    data_len,
+                )
+            }
+        } else {
+            // We already have all the data
+            data.slice_from(data_start as u32)
+        };
 
         #[cfg(test)]
-        let raw_data = &[];
+        let raw_data = CowBytes::new().slice_from(0);
 
         Ok(NVMLeafNode {
             meta_data,
@@ -870,6 +882,8 @@ impl NVMLeafNode {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::{CowBytes, NVMLeafNode, Size};
     use crate::{
         arbitrary::GenExt,
@@ -969,6 +983,7 @@ mod tests {
     #[quickcheck]
     fn ser_deser(leaf_node: NVMLeafNode) {
         let mut bytes = vec![];
+        bytes.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap();
         let _metadata_size = leaf_node.pack(&mut bytes).unwrap();
 
         let config = StoragePoolConfiguration::default();
@@ -976,7 +991,7 @@ mod tests {
         let _csum = XxHashBuilder.build().finish();
 
         let _node = NVMLeafNode::unpack(
-            &bytes,
+            bytes.into_boxed_slice(),
             Box::new(pool),
             DiskOffset::from_u64(0),
             crate::vdev::Block(4),
@@ -1062,12 +1077,13 @@ mod tests {
             .collect();
 
         let mut buf = BufWrite::with_capacity(Block(1));
+        buf.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap();
         let _ = leaf_node.pack(&mut buf).unwrap();
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config, 0).unwrap();
-        let buf = buf.into_buf();
+        let buf = buf.into_buf().into_boxed_slice();
         let mut wire_node = NVMLeafNode::unpack(
-            &buf,
+            buf.clone(),
             Box::new(pool),
             DiskOffset::from_u64(0),
             crate::vdev::Block(0),
@@ -1075,7 +1091,7 @@ mod tests {
         .unwrap();
 
         let meta_data_len: usize = u32::from_le_bytes(
-            buf[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
+            buf[NVMLEAF_METADATA_LEN_OFFSET + super::super::node::NODE_PREFIX_LEN..NVMLEAF_DATA_LEN_OFFSET + super::super::node::NODE_PREFIX_LEN]
                 .try_into()
                 .unwrap(),
         ) as usize;
@@ -1083,7 +1099,7 @@ mod tests {
 
         wire_node
             .state
-            .set_data(&Box::<[u8]>::leak(buf.into_boxed_slice())[meta_data_end..]);
+            .set_data(CowBytes::from(buf).slice_from(meta_data_end as u32 + super::super::node::NODE_PREFIX_LEN as u32));
 
         for (key, v) in kvs.into_iter() {
             assert_eq!(Some(v), wire_node.get_with_info(&key));
@@ -1099,19 +1115,20 @@ mod tests {
         }
 
         let mut buf = crate::buffer::BufWrite::with_capacity(Block(1));
+        buf.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap();
         let foo = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf();
         let meta_range = ..foo.unwrap().to_bytes() as usize;
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config, 0).unwrap();
         let _wire_node = NVMLeafNode::unpack(
-            &buf.as_slice()[meta_range],
+            buf.into_boxed_slice(),
             Box::new(pool),
             DiskOffset::from_u64(0),
-            crate::vdev::Block(0),
+            crate::vdev::Block(999),
         )
         .unwrap();
 
-        TestResult::discard()
+        TestResult::passed()
     }
 }
