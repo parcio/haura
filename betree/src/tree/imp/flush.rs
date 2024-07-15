@@ -151,7 +151,7 @@ where
                         left = &mut sibling;
                         right = &mut child;
                     };
-                    match left.leaf_rebalance(right) {
+                    match left.leaf_rebalance(right, &self.storage_map) {
                         FillUpResult::Merged { size_delta } => {
                             left.add_size(size_delta);
                             right.add_size(-size_delta);

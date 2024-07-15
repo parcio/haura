@@ -53,7 +53,7 @@ where
         self.dml.verify_cache();
 
         let before = node.size();
-        let (sibling, pivot_key, size_delta, lpk) = node.split();
+        let (sibling, pivot_key, size_delta, lpk) = node.split(&self.storage_map);
         let pk = lpk.to_global(self.tree_id());
         let select_right = sibling.size() > node.size();
         debug!(

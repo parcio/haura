@@ -241,6 +241,7 @@ impl<N> InternalNode<N> {
                 entries_size,
                 entries_sizes,
                 entries_prefs,
+                current_size: None,
             },
             children,
         }

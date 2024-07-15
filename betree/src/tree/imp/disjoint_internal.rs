@@ -92,6 +92,15 @@ pub(super) struct InternalNodeMetaData {
     pub(super) pivot: Vec<CowBytes>,
     pub entries_sizes: Vec<usize>,
     pub entries_prefs: Vec<StoragePreference>,
+    #[serde(skip)]
+    pub current_size: Option<usize>,
+}
+
+impl InternalNodeMetaData {
+    fn invalidate(&mut self) {
+        self.pref.invalidate();
+        self.current_size = None;
+    }
 }
 
 const INTERNAL_BINCODE_STATIC: usize = 4 + 8;
@@ -117,14 +126,20 @@ impl<N: StaticSize> DisjointInternalNode<N> {
 const META_BINCODE_STATIC: usize = 33;
 impl Size for InternalNodeMetaData {
     fn size(&self) -> usize {
-        std::mem::size_of::<u32>()
-            + std::mem::size_of::<usize>()
-            + std::mem::size_of::<u8>()
-            + std::mem::size_of::<u8>()
-            + self.pivot.iter().map(|p| p.size()).sum::<usize>()
-            + self.pivot.len() * std::mem::size_of::<usize>()
-            + self.pivot.len() * std::mem::size_of::<u8>()
-            + META_BINCODE_STATIC
+        *self.actual_size().get_or_insert_with(|| {
+            std::mem::size_of::<u32>()
+                + std::mem::size_of::<usize>()
+                + std::mem::size_of::<u8>()
+                + std::mem::size_of::<u8>()
+                + self.pivot.iter().map(|p| p.size()).sum::<usize>()
+                + self.pivot.len() * std::mem::size_of::<usize>()
+                + self.pivot.len() * std::mem::size_of::<u8>()
+                + META_BINCODE_STATIC
+        })
+    }
+
+    fn actual_size(&self) -> Option<usize> {
+        self.current_size
     }
 }
 
@@ -205,6 +220,7 @@ impl<N> DisjointInternalNode<N> {
                 ),
                 pref: AtomicStoragePreference::unknown(),
                 entries_prefs: vec![StoragePreference::NONE, StoragePreference::NONE],
+                current_size: None,
             },
             children: vec![left_child.into(), right_child.into()],
         }
@@ -445,7 +461,7 @@ impl<N> DisjointInternalNode<N> {
     where
         N: ObjectReference,
     {
-        self.meta_data.pref.invalidate();
+        self.meta_data.invalidate();
         self.meta_data.entries_size = 0;
         self.children.drain(..)
     }
@@ -459,7 +475,8 @@ impl<N: StaticSize> Size for Vec<N> {
 
 impl<N: ObjectReference> DisjointInternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
-        self.meta_data.pref.invalidate();
+        self.meta_data.invalidate();
+
         let split_off_idx = self.fanout() / 2;
         let pivot = self.meta_data.pivot.split_off(split_off_idx);
         let pivot_key = self.meta_data.pivot.pop().unwrap();
@@ -496,6 +513,7 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
                 // be sure which key was targeted by recorded accesses.
                 system_storage_preference: self.meta_data.system_storage_preference.clone(),
                 pref: AtomicStoragePreference::unknown(),
+                current_size: None,
             },
             children,
         };
@@ -508,7 +526,7 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
     }
 
     pub fn merge(&mut self, right_sibling: &mut Self, old_pivot_key: CowBytes) -> isize {
-        self.meta_data.pref.invalidate();
+        self.meta_data.invalidate();
         let size_delta = right_sibling.meta_data.entries_size + old_pivot_key.size();
         self.meta_data.entries_size += size_delta;
         self.meta_data.pivot.push(old_pivot_key);

@@ -65,7 +65,9 @@ macro_rules! mib {
 // leaf might be changed to a memory leaf when written to memory.
 impl StorageMap {
     pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
-        self.max_size(node).map(|max_size| node.inner_size() > max_size).unwrap_or(false)
+        self.max_size(node)
+            .map(|max_size| node.inner_size() > max_size)
+            .unwrap_or(false)
     }
 
     pub fn leaf_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
@@ -73,20 +75,24 @@ impl StorageMap {
     }
 
     pub fn leaf_is_too_small<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
-        node.is_leaf() && self.min_size(node).map(|min_size| node.inner_size() < min_size).unwrap_or(false)
+        node.is_leaf()
+            && self
+                .min_size(node)
+                .map(|min_size| node.inner_size() < min_size)
+                .unwrap_or(false)
     }
 
     pub fn min_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         Some(match (&node.0, self.get(node.correct_preference())) {
-            (PackedLeaf(_), StorageKind::Hdd) => mib!(1),
-            (PackedLeaf(_), StorageKind::Memory) => kib!(128),
-            (PackedLeaf(_), StorageKind::Ssd) => kib!(128),
-            (Leaf(_), StorageKind::Hdd) => mib!(1),
-            (Leaf(_), StorageKind::Memory) => kib!(1),
-            (Leaf(_), StorageKind::Ssd) => kib!(128),
-            (MemLeaf(_), StorageKind::Hdd) => mib!(1),
-            (MemLeaf(_), StorageKind::Memory) => kib!(128),
-            (MemLeaf(_), StorageKind::Ssd) => kib!(128),
+            (PackedLeaf(_), StorageKind::Hdd)
+            | (Leaf(_), StorageKind::Hdd)
+            | (MemLeaf(_), StorageKind::Hdd) => mib!(1),
+            (PackedLeaf(_), StorageKind::Ssd)
+            | (Leaf(_), StorageKind::Ssd)
+            | (MemLeaf(_), StorageKind::Ssd) => kib!(128),
+            (PackedLeaf(_), StorageKind::Memory)
+            | (Leaf(_), StorageKind::Memory)
+            | (MemLeaf(_), StorageKind::Memory) => mib!(1),
             (Internal(_), _) => return None,
             (DisjointInternal(_), _) => return None,
             (Inner::ChildBuffer(_), _) => return None,
@@ -95,13 +101,11 @@ impl StorageMap {
 
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         Some(match (&node.0, self.get(node.correct_preference())) {
-            (PackedLeaf(_), StorageKind::Hdd) => mib!(4),
-            (PackedLeaf(_), StorageKind::Memory) => mib!(4),
-            (PackedLeaf(_), StorageKind::Ssd) => mib!(2),
-            (Leaf(_), StorageKind::Hdd) => mib!(4),
-            (Leaf(_), StorageKind::Memory) => mib!(4),
-            (Leaf(_), StorageKind::Ssd) => mib!(2),
-            (MemLeaf(_), _) => mib!(4),
+            (PackedLeaf(_), StorageKind::Hdd) | (Leaf(_), StorageKind::Hdd) => mib!(4),
+            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(2),
+            (PackedLeaf(_), StorageKind::Memory)
+            | (Leaf(_), StorageKind::Memory)
+            | (MemLeaf(_), _) => mib!(2),
             (Internal(_), _) => mib!(4),
             (DisjointInternal(_), _) => mib!(4),
             (Inner::ChildBuffer(_), _) => return None,
@@ -989,13 +993,19 @@ impl<N: HasStoragePreference> Node<N> {
 }
 
 impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
+    pub(super) fn split(
+        &mut self,
+        storage_map: &StorageMap,
+    ) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.ensure_unpacked();
+
+        let min_size = storage_map.min_size(self);
+        let max_size = storage_map.min_size(self);
         match self.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
                 let (node, pivot_key, size_delta, pk) =
-                    leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    leaf.split(min_size.unwrap(), max_size.unwrap());
                 (Node(Leaf(node)), pivot_key, size_delta, pk)
             }
             Internal(ref mut internal) => {
@@ -1011,7 +1021,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             }
             MemLeaf(ref mut nvmleaf) => {
                 let (node, pivot_key, size_delta, pk) =
-                    nvmleaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    nvmleaf.split(min_size.unwrap(), max_size.unwrap());
                 (Node(MemLeaf(node)), pivot_key, size_delta, pk)
             }
             DisjointInternal(ref mut nvminternal) => {
@@ -1045,23 +1055,36 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn leaf_rebalance(&mut self, right_sibling: &mut Self) -> FillUpResult {
+    pub(super) fn leaf_rebalance(
+        &mut self,
+        right_sibling: &mut Self,
+        storage_map: &StorageMap,
+    ) -> FillUpResult {
         self.ensure_unpacked();
         right_sibling.ensure_unpacked();
+
+        let min_size = storage_map.min_size(self);
+        let max_size = storage_map.min_size(self);
         match (&mut self.0, &mut right_sibling.0) {
             (&mut Leaf(ref mut left), &mut Leaf(ref mut right)) => {
-                left.rebalance(right, MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE)
+                left.rebalance(right, min_size.unwrap(), max_size.unwrap())
             }
             _ => unreachable!(),
         }
     }
 
-    pub(super) fn nvmleaf_rebalance(&mut self, right_sibling: &mut Self) -> NVMFillUpResult {
+    pub(super) fn nvmleaf_rebalance(
+        &mut self,
+        right_sibling: &mut Self,
+        storage_map: &StorageMap,
+    ) -> NVMFillUpResult {
         self.ensure_unpacked();
         right_sibling.ensure_unpacked();
+        let min_size = storage_map.min_size(self);
+        let max_size = storage_map.min_size(self);
         match (&mut self.0, &mut right_sibling.0) {
             (&mut MemLeaf(ref mut left), &mut MemLeaf(ref mut right)) => {
-                left.rebalance(right, MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE)
+                left.rebalance(right, min_size.unwrap(), max_size.unwrap())
             }
             _ => unreachable!(),
         }
