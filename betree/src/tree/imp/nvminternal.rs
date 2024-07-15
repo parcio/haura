@@ -1,11 +1,13 @@
 //! Implementation of the [NVMInternalNode] node type.
 use super::{
     nvm_child_buffer::NVMChildBuffer,
+    nvm_child_buffer::NVMChildBuffer2,
     node::{PivotGetMutResult, PivotGetResult, TakeChildBufferWrapper},
     PivotKey,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    cow_bytesex::{CowBytes2, SlicedCowBytes2},
     data_management::{HasStoragePreference, ObjectReference},
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
@@ -60,6 +62,27 @@ impl<N> std::fmt::Debug for NVMInternalNode<N> {
     }
 }
 
+pub(super) struct NVMInternalNode2<N: 'static> {
+    pub pool: Option<RootSpu>,
+    pub disk_offset: Option<DiskOffset>,
+    pub meta_data: InternalNodeMetaData2,
+    pub data: std::sync::Arc<std::sync::RwLock<Option<InternalNodeData2<N>>>>,
+    pub meta_data_size: usize,
+    pub data_size: usize,
+    pub data_start: usize,
+    pub data_end: usize,
+    pub node_size: crate::vdev::Block<u32>,
+    pub checksum: Option<crate::checksum::XxHash>,
+    pub nvm_load_details: std::sync::RwLock<NVMLazyLoadDetails>
+}
+
+impl<N> std::fmt::Debug for NVMInternalNode2<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TODO: Karim.. fix this...")
+    }
+}
+
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
 #[archive(check_bytes)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -76,8 +99,28 @@ pub(super) struct InternalNodeMetaData {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
 #[archive(check_bytes)]
 #[cfg_attr(test, derive(PartialEq))]
+pub(super) struct InternalNodeMetaData2 {
+    pub level: u32,
+    pub entries_size: usize,
+    //#[serde(skip)]
+    pub system_storage_preference: AtomicSystemStoragePreference,
+    //#[serde(skip)]
+    pub pref: AtomicStoragePreference,
+    pub(super) pivot: Vec<CowBytes2>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
+#[archive(check_bytes)]
+#[cfg_attr(test, derive(PartialEq))]
 pub(super) struct InternalNodeData<N: 'static> {
     pub children: Vec<Option<NVMChildBuffer<N>>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
+#[archive(check_bytes)]
+#[cfg_attr(test, derive(PartialEq))]
+pub(super) struct InternalNodeData2<N: 'static> {
+    pub children: Vec<Option<NVMChildBuffer2<N>>>,
 }
 
 // @tilpner:
@@ -111,17 +154,17 @@ pub(super) struct InternalNodeData<N: 'static> {
 
 use lazy_static::lazy_static;
 lazy_static! {
-    static ref NVMInternalNode_EMPTY_NODE: NVMInternalNode<()> = NVMInternalNode {
+    static ref NVMInternalNode_EMPTY_NODE: NVMInternalNode2<()> = NVMInternalNode2 {
         pool: None,
         disk_offset: None,
-        meta_data: InternalNodeMetaData {
+        meta_data: InternalNodeMetaData2 {
             level: 0,
             entries_size: 0,
             system_storage_preference: AtomicSystemStoragePreference::none(),
             pref: AtomicStoragePreference::unknown(),
             pivot: vec![]
             },
-        data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
+        data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData2 {
             children: vec![]
         }))),
         meta_data_size: 0,
@@ -187,8 +230,21 @@ impl ObjectReference for () {
     }
 }
 
-#[inline]
-fn internal_node_base_size() -> usize {
+// #[inline]
+// fn internal_node_base_size() -> usize {
+//     let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+//     serializer_meta_data.serialize_value(&NVMInternalNode_EMPTY_NODE.meta_data).unwrap();
+//     let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+//     let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+//     serializer_data.serialize_value(NVMInternalNode_EMPTY_NODE.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+//     let bytes_data = serializer_data.into_serializer().into_inner();
+
+//     4 + 8 + 8 + bytes_meta_data.len() + bytes_data.len()
+// }
+
+use once_cell::sync::Lazy;
+static NVMLEAF_NODE_SIZE: Lazy<usize> = Lazy::new(|| {
     let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
     serializer_meta_data.serialize_value(&NVMInternalNode_EMPTY_NODE.meta_data).unwrap();
     let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
@@ -198,8 +254,12 @@ fn internal_node_base_size() -> usize {
     let bytes_data = serializer_data.into_serializer().into_inner();
 
     4 + 8 + 8 + bytes_meta_data.len() + bytes_data.len()
-}
+});
 
+#[inline]
+fn internal_node_base_size() -> usize {
+    *NVMLEAF_NODE_SIZE
+}
 
 impl<N: StaticSize> Size for NVMInternalNode<N> {
     fn size(&self) -> usize {

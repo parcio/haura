@@ -1,6 +1,7 @@
 //! Implementation of the [NVMLeafNode] node type.
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    cow_bytesex::{CowBytes2, SlicedCowBytes2},
     data_management::HasStoragePreference,
     size::Size,
     storage_pool::{AtomicSystemStoragePreference, DiskOffset, StoragePoolLayer},
@@ -109,6 +110,16 @@ pub struct NVMLeafNodeData {
     #[with(AsVec)]
     pub entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes, u16, u16)>,
 }
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Archive, Serialize, Deserialize)]
+#[archive(check_bytes)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct NVMLeafNodeData2 {
+    #[with(AsVec)]
+    pub entries: BTreeMap<CowBytes2, (KeyInfo, SlicedCowBytes2, u16, u16)>,
+}
+
 
 //pub mod validation;
 use bytecheck::CheckBytes;
@@ -291,13 +302,31 @@ static NVMLeafNodeMetaData_EMPTY_NODE: NVMLeafNodeMetaData = NVMLeafNodeMetaData
     entries_size: 0,
 };
 
-static NVMLeafNodeData_EMPTY_NODE: NVMLeafNodeData = NVMLeafNodeData {
+static NVMLeafNodeData_EMPTY_NODE2: NVMLeafNodeData2 = NVMLeafNodeData2 {
     entries: BTreeMap::new()
 };
 
-#[inline]
+use once_cell::sync::Lazy;
+static NVMLEAF_NODE_SIZE: Lazy<usize> = Lazy::new(|| {
+    let mut serializer_meta_data = AllocSerializer::<0>::default();
+    serializer_meta_data.serialize_value(&NVMLeafNodeMetaData_EMPTY_NODE).unwrap();
+    let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+    let mut serializer_data = AllocSerializer::<0>::default();
+    serializer_data.serialize_value(&NVMLeafNodeData_EMPTY_NODE2).unwrap();
+    let bytes_data = serializer_data.into_serializer().into_inner();
+
+    NVMLEAF_HEADER_FIXED_LEN + bytes_meta_data.len() + bytes_data.len()
+});
+
+
 fn nvmleaf_node_base_size() -> usize {
-    let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+    *NVMLEAF_NODE_SIZE
+}
+
+/*#[inline]
+fn nvmleaf_node_base_size() -> usize {
+    /*let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
     serializer_meta_data.serialize_value(&NVMLeafNodeMetaData_EMPTY_NODE).unwrap();
     let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
 
@@ -306,12 +335,21 @@ fn nvmleaf_node_base_size() -> usize {
     let bytes_data = serializer_data.into_serializer().into_inner();
 
     NVMLEAF_HEADER_FIXED_LEN + bytes_meta_data.len() + bytes_data.len()
+    */
+    NVMLEAF_HEADER_FIXED_LEN
+}*/
+#[derive(Archive, Clone)]
+struct MyStruct {
+    a: u32,
+    b: f64,
+    c: [u8; 16],
+    d: String, // Vector of strings (variable size)
 }
-
 impl Size for NVMLeafNode
 {
     fn size(&self) -> usize {
-        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+
+        /*let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
         serializer_meta_data.serialize_value(&self.meta_data).unwrap();
         let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
 
@@ -322,10 +360,15 @@ impl Size for NVMLeafNode
         let size = NVMLEAF_HEADER_FIXED_LEN + bytes_meta_data.len() + bytes_data.len();
 
         size
+        */
+        //let size = self.actual_size().unwrap();//NVMLEAF_HEADER_FIXED_LEN + self.meta_data.entries_size + 4;
+        //println!(".........................................{}", size);
+        //size
+        nvmleaf_node_base_size() + self.meta_data.entries_size
     }
 
     fn actual_size(&self) -> Option<usize> {
-        let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+        /*let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
         serializer_meta_data.serialize_value(&self.meta_data).unwrap();
         let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
 
@@ -336,14 +379,16 @@ impl Size for NVMLeafNode
         let size = NVMLEAF_HEADER_FIXED_LEN + bytes_meta_data.len() + bytes_data.len();
         
         Some(size)    
-        // Some(
-        //     nvmleaf_node_base_size()
-        //         + self.data.read().as_ref().unwrap().as_ref().unwrap()
-        //             .entries
-        //             .iter()
-        //             .map(|(key, (_keyinfo, value))| key.len() + _keyinfo.size() + value.len())
-        //             .sum::<usize>(),
-        // )
+        */
+
+        let size = nvmleaf_node_base_size()/* + std::mem::size_of::<NVMLeafNodeMetaData>()*/
+        + self.data.read().as_ref().unwrap().as_ref().unwrap()
+            .entries
+            .iter()
+            .map(|(key, (_keyinfo, value, a, b))| key.len()  + value.len())
+            .sum::<usize>();
+        //println!("+++++++++++++++++++++++++++++++++++++++++{}", size);
+        Some(size)
     }
 }
 
@@ -392,7 +437,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes, u16, u16))> for NVMLe
             // We're already looking at every entry here, so finding the overall pref here
             // avoids a full scan later.
             storage_pref.upgrade(keyinfo.storage_preference);
-            entries_size += packed::ENTRY_LEN + key.len() + value.len();
+            entries_size += /*packed::ENTRY_LEN +*/ key.len() + value.len();
 
             let curr_storage_pref = keyinfo.storage_preference;
             if let Some((ckeyinfo, cvalue, kcs, vcs)) = entries.insert(CowBytes::from(key), (keyinfo, value, 0, 0))
@@ -400,7 +445,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes, u16, u16))> for NVMLe
                 // iterator has collisions, try to compensate
                 //
                 // this entry will no longer be part of the final map, subtract its size
-                entries_size -= packed::ENTRY_LEN + key.len() + cvalue.len();
+                entries_size -= /*packed::ENTRY_LEN +*/ key.len() + cvalue.len();
 
                 // In case the old value increased the overall storage priority (faster), and the new
                 // value wouldn't have increased it as much, we might need to recalculate the
@@ -595,10 +640,10 @@ impl NVMLeafNode
         let mut sibling_pref = StoragePreference::NONE;
         let mut split_key = None;
         for (k, (keyinfo, v, kcs, vcs)) in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.iter().rev() {
-            sibling_size += packed::ENTRY_LEN + k.len() + v.len();
+            sibling_size += /*packed::ENTRY_LEN +*/ k.len() + v.len();
             sibling_pref.upgrade(keyinfo.storage_preference);
 
-            if packed::HEADER_FIXED_LEN + sibling_size >= min_size {
+            if /*packed::HEADER_FIXED_LEN +*/ sibling_size >= min_size {
                 split_key = Some(k.clone());
                 break;
             }
@@ -666,7 +711,7 @@ impl NVMLeafNode
                 }
             } else {
                 // There was no previous value in entries
-                self.meta_data.entries_size += packed::ENTRY_LEN;
+                //self.meta_data.entries_size += packed::ENTRY_LEN;
                 self.meta_data.entries_size += key_size;
             }
         } else if let Some((old_info, old_data, old_kcs, old_vcs)) = self.data.write().as_mut().unwrap().as_mut().unwrap().entries.remove(key.borrow()) {
@@ -685,7 +730,7 @@ impl NVMLeafNode
                 self.meta_data.storage_preference.invalidate();
             }
 
-            self.meta_data.entries_size -= packed::ENTRY_LEN;
+            //self.meta_data.entries_size -= packed::ENTRY_LEN;
             self.meta_data.entries_size -= key_size;
             self.meta_data.entries_size -= old_data.len();
         }

@@ -4,6 +4,7 @@
 //! [super::leaf::NVMNVMLeafNode].
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
+    cow_bytesex::{CowBytes2, SlicedCowBytes2},
     data_management::{HasStoragePreference, ObjectReference, impls::ObjRef, ObjectPointer},
     size::{Size, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
@@ -44,6 +45,21 @@ pub(super) struct NVMChildBuffer<N: 'static> {
     buffer_entries_size: usize,
     #[with(rkyv::with::AsVec)]
     pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
+    //#[serde(with = "ser_np")]
+    #[with(AsVecEx)]
+    pub(super) node_pointer: RwLock<N>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Archive, Serialize, Deserialize)]
+#[archive(check_bytes)]
+//#[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
+pub(super) struct NVMChildBuffer2<N: 'static> {
+    pub(super) messages_preference: AtomicStoragePreference,
+    //#[serde(skip)]
+    pub(super) system_storage_preference: AtomicSystemStoragePreference,
+    buffer_entries_size: usize,
+    #[with(rkyv::with::AsVec)]
+    pub(super) buffer: BTreeMap<CowBytes2, (KeyInfo, SlicedCowBytes2)>,
     //#[serde(with = "ser_np")]
     #[with(AsVecEx)]
     pub(super) node_pointer: RwLock<N>,
