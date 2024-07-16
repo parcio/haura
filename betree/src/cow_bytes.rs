@@ -182,10 +182,10 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
         serializer: &mut S
     ) -> Result<Self::Resolver, S::Error> {
         //panic!("----------------------");  
-        //let compression = CompressionConfiguration::None;
-        let compression = CompressionConfiguration::Zstd(Zstd {
-            level: 10,
-        });
+        let compression = CompressionConfiguration::None;
+        /*let compression = CompressionConfiguration::Zstd(Zstd {
+            level: 1,
+        });*/
         let default_compression = compression.to_builder();
 
         let compression = &*default_compression.read().unwrap();
@@ -209,7 +209,7 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
 
 impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
     fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {
-panic!("----------------------");
+//panic!("----------------------");
         let vec: Vec<u8> = self.deserialize(deserializer)?;
         
         let d = DecompressionTag::None;

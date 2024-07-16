@@ -23,6 +23,7 @@ pub mod cache;
 pub mod checksum;
 pub mod compression;
 pub mod cow_bytes;
+pub mod cow_bytesex;
 pub mod data_management;
 pub mod database;
 pub mod range_validation;

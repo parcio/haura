@@ -364,6 +364,7 @@ impl Size for NVMLeafNode
         //let size = self.actual_size().unwrap();//NVMLEAF_HEADER_FIXED_LEN + self.meta_data.entries_size + 4;
         //println!(".........................................{}", size);
         //size
+        
         nvmleaf_node_base_size() + self.meta_data.entries_size
     }
 

@@ -154,6 +154,9 @@ impl Default for DatabaseConfiguration {
             // identity mapping
             alloc_strategy: [vec![0], vec![1], vec![2], vec![3]],
             default_storage_class: 0,
+            /*compression: CompressionConfiguration::Zstd(crate::compression::Zstd {
+                     level: 10,
+                 }),*/
             compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
             access_mode: AccessMode::OpenIfExists,
