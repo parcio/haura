@@ -95,7 +95,7 @@ impl StorageMap {
             | (MemLeaf(_), StorageKind::Hdd) => mib!(1),
             (PackedLeaf(_), StorageKind::Ssd)
             | (Leaf(_), StorageKind::Ssd)
-            | (MemLeaf(_), StorageKind::Ssd) => kib!(128),
+            | (MemLeaf(_), StorageKind::Ssd) => mib!(1),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
             | (MemLeaf(_), StorageKind::Memory) => mib!(1),
@@ -108,7 +108,7 @@ impl StorageMap {
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         Some(match (&node.0, self.get(node.correct_preference())) {
             (PackedLeaf(_), StorageKind::Hdd) | (Leaf(_), StorageKind::Hdd) => mib!(4),
-            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(1),
+            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(4),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
             | (MemLeaf(_), _) => mib!(4),

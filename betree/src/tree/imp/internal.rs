@@ -587,7 +587,7 @@ where
 
             // NOTE: The max fanout has been changed here for random IO performance.
             if child.buffer_size() >= min_flush_size
-                && (size - child.buffer_size() <= max_node_size || fanout < 8 * min_fanout)
+                && (size - child.buffer_size() <= max_node_size || fanout < 2 * min_fanout)
             {
                 Some(child_idx)
             } else {

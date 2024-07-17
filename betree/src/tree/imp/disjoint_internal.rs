@@ -123,7 +123,7 @@ impl<N: StaticSize> DisjointInternalNode<N> {
     }
 
     pub fn exceeds_fanout(&self) -> bool {
-        self.fanout() > 3 * MIN_FANOUT
+        self.fanout() > 16 * MIN_FANOUT
     }
 }
 

@@ -68,7 +68,7 @@ impl KeyInfo {
 
 pub(super) const MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
 const MIN_FLUSH_SIZE: usize = 256 * 1024;
-const MIN_FANOUT: usize = 4;
+const MIN_FANOUT: usize = 2;
 const MIN_LEAF_NODE_SIZE: usize = 1024 * 1024;
 const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
@@ -605,28 +605,28 @@ where
                             node = child;
                             path.push(Some(child_buffer));
                         } else {
-                            //if let Some(last_lvl) = last_buffer_lvl {
-                            //    parent =
-                            //        path.get_mut(root_lvl - last_lvl - 1).and_then(|o| o.take());
-                            //    break if last_lvl == cur_lvl {
-                            //        child_buffer.into_owner()
-                            //    } else {
-                            //        path.get_mut(root_lvl - last_lvl).and_then(|o| o.take()).unwrap().into_owner()
-                            //    };
-                            //} else if was_disjoined {
-                            //    // No buffers were found which are already
-                            //    // loaded on the walkable path. Jump back to the
-                            //    // root and use usual insertion.
-                            //    break path
-                            //        .first_mut()
-                            //        .and_then(|o| o.take())
-                            //        .map(|o| o.into_owner())
-                            //        .unwrap_or(child_buffer.into_owner());
-                            //} else {
+                            if let Some(last_lvl) = last_buffer_lvl {
                                 parent =
-                                    path.last_mut().and_then(|o| o.take());
+                                    path.get_mut(root_lvl - last_lvl - 1).and_then(|o| o.take());
+                                break if last_lvl == cur_lvl {
+                                    child_buffer.into_owner()
+                                } else {
+                                    path.get_mut(root_lvl - last_lvl).and_then(|o| o.take()).unwrap().into_owner()
+                                };
+                            } else if was_disjoined {
+                                // No buffers were found which are already
+                                // loaded on the walkable path. Jump back to the
+                                // root and use usual insertion.
+                                break path
+                                    .first_mut()
+                                    .and_then(|o| o.take())
+                                    .map(|o| o.into_owner())
+                                    .unwrap_or(child_buffer.into_owner());
+                            } else {
+                                parent =
+                                    path.get_mut(root_lvl - cur_lvl - 1).and_then(|o| o.take());
                                 break child_buffer.into_owner();
-                            //}
+                            }
                         }
                     }
                     Err(node) => {
