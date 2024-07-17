@@ -6,7 +6,7 @@ use super::{
     internal::InternalNode,
     leaf::LeafNode,
     nvm_child_buffer::NVMChildBuffer,
-    nvmleaf::{NVMFillUpResult, NVMLeafNode},
+    nvmleaf::{NVMLeafNode},
     packed::PackedMap,
     take_child_buffer::TakeChildBufferWrapper,
     FillUpResult, KeyInfo, PivotKey, StorageMap, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE,
@@ -65,9 +65,15 @@ macro_rules! mib {
 // leaf might be changed to a memory leaf when written to memory.
 impl StorageMap {
     pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
-        self.max_size(node)
-            .map(|max_size| node.inner_size() > max_size)
-            .unwrap_or(false)
+        match &node.0 {
+            DisjointInternal(dint) => dint.is_too_large(kib!(64), kib!(512)),
+            _ => {
+                self.max_size(node)
+                    .map(|max_size| node.inner_size() > max_size)
+                    .unwrap_or(false)
+            }
+        }
+
     }
 
     pub fn leaf_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
@@ -102,13 +108,13 @@ impl StorageMap {
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         Some(match (&node.0, self.get(node.correct_preference())) {
             (PackedLeaf(_), StorageKind::Hdd) | (Leaf(_), StorageKind::Hdd) => mib!(4),
-            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(2),
+            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(1),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
-            | (MemLeaf(_), _) => mib!(2),
+            | (MemLeaf(_), _) => mib!(4),
             (Internal(_), _) => mib!(4),
-            (DisjointInternal(_), _) => mib!(4),
-            (Inner::ChildBuffer(_), _) => return None,
+            (DisjointInternal(_), _) => kib!(64),
+            (Inner::ChildBuffer(_), _) => mib!(4),
         })
     }
 }
@@ -225,7 +231,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         mut writer: W,
         _: PreparePack,
     ) -> Result<Option<Block<u32>>, io::Error> {
-        match self.0 {
+        let start = std::time::Instant::now();
+        let foo = match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()).map(|_| None),
             Leaf(ref leaf) => {
                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
@@ -242,7 +249,6 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 leaf.pack(writer)
             }
             DisjointInternal(ref nvminternal) => {
-                debug!("NVMInternal node packed successfully");
                 writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
                 nvminternal.pack(writer).map(|_| None)
             }
@@ -250,7 +256,9 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 writer.write_all((NodeInnerType::ChildBuffer as u32).to_be_bytes().as_ref())?;
                 cbuf.pack(writer).map(|_| None)
             }
-        }
+        };
+        // println!("pack took {} ns", start.elapsed().as_nanos());
+        foo
     }
 
     fn unpack_at<SPL: StoragePoolLayer>(
@@ -292,8 +300,9 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
     fn debug_info(&self) -> String {
         format!(
-            "{}: {:?}, {}, {:?}",
+            "{}: {}, {:?}, {}, {:?}",
             self.kind(),
+            self.level(),
             self.fanout(),
             self.size(),
             self.actual_size()
@@ -327,16 +336,16 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }),
             storage_kind,
         ) {
-            (Internal(internal), StorageKind::Memory) | (Internal(internal), StorageKind::Ssd) => {
-                // Spawn new child buffers from one internal node.
-                Inner::DisjointInternal(internal.to_disjoint_node(|new_cbuf| {
-                    dmu.insert(
-                        Node(Inner::ChildBuffer(new_cbuf)),
-                        pivot_key.d_id(),
-                        pivot_key.clone(),
-                    )
-                }))
-            }
+            // (Internal(internal), StorageKind::Memory) | (Internal(internal), StorageKind::Ssd) => {
+            //     // Spawn new child buffers from one internal node.
+            //     Inner::DisjointInternal(internal.to_disjoint_node(|new_cbuf| {
+            //         dmu.insert(
+            //             Node(Inner::ChildBuffer(new_cbuf)),
+            //             pivot_key.d_id(),
+            //             pivot_key.clone(),
+            //         )
+            //     }))
+            // }
             (DisjointInternal(mut internal), StorageKind::Hdd) => {
                 // Fetch children and pipe them into one node.
                 let mut cbufs = Vec::with_capacity(internal.children.len());
@@ -399,25 +408,25 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             DisjointInternal(ref mut nvminternal) => Some(
                 TakeChildBufferWrapper::NVMTakeChildBuffer(nvminternal.try_walk_incomplete(key)),
             ),
-            Inner::ChildBuffer(_) => todo!(),
+            Inner::ChildBuffer(_) => None,
         }
     }
 
-    pub(super) fn try_find_flush_candidate(&mut self) -> Option<TakeChildBufferWrapper<N>>
+    pub(super) fn try_find_flush_candidate(&mut self, storage_map: &StorageMap) -> Option<TakeChildBufferWrapper<N>>
     where
         N: ObjectReference,
     {
+        let max_size = storage_map.max_size(&self);
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => internal.try_find_flush_candidate(
                 MIN_FLUSH_SIZE,
-                MAX_INTERNAL_NODE_SIZE,
+                max_size.unwrap(),
                 MIN_FANOUT,
             ),
             MemLeaf(_) => None,
             DisjointInternal(ref mut nvminternal) => nvminternal.try_find_flush_candidate(
-                MIN_FLUSH_SIZE,
-                MAX_INTERNAL_NODE_SIZE,
+                max_size.unwrap(),
                 MIN_FANOUT,
             ),
             Inner::ChildBuffer(_) => unreachable!(),
@@ -495,6 +504,16 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         }
     }
 
+    pub(super) fn is_disjoint(&self) -> bool {
+        match self.0 {
+            Leaf(_) | PackedLeaf(_) => false,
+            Internal(_) => false,
+            MemLeaf(_) => false,
+            DisjointInternal(_) => true,
+            Inner::ChildBuffer(_) => unreachable!(),
+        }
+    }
+
     pub(super) fn empty_leaf(kind: StorageKind) -> Self {
         match kind {
             StorageKind::Hdd => Node(Leaf(LeafNode::new())),
@@ -534,6 +553,20 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Internal(i) => i.size(),
             DisjointInternal(d) => d.size(),
             Inner::ChildBuffer(c) => c.size(),
+        }
+    }
+
+    pub(super) fn buffer_ptr(&mut self, key: &[u8]) -> &mut RwLock<N> {
+        match self.0 {
+            PackedLeaf(_) => todo!(),
+            Leaf(_) => todo!(),
+            MemLeaf(_) => todo!(),
+            Internal(_) => todo!(),
+            DisjointInternal(ref mut dint) => {
+                let idx = dint.idx(key);
+                dint.children[idx].buffer_mut()
+            },
+            Inner::ChildBuffer(_) => todo!(),
         }
     }
 }
@@ -581,6 +614,9 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             Inner::ChildBuffer(_) => unreachable!(),
         };
         debug!("Root split pivot key: {:?}", pivot_key);
+
+        assert!(!left_sibling.has_too_low_fanout());
+        assert!(!right_sibling.has_too_low_fanout());
 
         if is_disjoint {
             let left_child =
@@ -1025,7 +1061,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                 (Node(MemLeaf(node)), pivot_key, size_delta, pk)
             }
             DisjointInternal(ref mut nvminternal) => {
-                debug_assert!(
+                assert!(
                     nvminternal.fanout() >= 2 * MIN_FANOUT,
                     "internal split failed due to low fanout: {}, size: {}, actual_size: {:?}",
                     nvminternal.fanout(),
@@ -1033,6 +1069,8 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                     nvminternal.actual_size()
                 );
                 let (node, pivot_key, size_delta, pk) = nvminternal.split();
+                assert!(nvminternal.fanout() >= MIN_FANOUT);
+                assert!(node.fanout() >= MIN_FANOUT);
                 (Node(DisjointInternal(node)), pivot_key, size_delta, pk)
             }
             Inner::ChildBuffer(_) => unreachable!(),
@@ -1051,7 +1089,12 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             (&mut DisjointInternal(ref mut left), &mut DisjointInternal(ref mut right)) => {
                 left.merge(right, pivot_key)
             }
-            _ => unreachable!(),
+            _ => {
+                let bt = std::backtrace::Backtrace::force_capture();
+                println!("{}", bt);
+                println!("Left is {} \n Right is {}", self.debug_info(), right_sibling.debug_info());
+                unreachable!()
+            },
         }
     }
 
@@ -1069,20 +1112,6 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             (&mut Leaf(ref mut left), &mut Leaf(ref mut right)) => {
                 left.rebalance(right, min_size.unwrap(), max_size.unwrap())
             }
-            _ => unreachable!(),
-        }
-    }
-
-    pub(super) fn nvmleaf_rebalance(
-        &mut self,
-        right_sibling: &mut Self,
-        storage_map: &StorageMap,
-    ) -> NVMFillUpResult {
-        self.ensure_unpacked();
-        right_sibling.ensure_unpacked();
-        let min_size = storage_map.min_size(self);
-        let max_size = storage_map.min_size(self);
-        match (&mut self.0, &mut right_sibling.0) {
             (&mut MemLeaf(ref mut left), &mut MemLeaf(ref mut right)) => {
                 left.rebalance(right, min_size.unwrap(), max_size.unwrap())
             }

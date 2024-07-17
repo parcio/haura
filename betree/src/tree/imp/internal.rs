@@ -13,7 +13,7 @@ use crate::{
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
-    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
+    tree::{imp::MIN_FANOUT, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
 use bincode::serialized_size;
@@ -531,8 +531,8 @@ impl<N: ObjectReference> InternalNode<N> {
 
     /// Translate any object ref in a `ChildBuffer` from `Incomplete` to `Unmodified` state.
     pub fn complete_object_refs(mut self, d_id: DatasetId) -> Self {
-        // TODO:
         let first_pk = match self.pivot.first() {
+
             Some(p) => PivotKey::LeftOuter(p.clone(), d_id),
             None => unreachable!(
                 "The store contains an empty InternalNode, this should never be the case."
@@ -558,14 +558,10 @@ where
 {
     pub fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<N>> {
         let child_idx = self.idx(key);
-        if self.children[child_idx].is_empty(key) {
-            Some(TakeChildBuffer {
-                node: self,
-                child_idx,
-            })
-        } else {
-            None
-        }
+        Some(TakeChildBuffer {
+            node: self,
+            child_idx,
+        })
     }
 
     pub fn try_find_flush_candidate(
@@ -589,8 +585,9 @@ where
 
             debug!("Largest child's buffer size: {}", child.buffer_size());
 
+            // NOTE: The max fanout has been changed here for random IO performance.
             if child.buffer_size() >= min_flush_size
-                && (size - child.buffer_size() <= max_node_size || fanout < 2 * min_fanout)
+                && (size - child.buffer_size() <= max_node_size || fanout < 8 * min_fanout)
             {
                 Some(child_idx)
             } else {
@@ -683,7 +680,7 @@ impl<'a, N> PrepareMergeChild<'a, N> {
     }
 }
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    pub(super) fn merge_children(self) -> MergeChildResult<N>
+    pub(super) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     where
         N: ObjectReference,
     {
@@ -701,7 +698,7 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 
         MergeChildResult {
             pivot_key,
-            old_np: right_sibling.node_pointer.into_inner(),
+            old_np: Box::new([right_sibling.node_pointer.into_inner()].into_iter()),
             size_delta: -(size_delta as isize),
         }
     }

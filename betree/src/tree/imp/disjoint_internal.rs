@@ -11,7 +11,7 @@ use crate::{
     database::DatasetId,
     size::{Size, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
-    tree::{pivot_key::LocalPivotKey, KeyInfo},
+    tree::{imp::MIN_FANOUT, pivot_key::LocalPivotKey, KeyInfo},
     AtomicStoragePreference, StoragePreference,
 };
 use owning_ref::OwningRefMut;
@@ -118,8 +118,12 @@ impl<N: StaticSize> Size for DisjointInternalNode<N> {
 // NOTE: This has become necessary as the decision when to flush a node is no
 // longer dependent on just this object but it's subobjects too.
 impl<N: StaticSize> DisjointInternalNode<N> {
-    pub fn logical_size(&self) -> usize {
-        self.size() + self.meta_data.entries_sizes.iter().sum::<usize>()
+    pub fn is_too_large(&self, max_node_size: usize, max_buf_size: usize) -> bool {
+        self.exceeds_fanout() || self.size() > max_node_size || self.meta_data.entries_sizes.iter().fold(false, |acc, s| acc || *s > max_buf_size)
+    }
+
+    pub fn exceeds_fanout(&self) -> bool {
+        self.fanout() > 3 * MIN_FANOUT
     }
 }
 
@@ -228,8 +232,6 @@ impl<N> DisjointInternalNode<N> {
 
     /// Returns the number of children.
     pub fn fanout(&self) -> usize
-    where
-        N: ObjectReference,
     {
         self.children.len()
     }
@@ -294,17 +296,12 @@ impl<N> DisjointInternalNode<N> {
     where
         N: serde::Serialize,
     {
-        // FIXME: Avoid additional allocation
-        // let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
-        // serializer_meta_data
-        //     .serialize_value(&self.meta_data)
-        //     .unwrap();
-        // let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
-        let bytes_meta_data = bincode::serialize(&self.meta_data)
+        let bytes_meta_data_len = bincode::serialized_size(&self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        w.write_all(&(bytes_meta_data.len() as u32).to_le_bytes())?;
-        w.write_all(&bytes_meta_data.as_ref())?;
+        w.write_all(&(bytes_meta_data_len as u32).to_le_bytes())?;
+        bincode::serialize_into(&mut w, &self.meta_data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         bincode::serialize_into(&mut w, &self.children)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         Ok(())
@@ -316,21 +313,13 @@ impl<N> DisjointInternalNode<N> {
         N: serde::Deserialize<'a> + StaticSize,
     {
         let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
-        // FIXME: useless copy in some cases, this can be replaced
-        // let archivedinternalnodemetadata: &ArchivedInternalNodeMetaData =
-        //     unsafe { rkyv::archived_root::<InternalNodeMetaData>(&buf[4..4 + len]) };
-        // let meta_data: InternalNodeMetaData = {
-        //     use rkyv::Deserialize;
-        //     archivedinternalnodemetadata
-        //         .deserialize(&mut rkyv::Infallible)
-        //         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-        // };
         let meta_data = bincode::deserialize(&buf[4..4 + len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let children = bincode::deserialize(&buf[4 + len..])
+        let children: Vec<_> = bincode::deserialize(&buf[4 + len..])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
+        // println!("Disjoint has {} children", children.len());
         Ok(DisjointInternalNode {
             meta_data,
             children,
@@ -477,6 +466,10 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.meta_data.invalidate();
 
+        // println!("Disjoint node has {} children", self.children.len());
+
+        assert!(self.fanout() > 2 * MIN_FANOUT);
+
         let split_off_idx = self.fanout() / 2;
         let pivot = self.meta_data.pivot.split_off(split_off_idx);
         let pivot_key = self.meta_data.pivot.pop().unwrap();
@@ -517,6 +510,9 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
             },
             children,
         };
+
+        assert!(self.fanout() >= MIN_FANOUT);
+        assert!(right_sibling.fanout() >= MIN_FANOUT);
         (
             right_sibling,
             pivot_key.clone(),
@@ -550,7 +546,7 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
         let first_pk = match self.meta_data.pivot.first() {
             Some(p) => PivotKey::LeftOuter(p.clone(), d_id),
             None => unreachable!(
-                "The store contains an empty NVMInternalNode, this should never be the case."
+                "The store contains an empty InternalNode, this should never be the case."
             ),
         };
         for (id, pk) in [first_pk]
@@ -580,6 +576,13 @@ where
     pub fn try_walk_incomplete(&mut self, key: &[u8]) -> NVMTakeChildBuffer<N> {
         let child_idx = self.idx(key);
 
+        // println!(
+        //     "Walking node (level: {}, size: {} MiB) with {} children.",
+        //     self.level(),
+        //     self.size() as f32 / 1024. / 1024.,
+        //     self.children.len()
+        // );
+
         NVMTakeChildBuffer {
             node: self,
             child_idx,
@@ -588,7 +591,6 @@ where
 
     pub fn try_find_flush_candidate(
         &mut self,
-        min_flush_size: usize,
         max_node_size: usize,
         min_fanout: usize,
     ) -> Option<TakeChildBufferWrapper<N>>
@@ -596,7 +598,6 @@ where
         N: ObjectReference,
     {
         let child_idx = {
-            let size = self.logical_size();
             let (child_idx, child) = self
                 .meta_data
                 .entries_sizes
@@ -606,13 +607,19 @@ where
                 .unwrap();
             debug!("Largest child's buffer size: {}", child);
 
-            if *child >= min_flush_size
-                && (size - *child <= max_node_size || self.fanout() < 2 * min_fanout)
-            {
-                Some(child_idx)
+            if !self.exceeds_fanout() && self.size() < max_node_size {
+               Some(child_idx)
             } else {
-                None
+               None
             }
+
+            // if *child >= min_flush_size
+            //     && (size - *child <= max_node_size || self.fanout() < 2 * min_fanout)
+            // {
+            //     Some(child_idx)
+            // } else {
+            //     None
+            // }
         };
         child_idx.map(move |child_idx| {
             TakeChildBufferWrapper::NVMTakeChildBuffer(NVMTakeChildBuffer {
@@ -680,40 +687,27 @@ where
     N: StaticSize,
 {
     pub(super) fn size(&self) -> usize {
-        (&*self.node).logical_size()
+        // FIXME: Previously logical_size was used here, this needs to take the buffer into account? or the internal node? or both?
+        (&*self.node).size()
     }
 
     pub(super) fn load_and_prepare_merge<X>(
         &mut self,
         dml: &X,
         d_id: DatasetId,
-    ) -> PrepareMergeChild<N, X>
+    ) -> PrepareMergeChild<N>
     where
         X: Dml<Object = Node<N>, ObjectRef = N>,
     {
+        assert!(self.node.fanout() >= 2);
         let (pivot_key_idx, other_child_idx) = if self.child_idx + 1 < self.node.children.len() {
             (self.child_idx, self.child_idx + 1)
         } else {
             (self.child_idx - 1, self.child_idx - 1)
         };
 
-        let pivot_child = dml
-            .get_mut(
-                self.node.children[pivot_key_idx].buffer_mut().get_mut(),
-                d_id,
-            )
-            .expect("error in prepare merge nvm");
-        let other_child = dml
-            .get_mut(
-                self.node.children[other_child_idx].buffer_mut().get_mut(),
-                d_id,
-            )
-            .expect("error in prepare merge nvm");
-
         PrepareMergeChild {
             node: self.node,
-            left_child: pivot_child,
-            right_child: other_child,
             pivot_key_idx,
             other_child_idx,
             d_id,
@@ -726,19 +720,15 @@ where
     }
 }
 
-pub(super) struct PrepareMergeChild<'a, N: 'a + 'static, X>
-where
-    X: Dml,
+pub(super) struct PrepareMergeChild<'a, N: 'a + 'static>
 {
     node: &'a mut DisjointInternalNode<N>,
-    left_child: X::CacheValueRefMut,
-    right_child: X::CacheValueRefMut,
     pivot_key_idx: usize,
     other_child_idx: usize,
     d_id: DatasetId,
 }
 
-impl<'a, N, X: Dml> PrepareMergeChild<'a, N, X> {
+impl<'a, N> PrepareMergeChild<'a, N> {
     pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
     where
         N: ObjectReference,
@@ -750,48 +740,45 @@ impl<'a, N, X: Dml> PrepareMergeChild<'a, N, X> {
     }
 }
 
-impl<'a, N, X> PrepareMergeChild<'a, N, X>
+impl<'a, N> PrepareMergeChild<'a, N>
 where
-    X: Dml<Object = Node<N>, ObjectRef = N>,
-    N: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    N: ObjectReference + HasStoragePreference,
 {
-    pub(super) fn merge_children(mut self, _dml: &X) -> MergeChildResult<N>
+    pub(super) fn merge_children<X>(self, dml: &X) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     where
-        N: ObjectReference,
+        X: Dml<Object = Node<N>, ObjectRef = N>,
     {
-        // FIXME: Shouldn't this be other_idx instead of + 1
-
-        let links = self.node.children.remove(self.pivot_key_idx + 1);
-
+        let mut right_child_links = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.meta_data.pivot.remove(self.pivot_key_idx);
-        // FIXME: size calculation
-        let size_delta = pivot_key.size();
-        self.node.meta_data.entries_size -= size_delta;
+        self.node.meta_data.entries_prefs.remove(self.pivot_key_idx + 1);
+        self.node.meta_data.entries_sizes.remove(self.pivot_key_idx + 1);
 
-        self.left_child
+        let mut left_buffer = dml.get_mut(self.node.children[self.pivot_key_idx].buffer_mut().get_mut(), self.d_id).expect("Invalid node state");
+        let mut right_buffer = dml.get_mut(right_child_links.buffer_mut().get_mut(), self.d_id).expect("Invalid node state");
+
+        let size_delta = pivot_key.size() + N::static_size() * 2 + std::mem::size_of::<u8>() + std::mem::size_of::<usize>();
+        self.node.meta_data.entries_size -= size_delta;
+        left_buffer
             .assert_buffer_mut()
-            .append(&mut self.right_child.assert_buffer_mut());
-        self.left_child
-            .assert_buffer()
-            .messages_preference
-            .upgrade_atomic(&self.right_child.assert_buffer().messages_preference);
+            .append(&mut right_buffer.assert_buffer_mut());
+        self.node.meta_data.entries_sizes[self.pivot_key_idx] = left_buffer.size();
+        self.node.meta_data.invalidate();
 
         MergeChildResult {
             pivot_key,
-            old_np: links.ptr.into_inner(),
+            old_np: Box::new([right_child_links.ptr.into_inner(), right_child_links.buffer.into_inner()].into_iter()),
             size_delta: -(size_delta as isize),
         }
     }
 }
 
-impl<'a, N, X> PrepareMergeChild<'a, N, X>
+impl<'a, N> PrepareMergeChild<'a, N>
 where
-    X: Dml<Object = Node<N>, ObjectRef = N>,
-    N: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    N: ObjectReference + HasStoragePreference,
 {
-    pub(super) fn rebalanced<F>(&mut self, new_pivot_key: CowBytes, load: F) -> isize
+    pub(super) fn rebalanced<F, X>(&mut self, new_pivot_key: CowBytes, load: F) -> isize
     where
-        N: ObjectReference,
+        X: Dml<Object = Node<N>, ObjectRef = N>,
         F: Fn(&mut RwLock<N>, DatasetId) -> X::CacheValueRefMut,
     {
         {

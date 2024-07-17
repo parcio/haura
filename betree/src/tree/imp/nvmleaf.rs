@@ -126,6 +126,8 @@ impl KeyInfo {
 
 use thiserror::Error;
 
+use super::leaf::FillUpResult;
+
 #[derive(Error, Debug)]
 pub enum NVMLeafError {
     #[error(
@@ -350,18 +352,6 @@ impl std::fmt::Debug for NVMLeafNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", &self.state)
     }
-}
-
-/// Case-dependent outcome of a rebalance operation.
-#[derive(Debug)]
-pub(super) enum NVMFillUpResult {
-    Rebalanced {
-        pivot_key: CowBytes,
-        size_delta: isize,
-    },
-    Merged {
-        size_delta: isize,
-    },
 }
 
 impl Size for NVMLeafNode {
@@ -845,17 +835,17 @@ impl NVMLeafNode {
         right_sibling: &mut Self,
         min_size: usize,
         max_size: usize,
-    ) -> NVMFillUpResult {
+    ) -> FillUpResult {
         self.state.force_upgrade();
         right_sibling.state.force_upgrade();
         let size_delta = self.merge(right_sibling);
         if self.size() <= max_size {
-            NVMFillUpResult::Merged { size_delta }
+            FillUpResult::Merged { size_delta }
         } else {
             // First size_delta is from the merge operation where we split
             let (pivot_key, split_size_delta) =
                 self.do_split_off(right_sibling, min_size, max_size);
-            NVMFillUpResult::Rebalanced {
+            FillUpResult::Rebalanced {
                 pivot_key,
                 size_delta: size_delta + split_size_delta,
             }

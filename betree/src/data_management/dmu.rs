@@ -469,7 +469,7 @@ where
         let (partial_read, compressed_data) = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
-            let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
+            let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(object_size as u32));
             let part = {
                 let pp = object.prepare_pack(self.spl().storage_kind_map()[storage_class as usize], &self, &pivot_key)?;
                 let part = object.pack(&mut buf, pp)?;
@@ -937,7 +937,11 @@ where
         match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
             Ok(_) | Err(RemoveError::NotPresent) => {}
             // TODO
-            Err(RemoveError::Pinned) => unimplemented!(),
+            Err(RemoveError::Pinned) => {
+                let bt = std::backtrace::Backtrace::force_capture();
+                println!("{}", bt);
+                unimplemented!()
+            },
         };
         if let ObjRef::Unmodified(ref ptr, ..) = or {
             self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove, or.index().clone());

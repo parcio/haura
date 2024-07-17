@@ -57,7 +57,7 @@ where
             ObjRef::Unmodified(_, o_pk) | ObjRef::Modified(_, o_pk) => *o_pk = pk,
             // NOTE: An object reference may never need to be modified when
             // performing a write back.
-            ObjRef::InWriteback(..) => unreachable!(),
+            ObjRef::InWriteback(..) => {},
         }
     }
 

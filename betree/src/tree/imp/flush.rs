@@ -14,7 +14,7 @@ use crate::{
     cache::AddSize,
     data_management::{Dml, HasStoragePreference, ObjectReference},
     size::Size,
-    tree::{errors::*, MessageAction},
+    tree::{errors::*, imp::MIN_FANOUT, MessageAction},
 };
 
 impl<X, R, M, I> Tree<X, M, I>
@@ -68,16 +68,19 @@ where
             );
             // 1. Select the largest child buffer which can be flushed.
             let mut child_buffer =
-                match DerivateRefNVM::try_new(node, |node| node.try_find_flush_candidate()) {
+                match DerivateRefNVM::try_new(node, |node| node.try_find_flush_candidate(&self.storage_map)) {
                     // 1.1. If there is none we have to split the node.
                     Err(_node) => match parent {
                         None => {
+                            // println!("split root");
                             self.split_root_node(_node);
                             return Ok(());
                         }
                         Some(ref mut parent) => {
+                            // println!("split node");
                             let (next_node, size_delta) = self.split_node(_node, parent)?;
                             node = next_node;
+                            assert!(!node.is_buffer());
                             parent.add_size(size_delta);
                             continue;
                         }
@@ -87,37 +90,46 @@ where
                 };
 
             let mut child = self.get_mut_node(child_buffer.child_pointer_mut())?;
+            assert!(!child.is_buffer());
 
             // 2. Iterate down to child if too large
             if !child.is_leaf() && self.storage_map.node_is_too_large(&child) {
                 warn!("Aborting flush, child is too large already");
                 parent = Some(child_buffer);
                 node = child;
+                assert!(!node.is_buffer());
                 continue;
             }
             // 3. If child is internal, small and has not many children -> merge the children of node.
-            if child.has_too_low_fanout() {
+            if child.has_too_low_fanout() && !self.storage_map.node_is_too_large(&child) {
+                panic!("merge internal with fanout {} on level {}", child.fanout().unwrap(), child.level());
                 let size_delta = {
                     let mut m = child_buffer.prepare_merge(&self.dml, self.tree_id());
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
-                    let is_right_sibling = m.is_right_sibling();
+                    assert!(!sibling.is_buffer());
+                    let child_on_left = m.is_right_sibling();
                     let MergeChildResult {
                         pivot_key,
                         old_np,
                         size_delta,
                     } = m.merge_children(&self.dml);
-                    if is_right_sibling {
+                    if child_on_left {
                         let size_delta = child.merge(&mut sibling, pivot_key);
                         child.add_size(size_delta);
                     } else {
                         let size_delta = sibling.merge(&mut child, pivot_key);
                         child.add_size(size_delta);
                     }
-                    self.dml.remove(old_np);
+                    drop(sibling);
+                    drop(child);
+                    for np in old_np {
+                        self.dml.remove(np);
+                    }
                     size_delta
                 };
                 child_buffer.add_size(size_delta);
                 node = child_buffer.into_owner();
+                assert!(!node.is_buffer());
                 continue;
             }
             // 4. Remove messages from the child buffer.
@@ -139,6 +151,7 @@ where
 
             // 6. Check if minimal leaf size is fulfilled, otherwise merge again.
             if self.storage_map.leaf_is_too_small(&child) {
+                panic!("merge leaf");
                 let size_delta = {
                     let mut m = child_buffer.prepare_merge(&self.dml, self.tree_id());
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
@@ -158,7 +171,9 @@ where
                             let MergeChildResult {
                                 old_np, size_delta, ..
                             } = m.merge_children(&self.dml);
-                            self.dml.remove(old_np);
+                            for np in old_np {
+                                self.dml.remove(np);
+                            }
                             size_delta
                         }
                         FillUpResult::Rebalanced {
@@ -175,6 +190,7 @@ where
             }
             // 7. If the child is too large, split until it is not.
             while self.storage_map.leaf_is_too_large(&child) {
+                // println!("split leaf");
                 let (next_node, size_delta) = self.split_node(child, &mut child_buffer)?;
                 child_buffer.add_size(size_delta);
                 child = next_node;
@@ -182,17 +198,19 @@ where
 
             // 8. After finishing all operations once, see if they have to be repeated.
             if child_buffer.size() > super::MAX_INTERNAL_NODE_SIZE {
-                warn!("Node is still too large");
+                panic!("Node is still too large");
                 if self.storage_map.node_is_too_large(&child) {
                     warn!("... but child, too");
                 }
                 node = child_buffer.into_owner();
+                assert!(!node.is_buffer());
                 continue;
             }
             // 9. Traverse down to child.
             // Drop old parent here.
             parent = Some(child_buffer);
             node = child;
+            assert!(!node.is_buffer());
         }
     }
 }

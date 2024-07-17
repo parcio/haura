@@ -40,7 +40,7 @@ where
         &mut self,
         dml: &X,
         d_id: DatasetId,
-    ) -> PrepareChildBufferMerge<N, X>
+    ) -> PrepareChildBufferMerge<N>
     where
         N: ObjectReference,
         X: Dml<Object = Node<N>, ObjectRef = N>,
@@ -65,15 +65,14 @@ pub(super) struct MergeChildResult<NP> {
 use super::internal::PrepareMergeChild as Block_PMC;
 use super::disjoint_internal::PrepareMergeChild as Mem_PMC;
 
-pub(super) enum PrepareChildBufferMerge<'a, N: 'static, X: Dml> {
+pub(super) enum PrepareChildBufferMerge<'a, N: 'static> {
     Block(Block_PMC<'a, N>),
-    Memory(Mem_PMC<'a, N, X>),
+    Memory(Mem_PMC<'a, N>),
 }
 
-impl<'a, N, X> PrepareChildBufferMerge<'a, N, X>
+impl<'a, N> PrepareChildBufferMerge<'a, N>
 where
-    X: Dml<Object = Node<N>, ObjectRef = N>,
-    N: ObjectReference<ObjectPointer = X::ObjectPointer> + HasStoragePreference,
+    N: ObjectReference + HasStoragePreference,
 {
     pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
     where
@@ -84,6 +83,8 @@ where
             PrepareChildBufferMerge::Memory(pmc) => pmc.sibling_node_pointer(),
         }
     }
+
+    /// Wether the *sibling* of *child* is the right to child or not.
     pub(super) fn is_right_sibling(&self) -> bool {
         match self {
             PrepareChildBufferMerge::Block(pmc) => pmc.is_right_sibling(),
@@ -91,8 +92,9 @@ where
         }
     }
 
-    pub(super) fn merge_children(self, dml: &X) -> MergeChildResult<N>
+    pub(super) fn merge_children<X>(self, dml: &X) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     where
+        X: Dml<Object = Node<N>, ObjectRef = N>,
         N: ObjectReference + HasStoragePreference,
     {
         match self {
@@ -101,13 +103,14 @@ where
         }
     }
 
-    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes, dml: &X) -> isize
+    pub(super) fn rebalanced<X>(&mut self, new_pivot_key: CowBytes, dml: &X) -> isize
     where
+        X: Dml<Object = Node<N>, ObjectRef = N>,
         N: ObjectReference + HasStoragePreference,
     {
         match self {
             PrepareChildBufferMerge::Block(pmc) => pmc.rebalanced(new_pivot_key),
-            PrepareChildBufferMerge::Memory(pmc) => pmc.rebalanced(new_pivot_key, |np, d_id| {
+            PrepareChildBufferMerge::Memory(pmc) => pmc.rebalanced::<_, X>(new_pivot_key, |np, d_id| {
                 dml.get_mut(np.get_mut(), d_id)
                     .expect("Node fetch in prepare merge rebalanced untreated")
             }),
