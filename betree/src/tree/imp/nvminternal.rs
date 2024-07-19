@@ -53,6 +53,7 @@ pub(super) struct NVMInternalNode<N: 'static> {
     pub data_end: usize,
     pub node_size: crate::vdev::Block<u32>,
     pub checksum: Option<crate::checksum::XxHash>,
+    pub d_id: Option<DatasetId>,
     pub nvm_load_details: std::sync::RwLock<NVMLazyLoadDetails>
 }
 
@@ -400,7 +401,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
         // Also since at this point I am loading all the data so assuming that 'None' suggests all the data is already fetched.
 
         // if (*self.need_to_load_data_from_nvm.read().unwrap()) {
-        //     println!("..............true");
+             //panic!("..............true");
         // } else {
         //     println!("..............false");
         // }
@@ -418,6 +419,22 @@ impl<N: ObjectReference> NVMInternalNode<N> {
 
                     *self.data.write().unwrap() = Some(node);
                     
+                    let first_pk = match self.meta_data.pivot.first() {
+                        Some(p) => PivotKey::LeftOuter(p.clone(), self.d_id.unwrap()),
+                        None => unreachable!(
+                            "The store contains an empty NVMInternalNode, this should never be the case."
+                        ),
+                    };
+                    for (id, pk) in [first_pk]
+                        .into_iter()
+                        .chain(self.meta_data.pivot.iter().map(|p| PivotKey::Right(p.clone(), self.d_id.unwrap())))
+                        .enumerate()
+                    {
+                        // SAFETY: There must always be pivots + 1 many children, otherwise
+                        // the state of the Internal Node is broken.
+                        self.data.write().as_mut().unwrap().as_mut().unwrap().children[id].as_mut().unwrap().complete_object_ref(pk)
+                    }
+
                     return Ok(());
                 },
                 Err(e) => {
@@ -455,6 +472,7 @@ impl<N> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
+            d_id: None,
             nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails{
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -804,6 +822,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
             data_end: 0,
             node_size: crate::vdev::Block(0),
             checksum: None,
+            d_id: None,
             nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails{
                 need_to_load_data_from_nvm: false,
                 time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -1046,6 +1065,7 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
     pub fn node_pointer_mut(&mut self) -> (&std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>, usize)  where N: ObjectReference{
         self.node.load_all_data();
+        //self.node.complete_object_refs(self.node.d_id.unwrap());
         //&mut self.node.data.write().as_mut().unwrap().as_mut().unwrap().children[self.child_idx].as_mut().unwrap().node_pointer
         (&self.node.data, self.child_idx)
     }
@@ -1109,6 +1129,7 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
+                d_id: None,
                 nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails{
                     need_to_load_data_from_nvm: false,
                     time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
@@ -1158,6 +1179,7 @@ mod tests {
                 data_end: 0,
                 node_size: crate::vdev::Block(0),
                 checksum: None,
+                d_id: None,
                 nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails{
                     need_to_load_data_from_nvm: false,
                     time_for_nvm_last_fetch: SystemTime::UNIX_EPOCH,
