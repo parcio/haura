@@ -194,7 +194,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
     fn pack_and_compress(&self, metadata_size: &mut usize, compressor: Arc<std::sync::RwLock<dyn CompressionBuilder>>) -> Result<Buf, io::Error> {
-
+        //println!("pack_and_compress...");
         match self.0 {
             PackedLeaf(ref map) => {
                 let builder = &*compressor.read().unwrap();
@@ -245,7 +245,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                         serializer_data.serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
                         let bytes_data = serializer_data.into_serializer().into_inner();
-
+                        //println!("ln m:{} d:{}", bytes_meta_data.len(), bytes_data.len());
                         writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
                         writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
                         writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
@@ -254,6 +254,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         writer.write_all(&bytes_data.as_ref())?;
 
                         *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this.. magic nos!
+                        //println!("ln compress m:{} d:{}", bytes_meta_data.len(), bytes_data.len());
                     }
                     return Ok(writer.finish());
                 };
@@ -276,7 +277,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                         serializer_data.serialize_value(nvminternal.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
                         let bytes_data = serializer_data.into_serializer().into_inner();
-        
+                        
                         writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
                         writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
                         writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
@@ -286,6 +287,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         
                         *metadata_size = 4 + 8 + 8 + bytes_meta_data.len();//TODO: fix this
         
+                        //println!("in compress m:{} d:{}", bytes_meta_data.len(), bytes_data.len());
                     }
                     return Ok(writer.finish());
                 };
@@ -413,7 +415,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                 serializer_data.serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
                 let bytes_data = serializer_data.into_serializer().into_inner();
-
+                
                 writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
                 writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
                 writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
@@ -435,7 +437,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
                 serializer_data.serialize_value(nvminternal.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
                 let bytes_data = serializer_data.into_serializer().into_inner();
-
+                
                 writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
                 writer.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
                 writer.write_all(bytes_data.len().to_be_bytes().as_ref())?;
@@ -454,6 +456,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     }
 
     fn unpack_at(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
+        panic!("..");
         if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
                 match deserialize::<InternalNode<_>>(&data[4..]) {
                 Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
@@ -467,11 +470,11 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // recalculates the correct storage_preference for the contained keys.
             Ok(Node(PackedLeaf(PackedMap::new((&data[4..]).to_vec()))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
-            let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
-            let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
+            let meta_data_len: usize = usize::from_be_bytes(data[4..11].try_into().unwrap());
+            let data_len: usize = usize::from_be_bytes(data[12..19].try_into().unwrap());
 
-            let meta_data_start = 4 + 8 + 8;
-            let meta_data_end = meta_data_start + meta_data_len;   
+            let meta_data_start = 4 + 8 + 8 - 1;
+            let meta_data_end = meta_data_start + meta_data_len - 1;
 
             let data_start = meta_data_end;
             let data_end = data_start + data_len;   
@@ -503,8 +506,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                     nvm_fetch_counter: 0}),
             }.complete_object_refs(d_id))))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
-            let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
-            let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
+            let meta_data_len: usize = usize::from_be_bytes(data[4..11].try_into().unwrap());
+            let data_len: usize = usize::from_be_bytes(data[12..19].try_into().unwrap());
 
             let meta_data_start = 4 + 8 + 8;
             let meta_data_end = meta_data_start + meta_data_len;   
@@ -549,7 +552,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     }
 
     fn unpack_and_decompress(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>, d: DecompressionTag) -> Result<Self, io::Error> {
-
+        //println!("unpack_and_decompress...");
         let mut decompression_state = d.new_decompression();
         let data = decompression_state.unwrap().decompress(&data).unwrap();
 
@@ -570,18 +573,20 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());
 
             let meta_data_start = 4 + 8 + 8;
-            let meta_data_end = meta_data_start + meta_data_len;   
+            let meta_data_end = meta_data_start + meta_data_len;
 
             let data_start = meta_data_end;
             let data_end = data_start + data_len;   
 
+            //println!("in uncompress mb:{}, me:{}, ds:{}, de{}", meta_data_start, meta_data_end, data_start, data_end);
+            
             let archivedinternalnodemetadata: &ArchivedInternalNodeMetaData = rkyv::check_archived_root::<InternalNodeMetaData>(&data[meta_data_start..meta_data_end]).unwrap();
             //let archivedinternalnode: &ArchivedInternalNode<NVMChildBuffer<_>>  = unsafe { archived_root::<NVMInternalNode<NVMChildBuffer<R>>>(&data[12..len+12]) };
             let meta_data: InternalNodeMetaData = archivedinternalnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let archivedinternalnodedata: &ArchivedInternalNodeData<_> = rkyv::check_archived_root::<InternalNodeData<R>>(&data[data_start..data_end]).unwrap();
+            //let archivedinternalnodedata: &ArchivedInternalNodeData<_> = rkyv::check_archived_root::<InternalNodeData<R>>(&data[data_start..data_end]).unwrap();
             //let archivedinternalnode: &ArchivedInternalNode<NVMChildBuffer<_>>  = unsafe { archived_root::<NVMInternalNode<NVMChildBuffer<R>>>(&data[12..len+12]) };
-            let data: InternalNodeData<_> = archivedinternalnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            //let data: InternalNodeData<_> = archivedinternalnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             
             Ok(Node(NVMInternal (NVMInternalNode {
                 pool: Some(pool),
@@ -609,15 +614,16 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             let meta_data_end = meta_data_start + meta_data_len;   
 
             let data_start = meta_data_end;
-            let data_end = data_start + data_len;   
+            let data_end = data_start + data_len;
 
+            //println!("ln uncompress mb:{}, me:{}, ds:{}, de{}", meta_data_start, meta_data_end, data_start, data_end);
             let archivedleafnodemetadata = rkyv::check_archived_root::<NVMLeafNodeMetaData>(&data[meta_data_start..meta_data_end]).unwrap();
             //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
             let meta_data:NVMLeafNodeMetaData = archivedleafnodemetadata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             
-            let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
+            //let archivedleafnodedata = rkyv::check_archived_root::<NVMLeafNodeData>(&data[data_start..data_end]).unwrap();
             //let archivedleafnode: &ArchivedNVMLeafNode = unsafe { archived_root::<NVMLeafNode>(&data) };            
-            let data:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            //let data:NVMLeafNodeData = archivedleafnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             
             let mut nvmleaf = NVMLeafNode {
                 pool: Some(pool),

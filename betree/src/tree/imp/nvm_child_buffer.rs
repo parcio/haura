@@ -12,6 +12,7 @@ use crate::{
     AtomicStoragePreference, StoragePreference, compression::CompressionBuilder,
 };
 use parking_lot::RwLock;
+use zstd_safe::WriteBuf;
 //use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
@@ -46,7 +47,7 @@ pub(super) struct NVMChildBuffer<N: 'static> {
     #[with(rkyv::with::AsVec)]
     pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
     //#[serde(with = "ser_np")]
-    #[with(AsVecEx)]
+    #[with(EncodeNodePointer)]
     pub(super) node_pointer: RwLock<N>,
 }
 
@@ -61,25 +62,76 @@ pub(super) struct NVMChildBuffer2<N: 'static> {
     #[with(rkyv::with::AsVec)]
     pub(super) buffer: BTreeMap<CowBytes2, (KeyInfo, SlicedCowBytes2)>,
     //#[serde(with = "ser_np")]
-    #[with(AsVecEx)]
+    #[with(EncodeNodePointer)]
     pub(super) node_pointer: RwLock<N>,
 }
 
-impl<N: ObjectReference> ArchiveWith<RwLock<N>> for AsVecEx {
+// impl<N: ObjectReference> ArchiveWith<RwLock<N>> for AsVecEx {
+//     type Archived = ArchivedVec<u8>;
+//     type Resolver = VecResolver;
+
+//     unsafe fn resolve_with(
+//         obj: &RwLock<N>,
+//         pos: usize,
+//         resolver: Self::Resolver,
+//         out: *mut Self::Archived,
+//     ) {
+//         panic!("..>> {}", obj.read().size());
+//         ArchivedVec::resolve_from_len(obj.read().size(), pos, resolver, out);
+//     }
+// }
+
+// impl<N: ObjectReference, S: ScratchSpace + Serializer + ?Sized> SerializeWith<RwLock<N>, S> for AsVecEx 
+// where <S as Fallible>::Error: std::fmt::Debug {
+//     fn serialize_with(field: &RwLock<N>, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
+//         let mut serialized_data = Vec::new();
+//         match field.read().serialize_unmodified(&mut serialized_data){
+//             Ok(data) => debug!("Successfully serialized childbuffer's node_pointer"),
+//             Err(e) => panic!("Failed to serialize childbuffer's node_pointer"),
+//         };
+
+//         let abc = <N as ObjectReference>::deserialize_and_set_unmodified(serialized_data.clone().as_slice());
+//         println!(".. {}", serialized_data.len());
+        
+//         // ArchivedVec::<u8>::serialize_from_iter::<u8, &u8, std::slice::Iter<'_, u8>, S>(
+//         //     serialized_data.iter(),
+//         //     serializer,
+//         // )
+//         ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)
+
+//         // Ok(NodePointerResolver {
+//         //     len: serialized_data.len(),
+//         //     inner: ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)?,
+//         // })
+//     }
+// }
+
+// impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<ArchivedVec<u8>, RwLock<N>, D> for AsVecEx {
+//     fn deserialize_with(field: &ArchivedVec<u8>, deserializer: &mut D) -> Result<RwLock<N>, D::Error> {
+//         println!("++ {}", field.len());
+//         let vec: Vec<u8> = field.deserialize(deserializer)?;
+//         match <N as ObjectReference>::deserialize_and_set_unmodified(vec.as_slice()) {
+//             Ok(obj) => Ok(RwLock::new(obj)) ,
+//             Err(e) => panic!("Failed to deserialize childbuffer's node_pointer"),
+//         }
+//     }
+// }
+
+impl<N: ObjectReference> ArchiveWith<RwLock<N>> for EncodeNodePointer {
     type Archived = ArchivedVec<u8>;
-    type Resolver = VecResolver;
+    type Resolver = NodePointerResolver;
 
     unsafe fn resolve_with(
-        obj: &RwLock<N>,
+        _: &RwLock<N>,
         pos: usize,
         resolver: Self::Resolver,
         out: *mut Self::Archived,
     ) {
-        ArchivedVec::resolve_from_len(obj.read().size(), pos, resolver, out);
+        ArchivedVec::resolve_from_len(resolver.len, pos, resolver.inner, out);
     }
 }
 
-impl<N: ObjectReference, S: ScratchSpace + Serializer + ?Sized> SerializeWith<RwLock<N>, S> for AsVecEx 
+impl<N: ObjectReference, S: ScratchSpace + Serializer + ?Sized> SerializeWith<RwLock<N>, S> for EncodeNodePointer 
 where <S as Fallible>::Error: std::fmt::Debug {
     fn serialize_with(field: &RwLock<N>, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
         let mut serialized_data = Vec::new();
@@ -87,27 +139,25 @@ where <S as Fallible>::Error: std::fmt::Debug {
             Ok(data) => debug!("Successfully serialized childbuffer's node_pointer"),
             Err(e) => panic!("Failed to serialize childbuffer's node_pointer"),
         };
-        //panic!("..");
-        ArchivedVec::<u8>::serialize_from_iter::<u8, &u8, std::slice::Iter<'_, u8>, S>(
-            serialized_data.iter(),
-            serializer,
-        )
-
-        // Ok(NodePointerResolver {
-        //     len: serialized_data.len(),
-        //     inner: ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)?,
-        // })
+        let abc = <N as ObjectReference>::deserialize_and_set_unmodified(serialized_data.clone().as_slice());
+        //println!(".. {}", serialized_data.len());
+        Ok(NodePointerResolver {
+            len: serialized_data.len(),
+            inner: ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)?,
+        })
     }
 }
 
-impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, RwLock<N>, D> for AsVecEx {
+impl<N: ObjectReference, D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, RwLock<N>, D> for EncodeNodePointer {
     fn deserialize_with(field: &Archived<Vec<u8>>, _: &mut D) -> Result<RwLock<N>, D::Error> {
+        //unimplemented!("TODO..");
         match <N as ObjectReference>::deserialize_and_set_unmodified(field.as_slice()) {
             Ok(obj) => Ok(RwLock::new(obj)) ,
             Err(e) => panic!("Failed to deserialize childbuffer's node_pointer"),
         }
     }
 }
+
 
 /*impl Size for (KeyInfo, SlicedCowBytes) {
     fn size(&self) -> usize {

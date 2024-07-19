@@ -207,6 +207,7 @@ impl ObjectReference for () {
     }
 
     fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
+        panic!("x");
         if let p
         = self {
 
@@ -220,6 +221,7 @@ impl ObjectReference for () {
     }
 
     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
+        panic!("x");
         match bincode::deserialize::<()>(bytes) {
             Ok(_) => Ok(()),
             Err(e) => {
@@ -409,7 +411,7 @@ impl<N: ObjectReference> NVMInternalNode<N> {
             match compressed_data {
                 Ok(buffer) => {
                     let bytes: Box<[u8]> = buffer.into_boxed_slice();
-
+                    //println!("...........{} {}", self.data_start, self.data_end);
                     let archivedinternalnodedata: &ArchivedInternalNodeData<_> = rkyv::check_archived_root::<InternalNodeData<N>>(&bytes[self.data_start..self.data_end]).unwrap();
                     
                     let node: InternalNodeData<_> = archivedinternalnodedata.deserialize(&mut rkyv::de::deserializers::SharedDeserializeMap::new()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;

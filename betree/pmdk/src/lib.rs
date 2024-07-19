@@ -15,6 +15,11 @@ pub struct PMem {
 unsafe impl Send for PMem {}
 unsafe impl Sync for PMem {}
 
+unsafe fn voidp_to_ref<'a, T>(p: *const c_void) -> &'a T
+{
+    unsafe { &*(p as *const T) }
+}
+
 impl PMem {
     pub fn create(filepath : &str, len: u64, mapped_len : &mut u64, is_pmem : &mut i32) -> Result<Self, std::io::Error> {
         let mut ptr = unsafe {

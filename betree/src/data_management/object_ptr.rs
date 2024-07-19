@@ -72,6 +72,7 @@ impl<D> ObjectPointer<D> {
     }
     /// Get the size in blocks of the serialized object.
     pub fn size(&self) -> Block<u32> {
+        //println!("000");
         self.size
     }
     /// Get the generation this object reference is belonging to. Relevant for

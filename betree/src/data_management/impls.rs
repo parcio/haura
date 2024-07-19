@@ -11,6 +11,7 @@ use serde::{
 };
 
 use rkyv::ser::Serializer;
+use zstd_safe::WriteBuf;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ModifiedObjectId {
@@ -77,14 +78,7 @@ where
 
     // TODO: Karim.. add comments
     fn serialize_unmodified(&self, w : &mut Vec<u8>) -> Result<(), std::io::Error> {
-        //panic!("serialize_unmodified ..........");
-        // if let ObjRef::Unmodified(ref p, ..) | ObjRef::Incomplete(ref p) = self {
-        //     bincode::serialize_into(w, p)
-        //             .map_err(|e| {
-        //                 debug!("Failed to serialize ObjectPointer.");
-        //                 std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        //             })?;
-        // }
+        //let abc  = w.clone();
         match *self {
             ObjRef::Modified(..) => 
                 std::io::Error::new(std::io::ErrorKind::Other,
@@ -101,21 +95,32 @@ where
                         debug!("Failed to serialize ObjectPointer.");
                         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
                 })?;
+
+                //let w_len = <&mut Vec<u8> as AsRef<&[u8]>>::as_ref(w.as_ref()).len();
+                // match bincode::deserialize::<ObjectPointer<D>>(abc.as_slice()) {
+                //     Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
+                //     Err(e) => {
+                //         panic!("new panic... {} {}",0, abc.as_slice().len());
+                //         Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+                //     )},
+                // };
+
                 return Ok(());
             }
             // std::io::Error::new(std::io::ErrorKind::Other,
             //     format!("ObjRef: Tried to serialize incomple reference.")),
         };
-
+        panic!("..");
         Ok(())
     }
 
     // TODO: Karim.. add comments
     fn deserialize_and_set_unmodified(bytes: &[u8]) -> Result<Self, std::io::Error> {
+
         match bincode::deserialize::<ObjectPointer<D>>(bytes) {
             Ok(p) => Ok(ObjRef::Incomplete(p.clone())),
             Err(e) => {
-                debug!("Failed to deserialize ObjectPointer.");
+                panic!("Failed to deserialize ObjectPointer. {}", bytes.len());
                 Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)
             )},
         }
