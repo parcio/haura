@@ -57,6 +57,9 @@ pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
     NVMTakeChildBuffer(Option<NVMTakeChildBuffer<'a, N>>),
 }
 
+use crate::buffer::BufWrite;
+const DEFAULT_BUFFER_SIZE: crate::vdev::Block<u32> = crate::vdev::Block(1);
+
 impl<'a, N: Size + HasStoragePreference> TakeChildBufferWrapper<'a, N> {
     pub fn node_pointer_mut(&mut self) -> &mut TakeChildBufferWrapper<'a, N>  where N: ObjectReference{
         // TODO: Karim... add comments...
@@ -231,6 +234,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 //let compression_nvm = CompressionConfiguration::None;
                 //let default_compression_nvm = compression_nvm.to_builder();
         
+                /*
                 let compression_nvm = &*compressor.read().unwrap();
                 //let compressed_data = [0u8, 10];
                 let compressed_data_nvm = {
@@ -258,11 +262,33 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                     }
                     return Ok(writer.finish());
                 };
+                */
+
+                let mut bw = BufWrite::with_capacity(DEFAULT_BUFFER_SIZE);
+                                let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                serializer_meta_data.serialize_value(&leaf.meta_data).unwrap();
+                let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+                let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                serializer_data.serialize_value(leaf.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+                let bytes_data = serializer_data.into_serializer().into_inner();
+                //println!("ln m:{} d:{}", bytes_meta_data.len(), bytes_data.len());
+                bw.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
+                bw.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
+                bw.write_all(bytes_data.len().to_be_bytes().as_ref())?;
+
+                bw.write_all(&bytes_meta_data.as_ref())?;
+                bw.write_all(&bytes_data.as_ref())?;
+
+                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len(); //TODO: fix this.. magic nos!
+                return Ok(bw.into_buf())
+
             },
             NVMInternal(ref nvminternal) => {
                 //let compression_nvm = CompressionConfiguration::None;
                 //let default_compression_nvm = compression_nvm.to_builder();
-        
+
+                /*
                 let compression_nvm = &*compressor.read().unwrap();
                 //let compressed_data = [0u8, 10];
                 let compressed_data_nvm = {
@@ -291,6 +317,26 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                     }
                     return Ok(writer.finish());
                 };
+                */
+                let mut bw = BufWrite::with_capacity(DEFAULT_BUFFER_SIZE);
+                                let mut serializer_meta_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                serializer_meta_data.serialize_value(&nvminternal.meta_data).unwrap();
+                let bytes_meta_data = serializer_meta_data.into_serializer().into_inner();
+
+                let mut serializer_data = rkyv::ser::serializers::AllocSerializer::<0>::default();
+                serializer_data.serialize_value(nvminternal.data.read().as_ref().unwrap().as_ref().unwrap()).unwrap();
+                let bytes_data = serializer_data.into_serializer().into_inner();
+
+                bw.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
+                bw.write_all(bytes_meta_data.len().to_be_bytes().as_ref())?;
+                bw.write_all(bytes_data.len().to_be_bytes().as_ref())?;
+
+                bw.write_all(&bytes_meta_data.as_ref())?;
+                bw.write_all(&bytes_data.as_ref())?;
+
+                *metadata_size = 4 + 8 + 8 + bytes_meta_data.len();//TODO: fix this
+
+                return Ok(bw.into_buf());
             },
     }
 
@@ -554,8 +600,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
     fn unpack_and_decompress(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>, d: DecompressionTag) -> Result<Self, io::Error> {
         //println!("unpack_and_decompress...");
-        let mut decompression_state = d.new_decompression();
-        let data = decompression_state.unwrap().decompress(&data).unwrap();
+        //let mut decompression_state = d.new_decompression();
+        //let data = decompression_state.unwrap().decompress(&data).unwrap();
 
         if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
                 match deserialize::<InternalNode<_>>(&data[4..]) {

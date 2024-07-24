@@ -182,10 +182,10 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
         serializer: &mut S
     ) -> Result<Self::Resolver, S::Error> {
         //panic!("----------------------");  
-        let compression = CompressionConfiguration::None;
-        /*let compression = CompressionConfiguration::Zstd(Zstd {
+        //let compression = CompressionConfiguration::None;
+        let compression = CompressionConfiguration::Zstd(Zstd {
             level: 1,
-        });*/
+        });
         let default_compression = compression.to_builder();
 
         let compression = &*default_compression.read().unwrap();
@@ -212,10 +212,23 @@ impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
 //panic!("----------------------");
         let vec: Vec<u8> = self.deserialize(deserializer)?;
         
-        let d = DecompressionTag::None;
-        let mut decompression_state = d.new_decompression();
 
-        let data = decompression_state.unwrap().decompress(vec.as_slice()).unwrap();
+        //let compression = CompressionConfiguration::None;
+        let compression = CompressionConfiguration::Zstd(Zstd {
+            level: 1,
+        });
+        let default_compression = compression.to_builder();
+
+        let compression = &*default_compression.read().unwrap();
+
+
+
+
+
+        //let d = DecompressionTag::None;
+        let mut decompression_state = compression.decompression_tag().new_decompression().unwrap();//d.new_decompression();
+
+        let data = decompression_state.decompress(vec.as_slice()).unwrap();
         let arc_vec = Arc::new(data.to_vec());
 
         Ok(CowBytes { inner: arc_vec })

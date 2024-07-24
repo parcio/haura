@@ -105,7 +105,7 @@ impl CompressionState for ZstdCompression {
 impl DecompressionState for ZstdDecompression {
     fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
         self.writer.write_all(data)?;
-        self.writer.finish()?;
+        self.writer.finish();
 
         Ok(mem::replace(
             self.writer.writer_mut(),
