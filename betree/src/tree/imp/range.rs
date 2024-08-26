@@ -37,7 +37,8 @@ pub struct RangeIterator<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     max_key: Option<Vec<u8>>,
     tree: Tree<X, M, I>,
     finished: bool,
-    prefetch: Option<X::Prefetch>,
+    prefetch_node: Option<X::Prefetch>,
+    prefetch_buffer: Option<X::Prefetch>,
 }
 
 impl<X, R, M, I> Iterator for RangeIterator<X, M, I>
@@ -96,7 +97,8 @@ where
             tree,
             finished: false,
             buffer: VecDeque::new(),
-            prefetch: None,
+            prefetch_node: None,
+            prefetch_buffer: None,
         }
     }
 
@@ -106,7 +108,7 @@ where
                 Bounded::Included(ref x) | Bounded::Excluded(ref x) => x,
             };
             self.tree
-                .leaf_range_query(min_key, &mut self.buffer, &mut self.prefetch)?
+                .leaf_range_query(min_key, &mut self.buffer, &mut self.prefetch_node, &mut self.prefetch_buffer)?
         };
 
         // Strip entries which are out of bounds from the buffer.
@@ -168,7 +170,8 @@ where
         &self,
         key: &[u8],
         data: &mut VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
-        prefetch: &mut Option<X::Prefetch>,
+        prefetch_node: &mut Option<X::Prefetch>,
+        prefetch_buffer: &mut Option<X::Prefetch>,
     ) -> Result<Option<CowBytes>, Error> {
         let result = {
             let mut left_pivot_key = None;
@@ -186,19 +189,37 @@ where
                     &mut messages,
                 ) {
                     GetRangeResult::NextNode {
-                        prefetch_option,
                         child_buffer,
                         np,
+                        prefetch_option_node,
+                        prefetch_option_additional,
                     } => {
-                        let previous_prefetch = if let Some(prefetch_np) = prefetch_option {
+                        let previous_prefetch_node = if let Some(prefetch_np) = prefetch_option_node {
                             let f = self.dml.prefetch(&prefetch_np.read())?;
-                            replace(prefetch, f)
+                            replace(prefetch_node, f)
                         } else {
-                            prefetch.take()
+                            prefetch_node.take()
                         };
 
-                        if let Some(cb_np) = child_buffer {
-                            let cb = self.get_node(cb_np)?;
+                        let previous_prefetch_buffer = if let Some(prefetch_np) = prefetch_option_additional {
+                            let f = self.dml.prefetch(&prefetch_np.read())?;
+                            replace(prefetch_buffer, f)
+                        } else {
+                            prefetch_buffer.take()
+                        };
+
+                        let buffer =
+                        if let Some(previous_prefetch) = previous_prefetch_buffer {
+                            Some(self.dml.finish_prefetch(previous_prefetch)?)
+                        } else {
+                            if let Some(cb_np) = child_buffer {
+                                Some(self.get_node(cb_np)?)
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(cb) = buffer {
                             let child = cb.assert_buffer();
                             for (key, msg) in child.get_all_messages() {
                                 messages
@@ -208,10 +229,11 @@ where
                             }
                         }
 
-                        if let Some(previous_prefetch) = previous_prefetch {
-                            self.dml.finish_prefetch(previous_prefetch)?;
+                        if let Some(previous_prefetch) = previous_prefetch_node {
+                            self.dml.finish_prefetch(previous_prefetch)?
+                        } else {
+                            self.get_node(np)?
                         }
-                        self.get_node(np)?
                     }
                     GetRangeResult::Data(leaf_entries) => {
                         self.apply_messages(

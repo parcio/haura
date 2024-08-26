@@ -435,6 +435,12 @@ where
         let mut unordered_msgs = Vec::new();
 
         let mut node = self.get_root_node()?;
+
+        if node.level() != 0 {
+            println!("fetch data");
+            println!("root fanout {:?}, root lvl: {:?}", node.fanout(), node.level());
+        }
+
         let data = loop {
             let mut prefetching = false;
             let next_node = match node.get(key, &mut unordered_msgs) {

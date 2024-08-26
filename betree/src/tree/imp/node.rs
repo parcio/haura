@@ -66,7 +66,7 @@ macro_rules! mib {
 impl StorageMap {
     pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
         match &node.0 {
-            DisjointInternal(dint) => dint.is_too_large(kib!(64), kib!(512)),
+            DisjointInternal(dint) => dint.is_too_large(kib!(256), mib!(1)),
             _ => {
                 self.max_size(node)
                     .map(|max_size| node.inner_size() > max_size)
@@ -95,7 +95,7 @@ impl StorageMap {
             | (MemLeaf(_), StorageKind::Hdd) => mib!(1),
             (PackedLeaf(_), StorageKind::Ssd)
             | (Leaf(_), StorageKind::Ssd)
-            | (MemLeaf(_), StorageKind::Ssd) => mib!(1),
+            | (MemLeaf(_), StorageKind::Ssd) => kib!(64),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
             | (MemLeaf(_), StorageKind::Memory) => mib!(1),
@@ -108,13 +108,14 @@ impl StorageMap {
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         Some(match (&node.0, self.get(node.correct_preference())) {
             (PackedLeaf(_), StorageKind::Hdd) | (Leaf(_), StorageKind::Hdd) => mib!(4),
-            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(4),
+            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(1),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
             | (MemLeaf(_), _) => mib!(4),
+            (Internal(_), StorageKind::Ssd) => mib!(1),
             (Internal(_), _) => mib!(4),
-            (DisjointInternal(_), _) => kib!(64),
-            (Inner::ChildBuffer(_), _) => mib!(4),
+            (DisjointInternal(_), _) => kib!(256),
+            (Inner::ChildBuffer(_), _) => mib!(1),
         })
     }
 }
@@ -577,7 +578,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         F: Fn(Self, LocalPivotKey) -> N,
     {
         let is_disjoint = match storage_map.get(self.correct_preference()) {
-            StorageKind::Memory | StorageKind::Ssd => true,
+            StorageKind::Memory => true,
             _ => false,
         };
 
@@ -704,7 +705,8 @@ pub(super) enum GetRangeResult<'a, T, N: 'a + 'static> {
         /// If a node is only partially present in storage we might need to
         /// fetch some additional object to complete the buffered messages.
         child_buffer: Option<&'a RwLock<N>>,
-        prefetch_option: Option<&'a RwLock<N>>,
+        prefetch_option_node: Option<&'a RwLock<N>>,
+        prefetch_option_additional: Option<&'a RwLock<N>>,
     },
 }
 
@@ -788,14 +790,15 @@ impl<N: HasStoragePreference> Node<N> {
                 leaf.entries().iter().map(|(k, v)| (&k[..], v.clone())),
             )),
             Internal(ref internal) => {
-                let prefetch_option = if internal.level() == 1 {
+                let prefetch_option_node = if internal.level() == 1 {
                     internal.get_next_node(key)
                 } else {
                     None
                 };
                 let np = internal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
                 GetRangeResult::NextNode {
-                    prefetch_option,
+                    prefetch_option_node,
+                    prefetch_option_additional: None,
                     child_buffer: None,
                     np,
                 }
@@ -814,7 +817,8 @@ impl<N: HasStoragePreference> Node<N> {
                 GetRangeResult::NextNode {
                     np: cl.ptr(),
                     child_buffer: Some(cl.buffer()),
-                    prefetch_option,
+                    prefetch_option_node: prefetch_option.map(|l| l.ptr()),
+                    prefetch_option_additional: prefetch_option.map(|l| l.buffer()),
                 }
             }
             Inner::ChildBuffer(_) => unreachable!(),

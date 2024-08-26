@@ -123,7 +123,7 @@ impl<N: StaticSize> DisjointInternalNode<N> {
     }
 
     pub fn exceeds_fanout(&self) -> bool {
-        self.fanout() > 16 * MIN_FANOUT
+        self.fanout() > 64
     }
 }
 
@@ -441,9 +441,9 @@ impl<N> DisjointInternalNode<N> {
         &self.children[idx]
     }
 
-    pub fn get_next_node(&self, key: &[u8]) -> Option<&RwLock<N>> {
+    pub fn get_next_node(&self, key: &[u8]) -> Option<&ChildLink<N>> {
         let idx = self.idx(key) + 1;
-        self.children.get(idx).map(|l| &l.ptr)
+        self.children.get(idx)
     }
 
     pub fn drain_children(&mut self) -> impl Iterator<Item = ChildLink<N>> + '_
