@@ -6,7 +6,7 @@ use super::{
     internal::InternalNode,
     leaf::LeafNode,
     nvm_child_buffer::NVMChildBuffer,
-    nvmleaf::{NVMLeafNode},
+    nvmleaf::NVMLeafNode,
     packed::PackedMap,
     take_child_buffer::TakeChildBufferWrapper,
     FillUpResult, KeyInfo, PivotKey, StorageMap, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE,
@@ -67,13 +67,11 @@ impl StorageMap {
     pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
         match &node.0 {
             DisjointInternal(dint) => dint.is_too_large(kib!(256), mib!(1)),
-            _ => {
-                self.max_size(node)
-                    .map(|max_size| node.inner_size() > max_size)
-                    .unwrap_or(false)
-            }
+            _ => self
+                .max_size(node)
+                .map(|max_size| node.inner_size() > max_size)
+                .unwrap_or(false),
         }
-
     }
 
     pub fn leaf_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
@@ -283,14 +281,15 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             Ok(Node(PackedLeaf(PackedMap::new(data))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
             Ok(Node(DisjointInternal(
-                DisjointInternalNode::unpack(&data[4..])?.complete_object_refs(d_id),
+                DisjointInternalNode::unpack(data.into())?.complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
             Ok(Node(MemLeaf(NVMLeafNode::unpack(
                 data, pool, offset, size,
             )?)))
         } else if data[0..4] == (NodeInnerType::ChildBuffer as u32).to_be_bytes() {
-            Ok(Node(ChildBuffer(NVMChildBuffer::unpack(data)?)))
+            panic!();
+            // Ok(Node(ChildBuffer(NVMChildBuffer::unpack(data)?)))
         } else {
             panic!(
                 "Unkown bytes to unpack. [0..4]: {}",
@@ -349,17 +348,9 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // }
             (DisjointInternal(mut internal), StorageKind::Hdd) => {
                 // Fetch children and pipe them into one node.
-                let mut cbufs = Vec::with_capacity(internal.children.len());
-                for link in internal.children.iter_mut() {
-                    let buf_ptr = std::mem::replace(link.buffer_mut().get_mut(), unsafe {
-                        std::mem::zeroed()
-                    });
-                    cbufs.push(match dmu.get_and_remove(buf_ptr)?.0 {
-                        Inner::ChildBuffer(buf) => buf,
-                        _ => unreachable!(),
-                    });
-                }
-                Inner::Internal(InternalNode::from_disjoint_node(internal, cbufs))
+                unimplemented!();
+                // let mut cbufs = Vec::with_capacity(internal.children.len());
+                // Inner::Internal(InternalNode::from_disjoint_node(internal, cbufs))
             }
             (Leaf(leaf), StorageKind::Memory) => Inner::MemLeaf(leaf.to_memory_leaf()),
             (MemLeaf(leaf), StorageKind::Ssd) | (MemLeaf(leaf), StorageKind::Hdd) => {
@@ -413,23 +404,23 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
         }
     }
 
-    pub(super) fn try_find_flush_candidate(&mut self, storage_map: &StorageMap) -> Option<TakeChildBufferWrapper<N>>
+    pub(super) fn try_find_flush_candidate(
+        &mut self,
+        storage_map: &StorageMap,
+    ) -> Option<TakeChildBufferWrapper<N>>
     where
         N: ObjectReference,
     {
         let max_size = storage_map.max_size(&self);
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
-            Internal(ref mut internal) => internal.try_find_flush_candidate(
-                MIN_FLUSH_SIZE,
-                max_size.unwrap(),
-                MIN_FANOUT,
-            ),
+            Internal(ref mut internal) => {
+                internal.try_find_flush_candidate(MIN_FLUSH_SIZE, max_size.unwrap(), MIN_FANOUT)
+            }
             MemLeaf(_) => None,
-            DisjointInternal(ref mut nvminternal) => nvminternal.try_find_flush_candidate(
-                max_size.unwrap(),
-                MIN_FANOUT,
-            ),
+            DisjointInternal(ref mut nvminternal) => {
+                nvminternal.try_find_flush_candidate(max_size.unwrap(), MIN_FANOUT)
+            }
             Inner::ChildBuffer(_) => unreachable!(),
         }
     }
@@ -556,20 +547,6 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Inner::ChildBuffer(c) => c.size(),
         }
     }
-
-    pub(super) fn buffer_ptr(&mut self, key: &[u8]) -> &mut RwLock<N> {
-        match self.0 {
-            PackedLeaf(_) => todo!(),
-            Leaf(_) => todo!(),
-            MemLeaf(_) => todo!(),
-            Internal(_) => todo!(),
-            DisjointInternal(ref mut dint) => {
-                let idx = dint.idx(key);
-                dint.children[idx].buffer_mut()
-            },
-            Inner::ChildBuffer(_) => todo!(),
-        }
-    }
 }
 
 impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
@@ -629,19 +606,13 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
 
             let left_link = crate::tree::imp::disjoint_internal::InternalNodeLink {
                 buffer_size: left_buffer.size(),
-                buffer_ptr: allocate_obj(
-                    Node(Inner::ChildBuffer(left_buffer)),
-                    LocalPivotKey::LeftOuter(pivot_key.clone()),
-                ),
+                buffer: left_buffer,
                 ptr: left_child,
             };
 
             let right_link = crate::tree::imp::disjoint_internal::InternalNodeLink {
                 buffer_size: right_buffer.size(),
-                buffer_ptr: allocate_obj(
-                    Node(Inner::ChildBuffer(right_buffer)),
-                    LocalPivotKey::LeftOuter(pivot_key.clone()),
-                ),
+                buffer: right_buffer,
                 ptr: right_child,
             };
             *self = Node(DisjointInternal(DisjointInternalNode::new(
@@ -758,12 +729,11 @@ impl<N: HasStoragePreference> Node<N> {
             }
             MemLeaf(ref nvmleaf) => GetResult::Data(nvmleaf.get_with_info(key)),
             DisjointInternal(ref nvminternal) => {
-                let child_link = nvminternal.get(key);
-
-                GetResult::NVMNextNode {
-                    child: child_link.ptr(),
-                    buffer: child_link.buffer(),
+                let (child_np, msg) = nvminternal.get(key);
+                if let Some(msg) = msg {
+                    msgs.push(msg);
                 }
+                GetResult::NextNode(child_np)
             }
             Inner::ChildBuffer(ref buf) => {
                 if let Some(msg) = buf.get(key) {
@@ -816,9 +786,9 @@ impl<N: HasStoragePreference> Node<N> {
                 let cl = nvminternal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
                 GetRangeResult::NextNode {
                     np: cl.ptr(),
-                    child_buffer: Some(cl.buffer()),
+                    child_buffer: None,
                     prefetch_option_node: prefetch_option.map(|l| l.ptr()),
-                    prefetch_option_additional: prefetch_option.map(|l| l.buffer()),
+                    prefetch_option_additional: None,
                 }
             }
             Inner::ChildBuffer(_) => unreachable!(),
@@ -883,15 +853,15 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                 Internal(ref mut internal) => internal.insert(key, keyinfo, msg, msg_action),
                 MemLeaf(ref mut nvmleaf) => nvmleaf.insert(key, keyinfo, msg, msg_action),
                 DisjointInternal(ref mut nvminternal) => {
-                    let link = nvminternal.get_mut(key.borrow());
                     // FIXME: Treat this error, this may happen if the database
                     // is in an invalid state for example when nodes are moved
                     // around. It shouldn't happen in theory at this point, but
                     // there is the possibility of bugs.
-                    let mut buffer_node = dml.get_mut(link.buffer_mut().get_mut(), d_id).unwrap();
                     let child_idx = nvminternal.idx(key.borrow());
+                    let link = nvminternal.get_mut(key.borrow());
+                    let buffer_node = link.buffer_mut();
                     let size_delta =
-                        buffer_node.insert(key, msg, msg_action, storage_preference, dml, d_id);
+                        buffer_node.insert(key, keyinfo, msg, msg_action);
                     nvminternal.after_insert_size_delta(child_idx, size_delta);
                     size_delta
                 }
@@ -925,15 +895,12 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                     for (k, (kinfo, v)) in msg_buffer {
                         let idx = nvminternal.idx(&k);
                         let link = nvminternal.get_mut(&k);
-                        let mut buffer_node =
-                            dml.get_mut(link.buffer_mut().get_mut(), d_id).unwrap();
+                        let buffer_node = link.buffer_mut();
                         let delta = buffer_node.insert(
                             k,
+                            kinfo,
                             v,
                             msg_action.clone(),
-                            kinfo.storage_preference,
-                            dml,
-                            d_id,
                         );
                         nvminternal.after_insert_size_delta(idx, delta);
                         size_delta += delta;
@@ -989,7 +956,7 @@ impl<N: HasStoragePreference> Node<N> {
             DisjointInternal(ref mut nvminternal) => Some(Box::new(
                 nvminternal
                     .iter_mut()
-                    .flat_map(|child| child.iter_mut().map(|p| p.get_mut())),
+                    .map(|child| child.ptr_mut().get_mut()),
             )),
             // NOTE: This returns none as it is not necessarily harmful to write
             // it back as no consistency constraints have to be met.
@@ -1096,9 +1063,13 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             _ => {
                 let bt = std::backtrace::Backtrace::force_capture();
                 println!("{}", bt);
-                println!("Left is {} \n Right is {}", self.debug_info(), right_sibling.debug_info());
+                println!(
+                    "Left is {} \n Right is {}",
+                    self.debug_info(),
+                    right_sibling.debug_info()
+                );
                 unreachable!()
-            },
+            }
         }
     }
 

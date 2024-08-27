@@ -23,42 +23,40 @@ use serde::{Deserialize, Serialize};
 pub(super) struct DisjointInternalNode<N> {
     // FIXME: This type can be used as zero-copy
     pub meta_data: InternalNodeMetaData,
-    // We need this type everytime in memory. Requires modifications during runtime each time.
+    // List of children, for simplicity this is kept in two lists for now.
+    // pub ptrs: Vec<RwLock<N>>,
+    // pub buffers: Vec<NVMChildBuffer>,
     pub children: Vec<ChildLink<N>>,
 }
 
-use super::serialize_nodepointer;
-
 /// A link to the next child, this contains a buffer for messages as well as a
 /// pointer to the child.
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
+#[derive(Debug)]
 pub(super) struct ChildLink<N> {
-    #[serde(with = "serialize_nodepointer")]
-    buffer: RwLock<N>,
-    #[serde(with = "serialize_nodepointer")]
+    buffer: NVMChildBuffer,
     ptr: RwLock<N>,
 }
 
 impl<N: PartialEq> PartialEq for ChildLink<N> {
     fn eq(&self, other: &Self) -> bool {
-        &*self.buffer.read() == &*other.buffer.read() && &*self.ptr.read() == &*other.ptr.read()
+        // TODO: Needs buffer check?
+        &*self.ptr.read() == &*other.ptr.read()
     }
 }
 
 impl<N> ChildLink<N> {
-    pub fn new(buffer: N, ptr: N) -> Self {
+    pub fn new(buffer: NVMChildBuffer, ptr: N) -> Self {
         ChildLink {
-            buffer: RwLock::new(buffer),
+            buffer,
             ptr: RwLock::new(ptr),
         }
     }
 
-    pub fn buffer_mut(&mut self) -> &mut RwLock<N> {
+    pub fn buffer_mut(&mut self) -> &mut NVMChildBuffer {
         &mut self.buffer
     }
 
-    pub fn buffer(&self) -> &RwLock<N> {
+    pub fn buffer(&self) -> &NVMChildBuffer {
         &self.buffer
     }
 
@@ -68,10 +66,6 @@ impl<N> ChildLink<N> {
 
     pub fn ptr(&self) -> &RwLock<N> {
         &self.ptr
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RwLock<N>> {
-        [&mut self.buffer, &mut self.ptr].into_iter()
     }
 }
 
@@ -119,7 +113,13 @@ impl<N: StaticSize> Size for DisjointInternalNode<N> {
 // longer dependent on just this object but it's subobjects too.
 impl<N: StaticSize> DisjointInternalNode<N> {
     pub fn is_too_large(&self, max_node_size: usize, max_buf_size: usize) -> bool {
-        self.exceeds_fanout() || self.size() > max_node_size || self.meta_data.entries_sizes.iter().fold(false, |acc, s| acc || *s > max_buf_size)
+        self.exceeds_fanout()
+            || self.size() > max_node_size
+            || self
+                .meta_data
+                .entries_sizes
+                .iter()
+                .fold(false, |acc, s| acc || *s > max_buf_size)
     }
 
     pub fn exceeds_fanout(&self) -> bool {
@@ -184,20 +184,20 @@ impl<N: HasStoragePreference> HasStoragePreference for DisjointInternalNode<N> {
 
 pub struct InternalNodeLink<N> {
     pub ptr: N,
-    pub buffer_ptr: N,
+    pub buffer: NVMChildBuffer,
     pub buffer_size: usize,
 }
 
 impl<N> InternalNodeLink<N> {
-    pub fn destruct(self) -> (N, N) {
-        (self.ptr, self.buffer_ptr)
+    pub fn destruct(self) -> (N, NVMChildBuffer) {
+        (self.ptr, self.buffer)
     }
 }
 
 impl<N> Into<ChildLink<N>> for InternalNodeLink<N> {
     fn into(self) -> ChildLink<N> {
         ChildLink {
-            buffer: RwLock::new(self.buffer_ptr),
+            buffer: self.buffer,
             ptr: RwLock::new(self.ptr),
         }
     }
@@ -226,13 +226,12 @@ impl<N> DisjointInternalNode<N> {
                 entries_prefs: vec![StoragePreference::NONE, StoragePreference::NONE],
                 current_size: None,
             },
-            children: vec![left_child.into(), right_child.into()],
+            children: todo!(),
         }
     }
 
     /// Returns the number of children.
-    pub fn fanout(&self) -> usize
-    {
+    pub fn fanout(&self) -> usize {
         self.children.len()
     }
 
@@ -291,38 +290,64 @@ impl<N> DisjointInternalNode<N> {
     /// Layout
     /// ------
     ///
-    /// len_meta META len_c [C_PTR CBUF_PTR]
+    /// - Metadata len
+    /// - InternalNodeMetaData bytes
+    /// - [child PTR; LEN]
+    /// - [child BUFFER; LEN]
     pub fn pack<W: std::io::Write>(&self, mut w: W) -> Result<(), std::io::Error>
     where
-        N: serde::Serialize,
+        N: serde::Serialize + StaticSize,
     {
         let bytes_meta_data_len = bincode::serialized_size(&self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
         w.write_all(&(bytes_meta_data_len as u32).to_le_bytes())?;
         bincode::serialize_into(&mut w, &self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        bincode::serialize_into(&mut w, &self.children)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        for child in self.children.iter() {
+            bincode::serialize_into(&mut w, &*child.ptr.read())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        }
+        for child in self.children.iter() {
+            child.buffer.pack(&mut w);
+        }
         Ok(())
     }
 
     /// Read object from a byte buffer and instantiate it.
-    pub fn unpack<'a>(buf: &'a [u8]) -> Result<Self, std::io::Error>
+    pub fn unpack(buf: CowBytes) -> Result<Self, std::io::Error>
     where
-        N: serde::Deserialize<'a> + StaticSize,
+        N: serde::de::DeserializeOwned + StaticSize,
     {
-        let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
-        let meta_data = bincode::deserialize(&buf[4..4 + len])
+        const NODE_ID: usize = 4;
+        let len = u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
+
+        let meta_data: InternalNodeMetaData =
+            bincode::deserialize(&buf[NODE_ID + 4..NODE_ID + 4 + len])
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let ptrs_len = meta_data.pivot.len() * N::static_size();
+        let ptrs: Vec<N> = bincode::deserialize(&buf[NODE_ID + len..NODE_ID + len + ptrs_len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let children: Vec<_> = bincode::deserialize(&buf[4 + len..])
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut off = 0;
+        let mut buffers = vec![];
+        for _ in 0..meta_data.pivot.len() {
+            let b =
+                NVMChildBuffer::unpack(buf.clone().slice_from(len as u32 + ptrs_len as u32 + off))?;
+            off += b.entries_size as u32;
+            buffers.push(b);
+        }
 
-        // println!("Disjoint has {} children", children.len());
         Ok(DisjointInternalNode {
             meta_data,
-            children,
+            children: ptrs
+                .into_iter()
+                .zip(buffers.into_iter())
+                .map(|(ptr, buf)| ChildLink {
+                    ptr: RwLock::new(ptr),
+                    buffer: buf,
+                })
+                .collect(),
         })
     }
 
@@ -338,11 +363,12 @@ impl<N> DisjointInternalNode<N> {
 }
 
 impl<N> DisjointInternalNode<N> {
-    pub fn get(&self, key: &[u8]) -> &ChildLink<N>
+    pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>)
     where
         N: ObjectReference,
     {
-        &self.children[self.idx(key)]
+        let child = &self.children[self.idx(key)];
+        (&child.ptr, child.buffer.get(key))
     }
 
     pub fn get_mut(&mut self, key: &[u8]) -> &mut ChildLink<N>
@@ -562,7 +588,6 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
             // SAFETY: There must always be pivots + 1 many children, otherwise
             // the state of the Internal Node is broken.
             self.children[id].ptr.write().set_index(pk.clone());
-            self.children[id].buffer.write().set_index(pk);
         }
         self
     }
@@ -608,9 +633,9 @@ where
             debug!("Largest child's buffer size: {}", child);
 
             if !self.exceeds_fanout() && self.size() < max_node_size {
-               Some(child_idx)
+                Some(child_idx)
             } else {
-               None
+                None
             }
 
             // if *child >= min_flush_size
@@ -654,13 +679,15 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         // is added to self, the overall entries don't change, so this node doesn't need to be
         // invalidated
 
-        let sibling = load(&mut self.node.children[self.child_idx].buffer).split_at(&pivot_key);
+        let sibling = self.node.children[self.child_idx]
+            .buffer
+            .split_at(&pivot_key);
         let sibling_size = sibling.size();
         let size_delta = sibling_size + pivot_key.size();
         self.node.children.insert(
             self.child_idx + 1,
             ChildLink {
-                buffer: RwLock::new(allocate(sibling)),
+                buffer: sibling,
                 ptr: RwLock::new(sibling_np),
             },
         );
@@ -720,8 +747,7 @@ where
     }
 }
 
-pub(super) struct PrepareMergeChild<'a, N: 'a + 'static>
-{
+pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
     node: &'a mut DisjointInternalNode<N>,
     pivot_key_idx: usize,
     other_child_idx: usize,
@@ -750,23 +776,37 @@ where
     {
         let mut right_child_links = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.meta_data.pivot.remove(self.pivot_key_idx);
-        self.node.meta_data.entries_prefs.remove(self.pivot_key_idx + 1);
-        self.node.meta_data.entries_sizes.remove(self.pivot_key_idx + 1);
+        self.node
+            .meta_data
+            .entries_prefs
+            .remove(self.pivot_key_idx + 1);
+        self.node
+            .meta_data
+            .entries_sizes
+            .remove(self.pivot_key_idx + 1);
 
-        let mut left_buffer = dml.get_mut(self.node.children[self.pivot_key_idx].buffer_mut().get_mut(), self.d_id).expect("Invalid node state");
-        let mut right_buffer = dml.get_mut(right_child_links.buffer_mut().get_mut(), self.d_id).expect("Invalid node state");
+        let mut left_buffer =
+                self.node.children[self.pivot_key_idx].buffer_mut();
+        let mut right_buffer = right_child_links.buffer_mut();
 
-        let size_delta = pivot_key.size() + N::static_size() * 2 + std::mem::size_of::<u8>() + std::mem::size_of::<usize>();
+        let size_delta = pivot_key.size()
+            + N::static_size() * 2
+            + std::mem::size_of::<u8>()
+            + std::mem::size_of::<usize>();
         self.node.meta_data.entries_size -= size_delta;
         left_buffer
-            .assert_buffer_mut()
-            .append(&mut right_buffer.assert_buffer_mut());
+            .append(&mut right_buffer);
         self.node.meta_data.entries_sizes[self.pivot_key_idx] = left_buffer.size();
         self.node.meta_data.invalidate();
 
         MergeChildResult {
             pivot_key,
-            old_np: Box::new([right_child_links.ptr.into_inner(), right_child_links.buffer.into_inner()].into_iter()),
+            old_np: Box::new(
+                [
+                    right_child_links.ptr.into_inner(),
+                ]
+                .into_iter(),
+            ),
             size_delta: -(size_delta as isize),
         }
     }
@@ -784,13 +824,8 @@ where
         {
             let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
             // Move messages around
-            let (mut left_child, mut right_child) = (
-                load(&mut left[0].buffer, self.d_id),
-                load(&mut right[0].buffer, self.d_id),
-            );
-            left_child
-                .assert_buffer_mut()
-                .rebalance(right_child.assert_buffer_mut(), &new_pivot_key);
+            let (left_child, right_child) = (&mut left[0].buffer, &mut right[0].buffer);
+            left_child.rebalance(right_child, &new_pivot_key);
         }
 
         let mut size_delta = new_pivot_key.size() as isize;
@@ -812,14 +847,14 @@ impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         &mut self.node.children[self.child_idx].ptr
     }
 
-    pub fn buffer_pointer_mut(&mut self) -> &mut RwLock<N>
+    pub fn buffer_mut(&mut self) -> &mut NVMChildBuffer
     where
         N: ObjectReference,
     {
         &mut self.node.children[self.child_idx].buffer
     }
 
-    pub fn buffer_pointer(&self) -> &RwLock<N>
+    pub fn buffer(&self) -> &NVMChildBuffer
     where
         N: ObjectReference,
     {

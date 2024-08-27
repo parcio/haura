@@ -136,8 +136,7 @@ where
             let (buffer, size_delta) = match &mut *child_buffer {
                 TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.take_buffer(),
                 TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                    let mut cbuf = self.get_mut_node(obj.buffer_pointer_mut())?;
-                    let (bmap, size_delta) = cbuf.assert_buffer_mut().take();
+                    let (bmap, size_delta) = obj.buffer_mut().take();
                     obj.add_size(-(size_delta as isize));
                     (bmap, -(size_delta as isize))
                 }

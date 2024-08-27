@@ -438,7 +438,11 @@ where
 
         if node.level() != 0 {
             println!("fetch data");
-            println!("root fanout {:?}, root lvl: {:?}", node.fanout(), node.level());
+            println!(
+                "root fanout {:?}, root lvl: {:?}",
+                node.fanout(),
+                node.level()
+            );
         }
 
         let data = loop {
@@ -574,75 +578,26 @@ where
         let mut parent = None;
         let mut node = {
             let mut node = self.get_mut_root_node()?;
-            let mut path = Vec::with_capacity(node.level() as usize);
-            let root_lvl = node.level() as usize;
-            let mut last_buffer_lvl = None;
             loop {
-                let cur_lvl = node.level() as usize;
-                let mut was_disjoined = false;
-                // This call performs an eventual iteration down to the next
-                // child. In the dissected internal node case we have to check
-                // if the buffer is loaded and contains the key.
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-                        let mut buffer_loaded = false;
                         let maybe_child = match &mut *child_buffer {
                             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                                 self.try_get_mut_node(obj.node_pointer_mut())
                             }
                             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                                // This branch is more complex, two presence
-                                // checks are required for a pass-through case:
-                                // the buffer needs to be present in memory and
-                                // the associated child node.
-                                was_disjoined = true;
-                                // FIXME: can be done without locking on cache
-                                let buffer = self.try_get_mut_node(obj.buffer_pointer_mut());
-                                if buffer.is_some() {
-                                    buffer_loaded = true;
-                                }
                                 self.try_get_mut_node(obj.child_pointer_mut())
                             }
                         };
-                        if buffer_loaded {
-                            last_buffer_lvl = Some(cur_lvl);
-                        }
                         if let Some(child) = maybe_child {
                             node = child;
-                            path.push(Some(child_buffer));
+                            parent = Some(child_buffer);
                         } else {
-                            if let Some(last_lvl) = last_buffer_lvl {
-                                parent =
-                                    path.get_mut(root_lvl - last_lvl - 1).and_then(|o| o.take());
-                                break if last_lvl == cur_lvl {
-                                    child_buffer.into_owner()
-                                } else {
-                                    path.get_mut(root_lvl - last_lvl).and_then(|o| o.take()).unwrap().into_owner()
-                                };
-                            } else if was_disjoined {
-                                // No buffers were found which are already
-                                // loaded on the walkable path. Jump back to the
-                                // root and use usual insertion.
-                                break path
-                                    .first_mut()
-                                    .and_then(|o| o.take())
-                                    .map(|o| o.into_owner())
-                                    .unwrap_or(child_buffer.into_owner());
-                            } else {
-                                parent =
-                                    path.get_mut(root_lvl - cur_lvl - 1).and_then(|o| o.take());
-                                break child_buffer.into_owner();
-                            }
+                            break child_buffer.into_owner();
                         }
                     }
                     Err(node) => {
-                        // if let Some(last_lvl) = last_buffer_lvl {
-                        //     parent = path.get_mut(root_lvl - last_lvl - 1).and_then(|o| o.take());
-                        //     break path[root_lvl - last_lvl].take().unwrap().into_owner();
-                        // } else {
-                            parent = path.last_mut().and_then(|o| o.take());
-                            break node;
-                        // }
+                        break node;
                     }
                 };
             }

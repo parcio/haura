@@ -221,8 +221,7 @@ impl<N> InternalNode<N> {
             .map(|(cbuf, child_ptr)| {
                 let size = cbuf.size();
                 let pref = cbuf.correct_preference();
-                let buf_ptr = insert_new_cbuf(cbuf);
-                (size, pref, ChildLink::new(buf_ptr, child_ptr))
+                (size, pref, ChildLink::new(cbuf, child_ptr))
             })
             .fold((vec![], 0usize, vec![], vec![]), |mut acc, elem| {
                 acc.0.push(elem.0);

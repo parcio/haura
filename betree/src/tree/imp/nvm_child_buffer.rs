@@ -39,7 +39,7 @@ pub(super) struct NVMChildBuffer {
     // This preference should always be set by the parent. Needs to be on fast
     // memory or NVMe to be worth the additional queries.
     pub(super) system_storage_preference: AtomicSystemStoragePreference,
-    entries_size: usize,
+    pub(super) entries_size: usize,
     pub(super) buffer: Map,
 }
 
@@ -52,7 +52,7 @@ const KEY_IDX_SIZE: usize =
 
 #[derive(Debug)]
 pub(super) enum Map {
-    Packed { entry_count: usize, data: CowBytes },
+    Packed { entry_count: usize, data: SlicedCowBytes },
     Unpacked(BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>),
 }
 
@@ -105,7 +105,7 @@ impl Map {
                             values_pos
                                 .into_iter()
                                 // NOTE: This copy is cheap as the data is behind an Arc.
-                                .map(|(pos, len)| data.clone().slice(pos, len)),
+                                .map(|(pos, len)| data.clone().subslice(pos, len)),
                         ),
                     ),
                 ));
@@ -294,7 +294,7 @@ impl NVMChildBuffer {
 }
 
 pub struct PackedBufferIterator<'a> {
-    buffer: &'a CowBytes,
+    buffer: &'a SlicedCowBytes,
     cur: usize,
     entry_count: usize,
     keys: Vec<KeyIdx>,
@@ -309,12 +309,12 @@ impl<'a> Iterator for PackedBufferIterator<'a> {
         }
 
         let kpos = &self.keys[self.cur];
-        let key = self.buffer.clone().slice(kpos.pos, kpos.len);
+        let key = self.buffer.clone().subslice(kpos.pos, kpos.len);
 
         let vpos_off = (kpos.pos + kpos.len) as usize;
         let vpos = u32::from_le_bytes(self.buffer.cut(vpos_off, 4).try_into().unwrap());
         let vlen = u32::from_le_bytes(self.buffer.cut(vpos_off + 4, 4).try_into().unwrap());
-        let val = self.buffer.clone().slice(vpos, vlen);
+        let val = self.buffer.clone().subslice(vpos, vlen);
         self.cur += 1;
         Some((
             // FIXME: Expensive copy when returning results here.
@@ -544,7 +544,7 @@ impl NVMChildBuffer {
         Ok(())
     }
 
-    pub fn unpack(buf: Box<[u8]>) -> Result<Self, std::io::Error> {
+    pub fn unpack(buf: SlicedCowBytes) -> Result<Self, std::io::Error> {
         let entry_count =
             u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
         let entries_size =
@@ -558,7 +558,7 @@ impl NVMChildBuffer {
             entries_size,
             buffer: Map::Packed {
                 entry_count,
-                data: buf.into(),
+                data: buf,
             },
         })
     }
