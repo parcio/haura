@@ -201,34 +201,6 @@ where
                             prefetch_node.take()
                         };
 
-                        let previous_prefetch_buffer = if let Some(prefetch_np) = prefetch_option_additional {
-                            let f = self.dml.prefetch(&prefetch_np.read())?;
-                            replace(prefetch_buffer, f)
-                        } else {
-                            prefetch_buffer.take()
-                        };
-
-                        let buffer =
-                        if let Some(previous_prefetch) = previous_prefetch_buffer {
-                            Some(self.dml.finish_prefetch(previous_prefetch)?)
-                        } else {
-                            if let Some(cb_np) = child_buffer {
-                                Some(self.get_node(cb_np)?)
-                            } else {
-                                None
-                            }
-                        };
-
-                        if let Some(cb) = buffer {
-                            let child = cb.assert_buffer();
-                            for (key, msg) in child.get_all_messages() {
-                                messages
-                                    .entry(key.clone())
-                                    .or_insert_with(Vec::new)
-                                    .push(msg.clone());
-                            }
-                        }
-
                         if let Some(previous_prefetch) = previous_prefetch_node {
                             self.dml.finish_prefetch(previous_prefetch)?
                         } else {

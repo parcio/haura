@@ -102,9 +102,9 @@ const INTERNAL_BINCODE_STATIC: usize = 4 + 8;
 impl<N: StaticSize> Size for DisjointInternalNode<N> {
     fn size(&self) -> usize {
         std::mem::size_of::<u32>()
-            + dbg!(self.meta_data.size())
-            + dbg!(self.children.len() * N::static_size() + 8)
-            + dbg!(self.meta_data.entries_sizes.iter().sum::<usize>())
+            + self.meta_data.size()
+            + self.children.len() * N::static_size() + 8
+            + self.children.iter().map(|c| c.buffer.size()).sum::<usize>()
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -230,7 +230,7 @@ impl<N> DisjointInternalNode<N> {
                 entries_prefs: vec![StoragePreference::NONE, StoragePreference::NONE],
                 current_size: None,
             },
-            children: todo!(),
+            children: vec![left_child.into(), right_child.into()],
         }
     }
 
@@ -307,6 +307,10 @@ impl<N> DisjointInternalNode<N> {
         w.write_all(&(bytes_meta_data_len as u32).to_le_bytes())?;
         bincode::serialize_into(&mut w, &self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let bytes_child_len = bincode::serialized_size(&self.children)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        w.write_all(&(bytes_child_len as u32).to_le_bytes())?;
         bincode::serialize_into(&mut w, &self.children)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         for child in self.children.iter() {
@@ -321,22 +325,27 @@ impl<N> DisjointInternalNode<N> {
         N: serde::de::DeserializeOwned + StaticSize,
     {
         const NODE_ID: usize = 4;
-        let len = u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
+        let mut cursor = NODE_ID;
+        let len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
+        cursor += 4;
 
         let meta_data: InternalNodeMetaData =
-            bincode::deserialize(&buf[NODE_ID + 4..NODE_ID + 4 + len])
+            bincode::deserialize(&buf[cursor..cursor + len])
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        cursor += len;
 
-        let ptrs_len = meta_data.pivot.len() * N::static_size() + 8;
+        let ptrs_len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
+        cursor += 4;
+
         let mut ptrs: Vec<ChildLink<N>> =
-            bincode::deserialize(&buf[NODE_ID + 4 + len..NODE_ID + 4 + len + ptrs_len])
+            bincode::deserialize(&buf[cursor..cursor + ptrs_len])
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        let mut off = 0;
+        cursor += ptrs_len;
         for idx in 0..meta_data.pivot.len() {
+            let sub = buf.clone().slice_from(cursor as u32);
             let b =
-                NVMChildBuffer::unpack(buf.clone().slice_from(NODE_ID as u32 + 4 + len as u32 + ptrs_len as u32 + off))?;
-            off += b.size() as u32;
+                NVMChildBuffer::unpack(sub)?;
+            cursor += b.size();
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
         }
 
@@ -602,6 +611,7 @@ where
 
     pub fn try_find_flush_candidate(
         &mut self,
+        min_flush_size: usize,
         max_node_size: usize,
         min_fanout: usize,
     ) -> Option<TakeChildBufferWrapper<N>>
@@ -618,7 +628,7 @@ where
                 .unwrap();
             debug!("Largest child's buffer size: {}", child);
 
-            if !self.exceeds_fanout() && self.size() < max_node_size {
+            if *child > min_flush_size && !self.exceeds_fanout() && self.size() < max_node_size {
                 Some(child_idx)
             } else {
                 None

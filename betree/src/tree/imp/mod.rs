@@ -462,7 +462,6 @@ where
                     self.get_node(child)?
                 }
 
-                GetResult::ChildBuffer => unreachable!(),
             };
             if !prefetching {
                 prefetch_queue.push(Event::Done);
@@ -621,7 +620,6 @@ where
             unimplemented!();
         }
 
-        assert!(!node.is_buffer());
         self.rebalance_tree(node, parent)?;
 
         // All non-root trees will start the eviction process.

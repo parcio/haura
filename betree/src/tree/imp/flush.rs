@@ -80,7 +80,6 @@ where
                             // println!("split node");
                             let (next_node, size_delta) = self.split_node(_node, parent)?;
                             node = next_node;
-                            assert!(!node.is_buffer());
                             parent.add_size(size_delta);
                             continue;
                         }
@@ -90,23 +89,19 @@ where
                 };
 
             let mut child = self.get_mut_node(child_buffer.child_pointer_mut())?;
-            assert!(!child.is_buffer());
 
             // 2. Iterate down to child if too large
             if !child.is_leaf() && self.storage_map.node_is_too_large(&child) {
                 warn!("Aborting flush, child is too large already");
                 parent = Some(child_buffer);
                 node = child;
-                assert!(!node.is_buffer());
                 continue;
             }
             // 3. If child is internal, small and has not many children -> merge the children of node.
             if child.has_too_low_fanout() && !self.storage_map.node_is_too_large(&child) {
-                panic!("merge internal with fanout {} on level {}", child.fanout().unwrap(), child.level());
                 let size_delta = {
                     let mut m = child_buffer.prepare_merge(&self.dml, self.tree_id());
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
-                    assert!(!sibling.is_buffer());
                     let child_on_left = m.is_right_sibling();
                     let MergeChildResult {
                         pivot_key,
@@ -129,7 +124,6 @@ where
                 };
                 child_buffer.add_size(size_delta);
                 node = child_buffer.into_owner();
-                assert!(!node.is_buffer());
                 continue;
             }
             // 4. Remove messages from the child buffer.
@@ -197,19 +191,17 @@ where
 
             // 8. After finishing all operations once, see if they have to be repeated.
             if child_buffer.size() > super::MAX_INTERNAL_NODE_SIZE {
-                panic!("Node is still too large");
+                warn!("Node is still too large");
                 if self.storage_map.node_is_too_large(&child) {
                     warn!("... but child, too");
                 }
                 node = child_buffer.into_owner();
-                assert!(!node.is_buffer());
                 continue;
             }
             // 9. Traverse down to child.
             // Drop old parent here.
             parent = Some(child_buffer);
             node = child;
-            assert!(!node.is_buffer());
         }
     }
 }

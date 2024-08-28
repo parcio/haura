@@ -83,15 +83,10 @@ where
                     pivot_key,
                     select_right,
                     |np| {
-                        OwningRefMut::new(self.get_mut_node(np).unwrap())
-                            .map_mut(|o| o.assert_buffer_mut())
+                        unimplemented!()
                     },
                     |node| {
-                        self.dml.insert(
-                            super::Node::new_buffer(node),
-                            self.tree_id(),
-                            crate::tree::PivotKey::Right(CowBytes::from(vec![]), self.tree_id()),
-                        )
+                        unimplemented!()
                     },
                 ),
         };
