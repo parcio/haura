@@ -18,22 +18,23 @@ use owning_ref::OwningRefMut;
 use parking_lot::RwLock;
 use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
+use super::serialize_nodepointer;
 use serde::{Deserialize, Serialize};
 
 pub(super) struct DisjointInternalNode<N> {
     // FIXME: This type can be used as zero-copy
     pub meta_data: InternalNodeMetaData,
-    // List of children, for simplicity this is kept in two lists for now.
-    // pub ptrs: Vec<RwLock<N>>,
-    // pub buffers: Vec<NVMChildBuffer>,
     pub children: Vec<ChildLink<N>>,
 }
 
 /// A link to the next child, this contains a buffer for messages as well as a
 /// pointer to the child.
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
 pub(super) struct ChildLink<N> {
+    #[serde(skip)]
     buffer: NVMChildBuffer,
+    #[serde(with = "serialize_nodepointer")]
     ptr: RwLock<N>,
 }
 
@@ -100,7 +101,10 @@ impl InternalNodeMetaData {
 const INTERNAL_BINCODE_STATIC: usize = 4 + 8;
 impl<N: StaticSize> Size for DisjointInternalNode<N> {
     fn size(&self) -> usize {
-        self.meta_data.size() + self.children.len() * N::static_size() * 2 + INTERNAL_BINCODE_STATIC
+        std::mem::size_of::<u32>()
+            + dbg!(self.meta_data.size())
+            + dbg!(self.children.len() * N::static_size() + 8)
+            + dbg!(self.meta_data.entries_sizes.iter().sum::<usize>())
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -290,7 +294,7 @@ impl<N> DisjointInternalNode<N> {
     /// Layout
     /// ------
     ///
-    /// - Metadata len
+    /// - LE u32 Metadata len
     /// - InternalNodeMetaData bytes
     /// - [child PTR; LEN]
     /// - [child BUFFER; LEN]
@@ -303,12 +307,10 @@ impl<N> DisjointInternalNode<N> {
         w.write_all(&(bytes_meta_data_len as u32).to_le_bytes())?;
         bincode::serialize_into(&mut w, &self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        bincode::serialize_into(&mut w, &self.children)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         for child in self.children.iter() {
-            bincode::serialize_into(&mut w, &*child.ptr.read())
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        }
-        for child in self.children.iter() {
-            child.buffer.pack(&mut w);
+            child.buffer.pack(&mut w)?;
         }
         Ok(())
     }
@@ -325,29 +327,22 @@ impl<N> DisjointInternalNode<N> {
             bincode::deserialize(&buf[NODE_ID + 4..NODE_ID + 4 + len])
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let ptrs_len = meta_data.pivot.len() * N::static_size();
-        let ptrs: Vec<N> = bincode::deserialize(&buf[NODE_ID + len..NODE_ID + len + ptrs_len])
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let ptrs_len = meta_data.pivot.len() * N::static_size() + 8;
+        let mut ptrs: Vec<ChildLink<N>> =
+            bincode::deserialize(&buf[NODE_ID + 4 + len..NODE_ID + 4 + len + ptrs_len])
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let mut off = 0;
-        let mut buffers = vec![];
-        for _ in 0..meta_data.pivot.len() {
+        for idx in 0..meta_data.pivot.len() {
             let b =
-                NVMChildBuffer::unpack(buf.clone().slice_from(len as u32 + ptrs_len as u32 + off))?;
-            off += b.entries_size as u32;
-            buffers.push(b);
+                NVMChildBuffer::unpack(buf.clone().slice_from(NODE_ID as u32 + 4 + len as u32 + ptrs_len as u32 + off))?;
+            off += b.size() as u32;
+            let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
         }
 
         Ok(DisjointInternalNode {
             meta_data,
-            children: ptrs
-                .into_iter()
-                .zip(buffers.into_iter())
-                .map(|(ptr, buf)| ChildLink {
-                    ptr: RwLock::new(ptr),
-                    buffer: buf,
-                })
-                .collect(),
+            children: ptrs,
         })
     }
 
@@ -494,7 +489,7 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
 
         // println!("Disjoint node has {} children", self.children.len());
 
-        assert!(self.fanout() > 2 * MIN_FANOUT);
+        assert!(self.fanout() >= 2 * MIN_FANOUT);
 
         let split_off_idx = self.fanout() / 2;
         let pivot = self.meta_data.pivot.split_off(split_off_idx);
@@ -504,19 +499,10 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
         let entries_sizes = self.meta_data.entries_sizes.split_off(split_off_idx);
         let entries_prefs = self.meta_data.entries_prefs.split_off(split_off_idx);
 
-        // FIXME: Necessary to update, how to propagate?
-        // if let (Some(new_left_outer), Some(new_left_pivot)) = (children.first_mut(), pivot.first())
-        // {
-        //     new_left_outer
-        //         .as_mut()
-        //         .unwrap()
-        //         .update_pivot_key(LocalPivotKey::LeftOuter(new_left_pivot.clone()))
-        // }
-
         let entries_size = entries_sizes.len() * std::mem::size_of::<usize>()
             + entries_prefs.len()
             + pivot.iter().map(|p| p.size()).sum::<usize>()
-            + children.len() * 2 * N::static_size();
+            + children.len() * N::static_size() + entries_sizes.iter().sum::<usize>();
 
         let size_delta = entries_size + pivot_key.size();
         self.meta_data.entries_size -= size_delta;
@@ -714,7 +700,6 @@ where
     N: StaticSize,
 {
     pub(super) fn size(&self) -> usize {
-        // FIXME: Previously logical_size was used here, this needs to take the buffer into account? or the internal node? or both?
         (&*self.node).size()
     }
 
@@ -785,8 +770,7 @@ where
             .entries_sizes
             .remove(self.pivot_key_idx + 1);
 
-        let mut left_buffer =
-                self.node.children[self.pivot_key_idx].buffer_mut();
+        let mut left_buffer = self.node.children[self.pivot_key_idx].buffer_mut();
         let mut right_buffer = right_child_links.buffer_mut();
 
         let size_delta = pivot_key.size()
@@ -794,19 +778,13 @@ where
             + std::mem::size_of::<u8>()
             + std::mem::size_of::<usize>();
         self.node.meta_data.entries_size -= size_delta;
-        left_buffer
-            .append(&mut right_buffer);
+        left_buffer.append(&mut right_buffer);
         self.node.meta_data.entries_sizes[self.pivot_key_idx] = left_buffer.size();
         self.node.meta_data.invalidate();
 
         MergeChildResult {
             pivot_key,
-            old_np: Box::new(
-                [
-                    right_child_links.ptr.into_inner(),
-                ]
-                .into_iter(),
-            ),
+            old_np: Box::new([right_child_links.ptr.into_inner()].into_iter()),
             size_delta: -(size_delta as isize),
         }
     }
@@ -868,6 +846,8 @@ pub(crate) use tests::Key as TestKey;
 #[cfg(test)]
 mod tests {
 
+    use std::io::Write;
+
     use super::*;
     use crate::{arbitrary::GenExt, database::DatasetId, tree::pivot_key};
 
@@ -916,7 +896,7 @@ mod tests {
     impl<N: Clone> Clone for ChildLink<N> {
         fn clone(&self) -> Self {
             Self {
-                buffer: self.buffer.read().clone().into(),
+                buffer: self.buffer.clone(),
                 ptr: self.ptr.read().clone().into(),
             }
         }
@@ -933,6 +913,7 @@ mod tests {
                     pref: self.meta_data.pref.clone(),
                     entries_prefs: self.meta_data.entries_prefs.clone(),
                     entries_sizes: self.meta_data.entries_sizes.clone(),
+                    current_size: None,
                 },
                 children: self.children.clone(),
             }
@@ -958,9 +939,10 @@ mod tests {
 
             let mut children: Vec<ChildLink<T>> = Vec::with_capacity(pivot_key_cnt + 1);
             for _ in 0..pivot_key_cnt + 1 {
-                entries_size += T::static_size() * 2;
+                let buffer = NVMChildBuffer::new();
+                entries_size += T::static_size() + buffer.size();
                 children.push(ChildLink {
-                    buffer: RwLock::new(T::arbitrary(g)),
+                    buffer,
                     ptr: RwLock::new(T::arbitrary(g)),
                 });
             }
@@ -977,7 +959,8 @@ mod tests {
                     ),
                     pref: AtomicStoragePreference::unknown(),
                     entries_prefs: vec![StoragePreference::NONE; pivot_key_cnt + 1],
-                    entries_sizes: children.iter().map(|c| 42).collect::<Vec<_>>(),
+                    entries_sizes: children.iter().map(|c| c.buffer.size()).collect::<Vec<_>>(),
+                    current_size: None,
                 },
                 children,
             }
@@ -1085,8 +1068,9 @@ mod tests {
     #[quickcheck]
     fn serialize_then_deserialize(node: DisjointInternalNode<()>) {
         let mut buf = Vec::new();
+        buf.write_all(&[0; 4]).unwrap();
         node.pack(&mut buf).unwrap();
-        let unpacked = DisjointInternalNode::<()>::unpack(&buf).unwrap();
+        let unpacked = DisjointInternalNode::<()>::unpack(buf.into()).unwrap();
         assert_eq!(unpacked.meta_data, node.meta_data);
         assert_eq!(unpacked.children, node.children);
     }

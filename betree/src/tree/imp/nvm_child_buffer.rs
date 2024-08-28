@@ -43,8 +43,14 @@ pub(super) struct NVMChildBuffer {
     pub(super) buffer: Map,
 }
 
+impl Default for NVMChildBuffer {
+    fn default() -> Self {
+        NVMChildBuffer::new()
+    }
+}
+
 pub const BUFFER_STATIC_SIZE: usize = HEADER;
-const NODE_ID: usize = 4;
+const NODE_ID: usize = 0;
 const HEADER: usize =
     NODE_ID + std::mem::size_of::<u32>() + std::mem::size_of::<u32>() + std::mem::size_of::<u8>();
 const KEY_IDX_SIZE: usize =
@@ -716,10 +722,10 @@ mod tests {
     #[quickcheck]
     fn unpack_equality(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; 4]);
+        buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
-        let mut other = NVMChildBuffer::unpack(buf.into_boxed_slice()).unwrap();
+        let mut other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
         other.buffer.unpacked();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
@@ -731,10 +737,10 @@ mod tests {
     #[quickcheck]
     fn unpackless_access(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; 4]);
+        buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
-        let other = NVMChildBuffer::unpack(buf.into_boxed_slice()).unwrap();
+        let other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
             let res = other.get(key).unwrap();
@@ -745,10 +751,10 @@ mod tests {
     #[quickcheck]
     fn unpackless_iter(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; 4]);
+        buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
-        let other = NVMChildBuffer::unpack(buf.into_boxed_slice()).unwrap();
+        let other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
 
         for (idx, (key, tup)) in child_buffer.get_all_messages().enumerate() {
             let res = other.get_all_messages().nth(idx).unwrap();
@@ -759,9 +765,9 @@ mod tests {
     #[quickcheck]
     fn serialize_deserialize_idempotent(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; 4]);
+        buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
-        let mut other = NVMChildBuffer::unpack(buf.into_boxed_slice()).unwrap();
+        let mut other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
         other.buffer.unpacked();
         assert_eq!(other, child_buffer);
     }
