@@ -50,7 +50,7 @@ impl Default for NVMChildBuffer {
 }
 
 pub const BUFFER_STATIC_SIZE: usize = HEADER;
-const NODE_ID: usize = 0;
+const NODE_ID: usize = 8;
 const HEADER: usize =
     NODE_ID + std::mem::size_of::<u32>() + std::mem::size_of::<u32>() + std::mem::size_of::<u8>();
 const KEY_IDX_SIZE: usize =
@@ -132,6 +132,14 @@ impl Map {
                 panic!("Tried to assert a packed ChildBuffer instance.")
             }
             Map::Unpacked(ref map) => map,
+        }
+    }
+
+    ///
+    fn assert_packed(&self) -> &SlicedCowBytes {
+        match self {
+            Map::Packed { data, .. } => &data,
+            Map::Unpacked(_) => panic!("Tried to assert an unpacked ChildBuffer instance."),
         }
     }
 
@@ -462,7 +470,7 @@ impl NVMChildBuffer {
         match self.buffer.unpacked().entry(key.clone()) {
             Entry::Vacant(e) => {
                 let size_delta =
-                    key_size + msg.size() + keyinfo.size() + 4 * std::mem::size_of::<u32>();
+                    key_size + msg.size() + keyinfo.size();
                 e.insert((keyinfo, msg));
                 self.entries_size += size_delta;
                 size_delta as isize
@@ -518,7 +526,14 @@ impl NVMChildBuffer {
     where
         W: std::io::Write,
     {
-        debug_assert!(self.buffer.is_unpacked());
+        // debug_assert!(self.buffer.is_unpacked());
+        if !self.buffer.is_unpacked() {
+            // Copy the contents of the buffer to the new writer without unpacking.
+            w.write_all(&self.buffer.assert_packed()[..self.size()])?;
+            return Ok(())
+        }
+
+        w.write_all(&[b'D', b'E', b'A', b'D', b'B', b'E', b'E', b'F'])?;
         w.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
         w.write_all(&(self.entries_size as u32).to_le_bytes())?;
         w.write_all(
@@ -551,6 +566,8 @@ impl NVMChildBuffer {
     }
 
     pub fn unpack(buf: SlicedCowBytes) -> Result<Self, std::io::Error> {
+        assert_eq!(&buf[..NODE_ID], &[b'D', b'E', b'A', b'D', b'B', b'E', b'E', b'F']);
+
         let entry_count =
             u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
         let entries_size =
@@ -662,7 +679,7 @@ mod tests {
     fn check_size(child_buffer: &NVMChildBuffer) {
         let mut buf = Vec::new();
         child_buffer.pack(&mut buf).unwrap();
-        assert_eq!(buf.len() + NODE_ID, child_buffer.size())
+        assert_eq!(buf.len(), child_buffer.size())
     }
 
     #[quickcheck]
@@ -722,7 +739,7 @@ mod tests {
     #[quickcheck]
     fn unpack_equality(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; NODE_ID]);
+        // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
         let mut other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
@@ -737,7 +754,7 @@ mod tests {
     #[quickcheck]
     fn unpackless_access(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; NODE_ID]);
+        // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
         let other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
@@ -751,7 +768,7 @@ mod tests {
     #[quickcheck]
     fn unpackless_iter(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; NODE_ID]);
+        // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
         let other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
@@ -765,10 +782,21 @@ mod tests {
     #[quickcheck]
     fn serialize_deserialize_idempotent(child_buffer: NVMChildBuffer) {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; NODE_ID]);
+        // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
         let mut other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
         other.buffer.unpacked();
         assert_eq!(other, child_buffer);
+    }
+
+    #[quickcheck]
+    fn insert(mut child_buffer: NVMChildBuffer, key: CowBytes, info: KeyInfo, msg: CowBytes) {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&[0u8; NODE_ID]);
+
+        check_size(&child_buffer);
+        child_buffer.insert(key, info, msg.into(), crate::tree::DefaultMessageAction);
+        check_size(&child_buffer);
+
     }
 }

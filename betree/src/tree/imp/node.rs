@@ -105,8 +105,9 @@ impl StorageMap {
             | (Leaf(_), StorageKind::Memory)
             | (MemLeaf(_), _) => mib!(4),
             (Internal(_), StorageKind::Ssd) => mib!(1),
+            (Internal(_), StorageKind::Memory) => mib!(1),
             (Internal(_), _) => mib!(4),
-            (DisjointInternal(_), _) => kib!(256),
+            (DisjointInternal(_), _) => mib!(4),
         })
     }
 }
@@ -779,7 +780,6 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                 Internal(ref mut internal) => internal.insert(key, keyinfo, msg, msg_action),
                 MemLeaf(ref mut nvmleaf) => nvmleaf.insert(key, keyinfo, msg, msg_action),
                 DisjointInternal(ref mut nvminternal) => {
-                    panic!("foo");
                     // FIXME: Treat this error, this may happen if the database
                     // is in an invalid state for example when nodes are moved
                     // around. It shouldn't happen in theory at this point, but

@@ -72,12 +72,10 @@ where
                     // 1.1. If there is none we have to split the node.
                     Err(_node) => match parent {
                         None => {
-                            // println!("split root");
                             self.split_root_node(_node);
                             return Ok(());
                         }
                         Some(ref mut parent) => {
-                            // println!("split node");
                             let (next_node, size_delta) = self.split_node(_node, parent)?;
                             node = next_node;
                             parent.add_size(size_delta);
@@ -130,9 +128,7 @@ where
             let (buffer, size_delta) = match &mut *child_buffer {
                 TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.take_buffer(),
                 TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                    let (bmap, size_delta) = obj.buffer_mut().take();
-                    obj.add_size(-(size_delta as isize));
-                    (bmap, -(size_delta as isize))
+                    obj.take_buffer()
                 }
             };
             child_buffer.add_size(size_delta);
@@ -144,7 +140,6 @@ where
 
             // 6. Check if minimal leaf size is fulfilled, otherwise merge again.
             if self.storage_map.leaf_is_too_small(&child) {
-                panic!("merge leaf");
                 let size_delta = {
                     let mut m = child_buffer.prepare_merge(&self.dml, self.tree_id());
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
@@ -183,7 +178,6 @@ where
             }
             // 7. If the child is too large, split until it is not.
             while self.storage_map.leaf_is_too_large(&child) {
-                // println!("split leaf");
                 let (next_node, size_delta) = self.split_node(child, &mut child_buffer)?;
                 child_buffer.add_size(size_delta);
                 child = next_node;

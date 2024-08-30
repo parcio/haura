@@ -103,7 +103,9 @@ impl<N: StaticSize> Size for DisjointInternalNode<N> {
     fn size(&self) -> usize {
         std::mem::size_of::<u32>()
             + self.meta_data.size()
-            + self.children.len() * N::static_size() + 8
+            + std::mem::size_of::<u32>()
+            + self.children.len() * N::static_size()
+            + 8
             + self.children.iter().map(|c| c.buffer.size()).sum::<usize>()
     }
 
@@ -313,9 +315,16 @@ impl<N> DisjointInternalNode<N> {
         w.write_all(&(bytes_child_len as u32).to_le_bytes())?;
         bincode::serialize_into(&mut w, &self.children)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        for (size, child) in self.meta_data.entries_sizes.iter().zip(self.children.iter()) {
+            assert_eq!(*size, child.buffer.size());
+        }
+
         for child in self.children.iter() {
             child.buffer.pack(&mut w)?;
         }
+
+
         Ok(())
     }
 
@@ -329,24 +338,23 @@ impl<N> DisjointInternalNode<N> {
         let len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
         cursor += 4;
 
-        let meta_data: InternalNodeMetaData =
-            bincode::deserialize(&buf[cursor..cursor + len])
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let meta_data: InternalNodeMetaData = bincode::deserialize(&buf[cursor..cursor + len])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         cursor += len;
 
         let ptrs_len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
         cursor += 4;
 
-        let mut ptrs: Vec<ChildLink<N>> =
-            bincode::deserialize(&buf[cursor..cursor + ptrs_len])
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut ptrs: Vec<ChildLink<N>> = bincode::deserialize(&buf[cursor..cursor + ptrs_len])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         cursor += ptrs_len;
-        for idx in 0..meta_data.pivot.len() {
+        for idx in 0..meta_data.entries_sizes.len() {
             let sub = buf.clone().slice_from(cursor as u32);
-            let b =
-                NVMChildBuffer::unpack(sub)?;
+            let b = NVMChildBuffer::unpack(sub)?;
             cursor += b.size();
+            assert_eq!(meta_data.entries_sizes[idx], b.size());
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
+            assert_eq!(meta_data.entries_sizes[idx], ptrs[idx].buffer.size());
         }
 
         Ok(DisjointInternalNode {
@@ -356,12 +364,15 @@ impl<N> DisjointInternalNode<N> {
     }
 
     pub fn after_insert_size_delta(&mut self, idx: usize, size_delta: isize) {
+        assert!(size_delta != 0);
         if size_delta > 0 {
             self.meta_data.entries_sizes[idx] += size_delta as usize;
             self.meta_data.entries_size += size_delta as usize;
+            debug_assert_eq!(self.children[idx].buffer.size(), self.meta_data.entries_sizes[idx]);
         } else {
             self.meta_data.entries_sizes[idx] -= -size_delta as usize;
             self.meta_data.entries_size -= -size_delta as usize;
+            debug_assert_eq!(self.children[idx].buffer.size(), self.meta_data.entries_sizes[idx]);
         }
     }
 }
@@ -511,7 +522,8 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
         let entries_size = entries_sizes.len() * std::mem::size_of::<usize>()
             + entries_prefs.len()
             + pivot.iter().map(|p| p.size()).sum::<usize>()
-            + children.len() * N::static_size() + entries_sizes.iter().sum::<usize>();
+            + children.len() * N::static_size()
+            + entries_sizes.iter().sum::<usize>();
 
         let size_delta = entries_size + pivot_key.size();
         self.meta_data.entries_size -= size_delta;
@@ -626,9 +638,11 @@ where
                 .enumerate()
                 .max_by_key(|(_, v)| *v)
                 .unwrap();
-            debug!("Largest child's buffer size: {}", child);
+            assert_eq!(self.children[child_idx].buffer.size(), *child);
 
-            if *child > min_flush_size && !self.exceeds_fanout() && self.size() < max_node_size {
+            if *child >= min_flush_size
+                && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout)
+            {
                 Some(child_idx)
             } else {
                 None
@@ -688,8 +702,8 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
             },
         );
         self.node.meta_data.pivot.insert(self.child_idx, pivot_key);
-        self.node.meta_data.entries_sizes[self.child_idx] -=
-            sibling_size - super::nvm_child_buffer::BUFFER_STATIC_SIZE;
+        self.node.meta_data.entries_sizes[self.child_idx] =
+            self.node.children[self.child_idx].buffer.size();
         self.node
             .meta_data
             .entries_sizes
@@ -702,6 +716,13 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
             self.child_idx += 1;
         }
         size_delta as isize
+    }
+
+    pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) {
+        let (map, size_delta) = self.node.children[self.child_idx].buffer.take();
+        self.node
+            .after_insert_size_delta(self.child_idx, -(size_delta as isize));
+        (map, -(size_delta as isize))
     }
 }
 
@@ -736,10 +757,10 @@ where
         }
     }
 
-    pub(super) fn add_size(&mut self, size_delta: isize) {
-        self.node
-            .after_insert_size_delta(self.child_idx, size_delta);
-    }
+    // pub(super) fn add_size(&mut self, size_delta: isize) {
+    //     self.node
+    //         .after_insert_size_delta(self.child_idx, size_delta);
+    // }
 }
 
 pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
@@ -814,6 +835,8 @@ where
             // Move messages around
             let (left_child, right_child) = (&mut left[0].buffer, &mut right[0].buffer);
             left_child.rebalance(right_child, &new_pivot_key);
+            self.node.meta_data.entries_sizes[self.pivot_key_idx] = left_child.size();
+            self.node.meta_data.entries_sizes[self.pivot_key_idx + 1] = left_child.size();
         }
 
         let mut size_delta = new_pivot_key.size() as isize;
@@ -949,7 +972,7 @@ mod tests {
 
             let mut children: Vec<ChildLink<T>> = Vec::with_capacity(pivot_key_cnt + 1);
             for _ in 0..pivot_key_cnt + 1 {
-                let buffer = NVMChildBuffer::new();
+                let buffer = NVMChildBuffer::arbitrary(g);
                 entries_size += T::static_size() + buffer.size();
                 children.push(ChildLink {
                     buffer,
