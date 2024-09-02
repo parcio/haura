@@ -25,7 +25,7 @@ use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{borrow::Borrow, collections::VecDeque, marker::PhantomData, mem, ops::RangeBounds};
 
-use take_child_buffer::TakeChildBufferWrapper;
+use internal::take_child_buffer::TakeChildBufferWrapper;
 
 /// Additional information for a single entry. Concerns meta information like
 /// the desired storage level of a key.
@@ -678,20 +678,13 @@ where
     }
 }
 
-mod child_buffer;
 mod derivate_ref;
-mod copyless_internal;
 mod flush;
 mod internal;
 mod leaf;
 mod node;
-mod packed_child_buffer;
-mod nvmleaf;
-mod packed;
 mod range;
-mod serialize_nodepointer;
 mod split;
-mod take_child_buffer;
 
 #[cfg(feature = "internal-api")]
 pub use self::node::NodeInfo;

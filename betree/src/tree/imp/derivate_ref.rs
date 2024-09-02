@@ -8,7 +8,7 @@ use std::{
 
 use crate::cache::AddSize;
 
-use super::take_child_buffer::TakeChildBufferWrapper;
+use super::internal::take_child_buffer::TakeChildBufferWrapper;
 
 /// A reference allowing for a derivative of the original structure to be stored
 /// alongside the original. Helpful if a derivative of the original is dependent

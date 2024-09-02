@@ -1,5 +1,6 @@
 //! Encapsulating logic for splitting of normal and root nodes.
-use super::{take_child_buffer::TakeChildBufferWrapper, Inner, Node, Tree};
+use super::{Inner, Node, Tree};
+use crate::tree::imp::internal::take_child_buffer::TakeChildBufferWrapper;
 use crate::{
     cache::AddSize,
     data_management::{Dml, HasStoragePreference, ObjectReference},

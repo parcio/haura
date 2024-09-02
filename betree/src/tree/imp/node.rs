@@ -1,14 +1,16 @@
 //! Implementation of the generic node wrapper.
 use self::Inner::*;
 use super::{
-    child_buffer::ChildBuffer,
-    copyless_internal::{ChildLink, CopylessInternalNode},
-    internal::InternalNode,
+    internal::{
+        child_buffer::ChildBuffer,
+        internal::InternalNode,
+        packed_child_buffer::NVMChildBuffer,
+        take_child_buffer::TakeChildBufferWrapper,
+        copyless_internal::{ChildLink, CopylessInternalNode, InternalNodeLink},
+    },
     leaf::LeafNode,
-    packed_child_buffer::NVMChildBuffer,
-    nvmleaf::NVMLeafNode,
-    packed::PackedMap,
-    take_child_buffer::TakeChildBufferWrapper,
+    leaf::CopylessLeaf,
+    leaf::PackedMap,
     FillUpResult, KeyInfo, PivotKey, StorageMap,
     MIN_FANOUT, MIN_FLUSH_SIZE
 };
@@ -39,7 +41,7 @@ pub struct Node<N: 'static>(Inner<N>);
 pub(super) enum Inner<N: 'static> {
     PackedLeaf(PackedMap),
     Leaf(LeafNode),
-    MemLeaf(NVMLeafNode),
+    MemLeaf(CopylessLeaf),
     Internal(InternalNode<N>),
     CopylessInternal(CopylessInternalNode<N>),
 }
@@ -266,7 +268,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 CopylessInternalNode::unpack(data.into())?.complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
-            Ok(Node(MemLeaf(NVMLeafNode::unpack(
+            Ok(Node(MemLeaf(CopylessLeaf::unpack(
                 data, pool, offset, size,
             )?)))
         } else {
@@ -476,7 +478,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     pub(super) fn empty_leaf(kind: StorageKind) -> Self {
         match kind {
             StorageKind::Hdd => Node(Leaf(LeafNode::new())),
-            StorageKind::Memory => Node(MemLeaf(NVMLeafNode::new())),
+            StorageKind::Memory => Node(MemLeaf(CopylessLeaf::new())),
             StorageKind::Ssd => Node(Leaf(LeafNode::new())),
         }
     }
@@ -567,13 +569,13 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             let left_buffer = NVMChildBuffer::new();
             let right_buffer = NVMChildBuffer::new();
 
-            let left_link = crate::tree::imp::copyless_internal::InternalNodeLink {
+            let left_link = InternalNodeLink {
                 buffer_size: left_buffer.size(),
                 buffer: left_buffer,
                 ptr: left_child,
             };
 
-            let right_link = crate::tree::imp::copyless_internal::InternalNodeLink {
+            let right_link = InternalNodeLink {
                 buffer_size: right_buffer.size(),
                 buffer: right_buffer,
                 ptr: right_child,

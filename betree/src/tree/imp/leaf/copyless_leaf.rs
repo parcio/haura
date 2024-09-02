@@ -29,16 +29,16 @@ const NVMLEAF_PER_KEY_META_LEN: usize = 3 * size_of::<u32>();
 // could hold a variant which holds the original buffer and simply returns
 // slices to this buffer.
 #[derive(Clone)]
-pub(super) struct NVMLeafNode {
-    state: NVMLeafNodeState,
-    meta_data: NVMLeafNodeMetaData,
+pub(crate) struct CopylessLeaf {
+    state: LeafNodeState,
+    meta: Meta,
 }
 
 #[derive(Clone, Debug)]
 /// A NVMLeaf can have different states depending on how much data has actually
 /// been loaded from disk. Or if this data is already deserialized and copied
 /// again to another memory buffer. The latter is most important for NVM.
-enum NVMLeafNodeState {
+enum LeafNodeState {
     /// State in which a node is allowed to access the memory range independly
     /// but does not guarantee that all keys are present in the memory
     /// structure. Zero-copy possible. This state does _not_ support insertions.
@@ -126,7 +126,7 @@ impl KeyInfo {
 
 use thiserror::Error;
 
-use super::leaf::FillUpResult;
+use super::FillUpResult;
 
 #[derive(Error, Debug)]
 pub enum NVMLeafError {
@@ -138,16 +138,16 @@ pub enum NVMLeafError {
     AlreadyDeserialized,
 }
 
-impl NVMLeafNodeState {
+impl LeafNodeState {
     /// Transition a node from "partially in memory" to "deserialized".
     pub fn upgrade(&mut self) -> Result<(), NVMLeafError> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, keys, .. } => {
+            LeafNodeState::PartiallyLoaded { data, keys, .. } => {
                 if data.iter().filter(|x| x.get().is_some()).count() < data.len() {
                     return Err(NVMLeafError::AttemptedInvalidTransition);
                 }
 
-                let other = NVMLeafNodeState::Deserialized {
+                let other = LeafNodeState::Deserialized {
                     data: BTreeMap::from_iter(
                         keys.into_iter()
                             .zip(data.into_iter())
@@ -157,7 +157,7 @@ impl NVMLeafNodeState {
                 let _ = std::mem::replace(self, other);
                 Ok(())
             }
-            NVMLeafNodeState::Deserialized { .. } => Err(NVMLeafError::AlreadyDeserialized),
+            LeafNodeState::Deserialized { .. } => Err(NVMLeafError::AlreadyDeserialized),
         }
     }
 
@@ -182,12 +182,12 @@ impl NVMLeafNodeState {
     /// Note: This does not perform the transition to the "deserialized" state.
     pub fn fetch(&self) {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { keys, .. } => {
+            LeafNodeState::PartiallyLoaded { keys, .. } => {
                 for (k, _) in keys.iter() {
                     let _ = self.get(k);
                 }
             }
-            NVMLeafNodeState::Deserialized { .. } => {
+            LeafNodeState::Deserialized { .. } => {
                 return;
             }
         }
@@ -197,24 +197,24 @@ impl NVMLeafNodeState {
     /// storage. Memory is always preferred.
     pub fn get(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { buf, data, keys } => keys
+            LeafNodeState::PartiallyLoaded { buf, data, keys } => keys
                 .binary_search_by(|e| e.0.as_ref().cmp(key))
                 .ok()
                 .and_then(|idx| {
                     Some(data[idx].get_or_init(|| unpack_entry(&buf[keys[idx].1.range()])))
                 }),
-            NVMLeafNodeState::Deserialized { data } => data.get(key),
+            LeafNodeState::Deserialized { data } => data.get(key),
         }
     }
 
     /// Returns an entry if it is located in memory.
     pub fn get_from_cache(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, keys, .. } => keys
+            LeafNodeState::PartiallyLoaded { data, keys, .. } => keys
                 .binary_search_by(|e| key.cmp(&e.0))
                 .ok()
                 .and_then(|idx| data[idx].get()),
-            NVMLeafNodeState::Deserialized { data } => data.get(key),
+            LeafNodeState::Deserialized { data } => data.get(key),
         }
     }
 
@@ -225,8 +225,8 @@ impl NVMLeafNodeState {
         val: (KeyInfo, SlicedCowBytes),
     ) -> Option<(KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { .. } => unimplemented!(),
-            NVMLeafNodeState::Deserialized { data } => data.insert(key, val),
+            LeafNodeState::PartiallyLoaded { .. } => unimplemented!(),
+            LeafNodeState::Deserialized { data } => data.insert(key, val),
         }
     }
 
@@ -236,8 +236,8 @@ impl NVMLeafNodeState {
     ) -> Option<impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator>
     {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { .. } => None,
-            NVMLeafNodeState::Deserialized { data } => Some(data.iter()),
+            LeafNodeState::PartiallyLoaded { .. } => None,
+            LeafNodeState::Deserialized { data } => Some(data.iter()),
         }
     }
 
@@ -250,36 +250,36 @@ impl NVMLeafNodeState {
     ) -> Option<impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator>
     {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, keys, .. } => Some(
+            LeafNodeState::PartiallyLoaded { data, keys, .. } => Some(
                 keys.iter()
                     .zip(data.iter())
                     .filter_map(|(k, v)| v.get().map(|e| (&k.0, e))),
             ),
-            NVMLeafNodeState::Deserialized { .. } => None,
+            LeafNodeState::Deserialized { .. } => None,
         }
     }
 
     /// Returns the number of entries present in the node.
     pub fn len(&self) -> usize {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { data, .. } => data.len(),
-            NVMLeafNodeState::Deserialized { data } => data.len(),
+            LeafNodeState::PartiallyLoaded { data, .. } => data.len(),
+            LeafNodeState::Deserialized { data } => data.len(),
         }
     }
 
     /// Access the underlying the BTree, only valid in the context of deserialized state.
     pub fn force_data_mut(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { .. } => unimplemented!(),
-            NVMLeafNodeState::Deserialized { ref mut data } => data,
+            LeafNodeState::PartiallyLoaded { .. } => unimplemented!(),
+            LeafNodeState::Deserialized { ref mut data } => data,
         }
     }
 
     /// Access the internal data representation. Panics if node not entirely deserialized.
     pub fn force_data(&self) -> &BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { .. } => unreachable!(),
-            NVMLeafNodeState::Deserialized { data } => data,
+            LeafNodeState::PartiallyLoaded { .. } => unreachable!(),
+            LeafNodeState::Deserialized { data } => data,
         }
     }
 
@@ -293,22 +293,22 @@ impl NVMLeafNodeState {
     #[cfg(test)]
     pub fn set_data(&mut self, data: SlicedCowBytes) {
         match self {
-            NVMLeafNodeState::PartiallyLoaded { ref mut buf, .. } => *buf = data,
-            NVMLeafNodeState::Deserialized { data } => todo!(),
+            LeafNodeState::PartiallyLoaded { ref mut buf, .. } => *buf = data,
+            LeafNodeState::Deserialized { data } => todo!(),
         }
     }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(super) struct NVMLeafNodeMetaData {
+pub(super) struct Meta {
     pub storage_preference: AtomicStoragePreference,
     /// A storage preference assigned by the Migration Policy
     pub system_storage_preference: AtomicSystemStoragePreference,
     pub entries_size: usize,
 }
 
-impl NVMLeafNodeMetaData {
+impl Meta {
     pub fn pack<W: Write>(&self, mut w: W) -> Result<(), std::io::Error> {
         w.write_all(
             &self
@@ -341,22 +341,22 @@ impl NVMLeafNodeMetaData {
     }
 }
 
-impl StaticSize for NVMLeafNodeMetaData {
+impl StaticSize for Meta {
     fn static_size() -> usize {
         // pref             sys pref            entries size
         size_of::<u8>() + size_of::<u8>() + size_of::<u32>()
     }
 }
 
-impl std::fmt::Debug for NVMLeafNode {
+impl std::fmt::Debug for CopylessLeaf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", &self.state)
     }
 }
 
-impl Size for NVMLeafNode {
+impl Size for CopylessLeaf {
     fn size(&self) -> usize {
-        NVMLEAF_HEADER_FIXED_LEN + NVMLeafNodeMetaData::static_size() + self.meta_data.entries_size
+        NVMLEAF_HEADER_FIXED_LEN + Meta::static_size() + self.meta.entries_size
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -369,7 +369,7 @@ impl Size for NVMLeafNode {
             });
             return Some(
                 NVMLEAF_HEADER_FIXED_LEN
-                    + NVMLeafNodeMetaData::static_size()
+                    + Meta::static_size()
                     + data_size
                     + key_size,
             );
@@ -378,12 +378,12 @@ impl Size for NVMLeafNode {
     }
 }
 
-impl HasStoragePreference for NVMLeafNode {
+impl HasStoragePreference for CopylessLeaf {
     fn current_preference(&self) -> Option<StoragePreference> {
-        self.meta_data
+        self.meta
             .storage_preference
             .as_option()
-            .map(|pref| self.meta_data.system_storage_preference.weak_bound(&pref))
+            .map(|pref| self.meta.system_storage_preference.weak_bound(&pref))
     }
 
     fn recalculate(&self) -> StoragePreference {
@@ -398,20 +398,20 @@ impl HasStoragePreference for NVMLeafNode {
             pref.upgrade(keyinfo.storage_preference);
         }
 
-        self.meta_data.storage_preference.set(pref);
-        self.meta_data.system_storage_preference.weak_bound(&pref)
+        self.meta.storage_preference.set(pref);
+        self.meta.system_storage_preference.weak_bound(&pref)
     }
 
     fn system_storage_preference(&self) -> StoragePreference {
-        self.meta_data.system_storage_preference.borrow().into()
+        self.meta.system_storage_preference.borrow().into()
     }
 
     fn set_system_storage_preference(&mut self, pref: StoragePreference) {
-        self.meta_data.system_storage_preference.set(pref)
+        self.meta.system_storage_preference.set(pref)
     }
 }
 
-impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
+impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for CopylessLeaf {
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))>,
@@ -454,31 +454,31 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for NVMLeafNode {
             }
         }
 
-        NVMLeafNode {
-            meta_data: NVMLeafNodeMetaData {
+        CopylessLeaf {
+            meta: Meta {
                 storage_preference: AtomicStoragePreference::known(storage_pref),
                 system_storage_preference: AtomicSystemStoragePreference::from(
                     StoragePreference::NONE,
                 ),
                 entries_size,
             },
-            state: NVMLeafNodeState::Deserialized { data: entries },
+            state: LeafNodeState::Deserialized { data: entries },
         }
     }
 }
 
-impl NVMLeafNode {
+impl CopylessLeaf {
     /// Constructs a new, empty `NVMLeafNode`.
     pub fn new() -> Self {
-        NVMLeafNode {
-            meta_data: NVMLeafNodeMetaData {
+        CopylessLeaf {
+            meta: Meta {
                 storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
                 system_storage_preference: AtomicSystemStoragePreference::from(
                     StoragePreference::NONE,
                 ),
                 entries_size: 0,
             },
-            state: NVMLeafNodeState::new(),
+            state: LeafNodeState::new(),
         }
     }
 
@@ -492,7 +492,7 @@ impl NVMLeafNode {
             .iter()
             .map(|(k, _)| k.len() + NVMLEAF_PER_KEY_META_LEN)
             .sum();
-        let meta_len = NVMLeafNodeMetaData::static_size() + pivots_size;
+        let meta_len = Meta::static_size() + pivots_size;
         let data_len: usize = self
             .state
             .force_data()
@@ -501,7 +501,7 @@ impl NVMLeafNode {
             .sum();
         writer.write_all(&(meta_len as u32).to_le_bytes())?;
         writer.write_all(&(data_len as u32).to_le_bytes())?;
-        self.meta_data.pack(&mut writer)?;
+        self.meta.pack(&mut writer)?;
 
         // Offset after metadata
         let mut data_entry_offset = 0;
@@ -536,7 +536,7 @@ impl NVMLeafNode {
         size: Block<u32>,
     ) -> Result<Self, std::io::Error> {
         // Skip the node
-        let data = CowBytes::from(data).slice_from(super::node::NODE_PREFIX_LEN as u32);
+        let data = CowBytes::from(data).slice_from(crate::tree::imp::node::NODE_PREFIX_LEN as u32);
         let meta_data_len: usize = u32::from_le_bytes(
             data[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
                 .try_into()
@@ -550,15 +550,15 @@ impl NVMLeafNode {
         let meta_data_end = NVMLEAF_METADATA_OFFSET + meta_data_len;
         let data_start = meta_data_end;
 
-        let meta_data = NVMLeafNodeMetaData::unpack(
+        let meta_data = Meta::unpack(
             &data[NVMLEAF_METADATA_OFFSET
-                ..NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size()],
+                ..NVMLEAF_METADATA_OFFSET + Meta::static_size()],
         );
 
         // Read in keys, format: len key len key ...
         let keys = {
             let mut ks = vec![];
-            let mut off = NVMLEAF_METADATA_OFFSET + NVMLeafNodeMetaData::static_size();
+            let mut off = NVMLEAF_METADATA_OFFSET + Meta::static_size();
             while off < meta_data_end {
                 let len = u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
                 off += 4;
@@ -577,8 +577,8 @@ impl NVMLeafNode {
                 SlicedCowBytes::from_raw(
                     pool.slice(
                         offset,
-                        data_start + super::node::NODE_PREFIX_LEN,
-                        data_start + data_len + super::node::NODE_PREFIX_LEN,
+                        data_start + crate::tree::imp::node::NODE_PREFIX_LEN,
+                        data_start + data_len + crate::tree::imp::node::NODE_PREFIX_LEN,
                     )
                     .unwrap()
                     .as_ptr(),
@@ -593,9 +593,9 @@ impl NVMLeafNode {
         #[cfg(test)]
         let raw_data = CowBytes::new().slice_from(0);
 
-        Ok(NVMLeafNode {
-            meta_data,
-            state: NVMLeafNodeState::PartiallyLoaded {
+        Ok(CopylessLeaf {
+            meta: meta_data,
+            state: LeafNodeState::PartiallyLoaded {
                 buf: raw_data,
                 data: vec![OnceLock::new(); keys.len()],
                 keys,
@@ -631,7 +631,7 @@ impl NVMLeafNode {
         self.state.force_upgrade();
 
         debug_assert!(self.size() > max_size);
-        debug_assert!(right_sibling.meta_data.entries_size == 0);
+        debug_assert!(right_sibling.meta.entries_size == 0);
 
         let mut sibling_size = 0;
         let mut sibling_pref = StoragePreference::NONE;
@@ -649,12 +649,12 @@ impl NVMLeafNode {
         let split_key = split_key.unwrap();
 
         *right_sibling.state.force_data_mut() = self.state.force_data_mut().split_off(&split_key);
-        right_sibling.meta_data.entries_size = sibling_size;
-        self.meta_data.entries_size -= sibling_size;
-        right_sibling.meta_data.storage_preference.set(sibling_pref);
+        right_sibling.meta.entries_size = sibling_size;
+        self.meta.entries_size -= sibling_size;
+        right_sibling.meta.storage_preference.set(sibling_pref);
 
         // have removed many keys from self, no longer certain about own pref, mark invalid
-        self.meta_data.storage_preference.invalidate();
+        self.meta.storage_preference.invalidate();
 
         let size_delta = -(sibling_size as isize);
 
@@ -691,15 +691,15 @@ impl NVMLeafNode {
     {
         self.state.force_upgrade();
 
-        let size_before = self.meta_data.entries_size as isize;
+        let size_before = self.meta.entries_size as isize;
         let key_size = key.borrow().len();
         let mut data = self.get(key.borrow());
         msg_action.apply_to_leaf(key.borrow(), msg, &mut data);
 
         if let Some(data) = data {
             // Value was added or preserved by msg
-            self.meta_data.entries_size += data.len();
-            self.meta_data
+            self.meta.entries_size += data.len();
+            self.meta
                 .storage_preference
                 .upgrade(keyinfo.storage_preference);
 
@@ -707,15 +707,15 @@ impl NVMLeafNode {
                 self.state.insert(key.into(), (keyinfo.clone(), data))
             {
                 // There was a previous value in entries, which was now replaced
-                self.meta_data.entries_size -= old_data.len();
+                self.meta.entries_size -= old_data.len();
 
                 // if previous entry was stricter than new entry, invalidate
                 if old_info.storage_preference < keyinfo.storage_preference {
-                    self.meta_data.storage_preference.invalidate();
+                    self.meta.storage_preference.invalidate();
                 }
             } else {
                 // There was no previous value in entries
-                self.meta_data.entries_size +=
+                self.meta.entries_size +=
                     key_size + NVMLEAF_PER_KEY_META_LEN + KeyInfo::static_size();
             }
         } else if let Some((old_info, old_data)) = self.state.force_data_mut().remove(key.borrow())
@@ -731,14 +731,14 @@ impl NVMLeafNode {
             // - as strict:
             //     The removed entry _may_ have caused the original upgrade to this preference,
             //     we'll have to trigger a scan to find out.
-            if self.meta_data.storage_preference.as_option() == Some(old_info.storage_preference) {
-                self.meta_data.storage_preference.invalidate();
+            if self.meta.storage_preference.as_option() == Some(old_info.storage_preference) {
+                self.meta.storage_preference.invalidate();
             }
 
-            self.meta_data.entries_size -= key_size + NVMLEAF_PER_KEY_META_LEN;
-            self.meta_data.entries_size -= old_data.len() + KeyInfo::static_size();
+            self.meta.entries_size -= key_size + NVMLEAF_PER_KEY_META_LEN;
+            self.meta.entries_size -= old_data.len() + KeyInfo::static_size();
         }
-        self.meta_data.entries_size as isize - size_before
+        self.meta.entries_size as isize - size_before
     }
 
     /// Inserts messages as leaf entries.
@@ -765,17 +765,17 @@ impl NVMLeafNode {
     ) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.state.force_upgrade();
         // assert!(self.size() > S::MAX);
-        let mut right_sibling = NVMLeafNode {
+        let mut right_sibling = CopylessLeaf {
             // During a split, preference can't be inherited because the new subset of entries
             // might be a subset with a lower maximal preference.
-            meta_data: NVMLeafNodeMetaData {
+            meta: Meta {
                 storage_preference: AtomicStoragePreference::known(StoragePreference::NONE),
                 system_storage_preference: AtomicSystemStoragePreference::from(
                     StoragePreference::NONE,
                 ),
                 entries_size: 0,
             },
-            state: NVMLeafNodeState::new(),
+            state: LeafNodeState::new(),
         };
 
         // This adjusts sibling's size and pref according to its new entries
@@ -810,17 +810,17 @@ impl NVMLeafNode {
         self.state
             .force_data_mut()
             .append(&mut right_sibling.state.force_data_mut());
-        let size_delta = right_sibling.meta_data.entries_size;
-        self.meta_data.entries_size += right_sibling.meta_data.entries_size;
+        let size_delta = right_sibling.meta.entries_size;
+        self.meta.entries_size += right_sibling.meta.entries_size;
 
-        self.meta_data
+        self.meta
             .storage_preference
-            .upgrade_atomic(&right_sibling.meta_data.storage_preference);
+            .upgrade_atomic(&right_sibling.meta.storage_preference);
 
         // right_sibling is now empty, reset to defaults
-        right_sibling.meta_data.entries_size = 0;
+        right_sibling.meta.entries_size = 0;
         right_sibling
-            .meta_data
+            .meta
             .storage_preference
             .set(StoragePreference::NONE);
 
@@ -856,8 +856,8 @@ impl NVMLeafNode {
         self.state.force_upgrade();
 
         match self.state {
-            NVMLeafNodeState::PartiallyLoaded { .. } => unreachable!(),
-            NVMLeafNodeState::Deserialized { data } => {
+            LeafNodeState::PartiallyLoaded { .. } => unreachable!(),
+            LeafNodeState::Deserialized { data } => {
                 super::leaf::LeafNode::from_iter(data.into_iter())
             }
         }
@@ -868,7 +868,7 @@ impl NVMLeafNode {
 mod tests {
     use std::io::Write;
 
-    use super::{CowBytes, NVMLeafNode, Size};
+    use super::{CowBytes, CopylessLeaf, Size};
     use crate::{
         arbitrary::GenExt,
         buffer::BufWrite,
@@ -878,7 +878,7 @@ mod tests {
         storage_pool::{DiskOffset, StoragePoolLayer},
         tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
-            imp::nvmleaf::{
+            imp::leaf::copyless_leaf::{
                 NVMLEAF_DATA_LEN_OFFSET, NVMLEAF_METADATA_LEN_OFFSET, NVMLEAF_METADATA_OFFSET,
             },
             KeyInfo,
@@ -889,7 +889,6 @@ mod tests {
 
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
-    use zstd_safe::WriteBuf;
     /*
     impl Arbitrary for KeyInfo {
         fn arbitrary(g: &mut Gen) -> Self {
@@ -900,7 +899,7 @@ mod tests {
         }
     }
     */
-    impl Arbitrary for NVMLeafNode {
+    impl Arbitrary for CopylessLeaf {
         fn arbitrary(g: &mut Gen) -> Self {
             let len = g.rng().gen_range(0..20);
             let entries: Vec<_> = (0..len)
@@ -913,7 +912,7 @@ mod tests {
                 .map(|(k, v)| (k, v.0))
                 .collect();
 
-            let node: NVMLeafNode = entries
+            let node: CopylessLeaf = entries
                 .iter()
                 .map(|(k, v)| (&k[..], (KeyInfo::arbitrary(g), v.clone())))
                 .collect();
@@ -937,19 +936,19 @@ mod tests {
         }
     }
 
-    fn serialized_size(leaf: &NVMLeafNode) -> usize {
+    fn serialized_size(leaf: &CopylessLeaf) -> usize {
         let mut w = vec![];
         let _m_size = leaf.pack(&mut w);
         w.len()
     }
 
     #[quickcheck]
-    fn actual_size(leaf_node: NVMLeafNode) {
+    fn actual_size(leaf_node: CopylessLeaf) {
         assert_eq!(leaf_node.actual_size(), Some(serialized_size(&leaf_node)));
     }
 
     #[quickcheck]
-    fn size(leaf_node: NVMLeafNode) {
+    fn size(leaf_node: CopylessLeaf) {
         let size = leaf_node.size();
         let serialized = serialized_size(&leaf_node);
         if size != serialized {
@@ -965,16 +964,16 @@ mod tests {
     }
 
     #[quickcheck]
-    fn ser_deser(leaf_node: NVMLeafNode) {
+    fn ser_deser(leaf_node: CopylessLeaf) {
         let mut bytes = vec![];
-        bytes.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap();
+        bytes.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap();
         let _metadata_size = leaf_node.pack(&mut bytes).unwrap();
 
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config, 0).unwrap();
         let _csum = XxHashBuilder.build().finish();
 
-        let _node = NVMLeafNode::unpack(
+        let _node = CopylessLeaf::unpack(
             bytes.into_boxed_slice(),
             Box::new(pool),
             DiskOffset::from_u64(0),
@@ -985,7 +984,7 @@ mod tests {
 
     #[quickcheck]
     fn insert(
-        mut leaf_node: NVMLeafNode,
+        mut leaf_node: CopylessLeaf,
         key: CowBytes,
         key_info: KeyInfo,
         msg: DefaultMessageActionMsg,
@@ -1005,7 +1004,7 @@ mod tests {
     const MAX_LEAF_SIZE: usize = 4096;
 
     #[quickcheck]
-    fn split(mut leaf_node: NVMLeafNode) -> TestResult {
+    fn split(mut leaf_node: CopylessLeaf) -> TestResult {
         let size_before = leaf_node.size();
 
         if size_before <= MAX_LEAF_SIZE || size_before > MAX_LEAF_SIZE + MIN_LEAF_SIZE {
@@ -1034,7 +1033,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split_merge_idempotent(mut leaf_node: NVMLeafNode) -> TestResult {
+    fn split_merge_idempotent(mut leaf_node: CopylessLeaf) -> TestResult {
         if leaf_node.size() <= MAX_LEAF_SIZE {
             return TestResult::discard();
         }
@@ -1042,13 +1041,13 @@ mod tests {
         let (mut sibling, ..) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
         leaf_node.recalculate();
         leaf_node.merge(&mut sibling);
-        assert_eq!(this.meta_data, leaf_node.meta_data);
+        assert_eq!(this.meta, leaf_node.meta);
         assert_eq!(this.state.force_data(), leaf_node.state.force_data());
         TestResult::passed()
     }
 
     #[quickcheck]
-    fn access_serialized(leaf_node: NVMLeafNode) -> TestResult {
+    fn access_serialized(leaf_node: CopylessLeaf) -> TestResult {
         if leaf_node.size() < MIN_LEAF_SIZE && leaf_node.state.force_data().len() < 3 {
             return TestResult::discard();
         }
@@ -1061,12 +1060,12 @@ mod tests {
             .collect();
 
         let mut buf = BufWrite::with_capacity(Block(1));
-        buf.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap();
+        buf.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap();
         let _ = leaf_node.pack(&mut buf).unwrap();
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config, 0).unwrap();
         let buf = buf.into_buf().into_boxed_slice();
-        let mut wire_node = NVMLeafNode::unpack(
+        let mut wire_node = CopylessLeaf::unpack(
             buf.clone(),
             Box::new(pool),
             DiskOffset::from_u64(0),
@@ -1075,7 +1074,7 @@ mod tests {
         .unwrap();
 
         let meta_data_len: usize = u32::from_le_bytes(
-            buf[NVMLEAF_METADATA_LEN_OFFSET + super::super::node::NODE_PREFIX_LEN..NVMLEAF_DATA_LEN_OFFSET + super::super::node::NODE_PREFIX_LEN]
+            buf[NVMLEAF_METADATA_LEN_OFFSET + crate::tree::imp::node::NODE_PREFIX_LEN..NVMLEAF_DATA_LEN_OFFSET + crate::tree::imp::node::NODE_PREFIX_LEN]
                 .try_into()
                 .unwrap(),
         ) as usize;
@@ -1083,7 +1082,7 @@ mod tests {
 
         wire_node
             .state
-            .set_data(CowBytes::from(buf).slice_from(meta_data_end as u32 + super::super::node::NODE_PREFIX_LEN as u32));
+            .set_data(CowBytes::from(buf).slice_from(meta_data_end as u32 + crate::tree::imp::node::NODE_PREFIX_LEN as u32));
 
         for (key, v) in kvs.into_iter() {
             assert_eq!(Some(v), wire_node.get_with_info(&key));
@@ -1093,19 +1092,19 @@ mod tests {
     }
 
     #[quickcheck]
-    fn serialize_deser_partial(leaf_node: NVMLeafNode) -> TestResult {
+    fn serialize_deser_partial(leaf_node: CopylessLeaf) -> TestResult {
         if leaf_node.size() < MAX_LEAF_SIZE / 2 && leaf_node.state.force_data().len() < 3 {
             return TestResult::discard();
         }
 
         let mut buf = crate::buffer::BufWrite::with_capacity(Block(1));
-        buf.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap();
+        buf.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap();
         let foo = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf();
         let meta_range = ..foo.unwrap().to_bytes() as usize;
         let config = StoragePoolConfiguration::default();
         let pool = crate::database::RootSpu::new(&config, 0).unwrap();
-        let _wire_node = NVMLeafNode::unpack(
+        let _wire_node = CopylessLeaf::unpack(
             buf.into_boxed_slice(),
             Box::new(pool),
             DiskOffset::from_u64(0),

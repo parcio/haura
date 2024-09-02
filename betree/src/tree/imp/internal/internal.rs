@@ -1,12 +1,16 @@
 //! Implementation of the [InternalNode] node type.
 use super::{
     child_buffer::ChildBuffer,
-    node::{PivotGetMutResult, PivotGetResult},
     packed_child_buffer::NVMChildBuffer,
     copyless_internal::CopylessInternalNode,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
+};
+
+use crate::tree::imp::{
+    node::{PivotGetMutResult, PivotGetResult},
     PivotKey,
 };
+
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, ObjectReference},
@@ -23,14 +27,14 @@ use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(super) struct InternalNode<N: 'static> {
+pub(in crate::tree::imp) struct InternalNode<N: 'static> {
     level: u32,
     entries_size: usize,
     #[serde(skip)]
     system_storage_preference: AtomicSystemStoragePreference,
     #[serde(skip)]
     pref: AtomicStoragePreference,
-    pub(super) pivot: Vec<CowBytes>,
+    pub(in crate::tree::imp) pivot: Vec<CowBytes>,
     children: Vec<ChildBuffer<N>>,
 }
 
@@ -566,13 +570,13 @@ where
     }
 }
 
-pub(super) struct TakeChildBuffer<'a, N: 'a + 'static> {
+pub(in crate::tree::imp) struct TakeChildBuffer<'a, N: 'a + 'static> {
     pub node: &'a mut InternalNode<N>,
     pub child_idx: usize,
 }
 
 impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
-    pub(super) fn split_child(
+    pub(in crate::tree::imp) fn split_child(
         &mut self,
         sibling_np: N,
         pivot_key: CowBytes,
@@ -601,11 +605,11 @@ impl<'a, N> TakeChildBuffer<'a, N>
 where
     N: StaticSize,
 {
-    pub(super) fn size(&self) -> usize {
+    pub(in crate::tree::imp) fn size(&self) -> usize {
         Size::size(&*self.node)
     }
 
-    pub(super) fn prepare_merge(&mut self) -> PrepareMergeChild<N>
+    pub(in crate::tree::imp) fn prepare_merge(&mut self) -> PrepareMergeChild<N>
     where
         N: ObjectReference,
     {
@@ -625,25 +629,25 @@ where
     }
 }
 
-pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
+pub(in crate::tree::imp) struct PrepareMergeChild<'a, N: 'a + 'static> {
     node: &'a mut InternalNode<N>,
     pivot_key_idx: usize,
     other_child_idx: usize,
 }
 
 impl<'a, N> PrepareMergeChild<'a, N> {
-    pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
+    pub(in crate::tree::imp) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
     where
         N: ObjectReference,
     {
         &mut self.node.children[self.other_child_idx].node_pointer
     }
-    pub(super) fn is_right_sibling(&self) -> bool {
+    pub(in crate::tree::imp) fn is_right_sibling(&self) -> bool {
         self.pivot_key_idx != self.other_child_idx
     }
 }
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    pub(super) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
+    pub(in crate::tree::imp) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     where
         N: ObjectReference,
     {
@@ -676,7 +680,7 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
         (&mut left[0], &mut right[0])
     }
 
-    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
+    pub(in crate::tree::imp) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
     where
         N: ObjectReference,
     {

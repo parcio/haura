@@ -22,14 +22,14 @@ use std::{
 /// A buffer for messages that belong to a child of a tree node.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
-pub(super) struct ChildBuffer<N: 'static> {
-    pub(super) messages_preference: AtomicStoragePreference,
+pub(in crate::tree::imp) struct ChildBuffer<N: 'static> {
+    pub(in crate::tree::imp) messages_preference: AtomicStoragePreference,
     #[serde(skip)]
-    pub(super) system_storage_preference: AtomicSystemStoragePreference,
+    pub(in crate::tree::imp) system_storage_preference: AtomicSystemStoragePreference,
     buffer_entries_size: usize,
-    pub(super) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
+    pub(in crate::tree::imp) buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
     #[serde(with = "serialize_nodepointer")]
-    pub(super) node_pointer: RwLock<N>,
+    pub(in crate::tree::imp) node_pointer: RwLock<N>,
 }
 
 impl Size for (KeyInfo, SlicedCowBytes) {

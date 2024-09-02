@@ -7,7 +7,7 @@ use std::borrow::Borrow;
 
 use super::{
     derivate_ref::DerivateRefNVM,
-    take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
+    internal::take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
     FillUpResult, Inner, Node, Tree,
 };
 use crate::{

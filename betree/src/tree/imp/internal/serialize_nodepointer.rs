@@ -1,5 +1,5 @@
 //! Serialization utilities of a node pointer type.
-use super::RwLock;
+use crate::tree::imp::RwLock;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub fn serialize<N, S>(np: &RwLock<N>, serializer: S) -> Result<S::Ok, S::Error>

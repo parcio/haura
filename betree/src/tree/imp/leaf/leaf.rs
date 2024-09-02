@@ -4,15 +4,17 @@ use crate::{
     data_management::HasStoragePreference,
     size::Size,
     storage_pool::AtomicSystemStoragePreference,
-    tree::{imp::packed, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
+    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
+
+use super::{packed, FillUpResult};
 use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};
 
 /// A leaf node of the tree holds pairs of keys values which are plain data.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(super) struct LeafNode {
+pub(crate) struct LeafNode {
     storage_preference: AtomicStoragePreference,
     /// A storage preference assigned by the Migration Policy
     system_storage_preference: AtomicSystemStoragePreference,
@@ -20,17 +22,6 @@ pub(super) struct LeafNode {
     entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
 }
 
-/// Case-dependent outcome of a rebalance operation.
-#[derive(Debug)]
-pub(super) enum FillUpResult {
-    Rebalanced {
-        pivot_key: CowBytes,
-        size_delta: isize,
-    },
-    Merged {
-        size_delta: isize,
-    },
-}
 
 impl Size for LeafNode {
     fn size(&self) -> usize {
@@ -357,7 +348,7 @@ impl LeafNode {
         }
     }
 
-    pub fn to_memory_leaf(self) -> super::nvmleaf::NVMLeafNode {
+    pub fn to_memory_leaf(self) -> super::copyless_leaf::CopylessLeaf {
         todo!()
     }
 
@@ -390,7 +381,7 @@ mod tests {
         data_management::HasStoragePreference,
         tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
-            imp::packed::PackedMap,
+            imp::leaf::PackedMap,
             KeyInfo,
         },
         StoragePreference,
@@ -474,7 +465,7 @@ mod tests {
     #[quickcheck]
     fn check_serialization(leaf_node: LeafNode) {
         let mut data = Vec::new();
-        assert!(data.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap() == 4);
+        assert!(data.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap() == 4);
         PackedMap::pack(&leaf_node, &mut data).unwrap();
         let twin = PackedMap::new(data.into_boxed_slice()).unpack_leaf();
 

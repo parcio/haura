@@ -76,7 +76,7 @@ fn prefix_size(entry_count: u32) -> usize {
 impl PackedMap {
     pub fn new(data: Box<[u8]>) -> Self {
         // Skip the 4 bytes node identifier prefix
-        let data = CowBytes::from(data).slice_from(super::node::NODE_PREFIX_LEN as u32);
+        let data = CowBytes::from(data).slice_from(crate::tree::imp::node::NODE_PREFIX_LEN as u32);
         debug_assert!(data.len() >= 4);
         let entry_count = LittleEndian::read_u32(&data[..4]);
         let system_preference = data[4];
@@ -222,14 +222,14 @@ impl PackedMap {
         }
     }
 
-    pub(super) fn unpack_leaf(&self) -> LeafNode {
+    pub(crate) fn unpack_leaf(&self) -> LeafNode {
         let mut leaf: LeafNode = self.get_all().collect();
         // Restore system storage preference state
         leaf.set_system_storage_preference(StoragePreference::from_u8(self.system_preference));
         leaf
     }
 
-    pub(super) fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<()> {
+    pub(crate) fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<()> {
         let entries = leaf.entries();
         let entries_cnt = entries.len() as u32;
         writer.write_u32::<LittleEndian>(entries_cnt)?;
@@ -255,11 +255,11 @@ impl PackedMap {
         Ok(())
     }
 
-    pub(super) fn inner(&self) -> &SlicedCowBytes {
+    pub(crate) fn inner(&self) -> &SlicedCowBytes {
         &self.data
     }
 
-    pub(super) fn entry_count(&self) -> u32 {
+    pub(crate) fn entry_count(&self) -> u32 {
         self.entry_count
     }
 }
@@ -283,7 +283,7 @@ mod tests {
     #[quickcheck]
     fn check_packed_contents(leaf: LeafNode) {
         let mut v = Vec::new();
-        assert!(v.write(&[0; super::super::node::NODE_PREFIX_LEN]).unwrap() == 4);
+        assert!(v.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap() == 4);
         PackedMap::pack(&leaf, &mut v).unwrap();
 
         let packed = PackedMap::new(v.into_boxed_slice());

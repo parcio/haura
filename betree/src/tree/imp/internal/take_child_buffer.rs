@@ -8,7 +8,7 @@ use crate::{
 
 use super::{internal::TakeChildBuffer, copyless_internal::NVMTakeChildBuffer};
 
-pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
+pub(in crate::tree::imp) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
     TakeChildBuffer(TakeChildBuffer<'a, N>),
     NVMTakeChildBuffer(NVMTakeChildBuffer<'a, N>),
 }
@@ -28,14 +28,14 @@ impl<'a, N> TakeChildBufferWrapper<'a, N>
 where
     N: StaticSize,
 {
-    pub(super) fn size(&self) -> usize {
+    pub(in crate::tree::imp) fn size(&self) -> usize {
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.size(),
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.size(),
         }
     }
 
-    pub(super) fn prepare_merge(
+    pub(in crate::tree::imp) fn prepare_merge(
         &mut self,
     ) -> PrepareChildBufferMerge<N>
     where
@@ -52,16 +52,16 @@ where
     }
 }
 
-pub(super) struct MergeChildResult<NP> {
-    pub(super) pivot_key: CowBytes,
-    pub(super) old_np: NP,
-    pub(super) size_delta: isize,
+pub(in crate::tree::imp) struct MergeChildResult<NP> {
+    pub(in crate::tree::imp) pivot_key: CowBytes,
+    pub(in crate::tree::imp) old_np: NP,
+    pub(in crate::tree::imp) size_delta: isize,
 }
 
 use super::internal::PrepareMergeChild as Block_PMC;
 use super::copyless_internal::PrepareMergeChild as Mem_PMC;
 
-pub(super) enum PrepareChildBufferMerge<'a, N: 'static> {
+pub(in crate::tree::imp) enum PrepareChildBufferMerge<'a, N: 'static> {
     Block(Block_PMC<'a, N>),
     Memory(Mem_PMC<'a, N>),
 }
@@ -70,7 +70,7 @@ impl<'a, N> PrepareChildBufferMerge<'a, N>
 where
     N: ObjectReference + HasStoragePreference,
 {
-    pub(super) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
+    pub(in crate::tree::imp) fn sibling_node_pointer(&mut self) -> &mut RwLock<N>
     where
         N: ObjectReference,
     {
@@ -81,14 +81,14 @@ where
     }
 
     /// Wether the *sibling* of *child* is the right to child or not.
-    pub(super) fn is_right_sibling(&self) -> bool {
+    pub(in crate::tree::imp) fn is_right_sibling(&self) -> bool {
         match self {
             PrepareChildBufferMerge::Block(pmc) => pmc.is_right_sibling(),
             PrepareChildBufferMerge::Memory(pmc) => pmc.is_right_sibling(),
         }
     }
 
-    pub(super) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
+    pub(in crate::tree::imp) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     where
         N: ObjectReference + HasStoragePreference,
     {
@@ -98,7 +98,7 @@ where
         }
     }
 
-    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
+    pub(in crate::tree::imp) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
     where
         N: ObjectReference + HasStoragePreference,
     {

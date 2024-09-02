@@ -34,13 +34,13 @@ impl<T> CutSlice<T> for [T] {
 
 /// A buffer for messages that belong to a child of a tree node.
 #[derive(Debug)]
-pub(super) struct NVMChildBuffer {
-    pub(super) messages_preference: AtomicStoragePreference,
+pub(in crate::tree::imp) struct NVMChildBuffer {
+    pub(in crate::tree::imp) messages_preference: AtomicStoragePreference,
     // This preference should always be set by the parent. Needs to be on fast
     // memory or NVMe to be worth the additional queries.
-    pub(super) system_storage_preference: AtomicSystemStoragePreference,
-    pub(super) entries_size: usize,
-    pub(super) buffer: Map,
+    pub(in crate::tree::imp) system_storage_preference: AtomicSystemStoragePreference,
+    pub(in crate::tree::imp) entries_size: usize,
+    pub(in crate::tree::imp) buffer: Map,
 }
 
 impl Default for NVMChildBuffer {
@@ -57,7 +57,7 @@ const KEY_IDX_SIZE: usize =
     std::mem::size_of::<u32>() + std::mem::size_of::<u8>() + std::mem::size_of::<u32>();
 
 #[derive(Debug)]
-pub(super) enum Map {
+pub(in crate::tree::imp) enum Map {
     Packed { entry_count: usize, data: SlicedCowBytes },
     Unpacked(BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>),
 }
@@ -81,7 +81,7 @@ impl KeyIdx {
 
 impl Map {
     /// Fetch a mutable version of the internal btree map.
-    pub(super) fn unpacked(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
+    pub(in crate::tree::imp) fn unpacked(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
             Map::Packed { entry_count, data } => {
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
