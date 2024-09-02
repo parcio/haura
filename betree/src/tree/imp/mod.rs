@@ -685,7 +685,7 @@ mod flush;
 mod internal;
 mod leaf;
 mod node;
-mod nvm_child_buffer;
+mod packed_child_buffer;
 mod nvmleaf;
 mod packed;
 mod range;

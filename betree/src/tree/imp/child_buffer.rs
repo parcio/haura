@@ -2,7 +2,7 @@
 //!
 //! Encapsulating common nodes like [super::internal::InternalNode] and
 //! [super::leaf::LeafNode].
-use super::{nvm_child_buffer::NVMChildBuffer, serialize_nodepointer};
+use super::{packed_child_buffer::NVMChildBuffer, serialize_nodepointer};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, ObjectReference},

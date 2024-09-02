@@ -2,7 +2,7 @@
 use super::{
     child_buffer::ChildBuffer,
     node::{PivotGetMutResult, PivotGetResult},
-    nvm_child_buffer::NVMChildBuffer,
+    packed_child_buffer::NVMChildBuffer,
     copyless_internal::CopylessInternalNode,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
     PivotKey,

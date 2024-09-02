@@ -1,7 +1,7 @@
 //! Implementation of the [DisjointInternalNode] node type.
 use super::{
     node::{PivotGetMutResult, PivotGetResult},
-    nvm_child_buffer::NVMChildBuffer,
+    packed_child_buffer::NVMChildBuffer,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
     PivotKey,
 };

@@ -5,7 +5,7 @@ use super::{
     copyless_internal::{ChildLink, CopylessInternalNode},
     internal::InternalNode,
     leaf::LeafNode,
-    nvm_child_buffer::NVMChildBuffer,
+    packed_child_buffer::NVMChildBuffer,
     nvmleaf::NVMLeafNode,
     packed::PackedMap,
     take_child_buffer::TakeChildBufferWrapper,
