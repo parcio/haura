@@ -683,7 +683,7 @@ where
 mod child_buffer;
 mod derivate_ref;
 mod derivate_ref_nvm;
-mod disjoint_internal;
+mod copyless_internal;
 mod flush;
 mod internal;
 mod leaf;

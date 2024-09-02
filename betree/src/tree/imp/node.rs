@@ -2,7 +2,7 @@
 use self::Inner::*;
 use super::{
     child_buffer::ChildBuffer,
-    disjoint_internal::{ChildLink, DisjointInternalNode},
+    copyless_internal::{ChildLink, CopylessInternalNode},
     internal::InternalNode,
     leaf::LeafNode,
     nvm_child_buffer::NVMChildBuffer,
@@ -41,7 +41,7 @@ pub(super) enum Inner<N: 'static> {
     Leaf(LeafNode),
     MemLeaf(NVMLeafNode),
     Internal(InternalNode<N>),
-    DisjointInternal(DisjointInternalNode<N>),
+    DisjointInternal(CopylessInternalNode<N>),
 }
 
 macro_rules! kib {
@@ -219,8 +219,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         mut writer: W,
         _: PreparePack,
     ) -> Result<Option<Block<u32>>, io::Error> {
-        let start = std::time::Instant::now();
-        let foo = match self.0 {
+        match self.0 {
             PackedLeaf(ref map) => writer.write_all(map.inner()).map(|_| None),
             Leaf(ref leaf) => {
                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
@@ -240,9 +239,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
                 nvminternal.pack(writer).map(|_| None)
             }
-        };
-        // println!("pack took {} ns", start.elapsed().as_nanos());
-        foo
+        }
     }
 
     fn unpack_at<SPL: StoragePoolLayer>(
@@ -266,7 +263,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             Ok(Node(PackedLeaf(PackedMap::new(data))))
         } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
             Ok(Node(DisjointInternal(
-                DisjointInternalNode::unpack(data.into())?.complete_object_refs(d_id),
+                CopylessInternalNode::unpack(data.into())?.complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
             Ok(Node(MemLeaf(NVMLeafNode::unpack(
@@ -378,7 +375,7 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
                 .map(TakeChildBufferWrapper::TakeChildBuffer),
             MemLeaf(_) => None,
             DisjointInternal(ref mut nvminternal) => Some(
-                TakeChildBufferWrapper::NVMTakeChildBuffer(nvminternal.try_walk_incomplete(key)),
+                TakeChildBufferWrapper::NVMTakeChildBuffer(nvminternal.try_walk(key)),
             ),
         }
     }
@@ -572,18 +569,18 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             let left_buffer = NVMChildBuffer::new();
             let right_buffer = NVMChildBuffer::new();
 
-            let left_link = crate::tree::imp::disjoint_internal::InternalNodeLink {
+            let left_link = crate::tree::imp::copyless_internal::InternalNodeLink {
                 buffer_size: left_buffer.size(),
                 buffer: left_buffer,
                 ptr: left_child,
             };
 
-            let right_link = crate::tree::imp::disjoint_internal::InternalNodeLink {
+            let right_link = crate::tree::imp::copyless_internal::InternalNodeLink {
                 buffer_size: right_buffer.size(),
                 buffer: right_buffer,
                 ptr: right_child,
             };
-            *self = Node(DisjointInternal(DisjointInternalNode::new(
+            *self = Node(DisjointInternal(CopylessInternalNode::new(
                 left_link,
                 right_link,
                 pivot_key,

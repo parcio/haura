@@ -3,7 +3,7 @@ use super::{
     child_buffer::ChildBuffer,
     node::{PivotGetMutResult, PivotGetResult},
     nvm_child_buffer::NVMChildBuffer,
-    disjoint_internal::{ChildLink, InternalNodeMetaData, DisjointInternalNode},
+    copyless_internal::{ChildLink, InternalNodeMetaData, CopylessInternalNode},
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
     PivotKey,
 };
@@ -186,7 +186,7 @@ impl<N> InternalNode<N> {
         })
     }
 
-    pub fn from_disjoint_node(mut mem: DisjointInternalNode<N>, cbufs: Vec<NVMChildBuffer>) -> Self {
+    pub fn from_disjoint_node(mut mem: CopylessInternalNode<N>, cbufs: Vec<NVMChildBuffer>) -> Self {
         let cbufs: Vec<ChildBuffer<N>> = cbufs
             .into_iter()
             .enumerate()
@@ -210,7 +210,7 @@ impl<N> InternalNode<N> {
         }
     }
 
-    pub fn to_disjoint_node<F>(self, insert_new_cbuf: F) -> DisjointInternalNode<N>
+    pub fn to_disjoint_node<F>(self, insert_new_cbuf: F) -> CopylessInternalNode<N>
     where
         F: Fn(NVMChildBuffer) -> N,
     {
@@ -231,7 +231,7 @@ impl<N> InternalNode<N> {
                 acc
             });
 
-        DisjointInternalNode {
+        CopylessInternalNode {
             meta_data: InternalNodeMetaData {
                 level: self.level,
                 system_storage_preference: self.system_storage_preference,

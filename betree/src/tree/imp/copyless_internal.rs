@@ -21,7 +21,7 @@ use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 use super::serialize_nodepointer;
 use serde::{Deserialize, Serialize};
 
-pub(super) struct DisjointInternalNode<N> {
+pub(super) struct CopylessInternalNode<N> {
     // FIXME: This type can be used as zero-copy
     pub meta_data: InternalNodeMetaData,
     pub children: Vec<ChildLink<N>>,
@@ -70,7 +70,7 @@ impl<N> ChildLink<N> {
     }
 }
 
-impl<N> std::fmt::Debug for DisjointInternalNode<N> {
+impl<N> std::fmt::Debug for CopylessInternalNode<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.meta_data.fmt(f)
     }
@@ -99,7 +99,7 @@ impl InternalNodeMetaData {
 }
 
 const INTERNAL_BINCODE_STATIC: usize = 4 + 8;
-impl<N: StaticSize> Size for DisjointInternalNode<N> {
+impl<N: StaticSize> Size for CopylessInternalNode<N> {
     fn size(&self) -> usize {
         std::mem::size_of::<u32>()
             + self.meta_data.size()
@@ -112,24 +112,6 @@ impl<N: StaticSize> Size for DisjointInternalNode<N> {
     fn actual_size(&self) -> Option<usize> {
         // FIXME: Actually cache the serialized size and track delta
         Some(self.size())
-    }
-}
-
-// NOTE: This has become necessary as the decision when to flush a node is no
-// longer dependent on just this object but it's subobjects too.
-impl<N: StaticSize> DisjointInternalNode<N> {
-    pub fn is_too_large(&self, max_node_size: usize, max_buf_size: usize) -> bool {
-        self.exceeds_fanout()
-            || self.size() > max_node_size
-            || self
-                .meta_data
-                .entries_sizes
-                .iter()
-                .fold(false, |acc, s| acc || *s > max_buf_size)
-    }
-
-    pub fn exceeds_fanout(&self) -> bool {
-        self.fanout() > 64
     }
 }
 
@@ -153,7 +135,7 @@ impl Size for InternalNodeMetaData {
     }
 }
 
-impl<N: HasStoragePreference> HasStoragePreference for DisjointInternalNode<N> {
+impl<N: HasStoragePreference> HasStoragePreference for CopylessInternalNode<N> {
     fn current_preference(&self) -> Option<StoragePreference> {
         self.meta_data
             .pref
@@ -209,7 +191,7 @@ impl<N> Into<ChildLink<N>> for InternalNodeLink<N> {
     }
 }
 
-impl<N> DisjointInternalNode<N> {
+impl<N> CopylessInternalNode<N> {
     pub fn new(
         left_child: InternalNodeLink<N>,
         right_child: InternalNodeLink<N>,
@@ -219,7 +201,7 @@ impl<N> DisjointInternalNode<N> {
     where
         N: StaticSize,
     {
-        DisjointInternalNode {
+        CopylessInternalNode {
             meta_data: InternalNodeMetaData {
                 level,
                 entries_size: pivot_key.size(),
@@ -324,7 +306,6 @@ impl<N> DisjointInternalNode<N> {
             child.buffer.pack(&mut w)?;
         }
 
-
         Ok(())
     }
 
@@ -357,7 +338,7 @@ impl<N> DisjointInternalNode<N> {
             assert_eq!(meta_data.entries_sizes[idx], ptrs[idx].buffer.size());
         }
 
-        Ok(DisjointInternalNode {
+        Ok(CopylessInternalNode {
             meta_data,
             children: ptrs,
         })
@@ -377,7 +358,7 @@ impl<N> DisjointInternalNode<N> {
     }
 }
 
-impl<N> DisjointInternalNode<N> {
+impl<N> CopylessInternalNode<N> {
     pub fn get(&self, key: &[u8]) -> (&RwLock<N>, Option<(KeyInfo, SlicedCowBytes)>)
     where
         N: ObjectReference,
@@ -503,7 +484,7 @@ impl<N: StaticSize> Size for Vec<N> {
     }
 }
 
-impl<N: ObjectReference> DisjointInternalNode<N> {
+impl<N: ObjectReference> CopylessInternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.meta_data.invalidate();
 
@@ -528,7 +509,7 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
         let size_delta = entries_size + pivot_key.size();
         self.meta_data.entries_size -= size_delta;
 
-        let right_sibling = DisjointInternalNode {
+        let right_sibling = CopylessInternalNode {
             meta_data: InternalNodeMetaData {
                 level: self.meta_data.level,
                 entries_size,
@@ -600,20 +581,13 @@ impl<N: ObjectReference> DisjointInternalNode<N> {
     }
 }
 
-impl<N: HasStoragePreference> DisjointInternalNode<N>
+impl<N: HasStoragePreference> CopylessInternalNode<N>
 where
     N: StaticSize,
     N: ObjectReference,
 {
-    pub fn try_walk_incomplete(&mut self, key: &[u8]) -> NVMTakeChildBuffer<N> {
+    pub fn try_walk(&mut self, key: &[u8]) -> NVMTakeChildBuffer<N> {
         let child_idx = self.idx(key);
-
-        // println!(
-        //     "Walking node (level: {}, size: {} MiB) with {} children.",
-        //     self.level(),
-        //     self.size() as f32 / 1024. / 1024.,
-        //     self.children.len()
-        // );
 
         NVMTakeChildBuffer {
             node: self,
@@ -641,7 +615,7 @@ where
             assert_eq!(self.children[child_idx].buffer.size(), *child);
 
             if *child >= min_flush_size
-                && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout)
+                && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout) && self.fanout() < (max_node_size as f32).sqrt() as usize
             {
                 Some(child_idx)
             } else {
@@ -666,7 +640,7 @@ where
 }
 
 pub(super) struct NVMTakeChildBuffer<'a, N: 'a + 'static> {
-    node: &'a mut DisjointInternalNode<N>,
+    node: &'a mut CopylessInternalNode<N>,
     child_idx: usize,
 }
 
@@ -764,7 +738,7 @@ where
 }
 
 pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
-    node: &'a mut DisjointInternalNode<N>,
+    node: &'a mut CopylessInternalNode<N>,
     pivot_key_idx: usize,
     other_child_idx: usize,
     d_id: DatasetId,
@@ -935,9 +909,9 @@ mod tests {
         }
     }
 
-    impl<T: Clone> Clone for DisjointInternalNode<T> {
+    impl<T: Clone> Clone for CopylessInternalNode<T> {
         fn clone(&self) -> Self {
-            DisjointInternalNode {
+            CopylessInternalNode {
                 meta_data: InternalNodeMetaData {
                     level: self.meta_data.level,
                     entries_size: self.meta_data.entries_size,
@@ -953,7 +927,7 @@ mod tests {
         }
     }
 
-    impl<T: Arbitrary + StaticSize> Arbitrary for DisjointInternalNode<T> {
+    impl<T: Arbitrary + StaticSize> Arbitrary for CopylessInternalNode<T> {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
             let pivot_key_cnt = rng.gen_range(0..10);
@@ -982,7 +956,7 @@ mod tests {
 
             entries_size += 4 + 8 + pivot_key_cnt * 8 + pivot_key_cnt * 1;
 
-            DisjointInternalNode {
+            CopylessInternalNode {
                 meta_data: InternalNodeMetaData {
                     pivot,
                     entries_size,
@@ -1000,23 +974,23 @@ mod tests {
         }
     }
 
-    fn serialized_size<T: ObjectReference>(node: &DisjointInternalNode<T>) -> usize {
+    fn serialized_size<T: ObjectReference>(node: &CopylessInternalNode<T>) -> usize {
         let mut buf = Vec::new();
         node.pack(&mut buf).unwrap();
         buf.len()
     }
 
-    fn check_size<T: Size + ObjectReference + std::cmp::PartialEq>(node: &DisjointInternalNode<T>) {
+    fn check_size<T: Size + ObjectReference + std::cmp::PartialEq>(node: &CopylessInternalNode<T>) {
         assert_eq!(node.size(), serialized_size(node))
     }
 
     #[quickcheck]
-    fn actual_size(node: DisjointInternalNode<()>) {
+    fn actual_size(node: CopylessInternalNode<()>) {
         assert_eq!(node.size(), serialized_size(&node))
     }
 
     #[quickcheck]
-    fn idx(node: DisjointInternalNode<()>, key: Key) {
+    fn idx(node: CopylessInternalNode<()>, key: Key) {
         let key = key.0;
         let idx = node.idx(&key);
 
@@ -1032,7 +1006,7 @@ mod tests {
     static mut PK: Option<PivotKey> = None;
 
     #[quickcheck]
-    fn size_split(mut node: DisjointInternalNode<()>) -> TestResult {
+    fn size_split(mut node: CopylessInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -1047,7 +1021,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split(mut node: DisjointInternalNode<()>) -> TestResult {
+    fn split(mut node: CopylessInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -1073,7 +1047,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split_key(mut node: DisjointInternalNode<()>) -> TestResult {
+    fn split_key(mut node: CopylessInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -1085,7 +1059,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split_and_merge(mut node: DisjointInternalNode<()>) -> TestResult {
+    fn split_and_merge(mut node: CopylessInternalNode<()>) -> TestResult {
         if node.fanout() < 4 {
             return TestResult::discard();
         }
@@ -1099,11 +1073,11 @@ mod tests {
     }
 
     #[quickcheck]
-    fn serialize_then_deserialize(node: DisjointInternalNode<()>) {
+    fn serialize_then_deserialize(node: CopylessInternalNode<()>) {
         let mut buf = Vec::new();
         buf.write_all(&[0; 4]).unwrap();
         node.pack(&mut buf).unwrap();
-        let unpacked = DisjointInternalNode::<()>::unpack(buf.into()).unwrap();
+        let unpacked = CopylessInternalNode::<()>::unpack(buf.into()).unwrap();
         assert_eq!(unpacked.meta_data, node.meta_data);
         assert_eq!(unpacked.children, node.children);
     }
