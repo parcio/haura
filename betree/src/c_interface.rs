@@ -2,7 +2,7 @@
 #![allow(non_camel_case_types)]
 use std::{
     ffi::CStr,
-    io::{stderr, BufReader, Write},
+    io::{stderr, Write},
     os::raw::{c_char, c_int, c_uint, c_ulong},
     process::abort,
     ptr::{null_mut, read, write},

@@ -87,3 +87,4 @@ latency_metrics = []
 nvm = ["pmdk"]
 # Log the allocations and deallocations done for later analysis
 allocation_log = []
+cache-paranoia = []

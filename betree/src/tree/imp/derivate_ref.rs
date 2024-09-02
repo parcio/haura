@@ -8,7 +8,7 @@ use std::{
 
 use crate::cache::AddSize;
 
-use super::internal::TakeChildBuffer;
+use super::take_child_buffer::TakeChildBufferWrapper;
 
 /// A reference allowing for a derivative of the original structure to be stored
 /// alongside the original. Helpful if a derivative of the original is dependent
@@ -25,23 +25,23 @@ use super::internal::TakeChildBuffer;
 /// let owning_ref = OwningRef::new(o).map(|o| &o.some_transition());
 ///                                         // ^-- we can't a reference from a temporary value
 /// // Does compile 😸
-/// let derivate_ref = DerivateRef::try_new(o, |o| o.some_transition())
+/// let derivate_ref = DerivateRefNVM::try_new(o, |o| o.some_transition())
 /// ```
-pub struct DerivateRef<T, U> {
+pub struct DerivateRefNVM<T, U> {
     inner: U,
     owner: T,
 }
 
-impl<T: StableDeref + DerefMut, U> DerivateRef<T, TakeChildBuffer<'static, U>> {
+impl<T: StableDeref + DerefMut, U> DerivateRefNVM<T, TakeChildBufferWrapper<'static, U>> {
     /// Unsafe conversions of a limited life-time reference in [TakeChildBuffer]
-    /// to a static one. This is only ever safe in the internal context of [DerivateRef].
+    /// to a static one. This is only ever safe in the internal context of [DerivateRefNVM].
     pub fn try_new<F>(mut owner: T, f: F) -> Result<Self, T>
     where
-        F: for<'a> FnOnce(&'a mut T::Target) -> Option<TakeChildBuffer<'a, U>>,
+        F: for<'a> FnOnce(&'a mut T::Target) -> Option<TakeChildBufferWrapper<'a, U>>,
     {
         match unsafe { transmute(f(&mut owner)) } {
             None => Err(owner),
-            Some(inner) => Ok(DerivateRef { owner, inner }),
+            Some(inner) => Ok(DerivateRefNVM { owner, inner }),
         }
     }
 
@@ -50,20 +50,20 @@ impl<T: StableDeref + DerefMut, U> DerivateRef<T, TakeChildBuffer<'static, U>> {
     }
 }
 
-impl<T: AddSize, U> AddSize for DerivateRef<T, U> {
+impl<T: AddSize, U> AddSize for DerivateRefNVM<T, U> {
     fn add_size(&self, size_delta: isize) {
         self.owner.add_size(size_delta);
     }
 }
 
-impl<T, U> Deref for DerivateRef<T, U> {
+impl<T, U> Deref for DerivateRefNVM<T, U> {
     type Target = U;
     fn deref(&self) -> &U {
         &self.inner
     }
 }
 
-impl<T, U> DerefMut for DerivateRef<T, U> {
+impl<T, U> DerefMut for DerivateRefNVM<T, U> {
     fn deref_mut(&mut self) -> &mut U {
         &mut self.inner
     }

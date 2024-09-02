@@ -586,7 +586,7 @@ impl NVMChildBuffer {
         })
     }
 
-    pub fn from_block_child_buffer<N>(other: ChildBuffer<N>) -> (Self, N) {
+    pub fn from_block_child_buffer<N>(_other: ChildBuffer<N>) -> (Self, N) {
         todo!()
     }
 }
@@ -654,7 +654,7 @@ mod tests {
             let buffer: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> = (0..entries_cnt)
                 .map(|_| {
                     (
-                        super::super::disjoint_internal::TestKey::arbitrary(g).0,
+                        super::super::copyless_internal::TestKey::arbitrary(g).0,
                         (
                             KeyInfo::arbitrary(g),
                             DefaultMessageActionMsg::arbitrary(g).0,

@@ -357,7 +357,7 @@ impl LeafNode {
         }
     }
 
-    pub fn to_memory_leaf(mut self) -> super::nvmleaf::NVMLeafNode {
+    pub fn to_memory_leaf(self) -> super::nvmleaf::NVMLeafNode {
         todo!()
     }
 

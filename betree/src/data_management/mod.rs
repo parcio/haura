@@ -117,15 +117,13 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Informs the object about the kind of storage it will be placed upon.
     /// This allows for optimizations within the node for different kind of
     /// storage medias.
-    fn prepare_pack<X>(
+    fn prepare_pack(
         &mut self,
         storage_kind: StorageKind,
-        dmu: &X,
         pivot_key: &PivotKey,
     ) -> Result<PreparePack, crate::data_management::Error>
     where
-        R: ObjectReference,
-        X: Dml<Object = crate::tree::Node<R>, ObjectRef = R>;
+        R: ObjectReference;
 
     /// Packs the object into the given `writer`. Returns an option if the node
     /// can be read with a subset of data starting from the start of the range.

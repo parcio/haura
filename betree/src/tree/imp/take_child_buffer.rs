@@ -2,12 +2,11 @@ use parking_lot::RwLock;
 
 use crate::{
     cow_bytes::CowBytes,
-    data_management::{Dml, HasStoragePreference, ObjectReference},
-    database::DatasetId,
+    data_management::{HasStoragePreference, ObjectReference},
     size::{Size, StaticSize},
 };
 
-use super::{internal::TakeChildBuffer, copyless_internal::NVMTakeChildBuffer, Node};
+use super::{internal::TakeChildBuffer, copyless_internal::NVMTakeChildBuffer};
 
 pub(super) enum TakeChildBufferWrapper<'a, N: 'a + 'static> {
     TakeChildBuffer(TakeChildBuffer<'a, N>),
@@ -36,21 +35,18 @@ where
         }
     }
 
-    pub(super) fn prepare_merge<X>(
+    pub(super) fn prepare_merge(
         &mut self,
-        dml: &X,
-        d_id: DatasetId,
     ) -> PrepareChildBufferMerge<N>
     where
         N: ObjectReference,
-        X: Dml<Object = Node<N>, ObjectRef = N>,
     {
         match self {
             TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                 PrepareChildBufferMerge::Block(obj.prepare_merge())
             }
             TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                PrepareChildBufferMerge::Memory(obj.load_and_prepare_merge(dml, d_id))
+                PrepareChildBufferMerge::Memory(obj.prepare_merge())
             }
         }
     }
@@ -92,28 +88,23 @@ where
         }
     }
 
-    pub(super) fn merge_children<X>(self, dml: &X) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
+    pub(super) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     where
-        X: Dml<Object = Node<N>, ObjectRef = N>,
         N: ObjectReference + HasStoragePreference,
     {
         match self {
             PrepareChildBufferMerge::Block(pmc) => pmc.merge_children(),
-            PrepareChildBufferMerge::Memory(pmc) => pmc.merge_children(dml),
+            PrepareChildBufferMerge::Memory(pmc) => pmc.merge_children(),
         }
     }
 
-    pub(super) fn rebalanced<X>(&mut self, new_pivot_key: CowBytes, dml: &X) -> isize
+    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
     where
-        X: Dml<Object = Node<N>, ObjectRef = N>,
         N: ObjectReference + HasStoragePreference,
     {
         match self {
             PrepareChildBufferMerge::Block(pmc) => pmc.rebalanced(new_pivot_key),
-            PrepareChildBufferMerge::Memory(pmc) => pmc.rebalanced::<_, X>(new_pivot_key, |np, d_id| {
-                dml.get_mut(np.get_mut(), d_id)
-                    .expect("Node fetch in prepare merge rebalanced untreated")
-            }),
+            PrepareChildBufferMerge::Memory(pmc) => pmc.rebalanced(new_pivot_key),
         }
     }
 }

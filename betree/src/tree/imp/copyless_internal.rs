@@ -3,18 +3,17 @@ use super::{
     node::{PivotGetMutResult, PivotGetResult},
     nvm_child_buffer::NVMChildBuffer,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
-    Node, PivotKey,
+    PivotKey,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, ObjectReference},
+    data_management::{HasStoragePreference, ObjectReference},
     database::DatasetId,
     size::{Size, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
     tree::{imp::MIN_FANOUT, pivot_key::LocalPivotKey, KeyInfo},
     AtomicStoragePreference, StoragePreference,
 };
-use owning_ref::OwningRefMut;
 use parking_lot::RwLock;
 use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
@@ -645,19 +644,14 @@ pub(super) struct NVMTakeChildBuffer<'a, N: 'a + 'static> {
 }
 
 impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
-    pub(super) fn split_child<F, G, X>(
+    pub(super) fn split_child(
         &mut self,
         sibling_np: N,
         pivot_key: CowBytes,
         select_right: bool,
-        load: F,
-        allocate: G,
     ) -> isize
     where
         N: ObjectReference,
-        X: Dml,
-        F: Fn(&mut RwLock<N>) -> OwningRefMut<X::CacheValueRefMut, NVMChildBuffer>,
-        G: Fn(NVMChildBuffer) -> N,
     {
         // split_at invalidates both involved children (old and new), but as the new child
         // is added to self, the overall entries don't change, so this node doesn't need to be
@@ -708,13 +702,9 @@ where
         (&*self.node).size()
     }
 
-    pub(super) fn load_and_prepare_merge<X>(
+    pub(super) fn prepare_merge(
         &mut self,
-        dml: &X,
-        d_id: DatasetId,
     ) -> PrepareMergeChild<N>
-    where
-        X: Dml<Object = Node<N>, ObjectRef = N>,
     {
         assert!(self.node.fanout() >= 2);
         let (pivot_key_idx, other_child_idx) = if self.child_idx + 1 < self.node.children.len() {
@@ -727,7 +717,6 @@ where
             node: self.node,
             pivot_key_idx,
             other_child_idx,
-            d_id,
         }
     }
 
@@ -741,7 +730,6 @@ pub(super) struct PrepareMergeChild<'a, N: 'a + 'static> {
     node: &'a mut CopylessInternalNode<N>,
     pivot_key_idx: usize,
     other_child_idx: usize,
-    d_id: DatasetId,
 }
 
 impl<'a, N> PrepareMergeChild<'a, N> {
@@ -760,9 +748,7 @@ impl<'a, N> PrepareMergeChild<'a, N>
 where
     N: ObjectReference + HasStoragePreference,
 {
-    pub(super) fn merge_children<X>(self, dml: &X) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
-    where
-        X: Dml<Object = Node<N>, ObjectRef = N>,
+    pub(super) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     {
         let mut right_child_links = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.meta_data.pivot.remove(self.pivot_key_idx);
@@ -775,7 +761,7 @@ where
             .entries_sizes
             .remove(self.pivot_key_idx + 1);
 
-        let mut left_buffer = self.node.children[self.pivot_key_idx].buffer_mut();
+        let left_buffer = self.node.children[self.pivot_key_idx].buffer_mut();
         let mut right_buffer = right_child_links.buffer_mut();
 
         let size_delta = pivot_key.size()
@@ -799,10 +785,7 @@ impl<'a, N> PrepareMergeChild<'a, N>
 where
     N: ObjectReference + HasStoragePreference,
 {
-    pub(super) fn rebalanced<F, X>(&mut self, new_pivot_key: CowBytes, load: F) -> isize
-    where
-        X: Dml<Object = Node<N>, ObjectRef = N>,
-        F: Fn(&mut RwLock<N>, DatasetId) -> X::CacheValueRefMut,
+    pub(super) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
     {
         {
             let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);

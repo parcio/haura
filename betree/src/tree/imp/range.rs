@@ -108,7 +108,7 @@ where
                 Bounded::Included(ref x) | Bounded::Excluded(ref x) => x,
             };
             self.tree
-                .leaf_range_query(min_key, &mut self.buffer, &mut self.prefetch_node, &mut self.prefetch_buffer)?
+                .leaf_range_query(min_key, &mut self.buffer, &mut self.prefetch_node)?
         };
 
         // Strip entries which are out of bounds from the buffer.
@@ -171,7 +171,6 @@ where
         key: &[u8],
         data: &mut VecDeque<(CowBytes, (KeyInfo, SlicedCowBytes))>,
         prefetch_node: &mut Option<X::Prefetch>,
-        prefetch_buffer: &mut Option<X::Prefetch>,
     ) -> Result<Option<CowBytes>, Error> {
         let result = {
             let mut left_pivot_key = None;
@@ -189,10 +188,8 @@ where
                     &mut messages,
                 ) {
                     GetRangeResult::NextNode {
-                        child_buffer,
                         np,
                         prefetch_option_node,
-                        prefetch_option_additional,
                     } => {
                         let previous_prefetch_node = if let Some(prefetch_np) = prefetch_option_node {
                             let f = self.dml.prefetch(&prefetch_np.read())?;

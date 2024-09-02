@@ -55,7 +55,7 @@ use crate::{
     migration::{DatabaseMsg, GlobalObjectId},
     size::StaticSize,
     storage_pool::StoragePoolLayer,
-    tree::{DefaultMessageAction, StorageKind, TreeLayer},
+    tree::{DefaultMessageAction, TreeLayer},
     vdev::Block,
     Database, Dataset, PreferredAccessType, StoragePreference,
 };

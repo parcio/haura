@@ -5,7 +5,6 @@ use pmdk;
 use crate::{
     tree::StorageKind,
     vdev::{self, Dev, Leaf},
-    StoragePreference,
 };
 use itertools::Itertools;
 use libc;

@@ -1,10 +1,7 @@
 //! Encapsulating logic for splitting of normal and root nodes.
-use owning_ref::OwningRefMut;
-
 use super::{take_child_buffer::TakeChildBufferWrapper, Inner, Node, Tree};
 use crate::{
     cache::AddSize,
-    cow_bytes::CowBytes,
     data_management::{Dml, HasStoragePreference, ObjectReference},
     size::Size,
     tree::{errors::*, MessageAction},
@@ -78,16 +75,10 @@ where
                 parent.split_child(sibling_np, pivot_key, select_right)
             }
             TakeChildBufferWrapper::NVMTakeChildBuffer(ref mut parent) => parent
-                .split_child::<_, _, X>(
+                .split_child(
                     sibling_np,
                     pivot_key,
                     select_right,
-                    |np| {
-                        unimplemented!()
-                    },
-                    |node| {
-                        unimplemented!()
-                    },
                 ),
         };
 

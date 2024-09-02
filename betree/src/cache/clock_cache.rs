@@ -399,7 +399,7 @@ impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 's
         }
     }
 
-    #[cfg(not(feature = "cacha-paranoia"))]
+    #[cfg(not(feature = "cache-paranoia"))]
     #[inline(always)]
     fn verify(&mut self) {}
 }
