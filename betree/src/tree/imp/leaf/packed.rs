@@ -281,11 +281,13 @@ impl Size for PackedMap {
 mod tests {
     use std::io::Write;
 
+    use crate::{buffer::BufWrite, vdev::Block};
+
     use super::{LeafNode, PackedMap};
 
     #[quickcheck]
     fn check_packed_contents(leaf: LeafNode) {
-        let mut v = Vec::new();
+        let mut v = BufWrite::with_capacity(Block(1));
         assert!(
             v.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN])
                 .unwrap()
@@ -293,7 +295,7 @@ mod tests {
         );
         PackedMap::pack(&leaf, &mut v).unwrap();
 
-        let packed = PackedMap::new(v.into_boxed_slice());
+        let packed = PackedMap::new(v.into_buf());
 
         for (k, (ki, v)) in leaf.entries() {
             let (pki, pv) = packed.get(k).unwrap();

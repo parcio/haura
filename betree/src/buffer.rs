@@ -444,17 +444,16 @@ impl Buf {
     /// non-self-managed memory range, this property is transferred otherwise a
     /// new [CowBytes] is created.
     pub fn into_sliced_cow_bytes(self) -> SlicedCowBytes {
-        let storage = Arc::try_unwrap(self.buf.buf)
-            .expect("AlignedBuf was not unique")
-            .into_inner();
+        if !(unsafe { &*self.buf.buf.get() }).owned {
+            let storage = Arc::try_unwrap(self.buf.buf)
+                .expect("AlignedBuf was not unique")
+                .into_inner();
 
-        if !storage.owned {
             unsafe {
                 SlicedCowBytes::from_raw(storage.ptr.as_ptr(), storage.capacity.to_bytes() as usize)
             }
         } else {
-            let len = storage.capacity.to_bytes() as usize;
-            CowBytes::from(unsafe { Vec::from_raw_parts(storage.ptr.as_ptr(), len, len) }).into()
+            CowBytes::from(self.into_boxed_slice()).into()
         }
     }
 

@@ -932,12 +932,12 @@ mod tests {
 
     #[quickcheck]
     fn ser_deser(leaf_node: CopylessLeaf) {
-        let mut bytes = vec![];
+        let mut bytes = BufWrite::with_capacity(Block(1));
         bytes
             .write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN])
             .unwrap();
         let _metadata_size = leaf_node.pack(&mut bytes).unwrap();
-        let _node = CopylessLeaf::unpack(bytes.into_boxed_slice()).unwrap();
+        let _node = CopylessLeaf::unpack(bytes.into_buf()).unwrap();
     }
 
     #[quickcheck]
@@ -1022,7 +1022,7 @@ mod tests {
             .unwrap();
         let _ = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf().into_boxed_slice();
-        let mut wire_node = CopylessLeaf::unpack(buf.clone()).unwrap();
+        let mut wire_node = CopylessLeaf::unpack(buf.clone().into()).unwrap();
 
         let meta_data_len: usize = u32::from_le_bytes(
             buf[NVMLEAF_METADATA_LEN_OFFSET + crate::tree::imp::node::NODE_PREFIX_LEN
@@ -1055,7 +1055,7 @@ mod tests {
             .unwrap();
         let _ = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf();
-        let _wire_node = CopylessLeaf::unpack(buf.into_boxed_slice()).unwrap();
+        let _wire_node = CopylessLeaf::unpack(buf.into_boxed_slice().into()).unwrap();
 
         TestResult::passed()
     }

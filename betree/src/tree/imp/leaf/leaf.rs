@@ -377,14 +377,11 @@ mod tests {
 
     use super::{CowBytes, LeafNode, Size};
     use crate::{
-        arbitrary::GenExt,
-        data_management::HasStoragePreference,
-        tree::{
+        arbitrary::GenExt, buffer::BufWrite, data_management::HasStoragePreference, tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
             imp::leaf::PackedMap,
             KeyInfo,
-        },
-        StoragePreference,
+        }, vdev::Block, StoragePreference
     };
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
@@ -464,10 +461,10 @@ mod tests {
 
     #[quickcheck]
     fn check_serialization(leaf_node: LeafNode) {
-        let mut data = Vec::new();
+        let mut data = BufWrite::with_capacity(Block(1));
         assert!(data.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap() == 4);
         PackedMap::pack(&leaf_node, &mut data).unwrap();
-        let twin = PackedMap::new(data.into_boxed_slice()).unpack_leaf();
+        let twin = PackedMap::new(data.into_buf()).unpack_leaf();
 
         assert_eq!(leaf_node, twin);
     }

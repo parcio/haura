@@ -853,7 +853,7 @@ mod tests {
     use std::io::Write;
 
     use super::*;
-    use crate::{arbitrary::GenExt, database::DatasetId};
+    use crate::{arbitrary::GenExt, buffer::BufWrite, database::DatasetId};
 
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
@@ -1071,12 +1071,19 @@ mod tests {
 
     #[quickcheck]
     fn serialize_then_deserialize(node: CopylessInternalNode<()>) {
-        let mut buf = Vec::new();
+        println!("Start");
+        let mut buf = BufWrite::with_capacity(crate::vdev::Block(1));
+        println!("Start Prefix");
         buf.write_all(&[0; 4]).unwrap();
+        println!("Start packing");
         node.pack(&mut buf).unwrap();
-        let unpacked = CopylessInternalNode::<()>::unpack(buf.into()).unwrap();
+        println!("Done packing");
+        let unpacked = CopylessInternalNode::<()>::unpack(buf.into_buf()).unwrap();
+        println!("Done unpacking");
         assert_eq!(unpacked.meta_data, node.meta_data);
+        println!("Checked meta data");
         assert_eq!(unpacked.children, node.children);
+        println!("Checked children");
     }
 
     // TODO tests
