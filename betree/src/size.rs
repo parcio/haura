@@ -5,9 +5,9 @@
 
 use parking_lot::RwLock;
 
-/// A trait which represents an serializable object
-/// that can quickly calculate the size of it's
-/// [`bincode`](../../bincode/index.html) representation.
+/// A trait which represents an serializable object that can quickly calculate
+/// the size of it's [`bincode`](../../bincode/index.html) representation and
+/// the current size occupied in memory.
 pub trait Size {
     /// Returns the size (number of bytes) that this object would have
     /// if serialized using [`bincode`](../../bincode/index.html).
@@ -27,6 +27,11 @@ pub trait Size {
             (predicted, Some(actual)) => Err((predicted, actual)),
             (predicted, None) => Ok(predicted),
         }
+    }
+
+    /// Size in bytes this
+    fn cache_size(&self) -> usize {
+        self.size()
     }
 }
 

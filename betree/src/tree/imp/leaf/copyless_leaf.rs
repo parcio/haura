@@ -293,7 +293,9 @@ impl LeafNodeState {
     pub fn set_data(&mut self, data: SlicedCowBytes) {
         match self {
             LeafNodeState::PartiallyLoaded { ref mut buf, .. } => *buf = data,
-            LeafNodeState::Deserialized { .. } => panic!("Set data on deserialized copyless leaf state."),
+            LeafNodeState::Deserialized { .. } => {
+                panic!("Set data on deserialized copyless leaf state.")
+            }
         }
     }
 }
@@ -369,6 +371,18 @@ impl Size for CopylessLeaf {
             return Some(NVMLEAF_HEADER_FIXED_LEN + Meta::static_size() + data_size + key_size);
         }
         None
+    }
+
+    fn cache_size(&self) -> usize {
+        match &self.state {
+            LeafNodeState::PartiallyLoaded { keys, .. } => {
+                Meta::static_size()
+                    + std::mem::size_of::<usize>()
+                    + keys.len() * Location::static_size()
+                    + keys.iter().map(|b| b.0.len()).sum::<usize>()
+            }
+            LeafNodeState::Deserialized { .. } => self.size(),
+        }
     }
 }
 
@@ -928,10 +942,7 @@ mod tests {
             .write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN])
             .unwrap();
         let _metadata_size = leaf_node.pack(&mut bytes).unwrap();
-        let _node = CopylessLeaf::unpack(
-            bytes.into_boxed_slice(),
-        )
-        .unwrap();
+        let _node = CopylessLeaf::unpack(bytes.into_boxed_slice()).unwrap();
     }
 
     #[quickcheck]
@@ -1016,10 +1027,7 @@ mod tests {
             .unwrap();
         let _ = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf().into_boxed_slice();
-        let mut wire_node = CopylessLeaf::unpack(
-            buf.clone(),
-        )
-        .unwrap();
+        let mut wire_node = CopylessLeaf::unpack(buf.clone()).unwrap();
 
         let meta_data_len: usize = u32::from_le_bytes(
             buf[NVMLEAF_METADATA_LEN_OFFSET + crate::tree::imp::node::NODE_PREFIX_LEN
@@ -1052,10 +1060,7 @@ mod tests {
             .unwrap();
         let _ = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf();
-        let _wire_node = CopylessLeaf::unpack(
-            buf.into_boxed_slice(),
-        )
-        .unwrap();
+        let _wire_node = CopylessLeaf::unpack(buf.into_boxed_slice()).unwrap();
 
         TestResult::passed()
     }

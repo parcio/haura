@@ -328,10 +328,7 @@ where
         key: ObjectKey<Generation>,
         mut object: E::Value,
     ) -> E::ValueRef {
-        // FIXME: This is always the maximum size of nodes as it concerns their
-        // disk representation. An useful metric would be the actual memory
-        // footprint which may differ based on the node type (NVM etc.).
-        let size = object.value_mut().get_mut().size();
+        let size = object.value_mut().get_mut().cache_size();
         let mut cache = self.cache.write();
         if !cache.contains_key(&key) {
             cache.insert(key, object, size);
@@ -383,7 +380,7 @@ where
                     .is_ok(),
             };
             if can_be_evicted {
-                Some(object.size())
+                Some(object.cache_size())
             } else {
                 None
             }
@@ -399,7 +396,7 @@ where
             ObjectKey::Modified(mid) => mid,
         };
 
-        let size = object.value_mut().get_mut().size();
+        let size = object.value_mut().get_mut().cache_size();
         cache.insert(ObjectKey::InWriteback(mid), object, size);
         let entry = cache.get(&ObjectKey::InWriteback(mid), false).unwrap();
 
