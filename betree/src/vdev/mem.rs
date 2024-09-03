@@ -2,14 +2,11 @@ use super::{
     errors::*, AtomicStatistics, Block, Result, ScrubResult, Statistics, Vdev, VdevLeafRead,
     VdevLeafWrite, VdevRead,
 };
-use crate::{
-    buffer::{Buf, BufWrite},
-    checksum::Checksum,
-};
+use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::{
-    io::{self, Write},
+    io,
     ops::{Deref, DerefMut},
     sync::atomic::Ordering,
 };
@@ -69,8 +66,13 @@ impl Memory {
 
         match self.slice_blocks(size, offset) {
             Ok(slice) => {
-                let mut buf = BufWrite::with_capacity(size);
-                buf.write_all(&slice)?;
+                let buf = unsafe {
+                    Buf::from_raw(
+                        std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                            .expect("Pointer in Memory vdev was null."),
+                        size,
+                    )
+                };
                 #[cfg(feature = "latency_metrics")]
                 self.stats.read_op_latency.fetch_add(
                     start
@@ -80,7 +82,7 @@ impl Memory {
                         .unwrap_or(u32::MAX as u64),
                     Ordering::Relaxed,
                 );
-                Ok(buf.into_buf())
+                Ok(buf)
             }
             Err(e) => {
                 #[cfg(feature = "latency_metrics")]

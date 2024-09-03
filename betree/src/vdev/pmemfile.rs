@@ -74,11 +74,25 @@ impl VdevRead for PMemFile {
         checksum: C,
     ) -> Result<Buf> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
-        let buf = {
-            let mut buf = Buf::zeroed(size).into_full_mut();
-            self.file.read(offset.to_bytes() as usize, buf.as_mut());
-            buf.into_full_buf()
+        let buf = unsafe {
+            let slice = self
+                .file
+                .get_slice(offset.to_bytes() as usize, size.to_bytes() as usize)?;
+            // # SAFETY
+            // Since Bufs are read only anyways we ensure the safety of this
+            // step by re-packing this forced mutable pointer into one.
+            Buf::from_raw(
+                std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                    .expect("Pmem pointer was null when trying to read from offset."),
+                size,
+            )
         };
+
+        // let buf = {
+        //     let mut buf = Buf::zeroed(size).into_full_mut();
+        //     self.file.read(offset.to_bytes() as usize, buf.as_mut());
+        //     buf.into_full_buf()
+        // };
 
         match checksum.verify(&buf).map_err(VdevError::from) {
             Ok(()) => Ok(buf),
@@ -107,10 +121,24 @@ impl VdevRead for PMemFile {
 
     async fn read_raw(&self, size: Block<u32>, offset: Block<u64>) -> Result<Vec<Buf>> {
         self.stats.read.fetch_add(size.as_u64(), Ordering::Relaxed);
-        let mut buf = Buf::zeroed(size).into_full_mut();
+        // let mut buf = Buf::zeroed(size).into_full_mut();
 
-        self.file.read(offset.to_bytes() as usize, buf.as_mut());
-        Ok(vec![buf.into_full_buf()])
+        let buf = unsafe {
+            let slice = self
+                .file
+                .get_slice(offset.to_bytes() as usize, size.to_bytes() as usize)?;
+            // # SAFETY
+            // Since Bufs are read only anyways we ensure the safety of this
+            // step by re-packing this forced mutable pointer into one.
+            Buf::from_raw(
+                std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                    .expect("Pmem pointer was null when trying to read from offset."),
+                size,
+            )
+        };
+
+        // self.file.read(offset.to_bytes() as usize, buf.as_mut());
+        Ok(vec![buf])
     }
 }
 

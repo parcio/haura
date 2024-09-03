@@ -1,7 +1,7 @@
 //! Implementation of the [InternalNode] node type.
 use super::{
     child_buffer::ChildBuffer,
-    packed_child_buffer::NVMChildBuffer,
+    packed_child_buffer::PackedChildBuffer,
     copyless_internal::CopylessInternalNode,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
 };
@@ -190,7 +190,7 @@ impl<N> InternalNode<N> {
         })
     }
 
-    pub fn from_disjoint_node(mut mem: CopylessInternalNode<N>, cbufs: Vec<NVMChildBuffer>) -> Self {
+    pub fn from_disjoint_node(mut mem: CopylessInternalNode<N>, cbufs: Vec<PackedChildBuffer>) -> Self {
         let cbufs: Vec<ChildBuffer<N>> = cbufs
             .into_iter()
             .enumerate()

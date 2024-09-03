@@ -5,7 +5,7 @@ use crate::tree::imp::{
 };
 
 use super::{
-    packed_child_buffer::NVMChildBuffer,
+    packed_child_buffer::PackedChildBuffer,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
 };
 
@@ -36,7 +36,7 @@ pub(in crate::tree::imp) struct CopylessInternalNode<N> {
 #[serde(bound(serialize = "N: Serialize", deserialize = "N: Deserialize<'de>"))]
 pub(in crate::tree::imp) struct ChildLink<N> {
     #[serde(skip)]
-    buffer: NVMChildBuffer,
+    buffer: PackedChildBuffer,
     #[serde(with = "serialize_nodepointer")]
     ptr: RwLock<N>,
 }
@@ -49,18 +49,18 @@ impl<N: PartialEq> PartialEq for ChildLink<N> {
 }
 
 impl<N> ChildLink<N> {
-    pub fn new(buffer: NVMChildBuffer, ptr: N) -> Self {
+    pub fn new(buffer: PackedChildBuffer, ptr: N) -> Self {
         ChildLink {
             buffer,
             ptr: RwLock::new(ptr),
         }
     }
 
-    pub fn buffer_mut(&mut self) -> &mut NVMChildBuffer {
+    pub fn buffer_mut(&mut self) -> &mut PackedChildBuffer {
         &mut self.buffer
     }
 
-    pub fn buffer(&self) -> &NVMChildBuffer {
+    pub fn buffer(&self) -> &PackedChildBuffer {
         &self.buffer
     }
 
@@ -175,12 +175,12 @@ impl<N: HasStoragePreference> HasStoragePreference for CopylessInternalNode<N> {
 
 pub struct InternalNodeLink<N> {
     pub ptr: N,
-    pub buffer: NVMChildBuffer,
+    pub buffer: PackedChildBuffer,
     pub buffer_size: usize,
 }
 
 impl<N> InternalNodeLink<N> {
-    pub fn destruct(self) -> (N, NVMChildBuffer) {
+    pub fn destruct(self) -> (N, PackedChildBuffer) {
         (self.ptr, self.buffer)
     }
 }
@@ -334,7 +334,7 @@ impl<N> CopylessInternalNode<N> {
         cursor += ptrs_len;
         for idx in 0..meta_data.entries_sizes.len() {
             let sub = buf.clone().slice_from(cursor as u32);
-            let b = NVMChildBuffer::unpack(sub)?;
+            let b = PackedChildBuffer::unpack(sub)?;
             cursor += b.size();
             assert_eq!(meta_data.entries_sizes[idx], b.size());
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
@@ -819,14 +819,14 @@ impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         &mut self.node.children[self.child_idx].ptr
     }
 
-    pub fn buffer_mut(&mut self) -> &mut NVMChildBuffer
+    pub fn buffer_mut(&mut self) -> &mut PackedChildBuffer
     where
         N: ObjectReference,
     {
         &mut self.node.children[self.child_idx].buffer
     }
 
-    pub fn buffer(&self) -> &NVMChildBuffer
+    pub fn buffer(&self) -> &PackedChildBuffer
     where
         N: ObjectReference,
     {
@@ -933,7 +933,7 @@ mod tests {
 
             let mut children: Vec<ChildLink<T>> = Vec::with_capacity(pivot_key_cnt + 1);
             for _ in 0..pivot_key_cnt + 1 {
-                let buffer = NVMChildBuffer::arbitrary(g);
+                let buffer = PackedChildBuffer::arbitrary(g);
                 entries_size += T::static_size() + buffer.size();
                 children.push(ChildLink {
                     buffer,

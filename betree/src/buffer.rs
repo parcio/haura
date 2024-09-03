@@ -57,6 +57,7 @@ fn split_range_at(
 struct AlignedStorage {
     ptr: NonNull<u8>,
     capacity: Block<u32>,
+    owned: bool,
 }
 
 // impl Default for AlignedStorage {
@@ -77,6 +78,7 @@ impl AlignedStorage {
                 NonNull::new(alloc::alloc_zeroed(new_layout)).expect("Allocation failed.")
             },
             capacity,
+            owned: true,
         }
     }
 
@@ -119,7 +121,9 @@ impl AlignedStorage {
                 self.ptr
                     .as_ptr()
                     .copy_to_nonoverlapping(new_ptr.as_ptr(), self.capacity.to_bytes() as usize);
-                alloc::dealloc(self.ptr.as_ptr(), curr_layout);
+                if self.owned {
+                    alloc::dealloc(self.ptr.as_ptr(), curr_layout);
+                }
                 new_ptr
             });
             self.capacity = wanted_capacity;
@@ -129,6 +133,9 @@ impl AlignedStorage {
 
 impl Drop for AlignedStorage {
     fn drop(&mut self) {
+        if !self.owned {
+            return;
+        }
         unsafe {
             let layout =
                 Layout::from_size_align_unchecked(self.capacity.to_bytes() as usize, BLOCK_SIZE);
@@ -148,6 +155,7 @@ impl From<Box<[u8]>> for AlignedStorage {
                 ptr: unsafe {
                     NonNull::new((*Box::into_raw(b)).as_mut_ptr()).expect("Assume valid pointer.")
                 },
+                owned: true,
             }
         } else {
             assert!(
@@ -266,11 +274,18 @@ impl BufWrite {
     /// and therefore no aliasing writable pieces can remain.
     /// Buffers are shrunk to fit.
     pub fn into_buf(mut self) -> Buf {
-        let curr_layout =
-            unsafe { Layout::from_size_align_unchecked(self.buf.capacity.to_bytes() as usize, BLOCK_SIZE) };
+        let curr_layout = unsafe {
+            Layout::from_size_align_unchecked(self.buf.capacity.to_bytes() as usize, BLOCK_SIZE)
+        };
         let new_cap = Block::round_up_from_bytes(self.size);
         self.buf.capacity = new_cap;
-        let new_ptr = unsafe { alloc::realloc(self.buf.ptr.as_ptr(), curr_layout, new_cap.to_bytes() as usize) };
+        let new_ptr = unsafe {
+            alloc::realloc(
+                self.buf.ptr.as_ptr(),
+                curr_layout,
+                new_cap.to_bytes() as usize,
+            )
+        };
         // If return value is null, old value remains valid.
         if let Some(new_ptr) = NonNull::new(new_ptr) {
             self.buf.ptr = new_ptr;
@@ -375,6 +390,19 @@ impl Buf {
         }
     }
 
+    pub(crate) unsafe fn from_raw(ptr: NonNull<u8>, size: Block<u32>) -> Self {
+        Self {
+            buf: AlignedBuf {
+                buf: Arc::new(UnsafeCell::new(AlignedStorage {
+                    ptr,
+                    capacity: size,
+                    owned: false,
+                })),
+            },
+            range: Block(0)..size,
+        }
+    }
+
     /// Create a [Buf] from a byte vector. If `b.len()` is not a multiple of the block size,
     /// the size will be rounded up to the next multiple and filled with zeroes.
     pub fn from_zero_padded(mut b: Vec<u8>) -> Self {
@@ -418,11 +446,22 @@ impl Buf {
                 .into_inner(),
         );
 
-        unsafe {
-            Box::from_raw(slice::from_raw_parts_mut(
-                storage.ptr.as_ptr(),
-                storage.capacity.to_bytes() as usize,
-            ))
+        if !storage.owned {
+            unsafe {
+                slice::from_raw_parts_mut(
+                    storage.ptr.as_ptr(),
+                    storage.capacity.to_bytes() as usize,
+                )
+                .to_vec()
+                .into_boxed_slice()
+            }
+        } else {
+            unsafe {
+                Box::from_raw(slice::from_raw_parts_mut(
+                    storage.ptr.as_ptr(),
+                    storage.capacity.to_bytes() as usize,
+                ))
+            }
         }
     }
 

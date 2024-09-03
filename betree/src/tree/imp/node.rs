@@ -4,7 +4,7 @@ use super::{
     internal::{
         child_buffer::ChildBuffer,
         internal::InternalNode,
-        packed_child_buffer::NVMChildBuffer,
+        packed_child_buffer::PackedChildBuffer,
         take_child_buffer::TakeChildBufferWrapper,
         copyless_internal::{ChildLink, CopylessInternalNode, InternalNodeLink},
     },
@@ -134,16 +134,16 @@ impl<'a, N> ChildBufferIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>>
     }
 }
 
-impl<'a> ChildBufferIteratorTrait<'a, Option<NVMChildBuffer>> for Vec<Option<NVMChildBuffer>> {
-    fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Option<NVMChildBuffer>> + 'a> {
+impl<'a> ChildBufferIteratorTrait<'a, Option<PackedChildBuffer>> for Vec<Option<PackedChildBuffer>> {
+    fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Option<PackedChildBuffer>> + 'a> {
         Box::new(self.iter_mut())
     }
 
-    fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a Option<NVMChildBuffer>> + 'a> {
+    fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a Option<PackedChildBuffer>> + 'a> {
         Box::new(self.iter())
     }
 
-    fn cb_iter(self) -> Box<dyn Iterator<Item = Option<NVMChildBuffer>> + 'a> {
+    fn cb_iter(self) -> Box<dyn Iterator<Item = Option<PackedChildBuffer>> + 'a> {
         Box::new(self.into_iter())
     }
 }
@@ -304,39 +304,39 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
     fn prepare_pack(
         &mut self,
-        storage_kind: StorageKind,
+        _storage_kind: StorageKind,
         _pivot_key: &PivotKey,
     ) -> Result<crate::data_management::PreparePack, crate::data_management::Error>
     where
         R: ObjectReference,
     {
         // NOTE: Only necessary transitions are represented here, all others are no-op. Can be improved.
-        self.0 = match (
-            std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }),
-            storage_kind,
-        ) {
-            // (Internal(internal), StorageKind::Memory) | (Internal(internal), StorageKind::Ssd) => {
-            //     // Spawn new child buffers from one internal node.
-            //     Inner::DisjointInternal(internal.to_disjoint_node(|new_cbuf| {
-            //         dmu.insert(
-            //             Node(Inner::ChildBuffer(new_cbuf)),
-            //             pivot_key.d_id(),
-            //             pivot_key.clone(),
-            //         )
-            //     }))
-            // }
-            (CopylessInternal(_internal), StorageKind::Hdd) => {
-                // Fetch children and pipe them into one node.
-                unimplemented!();
-                // let mut cbufs = Vec::with_capacity(internal.children.len());
-                // Inner::Internal(InternalNode::from_disjoint_node(internal, cbufs))
-            }
-            (Leaf(leaf), StorageKind::Memory) => Inner::MemLeaf(leaf.to_memory_leaf()),
-            (MemLeaf(leaf), StorageKind::Ssd) | (MemLeaf(leaf), StorageKind::Hdd) => {
-                Inner::Leaf(leaf.to_block_leaf())
-            }
-            (default, _) => default,
-        };
+        // self.0 = match (
+        //     std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }),
+        //     storage_kind,
+        // ) {
+        //     // (Internal(internal), StorageKind::Memory) | (Internal(internal), StorageKind::Ssd) => {
+        //     //     // Spawn new child buffers from one internal node.
+        //     //     Inner::DisjointInternal(internal.to_disjoint_node(|new_cbuf| {
+        //     //         dmu.insert(
+        //     //             Node(Inner::ChildBuffer(new_cbuf)),
+        //     //             pivot_key.d_id(),
+        //     //             pivot_key.clone(),
+        //     //         )
+        //     //     }))
+        //     // }
+        //     (CopylessInternal(_internal), StorageKind::Hdd) => {
+        //         // Fetch children and pipe them into one node.
+        //         unimplemented!();
+        //         // let mut cbufs = Vec::with_capacity(internal.children.len());
+        //         // Inner::Internal(InternalNode::from_disjoint_node(internal, cbufs))
+        //     }
+        //     (Leaf(leaf), StorageKind::Memory) => Inner::MemLeaf(leaf.to_memory_leaf()),
+        //     (MemLeaf(leaf), StorageKind::Ssd) | (MemLeaf(leaf), StorageKind::Hdd) => {
+        //         Inner::Leaf(leaf.to_block_leaf())
+        //     }
+        //     (default, _) => default,
+        // };
         Ok(PreparePack())
     }
 }
@@ -477,9 +477,8 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 
     pub(super) fn empty_leaf(kind: StorageKind) -> Self {
         match kind {
-            StorageKind::Hdd => Node(Leaf(LeafNode::new())),
             StorageKind::Memory => Node(MemLeaf(CopylessLeaf::new())),
-            StorageKind::Ssd => Node(Leaf(LeafNode::new())),
+            _ => Node(Leaf(LeafNode::new())),
         }
     }
 
@@ -520,7 +519,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
     where
         F: Fn(Self, LocalPivotKey) -> N,
     {
-        let is_disjoint = match storage_map.get(self.correct_preference()) {
+        let can_be_copyless = match storage_map.get(self.correct_preference()) {
             StorageKind::Memory => true,
             _ => false,
         };
@@ -558,16 +557,16 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         };
         debug!("Root split pivot key: {:?}", pivot_key);
 
-        assert!(!left_sibling.has_too_low_fanout());
-        assert!(!right_sibling.has_too_low_fanout());
+        debug_assert!(!left_sibling.has_too_low_fanout());
+        debug_assert!(!right_sibling.has_too_low_fanout());
 
-        if is_disjoint {
+        if can_be_copyless {
             let left_child =
                 allocate_obj(left_sibling, LocalPivotKey::LeftOuter(pivot_key.clone()));
             let right_child = allocate_obj(right_sibling, LocalPivotKey::Right(pivot_key.clone()));
 
-            let left_buffer = NVMChildBuffer::new();
-            let right_buffer = NVMChildBuffer::new();
+            let left_buffer = PackedChildBuffer::new();
+            let right_buffer = PackedChildBuffer::new();
 
             let left_link = InternalNodeLink {
                 buffer_size: left_buffer.size(),
@@ -609,10 +608,6 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
 pub(super) enum GetResult<'a, N: 'a + 'static> {
     Data(Option<(KeyInfo, SlicedCowBytes)>),
     NextNode(&'a RwLock<N>),
-    NVMNextNode {
-        child: &'a RwLock<N>,
-        buffer: &'a RwLock<N>,
-    },
 }
 
 pub(super) enum ApplyResult<'a, N: 'a + 'static> {

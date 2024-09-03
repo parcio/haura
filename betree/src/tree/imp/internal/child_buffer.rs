@@ -2,7 +2,7 @@
 //!
 //! Encapsulating common nodes like [super::internal::InternalNode] and
 //! [super::leaf::LeafNode].
-use super::{packed_child_buffer::NVMChildBuffer, serialize_nodepointer};
+use super::{packed_child_buffer::PackedChildBuffer, serialize_nodepointer};
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, ObjectReference},
@@ -133,7 +133,7 @@ impl<N> ChildBuffer<N> {
         })
     }
 
-    pub fn from_mem_child_buffer(mut other: NVMChildBuffer, np: N) -> Self {
+    pub fn from_mem_child_buffer(mut other: PackedChildBuffer, np: N) -> Self {
         let msgs = std::mem::replace(other.buffer.unpacked(), Default::default());
         let buffer_entries_size = msgs.iter().map(|(k, v)| k.size() + v.size()).sum();
         Self {

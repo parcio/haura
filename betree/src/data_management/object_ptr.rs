@@ -55,7 +55,6 @@ impl<D: StaticSize> StaticSize for ObjectPointer<D> {
             + Generation::static_size()
             + <DiskOffset as StaticSize>::static_size()
             + Block::<u32>::static_size()
-            + Block::<u32>::static_size()
             + std::mem::size_of::<usize>()
     }
 }

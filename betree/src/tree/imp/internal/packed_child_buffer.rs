@@ -34,7 +34,7 @@ impl<T> CutSlice<T> for [T] {
 
 /// A buffer for messages that belong to a child of a tree node.
 #[derive(Debug)]
-pub(in crate::tree::imp) struct NVMChildBuffer {
+pub(in crate::tree::imp) struct PackedChildBuffer {
     pub(in crate::tree::imp) messages_preference: AtomicStoragePreference,
     // This preference should always be set by the parent. Needs to be on fast
     // memory or NVMe to be worth the additional queries.
@@ -43,9 +43,9 @@ pub(in crate::tree::imp) struct NVMChildBuffer {
     pub(in crate::tree::imp) buffer: Map,
 }
 
-impl Default for NVMChildBuffer {
+impl Default for PackedChildBuffer {
     fn default() -> Self {
-        NVMChildBuffer::new()
+        PackedChildBuffer::new()
     }
 }
 
@@ -232,7 +232,7 @@ impl Map {
     }
 }
 
-impl HasStoragePreference for NVMChildBuffer {
+impl HasStoragePreference for PackedChildBuffer {
     fn current_preference(&self) -> Option<StoragePreference> {
         self.messages_preference
             .as_option()
@@ -273,7 +273,7 @@ impl HasStoragePreference for NVMChildBuffer {
     }
 }
 
-impl Size for NVMChildBuffer {
+impl Size for PackedChildBuffer {
     fn size(&self) -> usize {
         HEADER + self.entries_size
     }
@@ -283,7 +283,7 @@ impl Size for NVMChildBuffer {
     }
 }
 
-impl NVMChildBuffer {
+impl PackedChildBuffer {
     pub fn buffer_size(&self) -> usize {
         self.entries_size
     }
@@ -349,7 +349,7 @@ pub enum Iter<'a> {
 }
 
 impl<'a> Iter<'a> {
-    fn new(cbuf: &'a NVMChildBuffer) -> Self {
+    fn new(cbuf: &'a PackedChildBuffer) -> Self {
         match cbuf.buffer {
             Map::Packed {
                 entry_count,
@@ -387,7 +387,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-impl NVMChildBuffer {
+impl PackedChildBuffer {
     /// Returns an iterator over all messages.
     pub fn get_all_messages(
         &self,
@@ -417,7 +417,7 @@ impl NVMChildBuffer {
     /// contains the other entries.
     pub fn split_at(&mut self, pivot: &CowBytes) -> Self {
         let (buffer, buffer_entries_size) = self.split_off(pivot);
-        NVMChildBuffer {
+        PackedChildBuffer {
             messages_preference: AtomicStoragePreference::unknown(),
             buffer: Map::Unpacked(buffer),
             entries_size: buffer_entries_size,
@@ -491,7 +491,7 @@ impl NVMChildBuffer {
 
     /// Constructs a new, empty buffer.
     pub fn new() -> Self {
-        NVMChildBuffer {
+        PackedChildBuffer {
             messages_preference: AtomicStoragePreference::known(StoragePreference::NONE),
             buffer: Map::Unpacked(BTreeMap::new()),
             entries_size: 0,
@@ -591,7 +591,7 @@ impl NVMChildBuffer {
     }
 }
 
-impl NVMChildBuffer {
+impl PackedChildBuffer {
     pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> usize {
         // Context: Previously we mentioned the usage of a drain filter here and
         // linked to an existing issue of how it is missing from the standard
@@ -629,9 +629,9 @@ mod tests {
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
 
-    impl Clone for NVMChildBuffer {
+    impl Clone for PackedChildBuffer {
         fn clone(&self) -> Self {
-            NVMChildBuffer {
+            PackedChildBuffer {
                 messages_preference: self.messages_preference.clone(),
                 entries_size: self.entries_size,
                 buffer: Map::Unpacked(self.buffer.assert_unpacked().clone()),
@@ -640,14 +640,14 @@ mod tests {
         }
     }
 
-    impl PartialEq for NVMChildBuffer {
+    impl PartialEq for PackedChildBuffer {
         fn eq(&self, other: &Self) -> bool {
             self.entries_size == other.entries_size
                 && self.buffer.assert_unpacked() == other.buffer.assert_unpacked()
         }
     }
 
-    impl Arbitrary for NVMChildBuffer {
+    impl Arbitrary for PackedChildBuffer {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
             let entries_cnt = rng.gen_range(0..20);
@@ -662,7 +662,7 @@ mod tests {
                     )
                 })
                 .collect();
-            NVMChildBuffer {
+            PackedChildBuffer {
                 messages_preference: AtomicStoragePreference::unknown(),
                 entries_size: buffer
                     .iter()
@@ -676,19 +676,19 @@ mod tests {
         }
     }
 
-    fn check_size(child_buffer: &NVMChildBuffer) {
+    fn check_size(child_buffer: &PackedChildBuffer) {
         let mut buf = Vec::new();
         child_buffer.pack(&mut buf).unwrap();
         assert_eq!(buf.len(), child_buffer.size())
     }
 
     #[quickcheck]
-    fn actual_size(child_buffer: NVMChildBuffer) {
+    fn actual_size(child_buffer: PackedChildBuffer) {
         check_size(&child_buffer)
     }
 
     #[quickcheck]
-    fn size_split_at(mut child_buffer: NVMChildBuffer, pivot_key: CowBytes) {
+    fn size_split_at(mut child_buffer: PackedChildBuffer, pivot_key: CowBytes) {
         let sbl = child_buffer.split_at(&pivot_key);
         check_size(&child_buffer);
         assert!(child_buffer.checked_size().is_ok());
@@ -697,7 +697,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn split_at(mut child_buffer: NVMChildBuffer, pivot_key: CowBytes) {
+    fn split_at(mut child_buffer: PackedChildBuffer, pivot_key: CowBytes) {
         let sbl = child_buffer.split_at(&pivot_key);
         assert!(child_buffer
             .buffer
@@ -714,7 +714,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn append(mut child_buffer: NVMChildBuffer) -> TestResult {
+    fn append(mut child_buffer: PackedChildBuffer) -> TestResult {
         if child_buffer.buffer.len() < 4 {
             return TestResult::discard();
         }
@@ -737,12 +737,12 @@ mod tests {
     }
 
     #[quickcheck]
-    fn unpack_equality(child_buffer: NVMChildBuffer) {
+    fn unpack_equality(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
-        let mut other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
         other.buffer.unpacked();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
@@ -752,12 +752,12 @@ mod tests {
     }
 
     #[quickcheck]
-    fn unpackless_access(child_buffer: NVMChildBuffer) {
+    fn unpackless_access(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
-        let other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
             let res = other.get(key).unwrap();
@@ -766,12 +766,12 @@ mod tests {
     }
 
     #[quickcheck]
-    fn unpackless_iter(child_buffer: NVMChildBuffer) {
+    fn unpackless_iter(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
 
-        let other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
 
         for (idx, (key, tup)) in child_buffer.get_all_messages().enumerate() {
             let res = other.get_all_messages().nth(idx).unwrap();
@@ -780,17 +780,17 @@ mod tests {
     }
 
     #[quickcheck]
-    fn serialize_deserialize_idempotent(child_buffer: NVMChildBuffer) {
+    fn serialize_deserialize_idempotent(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
         child_buffer.pack(&mut buf).unwrap();
-        let mut other = NVMChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
         other.buffer.unpacked();
         assert_eq!(other, child_buffer);
     }
 
     #[quickcheck]
-    fn insert(mut child_buffer: NVMChildBuffer, key: CowBytes, info: KeyInfo, msg: CowBytes) {
+    fn insert(mut child_buffer: PackedChildBuffer, key: CowBytes, info: KeyInfo, msg: CowBytes) {
         let mut buf = Vec::new();
         buf.extend_from_slice(&[0u8; NODE_ID]);
 
