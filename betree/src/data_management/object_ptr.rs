@@ -104,7 +104,7 @@ impl<D> ObjectPointer<D> {
         let data = decompression_state.decompress(compressed_data)?;
         Ok(super::Object::unpack_at(
             self.info(),
-            data.into_boxed_slice(),
+            data,
         )?)
     }
 }

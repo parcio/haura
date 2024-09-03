@@ -13,13 +13,7 @@
 //! data blobs as in the [crate::object] module.
 
 use crate::{
-    cache::AddSize,
-    database::DatasetId,
-    migration::DmlMsg,
-    size::{Size, StaticSize},
-    storage_pool::StoragePoolLayer,
-    tree::{PivotKey, StorageKind},
-    StoragePreference,
+    buffer::Buf, cache::AddSize, database::DatasetId, migration::DmlMsg, size::{Size, StaticSize}, storage_pool::StoragePoolLayer, tree::{PivotKey, StorageKind}, StoragePreference
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -142,7 +136,7 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// can be read with a subset of data starting from the start of the range.
     fn pack<W: Write>(&self, writer: W, pp: PreparePack) -> Result<IntegrityMode, io::Error>;
     /// Unpacks the object from the given `data`.
-    fn unpack_at(d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error>;
+    fn unpack_at(d_id: DatasetId, data: Buf) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.
     fn debug_info(&self) -> String;
@@ -200,7 +194,7 @@ pub trait Dml: Sized {
         info: DatasetId,
     ) -> Result<Self::CacheValueRefMut, Error>;
 
-    /// Provides mutable access to the object
+    /// Provi
     /// if this object is already mutable.
     fn try_get_mut(&self, or: &Self::ObjectRef) -> Option<Self::CacheValueRefMut>;
 

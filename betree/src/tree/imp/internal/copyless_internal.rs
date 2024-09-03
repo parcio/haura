@@ -1,5 +1,5 @@
 //! Implementation of the [DisjointInternalNode] node type.
-use crate::{data_management::IntegrityMode, tree::imp::{
+use crate::{buffer::Buf, data_management::IntegrityMode, tree::imp::{
     node::{PivotGetMutResult, PivotGetResult},
     PivotKey,
 }};
@@ -115,6 +115,15 @@ impl<N: StaticSize> Size for CopylessInternalNode<N> {
     fn actual_size(&self) -> Option<usize> {
         // FIXME: Actually cache the serialized size and track delta
         Some(self.size())
+    }
+
+    fn cache_size(&self) -> usize {
+        std::mem::size_of::<u32>()
+            + self.meta_data.size()
+            + std::mem::size_of::<u32>()
+            + self.children.len() * N::static_size()
+            + 8
+            + self.children.iter().map(|c| c.buffer.cache_size()).sum::<usize>()
     }
 }
 
@@ -313,10 +322,11 @@ impl<N> CopylessInternalNode<N> {
     }
 
     /// Read object from a byte buffer and instantiate it.
-    pub fn unpack(buf: CowBytes) -> Result<Self, std::io::Error>
+    pub fn unpack(buf: Buf) -> Result<Self, std::io::Error>
     where
         N: serde::de::DeserializeOwned + StaticSize,
     {
+        let buf = buf.into_sliced_cow_bytes();
         const NODE_ID: usize = 4;
         let mut cursor = NODE_ID;
         let len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;

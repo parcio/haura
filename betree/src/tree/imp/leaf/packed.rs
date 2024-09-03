@@ -3,7 +3,8 @@
 //! Can be used for read-only access to avoid deserialization.
 use super::leaf::LeafNode;
 use crate::{
-    cow_bytes::{CowBytes, SlicedCowBytes},
+    buffer::Buf,
+    cow_bytes::SlicedCowBytes,
     data_management::{HasStoragePreference, IntegrityMode},
     size::Size,
     tree::KeyInfo,
@@ -74,9 +75,11 @@ fn prefix_size(entry_count: u32) -> usize {
 }
 
 impl PackedMap {
-    pub fn new(data: Box<[u8]>) -> Self {
+    pub fn new(data: Buf) -> Self {
         // Skip the 4 bytes node identifier prefix
-        let data = CowBytes::from(data).slice_from(crate::tree::imp::node::NODE_PREFIX_LEN as u32);
+        let data = data
+            .into_sliced_cow_bytes()
+            .slice_from(crate::tree::imp::node::NODE_PREFIX_LEN as u32);
         debug_assert!(data.len() >= 4);
         let entry_count = LittleEndian::read_u32(&data[..4]);
         let system_preference = data[4];
@@ -283,7 +286,11 @@ mod tests {
     #[quickcheck]
     fn check_packed_contents(leaf: LeafNode) {
         let mut v = Vec::new();
-        assert!(v.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap() == 4);
+        assert!(
+            v.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN])
+                .unwrap()
+                == 4
+        );
         PackedMap::pack(&leaf, &mut v).unwrap();
 
         let packed = PackedMap::new(v.into_boxed_slice());

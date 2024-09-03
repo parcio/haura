@@ -9,7 +9,10 @@
 //!
 //! [MutBuf] does not support growing with [io::Write] because the semantics of growing an inner split buffer are unclear.
 
-use crate::vdev::{Block, BLOCK_SIZE};
+use crate::{
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    vdev::{Block, BLOCK_SIZE},
+};
 use std::{
     alloc::{self, Layout},
     cell::UnsafeCell,
@@ -434,6 +437,24 @@ impl Buf {
         BufWrite {
             buf: storage,
             size: self.range.end.to_bytes(),
+        }
+    }
+
+    /// Convert to [SlicedCowBytes]. When [Buf] is referring to a foreign
+    /// non-self-managed memory range, this property is transferred otherwise a
+    /// new [CowBytes] is created.
+    pub fn into_sliced_cow_bytes(self) -> SlicedCowBytes {
+        let storage = Arc::try_unwrap(self.buf.buf)
+            .expect("AlignedBuf was not unique")
+            .into_inner();
+
+        if !storage.owned {
+            unsafe {
+                SlicedCowBytes::from_raw(storage.ptr.as_ptr(), storage.capacity.to_bytes() as usize)
+            }
+        } else {
+            let len = storage.capacity.to_bytes() as usize;
+            CowBytes::from(unsafe { Vec::from_raw_parts(storage.ptr.as_ptr(), len, len) }).into()
         }
     }
 

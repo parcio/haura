@@ -281,6 +281,13 @@ impl Size for PackedChildBuffer {
     fn actual_size(&self) -> Option<usize> {
         Some(self.size())
     }
+
+    fn cache_size(&self) -> usize {
+        match &self.buffer {
+            Map::Packed { .. } => HEADER + std::mem::size_of::<usize>() * 2,
+            Map::Unpacked(_) => self.size(),
+        }
+    }
 }
 
 impl PackedChildBuffer {

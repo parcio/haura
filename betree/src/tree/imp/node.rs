@@ -14,14 +14,9 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
-    cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{
+    buffer::Buf, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
-    },
-    database::DatasetId,
-    size::{Size, SizeMut, StaticSize},
-    tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
-    StoragePreference,
+    }, database::DatasetId, size::{Size, SizeMut, StaticSize}, tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind}, StoragePreference
 };
 use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
@@ -249,7 +244,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         }
     }
 
-    fn unpack_at(d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
+    fn unpack_at(d_id: DatasetId, data: Buf) -> Result<Self, io::Error> {
         if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
             match deserialize::<InternalNode<_>>(&data[4..]) {
                 Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
@@ -264,7 +259,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             Ok(Node(PackedLeaf(PackedMap::new(data))))
         } else if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
             Ok(Node(CopylessInternal(
-                CopylessInternalNode::unpack(data.into())?.complete_object_refs(d_id),
+                CopylessInternalNode::unpack(data)?.complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
             Ok(Node(MemLeaf(CopylessLeaf::unpack(data)?)))

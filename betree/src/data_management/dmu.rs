@@ -1068,7 +1068,7 @@ where
                 .decompression_tag()
                 .new_decompression()?
                 .decompress(compressed_data)?;
-            Object::unpack_at(ptr.info(), data.into_boxed_slice())?
+            Object::unpack_at(ptr.info(), data)?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),
