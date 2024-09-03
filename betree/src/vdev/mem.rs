@@ -105,17 +105,6 @@ impl Memory {
 
 #[async_trait]
 impl VdevRead for Memory {
-    async fn get_slice(
-        &self,
-        offset: Block<u64>,
-        start: usize,
-        end: usize,
-    ) -> Result<&'static [u8]> {
-        // println!("1> {:?}, {}, {}", offset, start, end);
-
-        self.ref_to_slice(offset, start, end)
-    }
-
     async fn read<C: Checksum>(
         &self,
         size: Block<u32>,

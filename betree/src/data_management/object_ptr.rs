@@ -1,4 +1,4 @@
-use super::HasStoragePreference;
+use super::{HasStoragePreference, IntegrityMode};
 use crate::{
     compression::DecompressionTag,
     database::{DatasetId, Generation},
@@ -19,7 +19,7 @@ pub struct ObjectPointer<D> {
     pub(super) checksum: D,
     pub(super) offset: DiskOffset,
     pub(super) size: Block<u32>,
-    pub(super) metadata_size: Option<Block<u32>>,
+    pub(super) integrity_mode: IntegrityMode,
     pub(super) info: DatasetId,
     pub(super) generation: Generation,
 }
@@ -100,18 +100,9 @@ impl<D> ObjectPointer<D> {
         D: crate::size::StaticSize + crate::checksum::Checksum,
     {
         let mut decompression_state = self.decompression_tag().new_decompression()?;
-        // Depending on the encoded node type we might not need the entire range
-        // right away. Or at all in some cases.
-        let compressed_data = if let Some(m_size) = self.metadata_size {
-            pool.read(m_size, self.offset(), self.checksum.clone())?
-        } else {
-            pool.read(self.size(), self.offset(), self.checksum.clone())?
-        };
+        let compressed_data = pool.read(self.size(), self.offset(), self.checksum.clone())?;
         let data = decompression_state.decompress(compressed_data)?;
         Ok(super::Object::unpack_at(
-            self.size(),
-            pool.clone().into(),
-            self.offset(),
             self.info(),
             data.into_boxed_slice(),
         )?)

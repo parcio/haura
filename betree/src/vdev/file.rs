@@ -60,15 +60,6 @@ fn get_block_device_size(file: &fs::File) -> io::Result<Block<u64>> {
 
 #[async_trait]
 impl VdevRead for File {
-    async fn get_slice(
-        &self,
-        _offset: Block<u64>,
-        _start: usize,
-        _end: usize,
-    ) -> Result<&'static [u8]> {
-        unimplemented!("This case should not occur!");
-    }
-
     async fn read<C: Checksum>(
         &self,
         size: Block<u32>,

@@ -45,6 +45,10 @@ pub trait Builder<C: Checksum>:
 
     /// Create a new state to build a checksum.
     fn build(&self) -> Self::State;
+
+    /// Return an empty Checksum. This variant skips the verificiation steps
+    /// when applied to a new buffer.
+    fn empty(&self) -> C;
 }
 
 /// Holds a state for building a new `Checksum`.

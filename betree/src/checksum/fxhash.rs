@@ -22,6 +22,9 @@ impl Checksum for FxHash {
         &self,
         data: I,
     ) -> Result<(), ChecksumError> {
+        if self.0 == 0 {
+            return Ok(());
+        }
         let mut state = FxHashBuilder.build();
         for x in data {
             state.ingest(x.as_ref());
@@ -48,6 +51,10 @@ impl Builder<FxHash> for FxHashBuilder {
 
     fn build(&self) -> Self::State {
         FxHashState(FxHasher::default())
+    }
+
+    fn empty(&self) -> FxHash {
+        FxHash(0)
     }
 }
 

@@ -1,8 +1,8 @@
 //! Implementation of the [DisjointInternalNode] node type.
-use crate::tree::imp::{
+use crate::{data_management::IntegrityMode, tree::imp::{
     node::{PivotGetMutResult, PivotGetResult},
     PivotKey,
-};
+}};
 
 use super::{
     packed_child_buffer::PackedChildBuffer,
@@ -285,7 +285,7 @@ impl<N> CopylessInternalNode<N> {
     /// - InternalNodeMetaData bytes
     /// - [child PTR; LEN]
     /// - [child BUFFER; LEN]
-    pub fn pack<W: std::io::Write>(&self, mut w: W) -> Result<(), std::io::Error>
+    pub fn pack<W: std::io::Write>(&self, mut w: W) -> Result<IntegrityMode, std::io::Error>
     where
         N: serde::Serialize + StaticSize,
     {
@@ -309,7 +309,7 @@ impl<N> CopylessInternalNode<N> {
             child.buffer.pack(&mut w)?;
         }
 
-        Ok(())
+        Ok(IntegrityMode::Internal)
     }
 
     /// Read object from a byte buffer and instantiate it.
@@ -843,7 +843,7 @@ mod tests {
     use std::io::Write;
 
     use super::*;
-    use crate::{arbitrary::GenExt, database::DatasetId, tree::pivot_key};
+    use crate::{arbitrary::GenExt, database::DatasetId};
 
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;

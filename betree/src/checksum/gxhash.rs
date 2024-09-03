@@ -22,6 +22,9 @@ impl Checksum for GxHash {
         &self,
         data: I,
     ) -> Result<(), ChecksumError> {
+        if self.0 == 0 {
+            return Ok(());
+        }
         let mut state = GxHashBuilder.build();
         for x in data {
             state.ingest(x.as_ref());
@@ -50,6 +53,10 @@ impl Builder<GxHash> for GxHashBuilder {
         // Due to security concerns the default `GxHasher` is randomized, which
         // does not work for us, therefore, use pinned seed.
         GxHashState(GxHasher::with_seed(0))
+    }
+
+    fn empty(&self) -> GxHash {
+        GxHash(0)
     }
 }
 

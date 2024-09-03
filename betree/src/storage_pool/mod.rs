@@ -48,24 +48,6 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
         block_on(self.read_async(size, offset, checksum)?.into_future())
     }
 
-    /// Extract a slice from a memory region.
-    fn slice(&self, offset: DiskOffset, start: usize, end: usize) -> VdevResult<&'static [u8]> {
-        block_on(self.get_slice(offset, start, end)?.into_future())
-    }
-
-    /// A future yielding a reference to a byte range. This is valid as long as
-    /// the underlying memory is present.
-    type SliceAsync: TryFuture<Ok = &'static [u8], Error = VdevError> + Send;
-
-    /// Fetch a reference to a slice from the specified disk block. This is only
-    /// valid when used on memory represented vdevs.
-    fn get_slice(
-        &self,
-        offset: DiskOffset,
-        start: usize,
-        end: usize,
-    ) -> VdevResult<Self::SliceAsync>;
-
     /// Future returned by `read_async`.
     type ReadAsync: TryFuture<Ok = Buf, Error = VdevError> + Send;
 

@@ -11,7 +11,7 @@ use crate::{
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
     compression::CompressionBuilder,
-    data_management::CopyOnWriteReason,
+    data_management::{CopyOnWriteReason, IntegrityMode},
     database::{DatasetId, Generation, Handler},
     migration::DmlMsg,
     size::{Size, SizeMut, StaticSize},
@@ -314,11 +314,7 @@ where
     > {
         let ptr = op.clone();
 
-        let size = if let Some(m_size) = op.metadata_size {
-            m_size
-        } else {
-            op.size()
-        };
+        let size = op.size();
 
         Ok(self
             .pool
@@ -469,9 +465,14 @@ where
         let (partial_read, compressed_data) = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
-            let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(object_size as u32));
+            let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
+                object_size as u32,
+            ));
             let part = {
-                let pp = object.prepare_pack(self.spl().storage_kind_map()[storage_class as usize], &pivot_key)?;
+                let pp = object.prepare_pack(
+                    self.spl().storage_kind_map()[storage_class as usize],
+                    &pivot_key,
+                )?;
                 let part = object.pack(&mut buf, pp)?;
                 drop(object);
                 part
@@ -489,15 +490,13 @@ where
 
         let info = self.modified_info.lock().remove(&mid).unwrap();
 
-        let checksum = {
-            let mut state = self.default_checksum_builder.build();
-            if let Some(ref size) = partial_read {
-                state.ingest(&compressed_data.as_ref()[..size.to_bytes() as usize])
-                // state.ingest(compressed_data.as_ref());
-            } else {
+        let checksum = match partial_read {
+            IntegrityMode::External => {
+                let mut state = self.default_checksum_builder.build();
                 state.ingest(compressed_data.as_ref());
+                state.finish()
             }
-            state.finish()
+            IntegrityMode::Internal => self.default_checksum_builder.empty(),
         };
 
         self.pool.begin_write(compressed_data, offset)?;
@@ -509,7 +508,7 @@ where
             decompression_tag: compression.decompression_tag(),
             generation,
             info,
-            metadata_size: partial_read,
+            integrity_mode: partial_read,
         };
 
         let was_present;
@@ -941,7 +940,7 @@ where
                 let bt = std::backtrace::Backtrace::force_capture();
                 println!("{}", bt);
                 unimplemented!()
-            },
+            }
         };
         if let ObjRef::Unmodified(ref ptr, ..) = or {
             self.copy_on_write(ptr.clone(), CopyOnWriteReason::Remove, or.index().clone());
@@ -1072,13 +1071,7 @@ where
                 .decompression_tag()
                 .new_decompression()?
                 .decompress(compressed_data)?;
-            Object::unpack_at(
-                ptr.size(),
-                self.pool.clone().into(),
-                ptr.offset(),
-                ptr.info(),
-                data.into_boxed_slice(),
-            )?
+            Object::unpack_at(ptr.info(), data.into_boxed_slice())?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),

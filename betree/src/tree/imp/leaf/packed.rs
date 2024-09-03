@@ -4,7 +4,7 @@
 use super::leaf::LeafNode;
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::HasStoragePreference,
+    data_management::{HasStoragePreference, IntegrityMode},
     size::Size,
     tree::KeyInfo,
     StoragePreference,
@@ -229,7 +229,7 @@ impl PackedMap {
         leaf
     }
 
-    pub(crate) fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<()> {
+    pub(crate) fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<IntegrityMode> {
         let entries = leaf.entries();
         let entries_cnt = entries.len() as u32;
         writer.write_u32::<LittleEndian>(entries_cnt)?;
@@ -252,7 +252,7 @@ impl PackedMap {
             writer.write_all(key)?;
             writer.write_all(value)?;
         }
-        Ok(())
+        Ok(IntegrityMode::External)
     }
 
     pub(crate) fn inner(&self) -> &SlicedCowBytes {

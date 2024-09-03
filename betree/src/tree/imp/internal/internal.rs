@@ -720,7 +720,6 @@ mod tests {
     use super::*;
     use crate::{
         arbitrary::GenExt,
-        database::DatasetId,
         tree::default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
     };
     use bincode::serialized_size;

@@ -3,25 +3,24 @@ use self::Inner::*;
 use super::{
     internal::{
         child_buffer::ChildBuffer,
+        copyless_internal::{ChildLink, CopylessInternalNode, InternalNodeLink},
         internal::InternalNode,
         packed_child_buffer::PackedChildBuffer,
         take_child_buffer::TakeChildBufferWrapper,
-        copyless_internal::{ChildLink, CopylessInternalNode, InternalNodeLink},
     },
-    leaf::LeafNode,
     leaf::CopylessLeaf,
+    leaf::LeafNode,
     leaf::PackedMap,
-    FillUpResult, KeyInfo, PivotKey, StorageMap,
-    MIN_FANOUT, MIN_FLUSH_SIZE
+    FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{Dml, HasStoragePreference, Object, ObjectReference, PreparePack},
+    data_management::{
+        Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
+    },
     database::DatasetId,
     size::{Size, SizeMut, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer},
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
-    vdev::Block,
     StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
@@ -134,8 +133,12 @@ impl<'a, N> ChildBufferIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>>
     }
 }
 
-impl<'a> ChildBufferIteratorTrait<'a, Option<PackedChildBuffer>> for Vec<Option<PackedChildBuffer>> {
-    fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut Option<PackedChildBuffer>> + 'a> {
+impl<'a> ChildBufferIteratorTrait<'a, Option<PackedChildBuffer>>
+    for Vec<Option<PackedChildBuffer>>
+{
+    fn cb_iter_mut(
+        &'a mut self,
+    ) -> Box<dyn Iterator<Item = &'a mut Option<PackedChildBuffer>> + 'a> {
         Box::new(self.iter_mut())
     }
 
@@ -158,8 +161,8 @@ enum NodeInnerType {
     Packed = 1,
     Leaf,
     Internal,
-    NVMLeaf,
-    NVMInternal,
+    CopylessLeaf,
+    CopylessInternal,
 }
 
 pub(super) const NODE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
@@ -216,41 +219,37 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 }
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
-    fn pack<W: Write>(
-        &self,
-        mut writer: W,
-        _: PreparePack,
-    ) -> Result<Option<Block<u32>>, io::Error> {
+    fn pack<W: Write>(&self, mut writer: W, _: PreparePack) -> Result<IntegrityMode, io::Error> {
         match self.0 {
-            PackedLeaf(ref map) => writer.write_all(map.inner()).map(|_| None),
+            PackedLeaf(ref map) => writer
+                .write_all(map.inner())
+                .map(|_| IntegrityMode::External),
             Leaf(ref leaf) => {
                 writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
-                PackedMap::pack(leaf, writer).map(|_| None)
+                PackedMap::pack(leaf, writer)
             }
             Internal(ref internal) => {
                 writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
                 serialize_into(writer, internal)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-                    .map(|_| None)
+                    .map(|_| IntegrityMode::External)
             }
             MemLeaf(ref leaf) => {
-                writer.write_all((NodeInnerType::NVMLeaf as u32).to_be_bytes().as_ref())?;
+                writer.write_all((NodeInnerType::CopylessLeaf as u32).to_be_bytes().as_ref())?;
                 leaf.pack(writer)
             }
-            CopylessInternal(ref nvminternal) => {
-                writer.write_all((NodeInnerType::NVMInternal as u32).to_be_bytes().as_ref())?;
-                nvminternal.pack(writer).map(|_| None)
+            CopylessInternal(ref cpl_internal) => {
+                writer.write_all(
+                    (NodeInnerType::CopylessInternal as u32)
+                        .to_be_bytes()
+                        .as_ref(),
+                )?;
+                cpl_internal.pack(writer)
             }
         }
     }
 
-    fn unpack_at<SPL: StoragePoolLayer>(
-        size: crate::vdev::Block<u32>,
-        pool: Box<SPL>,
-        offset: DiskOffset,
-        d_id: DatasetId,
-        data: Box<[u8]>,
-    ) -> Result<Self, io::Error> {
+    fn unpack_at(d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error> {
         if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
             match deserialize::<InternalNode<_>>(&data[4..]) {
                 Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
@@ -263,14 +262,12 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             // The leaf contents are scanned cheaply during unpacking, which
             // recalculates the correct storage_preference for the contained keys.
             Ok(Node(PackedLeaf(PackedMap::new(data))))
-        } else if data[0..4] == (NodeInnerType::NVMInternal as u32).to_be_bytes() {
+        } else if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
             Ok(Node(CopylessInternal(
                 CopylessInternalNode::unpack(data.into())?.complete_object_refs(d_id),
             )))
-        } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
-            Ok(Node(MemLeaf(CopylessLeaf::unpack(
-                data, pool, offset, size,
-            )?)))
+        } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
+            Ok(Node(MemLeaf(CopylessLeaf::unpack(data)?)))
         } else {
             panic!(
                 "Unkown bytes to unpack. [0..4]: {}",
@@ -775,11 +772,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             })
     }
 
-    pub(super) fn insert_msg_buffer<I, M>(
-        &mut self,
-        msg_buffer: I,
-        msg_action: M,
-    ) -> isize
+    pub(super) fn insert_msg_buffer<I, M>(&mut self, msg_buffer: I, msg_action: M) -> isize
     where
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,

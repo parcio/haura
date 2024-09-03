@@ -23,6 +23,9 @@ impl Checksum for XxHash {
         &self,
         data: I,
     ) -> Result<(), ChecksumError> {
+        if self.0 == 0 {
+            return Ok(());
+        }
         let mut state = XxHashBuilder.build();
         for x in data {
             state.ingest(x.as_ref());
@@ -49,6 +52,10 @@ impl Builder<XxHash> for XxHashBuilder {
 
     fn build(&self) -> Self::State {
         XxHashState(twox_hash::XxHash::with_seed(0))
+    }
+
+    fn empty(&self) -> XxHash {
+        XxHash(0)
     }
 }
 

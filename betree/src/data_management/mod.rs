@@ -17,13 +17,12 @@ use crate::{
     database::DatasetId,
     migration::DmlMsg,
     size::{Size, StaticSize},
-    storage_pool::{DiskOffset, StoragePoolLayer},
+    storage_pool::StoragePoolLayer,
     tree::{PivotKey, StorageKind},
-    vdev::Block,
     StoragePreference,
 };
 use parking_lot::Mutex;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use stable_deref_trait::StableDeref;
 use std::{
     collections::HashMap,
@@ -112,6 +111,20 @@ pub trait HasStoragePreference {
 /// This is more of a hack since i don't want to pull apart the trait.
 pub struct PreparePack();
 
+/// Which integrity mode is used by the nodes. Can be used to skip the
+/// processing of an entire node if it is not required to ensure integrity of
+/// data.
+#[derive(
+    Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, Copy,
+)]
+pub enum IntegrityMode {
+    /// The default mode. Checksums are stored with the object pointers. All
+    /// data is processed initially.
+    External,
+    /// Integrity is ensured by the node implementation itself.
+    Internal,
+}
+
 /// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Informs the object about the kind of storage it will be placed upon.
@@ -127,15 +140,9 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
 
     /// Packs the object into the given `writer`. Returns an option if the node
     /// can be read with a subset of data starting from the start of the range.
-    fn pack<W: Write>(&self, writer: W, pp: PreparePack) -> Result<Option<Block<u32>>, io::Error>;
+    fn pack<W: Write>(&self, writer: W, pp: PreparePack) -> Result<IntegrityMode, io::Error>;
     /// Unpacks the object from the given `data`.
-    fn unpack_at<SPL: StoragePoolLayer>(
-        size: crate::vdev::Block<u32>,
-        pool: Box<SPL>,
-        disk_offset: DiskOffset,
-        d_id: DatasetId,
-        data: Box<[u8]>,
-    ) -> Result<Self, io::Error>;
+    fn unpack_at(d_id: DatasetId, data: Box<[u8]>) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.
     fn debug_info(&self) -> String;

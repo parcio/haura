@@ -23,7 +23,7 @@ use crate::{
 use leaf::FillUpResult;
 use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
-use std::{borrow::Borrow, collections::VecDeque, marker::PhantomData, mem, ops::RangeBounds};
+use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
 
 use internal::take_child_buffer::TakeChildBufferWrapper;
 

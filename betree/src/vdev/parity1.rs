@@ -93,15 +93,6 @@ impl<V: Vdev + VdevLeafRead + VdevLeafWrite> Vdev for Parity1<V> {
 
 #[async_trait]
 impl<V: VdevLeafRead + VdevLeafWrite + 'static> VdevRead for Parity1<V> {
-    async fn get_slice(
-        &self,
-        _offset: Block<u64>,
-        _start: usize,
-        _end: usize,
-    ) -> Result<&'static [u8]> {
-        unimplemented!("This case should not occur!");
-    }
-
     async fn read<C: Checksum>(
         &self,
         size: Block<u32>,

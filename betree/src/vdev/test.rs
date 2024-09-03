@@ -98,15 +98,6 @@ impl VdevRead for FailingLeafVdev {
         }
     }
 
-    async fn get_slice(
-        &self,
-        offset: Block<u64>,
-        start: usize,
-        end: usize,
-    ) -> Result<&'static [u8], Error> {
-        unimplemented!("Implement test case!");
-    }
-
     async fn scrub<C: Checksum>(
         &self,
         size: Block<u32>,
