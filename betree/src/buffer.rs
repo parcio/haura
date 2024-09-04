@@ -280,6 +280,7 @@ impl BufWrite {
         let curr_layout = unsafe {
             Layout::from_size_align_unchecked(self.buf.capacity.to_bytes() as usize, BLOCK_SIZE)
         };
+        debug_assert!(self.buf.owned);
         let new_cap = Block::round_up_from_bytes(self.size);
         self.buf.capacity = new_cap;
         let new_ptr = unsafe {
