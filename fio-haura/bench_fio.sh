@@ -10,11 +10,11 @@ root=$PWD
 
 # Below are possible configuration options. Add elements to run multiple
 # benchmarks.
-modes=(write read randread)
+modes=(read randread write randwrite)
 ioengines=("external:${root}/src/fio-engine-haura.o")
 blocksizes=(4k 4m)
 jobs=(1 2 3 4 5 6 7 8)
-size_gb=4
+size_gb=1
 runtime=30s
 extra_options=(--disrespect-fio-options)
 id="results_ID"
@@ -22,14 +22,10 @@ id="results_ID"
 mkdir "$id"
 pushd "$id" || exit
 
-for ioengine in "${ioengines[@]}"
-do
-    for blocksize in "${blocksizes[@]}"
-    do
-        for job in "${jobs[@]}"
-        do
-            for mode in "${modes[@]}"
-            do
+for ioengine in "${ioengines[@]}"; do
+    for job in "${jobs[@]}"; do
+        for mode in "${modes[@]}"; do
+            for blocksize in "${blocksizes[@]}"; do
                 name="${mode}_$(echo "$ioengine" | awk -F'/' '{print $NF}')_${blocksize}_${job}"
                 mkdir "${name}"
                 pushd "${name}" || exit

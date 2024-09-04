@@ -326,12 +326,59 @@ static int fio_haura_setup(struct thread_data *td) {
       return bail(error);
     }
     fio_haura_translate(td, cfg);
-    if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
-      return bail(error);
-    }
-    if ((global_data.obj_s = betree_create_object_store(
-             global_data.db, "fio", 3, pref, &error)) == NULL) {
-      return bail(error);
+
+    int is_prefilled = 0;
+    /*
+    ** Checking for any pre-existing data we might be able to use.
+    */
+    if ((global_data.db = betree_open_db(cfg, &error)) == NULL ||
+        td_write(td)) {
+    new_db:
+      if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
+        return bail(error);
+      }
+      if ((global_data.obj_s = betree_create_object_store(
+               global_data.db, "fio", 3, pref, &error)) == NULL) {
+        return bail(error);
+      }
+    } else {
+      /*
+      ** Check if object store exists and objects are valid otherwise open new
+      *db.
+      */
+      if ((global_data.obj_s = betree_create_object_store(
+               global_data.db, "fio", 3, pref, &error)) == NULL) {
+        betree_close_db(global_data.db);
+        global_data.db = NULL;
+        goto new_db;
+      }
+
+      char init[2] = {1};
+
+      for (size_t idx = 0; idx < global_data.jobs; idx += 1) {
+        init[1] += 1;
+
+        int object_size = -1;
+        if ((object_size = betree_object_get_size(global_data.obj_s, init, 2,
+                                                  &error)) == -1) {
+          betree_close_db(global_data.db);
+          global_data.db = NULL;
+          global_data.obj_s = NULL;
+          goto new_db;
+        }
+
+        if (td->o.size > object_size) {
+          betree_close_db(global_data.db);
+          global_data.db = NULL;
+          global_data.obj_s = NULL;
+          goto new_db;
+        }
+      }
+
+      // If we made it this far the data present is sufficient for the
+      // benchmark. Good job!
+      printf("haura: Reusing stored data from previous benchmark\n");
+      is_prefilled = 1;
     }
 
     char init[2] = {1};
@@ -347,7 +394,7 @@ static int fio_haura_setup(struct thread_data *td) {
       /* Due to limitations in the fio initialization process we prepopulate the
        * objects here, which is suboptimal but the only place possible due to
        * the order of execution. */
-      if (!td_write(td)) {
+      if (!td_write(td) && !is_prefilled) {
         unsigned long long block_size = td->o.bs[DDIR_WRITE];
         unsigned long long max_io_size = td->o.size;
         void *buf = malloc(block_size);
