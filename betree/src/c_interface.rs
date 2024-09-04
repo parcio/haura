@@ -928,6 +928,23 @@ pub unsafe extern "C" fn betree_object_close(obj: *mut obj_t, err: *mut *mut err
     obj.close().handle_result(err)
 }
 
+/// Fetch the size of the given object if it exists. Returns -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_get_size(
+    os: *mut obj_store_t,
+    key: *const c_char,
+    key_len: c_uint,
+    err: *mut *mut err_t,
+) -> c_int {
+    let os = &mut (*os).0;
+    if let Ok(Some(info)) = os.read_object_info(from_raw_parts(key as *const u8, key_len as usize)) {
+        info.size as i32
+    } else {
+        *err = Box::into_raw(Box::new(err_t(Error::DoesNotExist)));
+        -1
+    }
+}
+
 /// Try to read `buf_len` bytes of `obj` into `buf`, starting at `offset` bytes into the objects
 /// data. The actually read number of bytes is written into `n_read` if and only if the read
 /// succeeded.

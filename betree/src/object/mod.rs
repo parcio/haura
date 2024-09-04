@@ -647,7 +647,7 @@ impl<'os> ObjectStore {
         Ok(Box::new(iter))
     }
 
-    fn read_object_info(&'os self, key: &[u8]) -> Result<Option<ObjectInfo>> {
+    pub fn read_object_info(&'os self, key: &[u8]) -> Result<Option<ObjectInfo>> {
         if let Some(meta) = self.metadata.get(key)? {
             Ok(Some(
                 ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &meta).unwrap(),
