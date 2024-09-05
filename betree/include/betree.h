@@ -449,12 +449,12 @@ struct obj_t *betree_object_create(struct obj_store_t *os,
 int betree_object_delete(struct obj_t *obj, struct err_t **err);
 
 /**
- * Fetch the size of the given object if it exists. Returns -1 on error.
+ * Fetch the size of the given object if it exists. Returns 0 on error.
  */
-int betree_object_get_size(struct obj_store_t *os,
-                           const char *key,
-                           unsigned int key_len,
-                           struct err_t **err);
+unsigned long long betree_object_get_size(struct obj_store_t *os,
+                                          const char *key,
+                                          unsigned int key_len,
+                                          struct err_t **err);
 
 /**
  * Open an existing object.

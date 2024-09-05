@@ -359,7 +359,7 @@ static int fio_haura_setup(struct thread_data *td) {
       for (size_t idx = 0; idx < global_data.jobs; idx += 1) {
         init[1] += 1;
 
-        int object_size = -1;
+        unsigned long long object_size = -1;
         if ((object_size = betree_object_get_size(global_data.obj_s, init, 2,
                                                   &error)) == -1) {
           betree_close_db(global_data.db);

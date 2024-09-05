@@ -3,7 +3,7 @@
 use std::{
     ffi::CStr,
     io::{stderr, Write},
-    os::raw::{c_char, c_int, c_uint, c_ulong},
+    os::raw::{c_char, c_int, c_uint, c_ulong, c_ulonglong},
     process::abort,
     ptr::{null_mut, read, write},
     slice::{from_raw_parts, from_raw_parts_mut},
@@ -928,20 +928,20 @@ pub unsafe extern "C" fn betree_object_close(obj: *mut obj_t, err: *mut *mut err
     obj.close().handle_result(err)
 }
 
-/// Fetch the size of the given object if it exists. Returns -1 on error.
+/// Fetch the size of the given object if it exists. Returns 0 on error.
 #[no_mangle]
 pub unsafe extern "C" fn betree_object_get_size(
     os: *mut obj_store_t,
     key: *const c_char,
     key_len: c_uint,
     err: *mut *mut err_t,
-) -> c_int {
+) -> c_ulonglong {
     let os = &mut (*os).0;
     if let Ok(Some(info)) = os.read_object_info(from_raw_parts(key as *const u8, key_len as usize)) {
-        info.size as i32
+        info.size as u64
     } else {
         *err = Box::into_raw(Box::new(err_t(Error::DoesNotExist)));
-        -1
+        0
     }
 }
 
