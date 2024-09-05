@@ -181,27 +181,27 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes2 {
         &self,
         serializer: &mut S
     ) -> Result<Self::Resolver, S::Error> {
-        //panic!("----------------------");  
-        let compression = CompressionConfiguration::None;
-        /*let compression = CompressionConfiguration::Zstd(Zstd {
-            level: 1,
-        });*/
-        let default_compression = compression.to_builder();
+        panic!("----------------------");  
+        // let compression = CompressionConfiguration::None;
+        // /*let compression = CompressionConfiguration::Zstd(Zstd {
+        //     level: 1,
+        // });*/
+        // let default_compression = compression.to_builder();
 
-        let compression = &*default_compression.read().unwrap();
-        //let compressed_data = [0u8, 10];
-        //panic!("<>");
-        let compressed_data = {
-            // FIXME: cache this
-            let a = compression.new_compression().unwrap();
-            let mut state = a.write().unwrap();
-            {
-                state.write_all(self.inner.as_slice());
-            }
-            state.finish()
-        };
+        // let compression = &*default_compression.read().unwrap();
+        // //let compressed_data = [0u8, 10];
+        // //panic!("<>");
+        // let compressed_data = {
+        //     // FIXME: cache this
+        //     let a = compression.new_compression().unwrap();
+        //     let mut state = a.write().unwrap();
+        //     {
+        //         state.write_all(self.inner.as_slice());
+        //     }
+        //     state.finish()
+        // };
 
-        ArchivedVec::serialize_from_slice(compressed_data.as_slice(), serializer)
+        // ArchivedVec::serialize_from_slice(compressed_data.as_slice(), serializer)
         
         //ArchivedVec::serialize_from_slice(&self.inner, serializer)
     }
@@ -209,16 +209,16 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes2 {
 
 impl<D: Fallible + ?Sized> Deserialize<CowBytes2, D> for ArchivedVec<u8> {
     fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes2, D::Error> {
-//panic!("----------------------");
-        let vec: Vec<u8> = self.deserialize(deserializer)?;
+panic!("----------------------");
+        // let vec: Vec<u8> = self.deserialize(deserializer)?;
         
-        let d = DecompressionTag::None;
-        let mut decompression_state = d.new_decompression();
+        // let d = DecompressionTag::None;
+        // let mut decompression_state = d.new_decompression();
 
-        let data = decompression_state.unwrap().decompress(vec.as_slice()).unwrap();
-        let arc_vec = Arc::new(data.to_vec());
+        // let data = decompression_state.unwrap().decompress(vec.as_slice()).unwrap();
+        // let arc_vec = Arc::new(data.to_vec());
 
-        Ok(CowBytes2 { inner: arc_vec })
+        // Ok(CowBytes2 { inner: arc_vec })
         
         
         /*let arc_vec = Arc::new(vec);

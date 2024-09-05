@@ -162,9 +162,14 @@ struct ArchivedCowBytes {
     inner: ArchivedVec<u8>,
 }
 
+pub struct CowBytesResolver {
+    len: usize,
+    inner: VecResolver,
+}
+
 impl Archive for CowBytes {
     type Archived = ArchivedVec<u8>;
-    type Resolver = VecResolver;
+    type Resolver = CowBytesResolver;
 
     unsafe fn resolve(
         &self,
@@ -172,7 +177,9 @@ impl Archive for CowBytes {
         resolver: Self::Resolver,
         out: *mut Self::Archived,
     ) {
-        ArchivedVec::resolve_from_len(self.inner.len(), pos, resolver, out);
+        println!("xxxxxxxxxxxxxxxxxxxxxxx {} {}", self.inner.len(), resolver.len);
+        //ArchivedVec::resolve_from_len(self.inner.len(), pos, resolver, out);
+        ArchivedVec::resolve_from_len(resolver.len, pos, resolver.inner, out);
     }
 }
 
@@ -181,57 +188,137 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
         &self,
         serializer: &mut S
     ) -> Result<Self::Resolver, S::Error> {
-        //panic!("----------------------");  
+
+        panic!("----------------------");  
         //let compression = CompressionConfiguration::None;
-        let compression = CompressionConfiguration::Zstd(Zstd {
+        /*let compression = CompressionConfiguration::Zstd(Zstd {
             level: 1,
         });
         let default_compression = compression.to_builder();
+*/
 
-        let compression = &*default_compression.read().unwrap();
-        //let compressed_data = [0u8, 10];
-        //panic!("<>");
-        let compressed_data = {
-            // FIXME: cache this
-            let a = compression.new_compression().unwrap();
-            let mut state = a.write().unwrap();
-            {
-                state.write_all(self.inner.as_slice());
-            }
-            state.finish()
-        };
+       
 
-        ArchivedVec::serialize_from_slice(compressed_data.as_slice(), serializer)
+        // let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//default_compression.read().unwrap();
+        // //let compressed_data = [0u8, 10];
+        // //panic!("<>");
+        // let mut compressed_data = {
+        //     let state = compression.new_compression().unwrap();
+        //     let mut writer = state.write().unwrap();
+        //     {
+        //         match writer.write_all(self.inner.as_slice()) {
+        //             Ok(obj) => obj,
+        //             Err(e) => panic!("+++++++++++++++++++++++++++++++++++++++++++++++++++++++"),
+        //         }
+        //     }
+        //     writer.finish()
+        // };
+
+        // if compressed_data[compressed_data.len()-1] != 0 && compressed_data.len() != 4096{
+        //     println!("once...");
+        //     let mut dkd = (*self.inner).clone();
+        //     dkd.resize(dkd.len() + 4096,0);
+            
+        //     compressed_data = {
+        //         let state = compression.new_compression().unwrap();
+        //         let mut writer = state.write().unwrap();
+        //         {
+        //             match writer.write_all(dkd.as_slice()) {
+        //                 Ok(obj) => obj,
+        //                 Err(e) => panic!("+++++++++++++++++++++++++++++++++++++++++++++++++++++++"),
+        //             }
+        //         }
+        //         writer.finish()
+        //     };
+    
+        //     //println!("11------------------------------------{}, {}", dkd.len(), compressed_data.len());
+        // //}
+
+        // //if compressed_data[compressed_data.len()-1] != 0 {
+        // //    panic!("agaiomn!!!! {:?}", dkd.as_slice());
+        // //}
+        //     //let mut dkd = (*self.inner).clone();
+        //     //dkd.resize(dkd.len() + 4096,0);
+
+
+        // //  if self.inner.len() == 131072 {
+        //     //println!("1------------------------------------{:?}", self.inner.as_slice());
+        //     //println!("2------------------------------------{:?}", compressed_data.as_slice());
+        //     //println!("1------------------------------------{}:: {} -- {}",compressed_data[compressed_data.len()-1], compressed_data.as_slice().len(), self.inner.as_slice().len());
+
+
+        //     //println!("{} {}", self.inner[self.inner.len()-1], compressed_data[self.inner.len()-1]);
+        //     //println!("{} {}", self.inner[self.inner.len()-2], compressed_data[self.inner.len()-2]);
+        //     //println!("{} {}", self.inner[self.inner.len()-3], compressed_data[self.inner.len()-3]);
+            
+
+        //     //let d = DecompressionTag::None;
+        //     let mut decompression_state = compression.decompression_tag().new_decompression().unwrap();//d.new_decompression();
+
+        //     let data = decompression_state.decompress(&compressed_data).unwrap();
+        //     let arc_vec = Arc::new(data.to_vec());
+        // //     panic!("");
+        // //  }
+
+        // //println!("++++++++++++++++++++{:?}", compressed_data.as_slice());
+        // //println!("++++++++++++++++++++");
+
+       
+        //     //panic!("1------------------------------------{:?}:: {} -- {}", compressed_data.as_slice(), compressed_data.as_slice().len(), self.inner.as_slice().len());
+        // }
+
+        // let mut lambda = |data: &dyn AsRef<[u8]>| {
+
+        //     Ok(CowBytesResolver {
+        //         len: data.as_ref().len(),
+        //         inner: ArchivedVec::serialize_from_slice(data.as_ref().as_slice(), serializer)?,
+        //     })
+
+        //     //ArchivedVec::serialize_from_slice(data.as_ref().as_slice(), serializer)
+        // };
+        // lambda(&compressed_data)
+        // //ArchivedVec::serialize_from_slice(compressed_data.as_slice(), serializer)
         
-        //ArchivedVec::serialize_from_slice(&self.inner, serializer)
+        // //ArchivedVec::serialize_from_slice(&self.inner, serializer)
     }
 }
 
+
+use std::io::Write;
+
 impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
     fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {
-//panic!("----------------------");
-        let vec: Vec<u8> = self.deserialize(deserializer)?;
-        
+        panic!("..");
+        //println!("pre =====");
+        // let vec: Vec<u8> = self.deserialize(deserializer)?;
+        // if vec[vec.len()-1] != 0 {
+        //     panic!("1------------------------------------{:?}", vec.as_slice());
+        // }
 
-        //let compression = CompressionConfiguration::None;
-        let compression = CompressionConfiguration::Zstd(Zstd {
-            level: 1,
-        });
-        let default_compression = compression.to_builder();
+        // let size = crate::vdev::Block::from_bytes(vec.len() as u32);
+        // //println!("===== {} {:?}", vec.len(), size);
+        // let mut buf = crate::buffer::BufWrite::with_capacity(size);
+        // buf.write_all(vec.as_slice());
+        // let dt = buf.into_buf();
+        // //println!("===== done {} {:?} {}", vec.len(), size, dt.as_ref().len());
+        // //let compression = CompressionConfiguration::None;
+        // /*let compression = CompressionConfiguration::Zstd(Zstd {
+        //     level: 1,
+        // });
+        // let default_compression = compression.to_builder();*/
 
-        let compression = &*default_compression.read().unwrap();
+        // let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//crate::compression::COMPRESSION_VAR.read().unwrap()default_compression.read().unwrap();
 
 
 
 
+        // //let d = DecompressionTag::None;
+        // let mut decompression_state = compression.decompression_tag().new_decompression().unwrap();//d.new_decompression();
 
-        //let d = DecompressionTag::None;
-        let mut decompression_state = compression.decompression_tag().new_decompression().unwrap();//d.new_decompression();
+        // let data = decompression_state.decompress(&dt/*vec.as_slice()*/).unwrap();
+        // let arc_vec = Arc::new(data.to_vec());
 
-        let data = decompression_state.decompress(vec.as_slice()).unwrap();
-        let arc_vec = Arc::new(data.to_vec());
-
-        Ok(CowBytes { inner: arc_vec })
+        // Ok(CowBytes { inner: arc_vec })
         
         
         /*let arc_vec = Arc::new(vec);

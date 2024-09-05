@@ -248,8 +248,8 @@ where
         // };
 
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = decompression_state.decompress(&compressed_data)?;
-            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data, a)?
+            let data = decompression_state.decompress(compressed_data)?;
+            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice(), a)?
         };
 
         let key = ObjectKey::Unmodified { offset, generation };
@@ -412,7 +412,23 @@ where
         //     state.finish()
         // };
 
+        // let compressed_data = {
+        //     // FIXME: cache this
+        //     let mut state = compression.new_compression().unwrap();
+        //     let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
+        //     {
+        //         object.pack(&mut buf, &mut metadata_size)?;
+        //         drop(object);
+        //     }
+        //     let mut newstate = state.write().unwrap();
+        //     {
+        //         newstate.finish(buf.into_buf())
+        //     }
+            
+        // };
+        //panic!("2------------------------------------{:?}", compressed_data);
         let compressed_data : Buf = object.pack_and_compress(&mut metadata_size, self.default_compression.clone()).unwrap();
+        //println!("2------------------------------------{:?}", compressed_data);
         drop(object);
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
@@ -967,9 +983,9 @@ where
             let data = ptr
                 .decompression_tag()
                 .new_decompression()?
-                .decompress(&compressed_data)?;
+                .decompress(compressed_data)?;
             //Object::unpack_at(ptr.size(), ptr.checksum().clone().into() , self.pool.clone().into(), ptr.offset(), ptr.info(), data)?
-            Object::unpack_and_decompress(ptr.size(), ptr.checksum().clone().into() , self.pool.clone().into(), ptr.offset(), ptr.info(), data, ptr.decompression_tag())?
+            Object::unpack_and_decompress(ptr.size(), ptr.checksum().clone().into() , self.pool.clone().into(), ptr.offset(), ptr.info(), data.into_boxed_slice(), ptr.decompression_tag())?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),

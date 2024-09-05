@@ -195,40 +195,89 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
     }
 }
 
+use rand::Rng;
+
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
     fn pack_and_compress(&self, metadata_size: &mut usize, compressor: Arc<std::sync::RwLock<dyn CompressionBuilder>>) -> Result<Buf, io::Error> {
-        //println!("pack_and_compress...");
+        /*
+        let mut v = vec![5; 131072];
+
+        let mut rng = rand::thread_rng(); // Create a random number generator
+
+        for i in &mut v {
+            *i = rng.gen_range(1..=255); // Fill the vector with random numbers between 1 and 100
+        }
+
+
+        let w = CowBytes { inner: Arc::new(v)};
+
+        //println!("1: {:?}", w);
+
+        let mut ser = rkyv::ser::serializers::AllocSerializer::<10000000>::default();
+        ser.serialize_value(&w).unwrap();
+        let sercow = ser.into_serializer().into_inner();
+
+        //println!("2: {:?}, {}", sercow, sercow.len());
+
+
+        let arccow = rkyv::check_archived_root::<CowBytes>(&sercow[..]).unwrap();
+        //println!("2.1:");
+        let cow: CowBytes  = arccow.deserialize(&mut rkyv::Infallible).unwrap();
+
+        panic!("");
+        //panic!("3: {:?}", cow);
+*/
         match self.0 {
             PackedLeaf(ref map) => {
                 let builder = &*compressor.read().unwrap();
                 let state = builder.new_compression().unwrap();
-                let mut writer = state.write().unwrap();
+                //let mut writer = state.write().unwrap();
+                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(128));
                 {
-                    writer.write_all(map.inner())?
+                    buf.write_all(map.inner())?
                 }
-                return Ok(writer.finish());
+
+                let mut newstate = state.write().unwrap();
+                {
+                    return Ok(newstate.finish(buf.into_buf()).unwrap());
+                }
+
+                panic!("");
             },
             Leaf(ref leaf) => {
                 let builder = &*compressor.read().unwrap();
                 let state = builder.new_compression().unwrap();
-                let mut writer = state.write().unwrap();
+                //let mut writer = state.write().unwrap();
+                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(128));
                 {
-                    writer.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
-                    PackedMap::pack(leaf, &mut *writer)?
+                    buf.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
+                    PackedMap::pack(leaf, &mut buf)?
                 }
-                return Ok(writer.finish());
+
+                let mut newstate = state.write().unwrap();
+                {
+                    return Ok(newstate.finish(buf.into_buf()).unwrap());
+                }
+
+                panic!("");
             },
             Internal(ref internal) => {
                 let builder = &*compressor.read().unwrap();
                 let state = builder.new_compression().unwrap();
-                let mut writer = state.write().unwrap();
+                //let mut writer = state.write().unwrap();
+                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(128));
                 {
-                    writer.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
-                    serialize_into(&mut *writer, internal)
+                    buf.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
+                    serialize_into(&mut buf, internal)
                         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
                 }
-                return Ok(writer.finish());
 
+                let mut newstate = state.write().unwrap();
+                {
+                    return Ok(newstate.finish(buf.into_buf()).unwrap());
+                }
+
+                panic!("");
             },
             NVMLeaf(ref leaf) => {
                 //let compression_nvm = CompressionConfiguration::None;

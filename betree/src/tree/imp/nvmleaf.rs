@@ -224,29 +224,29 @@ where
         field: &BTreeMap<K, V>,
         serializer: &mut S,
     ) -> Result<Self::Resolver, S::Error> {
+panic!("..");
+        // let compression = CompressionConfiguration::None;
+        // let default_compression = compression.to_builder();
 
-        let compression = CompressionConfiguration::None;
-        let default_compression = compression.to_builder();
+        // let compression = &*default_compression.read().unwrap();
+        // //let compressed_data = [0u8, 10];
+        // let compressed_data = {
+        //     // FIXME: cache this
+        //     let a = compression.new_compression().unwrap();
+        //     let mut state = a.write().unwrap();
+        //     {
+        //         state.write_all(&[0u8, 10]);
+        //     }
+        //     state.finish()
+        // };
 
-        let compression = &*default_compression.read().unwrap();
-        //let compressed_data = [0u8, 10];
-        let compressed_data = {
-            // FIXME: cache this
-            let a = compression.new_compression().unwrap();
-            let mut state = a.write().unwrap();
-            {
-                state.write_all(&[0u8, 10]);
-            }
-            state.finish()
-        };
-
-        ArchivedVec::serialize_from_iter(
-            field.iter().map(|(key, value)| {
-                //let (a, b, c, d) = value as (&KeyInfo, &SlicedCowBytes, &u16, &u16);
-                EntryEx { key: key, value: value }
-            }),
-            serializer,
-        )
+        // ArchivedVec::serialize_from_iter(
+        //     field.iter().map(|(key, value)| {
+        //         //let (a, b, c, d) = value as (&KeyInfo, &SlicedCowBytes, &u16, &u16);
+        //         EntryEx { key: key, value: value }
+        //     }),
+        //     serializer,
+        // )
     }
 }
 

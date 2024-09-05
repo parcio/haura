@@ -290,6 +290,23 @@ impl io::Write for BufWrite {
     }
 }
 
+	
+unsafe impl zstd::stream::raw::WriteBuf for BufWrite {
+    fn as_slice(&self) -> &[u8] {
+        self.as_ref()
+    }
+    fn capacity(&self) -> usize {
+        self.buf.capacity.to_bytes() as usize
+    }
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        unsafe { self.buf.ptr.as_mut().unwrap() }
+    }
+    unsafe fn filled_until(&mut self, n: usize) {
+        self.size = n as u32
+    }
+   }
+
+
 impl io::Seek for BufWrite {
     fn seek(&mut self, seek: io::SeekFrom) -> io::Result<u64> {
         use io::SeekFrom::*;

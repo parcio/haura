@@ -57,14 +57,14 @@ impl io::Write for NoneCompression {
 }
 
 impl CompressionState for NoneCompression {
-    fn finish(&mut self) -> Buf {
-        mem::replace(&mut self.buf, BufWrite::with_capacity(DEFAULT_BUFFER_SIZE)).into_buf()
+    fn finish(&mut self, buf: Buf) -> Result<Buf> {
+        Ok(buf)
     }
 }
 
 impl DecompressionState for NoneDecompression {
-    fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
+    fn decompress(&mut self, data: Buf) -> Result<Buf> {
         // FIXME: pass-through Buf, reusing alloc
-        Ok(data.to_vec().into_boxed_slice())
+        Ok(data)
     }
 }
