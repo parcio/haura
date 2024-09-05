@@ -111,6 +111,7 @@ static struct fio_option options[] = {
 
 static int bail(struct err_t *error) {
   betree_print_error(error);
+  printf("\n");
   betree_free_err(error);
   return 1;
 }
