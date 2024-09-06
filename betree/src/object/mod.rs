@@ -654,12 +654,12 @@ impl<'os> ObjectStore {
 
     fn read_object_info(&'os self, key: &[u8]) -> Result<Option<ObjectInfo>> {
         if let Some(meta) = self.metadata.get(key)? {
-            println!("+ success : {:?}", key);
+            //println!("+ success : {:?}", key);
             Ok(Some(
                 ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &meta).unwrap(),
             ))
         } else {
-            println!("- fail: {:?}", key);
+            //println!("- fail: {:?}", key);
             Ok(None)
         }
     }

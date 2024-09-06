@@ -85,12 +85,12 @@ impl AlignedStorage {
             ))
             .max(self.capacity + MIN_GROWTH_SIZE);
 
-        if wanted_capacity.to_bytes() > 8 * 1024 * 1024 {
-            log::warn!(
-                "Requested allocation of >8MiB: {} byte",
-                wanted_capacity.to_bytes()
-            );
-        }
+        // if wanted_capacity.to_bytes() > 8 * 1024 * 1024 {
+        //     log::warn!(
+        //         "Requested allocation of >8MiB: {} byte",
+        //         wanted_capacity.to_bytes()
+        //     );
+        // }
 
         unsafe {
             let curr_layout =

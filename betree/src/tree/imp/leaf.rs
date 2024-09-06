@@ -144,21 +144,21 @@ impl LeafNode {
     }
 
     pub(in crate::tree) fn get_with_info(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
-        println!("leaf@@: {:?} - {}", key, self.entries.len());
-        if self.entries.contains_key(key) {
-            println!("The key exists in the BTreeMap.");
-        } else {
-            for key in self.entries.keys() {
-                let _v = key.to_vec();
-                if(_v.len() > 5) {
-                    println!("Key{}: {},{},{},{},{},{}", _v.len(), _v[0],_v[1],_v[2],_v[3],_v[4],_v[5]);
+        // println!("leaf@@: {:?} - {}", key, self.entries.len());
+        // if self.entries.contains_key(key) {
+        //     println!("The key exists in the BTreeMap.");
+        // } else {
+        //     for key in self.entries.keys() {
+        //         let _v = key.to_vec();
+        //         if(_v.len() > 5) {
+        //             println!("Key{}: {},{},{},{},{},{}", _v.len(), _v[0],_v[1],_v[2],_v[3],_v[4],_v[5]);
                     
-                }  else {
-                    println!("Key: {:?}", _v);
-                }
-            }
-            println!("The key does not exist in the BTreeMap.");
-        }
+        //         }  else {
+        //             println!("Key: {:?}", _v);
+        //         }
+        //     }
+        //     println!("The key does not exist in the BTreeMap.");
+        // }
 
         self.entries.get(key).cloned()
     }
