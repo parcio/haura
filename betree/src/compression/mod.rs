@@ -76,6 +76,7 @@ pub trait CompressionState: Write {
     /// Finishes the compression stream and returns a buffer that contains the
     /// compressed data.
     fn finish(&mut self, data: Buf) -> Result<Buf>;
+    fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
 }
 
 pub trait DecompressionState {
@@ -93,8 +94,6 @@ pub use self::zstd::Zstd;
 
 
 lazy_static::lazy_static! {
-    pub static ref COMPRESSION_VAR: Arc<std::sync::RwLock<dyn CompressionBuilder>> = 
-    CompressionConfiguration::Zstd(Zstd {
-        level: 1,
-    }).to_builder();
+    pub static ref COMPRESSION_VAR: Arc<std::sync::RwLock<dyn CompressionBuilder>> =
+    Arc::new(std::sync::RwLock::new(None));
 }

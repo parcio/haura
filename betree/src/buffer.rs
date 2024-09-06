@@ -249,6 +249,10 @@ pub struct BufWrite {
 }
 
 impl BufWrite {
+    pub fn get_len(&self) -> u32 {
+        self.size
+    }
+
     /// Create an empty [BufWrite] with the specified capacity.
     /// The backing storage is zeroed.
     pub fn with_capacity(capacity: Block<u32>) -> Self {

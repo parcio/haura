@@ -648,7 +648,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     }
 
     fn unpack_and_decompress(size: crate::vdev::Block<u32>, checksum: crate::checksum::XxHash, pool: RootSpu, _offset: DiskOffset, d_id: DatasetId, data: Box<[u8]>, d: DecompressionTag) -> Result<Self, io::Error> {
-        //println!("unpack_and_decompress...");
+        //panic!("unpack_and_decompress...");
         //let mut decompression_state = d.new_decompression();
         //let data = decompression_state.unwrap().decompress(&data).unwrap();
 

@@ -94,6 +94,10 @@ use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
 
 impl CompressionState for ZstdCompression {
+    fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+    {
+        panic!("..");
+    }
     fn finish(&mut self, data: Buf) -> Result<Buf> {
         let size = zstd_safe::compress_bound(data.as_ref().len());
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
@@ -123,6 +127,8 @@ impl CompressionState for ZstdCompression {
 
 impl DecompressionState for ZstdDecompression {
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
+        //panic!("..why");
+
         let size = u32::read_from_buffer(data.as_ref()).unwrap();
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
 

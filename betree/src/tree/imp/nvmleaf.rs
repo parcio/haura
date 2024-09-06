@@ -572,11 +572,14 @@ impl NVMLeafNode
     }
 
     pub(in crate::tree) fn load_all_entries(&self) -> Result<(), std::io::Error> {
+        //println!("1..");
         if self.nvm_load_details.read().unwrap().need_to_load_data_from_nvm && self.disk_offset.is_some() {
+            //println!("2..");
             self.nvm_load_details.write().unwrap().need_to_load_data_from_nvm = false; // TODO: What if all the entries are fetched one by one? handle this part as well.
             let compressed_data = self.pool.as_ref().unwrap().read(self.node_size, self.disk_offset.unwrap(), self.checksum.unwrap());
             match compressed_data {
                 Ok(buffer) => {
+                    //println!("3..");
                     let bytes: Box<[u8]> = buffer.into_boxed_slice();
 
                     let archivedleafnodedata: &ArchivedNVMLeafNodeData = rkyv::check_archived_root::<NVMLeafNodeData>(&bytes[self.data_start..self.data_end]).unwrap();
@@ -590,11 +593,12 @@ impl NVMLeafNode
                     return Ok(());
                 },
                 Err(e) => {
+                    //println!("4..");
                     return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
                 }
             }
         }
-
+        //println!("5..");
         Ok(())
     }
 
@@ -609,7 +613,25 @@ impl NVMLeafNode
     }
 
     pub(in crate::tree) fn get_with_info(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
+        //TODO: Try excluding compression at all even NONE one!!!!!
+        println!("@@: {:?} - {}", key, self.data.read().as_ref().unwrap().as_ref().unwrap().entries.len());
         self.load_all_entries();
+
+        if self.data.read().as_ref().unwrap().as_ref().unwrap().entries.contains_key(key) {
+            println!("The key exists in the BTreeMap.");
+        } else {
+            for key in self.data.read().as_ref().unwrap().as_ref().unwrap().entries.keys() {
+                let _v = key.to_vec();
+                if(_v.len() > 5) {
+                    println!("Key{}: {},{},{},{},{},{}", _v.len(), _v[0],_v[1],_v[2],_v[3],_v[4],_v[5]);
+                    
+                }  else {
+                    println!("Key: {:?}", _v);
+                }
+            }
+            println!("The key does not exist in the BTreeMap.");
+        }
+
         self.data.read().as_ref().unwrap().as_ref().unwrap().entries.get(key).map(|(_info, data, kcs, vcs)| (_info.clone(), data.clone()))
     }
 
