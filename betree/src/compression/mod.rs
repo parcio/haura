@@ -80,6 +80,7 @@ pub trait CompressionState: Write {
 }
 
 pub trait DecompressionState {
+    fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
     fn decompress(&mut self, data: Buf) -> Result<Buf>;
 }
 

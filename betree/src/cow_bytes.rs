@@ -5,6 +5,7 @@ use crate::{compression::DecompressionTag, size::Size};
 //use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use stable_deref_trait::StableDeref;
 use zstd_safe::WriteBuf;
+//use core::slice::SlicePattern;
 use std::{
     borrow::Borrow,
     cmp,
@@ -193,32 +194,33 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
         let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//default_compression.read().unwrap();
         let compressed_data = {
             let state = compression.new_compression().unwrap();
-            let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(1));
-            {
-                // buf.write(self.inner.as_slice());
-                // ()
-                buf.write_all(self.inner.as_slice());
-            }
-            println!("%%% {} {}", self.inner.len(), buf.get_len());
-            let mut newstate = state.write().unwrap();
-            {
-                let a = buf.into_buf();
+            // let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(1));
+            // {
+            //     // buf.write(self.inner.as_slice());
+            //     // ()
+            //     buf.write_all(self.inner.as_slice());
+            // }
+            // println!("%%% {} {}", self.inner.len(), buf.get_len());
+             let mut newstate = state.write().unwrap();
+             {
+            //     let a = buf.into_buf();
 
-                let size: u32 = u32::read_from_buffer(a.as_ref()).unwrap();
-                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block::round_up_from_bytes(size));
+            //     let size: u32 = u32::read_from_buffer(a.as_ref()).unwrap();
+            //     let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block::round_up_from_bytes(size));
 
                 
-                println!("%%% {} {}", size, a.as_ref().len());
-                newstate.finish(a)
+            //     println!("%%% {} {}", size, a.as_ref().len());
+                //newstate.finishext(a.as_ref())
+                newstate.finishext(self.inner.as_slice())
             }
         };
-        panic!("%%% {} ", compressed_data.unwrap().as_ref().len());
+        //panic!("%%% {} ", compressed_data.unwrap().len());
 
-        let mut lambda = |data: &crate::buffer::Buf| {
+        let mut lambda = |data: &Vec<u8>| {
 
             Ok(CowBytesResolver {
-                len: data.as_ref().len(),
-                inner: ArchivedVec::serialize_from_slice(data.as_ref().as_slice(), serializer)?,
+                len: data.len(),
+                inner: ArchivedVec::serialize_from_slice(data.as_slice(), serializer)?,
             })
         };
         lambda(&compressed_data.unwrap())
@@ -238,17 +240,13 @@ impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
     fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {
         let vec: Vec<u8> = self.deserialize(deserializer)?;
 
-         let size = crate::vdev::Block::from_bytes(vec.len() as u32);
-         let mut buf = crate::buffer::BufWrite::with_capacity(size);
-         buf.write_all(vec.as_slice());
-         let dt = buf.into_buf();
-
          let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//crate::compression::COMPRESSION_VAR.read().unwrap()default_compression.read().unwrap();
 
          let mut decompression_state = compression.decompression_tag().new_decompression().unwrap();//d.new_decompression();
 
-         let data = decompression_state.decompress(dt/*vec.as_slice()*/).unwrap();
-         let arc_vec = Arc::new(data.to_vec());
+         //let data = decompression_state.decompress(dt/*vec.as_slice()*/).unwrap();
+         let data = decompression_state.decompressext(vec.as_slice()).unwrap();
+         let arc_vec = Arc::new(data);
 
          Ok(CowBytes { inner: arc_vec })
 /*

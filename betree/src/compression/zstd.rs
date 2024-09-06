@@ -126,6 +126,11 @@ impl CompressionState for ZstdCompression {
 }
 
 impl DecompressionState for ZstdDecompression {
+    fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+    {
+        Ok(data.clone().to_vec())
+    }
+    
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
         //panic!("..why");
 

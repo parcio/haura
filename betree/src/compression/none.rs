@@ -68,6 +68,11 @@ impl CompressionState for NoneCompression {
 }
 
 impl DecompressionState for NoneDecompression {
+    fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+    {
+        Ok(data.clone().to_vec())
+    }
+
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
         // FIXME: pass-through Buf, reusing alloc
         Ok(data)
