@@ -14,7 +14,7 @@ serde_json = "1.0"
 
 jemallocator = { version = "0.3", features = [ "background_threads" ] }
 
-figment = { version = "0.10", features = [ "json" ] }
+figment = { version = "0.10", features = ["json", "yaml"] }
 
 log = "0.4"
 env_logger = "0.9"

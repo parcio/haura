@@ -180,7 +180,8 @@ fn bectl_main() -> Result<(), Error> {
 
     let cfg: DatabaseConfiguration = figment::Figment::new()
         .merge(DatabaseConfiguration::figment_default())
-        .merge(figment::providers::Json::file(opt.database_config))
+        .merge(figment::providers::Yaml::file(&opt.database_config))
+        .merge(figment::providers::Json::file(&opt.database_config))
         .merge(DatabaseConfiguration::figment_env())
         .extract()?;
 
