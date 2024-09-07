@@ -46,7 +46,7 @@ env_logger = { version = "0.9", optional = true }
 core_affinity = "0.5"
 async-trait = "0.1"
 
-lz4-sys = "1.9"
+lz4 = "1.23.1"
 zstd = { version = "0.9", default-features = false }
 zstd-safe = { version = "4.0", default-features = false, features = ["experimental"] }
 

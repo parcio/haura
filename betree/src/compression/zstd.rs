@@ -89,7 +89,7 @@ impl io::Write for ZstdCompression {
         unimplemented!()
     }
 }
-
+use std::time::Instant;
 use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
 
@@ -123,6 +123,7 @@ impl CompressionState for ZstdCompression {
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
+        let start = Instant::now();
         let size = zstd_safe::compress_bound(data.as_ref().len());
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
         buf.write_all(&[0u8; DATA_OFF])?;
@@ -145,9 +146,12 @@ impl CompressionState for ZstdCompression {
         og_len
             .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
             .unwrap();
+        let duration = start.elapsed();
+        println!("Total time elapsed: {:?}", duration);
         Ok(buf.into_buf())
     }
 }
+
 
 impl DecompressionState for ZstdDecompression {
     fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>
@@ -184,6 +188,7 @@ impl DecompressionState for ZstdDecompression {
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
+        //let start = Instant::now();
         //panic!("..why");
 
         let size = u32::read_from_buffer(data.as_ref()).unwrap();
@@ -212,7 +217,8 @@ impl DecompressionState for ZstdDecompression {
 
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
-
+        //let duration = start.elapsed();
+        //println!("Total time elapsed: {:?}", duration);
         Ok(buf.into_buf())
     }
 }

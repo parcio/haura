@@ -20,7 +20,7 @@ const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CompressionConfiguration {
     None,
-    // Lz4,
+    Lz4(Lz4),
     Zstd(Zstd),
 }
 
@@ -29,6 +29,7 @@ impl CompressionConfiguration {
         match self {
             CompressionConfiguration::None => Arc::new(std::sync::RwLock::new(None)),
             CompressionConfiguration::Zstd(zstd) => Arc::new(std::sync::RwLock::new(*zstd)),
+            CompressionConfiguration::Lz4(lz4) => Arc::new(std::sync::RwLock::new(*lz4)),
         }
     }
 }
@@ -51,7 +52,7 @@ impl DecompressionTag {
         use DecompressionTag as Tag;
         match self {
             Tag::None => Ok(None::new_decompression()?),
-            Tag::Lz4 => todo!(), //Ok(Lz4::new_decompression()?),
+            Tag::Lz4 => Ok(Lz4::new_decompression()?),
             Tag::Zstd => Ok(Zstd::new_decompression()?),
         }
     }
@@ -87,8 +88,8 @@ pub trait DecompressionState {
 mod none;
 pub use self::none::None;
 
-//mod lz4;
-//pub use self::lz4::Lz4;
+mod lz4;
+pub use self::lz4::Lz4;
 
 mod zstd;
 pub use self::zstd::Zstd;
