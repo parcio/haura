@@ -147,7 +147,8 @@ impl CompressionState for ZstdCompression {
             .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
             .unwrap();
         let duration = start.elapsed();
-        println!("Total time elapsed: {:?}", duration);
+        //println!("Total time elapsed: {:?}", duration);
+        //println!("Total time elapsed: {} {}", size, buf.get_len());
         Ok(buf.into_buf())
     }
 }
@@ -219,6 +220,7 @@ impl DecompressionState for ZstdDecompression {
         self.writer.finish(&mut output, finished_frame)?;
         //let duration = start.elapsed();
         //println!("Total time elapsed: {:?}", duration);
+        println!("Total time elapsed: {} {}", size, buf.get_len());
         Ok(buf.into_buf())
     }
 }

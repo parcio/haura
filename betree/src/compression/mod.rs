@@ -98,7 +98,11 @@ pub use self::zstd::Zstd;
 lazy_static::lazy_static! {
     pub static ref COMPRESSION_VAR: Arc<std::sync::RwLock<dyn CompressionBuilder>> =
     //Arc::new(std::sync::RwLock::new(None));
-    CompressionConfiguration::Zstd(Zstd {
+    /*CompressionConfiguration::Zstd(Zstd {
+        level: 1,
+    }).to_builder();*/
+
+    CompressionConfiguration::Lz4(Lz4 {
         level: 1,
     }).to_builder();
 }

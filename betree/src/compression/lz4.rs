@@ -106,14 +106,8 @@ const DATA_OFF: usize = mem::size_of::<u32>();
 impl CompressionState for Lz4Compression {
     fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
-        Ok(data.clone().to_vec())
-    }
-
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
-        let start = Instant::now();
-        let size = data.as_ref().len();
+        let size = data.len();
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
-        //buf.write_all(&[0u8; DATA_OFF])?;
 
         let mut encoder = EncoderBuilder::new()
         .level(u32::from(self.config.level))
@@ -125,34 +119,23 @@ impl CompressionState for Lz4Compression {
         encoder.write_all(data.as_ref())?;
         let (compressed_data, result) = encoder.finish();
         
-        //result.map(|_| compressed_data)
+        Ok(compressed_data.as_slice().to_vec())
+    }
 
-        //io::copy(&mut data.as_ref(), &mut encoder)?;
-        //let (_output, result) = encoder.finish();
-        //println!("{:?}", data.as_ref());
-        //panic!("{:?}", _output.as_ref());
-        // _output
+    fn finish(&mut self, data: Buf) -> Result<Buf> {
+        let size = data.as_ref().len();
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
 
-        // let mut input = zstd::stream::raw::InBuffer::around(&data);
-        // let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, DATA_OFF);
-        // let mut finished_frame;
-        // loop {
-        //     let remaining = self.writer.run(&mut input, &mut output)?;
-        //     finished_frame = remaining == 0;
-        //     if input.pos() > 0 || data.is_empty() {
-        //         break;
-        //     }
-        // }
+        let mut encoder = EncoderBuilder::new()
+        .level(u32::from(self.config.level))
+        .checksum(ContentChecksum::NoChecksum)
+        .block_size(BlockSize::Max4MB)
+        .block_mode(BlockMode::Linked)
+        .build(buf)?;
 
-        //while self.writer.flush(&mut output)? > 0 {}
-        //self.writer.finish(&mut output, finished_frame)?;
-
-        // let og_len = data.len() as u32;
-        // og_len
-        //     .write_to_buffer(&mut _output.as_mut()[..DATA_OFF])
-        //     .unwrap();
-        let duration = start.elapsed();
-        println!("Total time elapsed: {} {}", size, compressed_data.get_len());
+        encoder.write_all(data.as_ref())?;
+        let (compressed_data, result) = encoder.finish();
+        
         Ok(compressed_data.into_buf())
     }
     // fn finish(&mut self) -> Buf {
@@ -166,49 +149,22 @@ impl CompressionState for Lz4Compression {
 impl DecompressionState for Lz4Decompression {
     fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
-        Ok(data.clone().to_vec())
+        //panic!("..");
+        let size = data.as_ref().len() as u32;
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
+        let mut decoder = Decoder::new(data.as_ref())?;
+
+        io::copy(&mut decoder, &mut buf)?;
+        Ok(buf.as_slice().to_vec())
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        let size = u32::read_from_buffer(data.as_ref()).unwrap();
+        let size = data.as_ref().len() as u32;
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
-
         let mut decoder = Decoder::new(data.as_ref())?;
 
-        // let mut input = zstd::stream::raw::InBuffer::around(&data[DATA_OFF..]);
-        // let mut output = zstd::stream::raw::OutBuffer::around(&mut buf);
-
-        // let mut finished_frame;
-        // loop {
-        //     let remaining = self.writer.run(&mut input, &mut output)?;
-        //     finished_frame = remaining == 0;
-        //     if remaining > 0 {
-        //         if output.dst.capacity() == output.dst.as_ref().len() {
-        //             // append faux byte to extend in case that original was
-        //             // wrong for some reason (this should not happen but is a
-        //             // sanity guard)
-        //             output.dst.write(&[0])?;
-        //         }
-        //         continue;
-        //     }
-        //     if input.pos() > 0 || data.is_empty() {
-        //         break;
-        //     }
-        // }
-
-        // while self.writer.flush(&mut output)? > 0 {}
-        // self.writer.finish(&mut output, finished_frame)?;
-
-        //io::copy(&mut decoder, &mut buf)?;
-        let start = Instant::now();
-        let mut output = Vec::with_capacity(size as usize);
-        decoder.read_to_end(&mut output)?;
-        let duration = start.elapsed();
-        println!("Total time elapsed: {} {} {:?}", size, output.len(), duration);
-        buf.write_all(&output);
-        
+        io::copy(&mut decoder, &mut buf)?;
         Ok(buf.into_buf())
-        //Ok(data)
     }
     // fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
     //     let mut output = Vec::with_capacity(DEFAULT_BUFFER_SIZE.to_bytes() as usize);
