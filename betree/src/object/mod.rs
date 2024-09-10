@@ -77,7 +77,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-mod chunk;
+pub mod chunk;
 mod meta;
 use self::{chunk::*, meta::*};
 pub use meta::ObjectInfo;
@@ -885,6 +885,7 @@ impl<'ds> ObjectHandle<'ds> {
         &self,
         chunk_range: Range<u32>,
     ) -> Result<impl Iterator<Item = Result<(Range<u64>, SlicedCowBytes)>>> {
+        //println!("==={:?}", chunk_range);
         // FIXME: This is incorrect, correctly we shoud measure how long each individual fetch takes
         let start = Instant::now();
         let iter = self.store.data.range(
@@ -946,12 +947,13 @@ impl<'ds> ObjectHandle<'ds> {
         let mut meta_change = MetaMessage::default();
         let mut total_written = 0;
         log::trace!("Entered object::write_at_with_pref");
-
+        
+        
         let start = Instant::now();
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(self.object.id, chunk.start.chunk_id);
-
+            //println!(".. {}.. {:?}", len, chunk_range);
             self.store
                 .data
                 .upsert_with_pref(&key[..], &buf[..len], chunk.start.offset, storage_pref)

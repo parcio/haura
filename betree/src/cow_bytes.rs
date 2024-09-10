@@ -191,7 +191,7 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
         serializer: &mut S
     ) -> Result<Self::Resolver, S::Error> {
         //panic!("----------------------");
-
+/*
         let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//default_compression.read().unwrap();
         let compressed_data = {
             let state = compression.new_compression().unwrap();
@@ -225,11 +225,11 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
             })
         };
         lambda(&compressed_data.unwrap())
-
-        /*Ok(CowBytesResolver {
+*/
+        Ok(CowBytesResolver {
             len: self.inner.len(),
             inner: ArchivedVec::serialize_from_slice(self.inner.as_slice(), serializer)?,
-        })*/
+        })
     }
 }
 
@@ -238,7 +238,7 @@ use std::io::Write;
 
 impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
     fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {
-        
+        /*
         let vec: Vec<u8> = self.deserialize(deserializer)?;
 
          let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//crate::compression::COMPRESSION_VAR.read().unwrap()default_compression.read().unwrap();
@@ -251,11 +251,11 @@ impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
 
          Ok(CowBytes { inner: arc_vec })
          
-
-         /*let vec: Vec<u8> = self.deserialize(deserializer)?;
+*/
+         let vec: Vec<u8> = self.deserialize(deserializer)?;
         
          let arc_vec = Arc::new(vec);
-         Ok(CowBytes { inner: arc_vec })*/
+         Ok(CowBytes { inner: arc_vec })
     }
 }
 

@@ -429,6 +429,7 @@ impl DatasetInner<DefaultMessageAction> {
         storage_preference: StoragePreference,
     ) -> Result<()> {
         if data.len() > tree::MAX_MESSAGE_SIZE {
+            panic!("> {} {}", data.len(), tree::MAX_MESSAGE_SIZE);
             return Err(Error::MessageTooLarge);
         }
         self.insert_msg_with_pref(
@@ -456,6 +457,7 @@ impl DatasetInner<DefaultMessageAction> {
         storage_preference: StoragePreference,
     ) -> Result<()> {
         if offset as usize + data.len() > tree::MAX_MESSAGE_SIZE {
+            panic!("> {} {}", offset as usize + data.len(), tree::MAX_MESSAGE_SIZE);
             return Err(Error::MessageTooLarge);
         }
         // TODO: In case of overfilling the underlying storage we should notify in _any_ case that the writing is not successfull, for this

@@ -690,7 +690,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 meta_data : meta_data,
                 data: std::sync::Arc::new(std::sync::RwLock::new(Some(InternalNodeData {
                     children: vec![]
-                }))), //Some(data),
+                }))),
+                //data: std::sync::Arc::new(std::sync::RwLock::new(Some(data))),
                 meta_data_size: meta_data_len,
                 data_size: data_len,
                 data_start: data_start,
@@ -700,9 +701,10 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 d_id: Some(d_id),
                 nvm_load_details: std::sync::RwLock::new(NVMLazyLoadDetails{
                     need_to_load_data_from_nvm: true,
+                    //need_to_load_data_from_nvm: false,
                     time_for_nvm_last_fetch: SystemTime::now(),
                     nvm_fetch_counter: 0}),
-            }/*.complete_object_refs(d_id)*/)))
+            }.complete_object_refs(d_id))))
         } else if data[0..4] == (NodeInnerType::NVMLeaf as u32).to_be_bytes() {
             let meta_data_len: usize = usize::from_be_bytes(data[4..12].try_into().unwrap());
             let data_len: usize = usize::from_be_bytes(data[12..20].try_into().unwrap());

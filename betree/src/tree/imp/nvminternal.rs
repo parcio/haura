@@ -1064,7 +1064,8 @@ impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
 
 impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
     pub fn node_pointer_mut(&mut self) -> (&std::sync::Arc<std::sync::RwLock<Option<InternalNodeData<N>>>>, usize)  where N: ObjectReference{
-        self.node.load_all_data();
+        //self.node.load_all_data();
+        self.node.load_all_data(); //self.node.load_entry(self.child_idx);
         //self.node.complete_object_refs(self.node.d_id.unwrap());
         //&mut self.node.data.write().as_mut().unwrap().as_mut().unwrap().children[self.child_idx].as_mut().unwrap().node_pointer
         (&self.node.data, self.child_idx)

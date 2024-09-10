@@ -60,7 +60,7 @@ const MIN_FLUSH_SIZE: usize = 256 * 1024;
 const MIN_FANOUT: usize = 4;
 const MIN_LEAF_NODE_SIZE: usize = 1024 * 1024;
 const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
-pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
+pub(crate) const MAX_MESSAGE_SIZE: usize = 128 * 1024;
 
 /// The actual tree type.
 pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
