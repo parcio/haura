@@ -1,7 +1,7 @@
 use std::iter;
 
 /// 128 kibibyte
-pub const CHUNK_SIZE: u32 = 128 * 1024;
+//pub const CHUNK_SIZE: u32 = 128 * 1024;
 
 pub const CHUNK_MAX: u32 = u32::MAX - 1024;
 // pub const CHUNK_META_SIZE: u32 = CHUNK_MAX + 1;
@@ -16,7 +16,7 @@ pub struct ChunkOffset {
 impl ChunkOffset {
     /// The total byte offset, as it would be without chunking.
     pub fn as_bytes(&self) -> u64 {
-        self.chunk_id as u64 * CHUNK_SIZE as u64 + self.offset as u64
+        self.chunk_id as u64 * unsafe{crate::g_CHUNK_SIZE} as u64 + self.offset as u64
     }
 }
 
@@ -28,7 +28,7 @@ pub struct ChunkRange {
 
 impl ChunkRange {
     pub fn from_byte_bounds(offset: u64, len: u64) -> Self {
-        const SIZE: u64 = CHUNK_SIZE as u64;
+        let SIZE: u64 = unsafe{crate::g_CHUNK_SIZE} as u64;
         let end = offset.saturating_add(len);
 
         ChunkRange {
@@ -83,7 +83,7 @@ impl ChunkRange {
                     start: curr_start,
                     end: ChunkOffset {
                         chunk_id: curr_start.chunk_id,
-                        offset: if last_chunk { end.offset } else { CHUNK_SIZE },
+                        offset: if last_chunk { end.offset } else { unsafe{crate::g_CHUNK_SIZE} },
                     },
                 };
 
@@ -131,7 +131,7 @@ mod test {
         assert_eq!(chunk_range.split_at_chunk_bounds().count(), 1);
 
         assert_eq!(
-            ChunkRange::from_byte_bounds(2 * CHUNK_SIZE as u64 + 112, CHUNK_SIZE as u64 - 112)
+            ChunkRange::from_byte_bounds(2 * unsafe{crate::g_CHUNK_SIZE} as u64 + 112, unsafe{crate::g_CHUNK_SIZE} as u64 - 112)
                 .split_at_chunk_bounds()
                 .collect::<Vec<_>>(),
             vec![ChunkRange {
@@ -141,24 +141,24 @@ mod test {
                 },
                 end: ChunkOffset {
                     chunk_id: 2,
-                    offset: CHUNK_SIZE
+                    offset: unsafe{crate::g_CHUNK_SIZE}
                 }
             },]
         );
 
         assert_eq!(
-            ChunkRange::from_byte_bounds(1, 21 * CHUNK_SIZE as u64)
+            ChunkRange::from_byte_bounds(1, 21 * unsafe{crate::g_CHUNK_SIZE} as u64)
                 .split_at_chunk_bounds()
                 .count(),
             22
         );
 
         assert_eq!(
-            ChunkRange::from_byte_bounds(1, 21 * CHUNK_SIZE as u64)
+            ChunkRange::from_byte_bounds(1, 21 * unsafe{crate::g_CHUNK_SIZE} as u64)
                 .split_at_chunk_bounds()
                 .map(|chunk| chunk.single_chunk_len())
                 .sum::<u32>(),
-            21 * CHUNK_SIZE
+            21 * unsafe{crate::g_CHUNK_SIZE}
         );
     }
 }

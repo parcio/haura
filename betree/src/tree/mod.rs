@@ -27,4 +27,4 @@ type Key = CowBytes;
 type Value = SlicedCowBytes;
 
 use self::imp::KeyInfo;
-pub(crate) use self::{errors::Error, imp::MAX_MESSAGE_SIZE, layer::ErasedTreeSync};
+pub(crate) use self::{errors::Error, /*imp::MAX_MESSAGE_SIZE,*/ layer::ErasedTreeSync};

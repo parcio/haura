@@ -9,8 +9,8 @@ use super::{
     nvmleaf::{NVMLeafNode, NVMLeafNodeMetaData, NVMLeafNodeData, self, NVMLeafNodeLoadDetails},
     packed::PackedMap,
     nvmleaf::NVMFillUpResult,
-    FillUpResult, KeyInfo, PivotKey, MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE, MIN_FANOUT,
-    MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,
+    FillUpResult, KeyInfo, PivotKey, /*MAX_INTERNAL_NODE_SIZE, MAX_LEAF_NODE_SIZE,*/ MIN_FANOUT,
+    /*MIN_FLUSH_SIZE, MIN_LEAF_NODE_SIZE,*/
 };
 use crate::{
     compression::CompressionBuilder, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{Dml, HasStoragePreference, Object, ObjectReference}, database::{DatasetId,RootSpu}, size::{Size, SizeMut, StaticSize}, storage_pool::{DiskOffset, StoragePoolLayer}, tree::{pivot_key::LocalPivotKey, MessageAction, imp::{nvminternal::{InternalNodeMetaData, ArchivedInternalNodeMetaData, ArchivedInternalNodeData, InternalNodeData}}}, StoragePreference,
@@ -846,14 +846,14 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
         match self.0 {
             Leaf(_) | PackedLeaf(_) => None,
             Internal(ref mut internal) => internal.try_find_flush_candidate(
-                MIN_FLUSH_SIZE,
-                MAX_INTERNAL_NODE_SIZE,
+                unsafe{crate::g_MIN_FLUSH_SIZE},
+                unsafe{crate::g_MAX_INTERNAL_NODE_SIZE},
                 MIN_FANOUT,
             ),
             NVMLeaf(ref nvmleaf) => None,
             NVMInternal(ref mut nvminternal) => nvminternal.try_find_flush_candidate(
-                MIN_FLUSH_SIZE,
-                MAX_INTERNAL_NODE_SIZE,
+                unsafe{crate::g_MIN_FLUSH_SIZE},
+                unsafe{crate::g_MAX_INTERNAL_NODE_SIZE},
                 MIN_FANOUT,
             ),
         }
@@ -861,11 +861,11 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
 
     pub(super) fn is_too_large(&self) -> bool {
         match self.0 {
-            PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
-            Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
-            Internal(ref internal) => internal.size() > MAX_INTERNAL_NODE_SIZE,
-            NVMLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
-            NVMInternal(ref nvminternal) => nvminternal.size() > MAX_INTERNAL_NODE_SIZE,
+            PackedLeaf(ref map) => map.size() > unsafe{crate::g_MAX_LEAF_NODE_SIZE},
+            Leaf(ref leaf) => leaf.size() > unsafe{crate::g_MAX_LEAF_NODE_SIZE},
+            Internal(ref internal) => internal.size() > unsafe{crate::g_MAX_INTERNAL_NODE_SIZE},
+            NVMLeaf(ref nvmleaf) => nvmleaf.size() > unsafe{crate::g_MAX_LEAF_NODE_SIZE},
+            NVMInternal(ref nvminternal) => nvminternal.size() > unsafe{crate::g_MAX_INTERNAL_NODE_SIZE},
         }
     }
 }
@@ -918,20 +918,20 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 
     pub(super) fn is_too_small_leaf(&self) -> bool {
         match self.0 {
-            PackedLeaf(ref map) => map.size() < MIN_LEAF_NODE_SIZE,
-            Leaf(ref leaf) => leaf.size() < MIN_LEAF_NODE_SIZE,
+            PackedLeaf(ref map) => map.size() < unsafe{crate::g_MIN_LEAF_NODE_SIZE},
+            Leaf(ref leaf) => leaf.size() < unsafe{crate::g_MIN_LEAF_NODE_SIZE},
             Internal(_) => false,
-            NVMLeaf(ref nvmleaf) => nvmleaf.size() < MIN_LEAF_NODE_SIZE,
+            NVMLeaf(ref nvmleaf) => nvmleaf.size() < unsafe{crate::g_MIN_LEAF_NODE_SIZE},
             NVMInternal(ref nvminternal) => false,
         }
     }
 
     pub(super) fn is_too_large_leaf(&self) -> bool {
         match self.0 {
-            PackedLeaf(ref map) => map.size() > MAX_LEAF_NODE_SIZE,
-            Leaf(ref leaf) => leaf.size() > MAX_LEAF_NODE_SIZE,
+            PackedLeaf(ref map) => map.size() > unsafe{crate::g_MAX_LEAF_NODE_SIZE},
+            Leaf(ref leaf) => leaf.size() > unsafe{crate::g_MAX_LEAF_NODE_SIZE},
             Internal(_) => false,
-            NVMLeaf(ref nvmleaf) => nvmleaf.size() > MAX_LEAF_NODE_SIZE,
+            NVMLeaf(ref nvmleaf) => nvmleaf.size() > unsafe{crate::g_MAX_LEAF_NODE_SIZE},
             NVMInternal(ref nvminternal) => false,
         }
     }
@@ -991,7 +991,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
                 let (right_sibling, pivot_key, _, _pk) =
-                    leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    leaf.split(unsafe{crate::g_MIN_LEAF_NODE_SIZE}, unsafe{crate::g_MAX_LEAF_NODE_SIZE});
                 (Node(Leaf(right_sibling)), pivot_key, 0)
             }
             Internal(ref mut internal) => {
@@ -1001,7 +1001,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             NVMLeaf(ref mut nvmleaf) => {
                 isnvm = true;
                 let (right_sibling, pivot_key, _, _pk) =
-                    nvmleaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    nvmleaf.split(unsafe{crate::g_MIN_LEAF_NODE_SIZE}, unsafe{crate::g_MAX_LEAF_NODE_SIZE});
                 (Node(NVMLeaf(right_sibling)), pivot_key, 0)
             },
             NVMInternal(ref mut nvminternal) => {
@@ -1352,7 +1352,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {
                 let (node, pivot_key, size_delta, pk) =
-                    leaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    leaf.split(unsafe{crate::g_MIN_LEAF_NODE_SIZE}, unsafe{crate::g_MAX_LEAF_NODE_SIZE});
                 (Node(Leaf(node)), pivot_key, size_delta, pk)
             }
             Internal(ref mut internal) => {
@@ -1368,7 +1368,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             },
             NVMLeaf(ref mut nvmleaf) => {
                 let (node, pivot_key, size_delta, pk) =
-                    nvmleaf.split(MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE);
+                    nvmleaf.split(unsafe{crate::g_MIN_LEAF_NODE_SIZE}, unsafe{crate::g_MAX_LEAF_NODE_SIZE});
                 (Node(NVMLeaf(node)), pivot_key, size_delta, pk)
             },
             NVMInternal(ref mut nvminternal) => {
@@ -1406,7 +1406,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         right_sibling.ensure_unpacked();
         match (&mut self.0, &mut right_sibling.0) {
             (&mut Leaf(ref mut left), &mut Leaf(ref mut right)) => {
-                left.rebalance(right, MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE)
+                left.rebalance(right, unsafe{crate::g_MIN_LEAF_NODE_SIZE}, unsafe{crate::g_MAX_LEAF_NODE_SIZE})
             },
             _ => unreachable!(),
         }
@@ -1417,7 +1417,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         right_sibling.ensure_unpacked();
         match (&mut self.0, &mut right_sibling.0) {
             (&mut NVMLeaf(ref mut left), &mut NVMLeaf(ref mut right)) => {
-                left.rebalance(right, MIN_LEAF_NODE_SIZE, MAX_LEAF_NODE_SIZE)
+                left.rebalance(right, unsafe{crate::g_MIN_LEAF_NODE_SIZE}, unsafe{crate::g_MAX_LEAF_NODE_SIZE})
             },
             _ => unreachable!(),
         }

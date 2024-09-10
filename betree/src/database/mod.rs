@@ -418,6 +418,19 @@ impl Database {
         Self::build_internal(builder, None, None)
     }
 
+    pub fn buildex(builder: DatabaseConfiguration, n_MAX_INTERNAL_NODE_SIZE :usize, n_MIN_FLUSH_SIZE :usize, n_MIN_LEAF_NODE_SIZE :usize, n_MAX_MESSAGE_SIZE :usize, n_CHUNK_SIZE: u32) -> Result<Self> {
+        println!(" {} {} {} {} {} ========================== ", n_MAX_INTERNAL_NODE_SIZE, n_MIN_FLUSH_SIZE, n_MIN_LEAF_NODE_SIZE, n_MAX_MESSAGE_SIZE, n_CHUNK_SIZE);
+        unsafe {
+            super::g_MAX_INTERNAL_NODE_SIZE=n_MAX_INTERNAL_NODE_SIZE;
+            super::g_MIN_FLUSH_SIZE=n_MIN_FLUSH_SIZE;
+            super::g_MIN_LEAF_NODE_SIZE=n_MIN_LEAF_NODE_SIZE;
+            super::g_MAX_LEAF_NODE_SIZE=n_MAX_INTERNAL_NODE_SIZE;
+            super::g_MAX_MESSAGE_SIZE=n_MAX_MESSAGE_SIZE;
+            super::g_CHUNK_SIZE=n_CHUNK_SIZE;
+        }
+        Self::build_internal(builder, None, None)
+    }
+
     // Construct an instance of [Database] either using external threads or not.
     // Deprecates [with_sync]
     fn build_internal(
