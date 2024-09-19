@@ -45,6 +45,14 @@ pub struct KeyInfo {
     storage_preference: StoragePreference,
 }
 
+impl Default for KeyInfo {
+    fn default() -> Self {
+        Self {
+            storage_preference: StoragePreference::NONE,
+        }
+    }
+}
+
 impl StaticSize for KeyInfo {
     fn static_size() -> usize {
         mem::size_of::<StoragePreference>()
@@ -621,7 +629,7 @@ where
 mod derivate_ref;
 mod flush;
 mod internal;
-mod leaf;
+pub mod leaf;
 mod node;
 mod range;
 mod split;

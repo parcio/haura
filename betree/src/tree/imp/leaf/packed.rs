@@ -60,7 +60,7 @@ pub(crate) const ENTRY_DATA_OFFSET: usize = ENTRY_KEY_INFO_OFFSET + 1;
 ///
 /// ```
 #[derive(Debug)]
-pub(crate) struct PackedMap {
+pub struct PackedMap {
     entry_count: u32,
     system_preference: u8,
     data: SlicedCowBytes,
@@ -225,14 +225,14 @@ impl PackedMap {
         }
     }
 
-    pub(crate) fn unpack_leaf(&self) -> LeafNode {
+    pub fn unpack_leaf(&self) -> LeafNode {
         let mut leaf: LeafNode = self.get_all().collect();
         // Restore system storage preference state
         leaf.set_system_storage_preference(StoragePreference::from_u8(self.system_preference));
         leaf
     }
 
-    pub(crate) fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<IntegrityMode> {
+    pub fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<IntegrityMode> {
         let entries = leaf.entries();
         let entries_cnt = entries.len() as u32;
         writer.write_u32::<LittleEndian>(entries_cnt)?;
@@ -255,7 +255,7 @@ impl PackedMap {
             writer.write_all(key)?;
             writer.write_all(value)?;
         }
-        Ok(IntegrityMode::External)
+        Ok(IntegrityMode::Internal)
     }
 
     pub(crate) fn inner(&self) -> &SlicedCowBytes {

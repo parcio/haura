@@ -3,7 +3,7 @@
 
 mod default_message_action;
 mod errors;
-mod imp;
+pub mod imp;
 mod layer;
 mod message_action;
 mod pivot_key;

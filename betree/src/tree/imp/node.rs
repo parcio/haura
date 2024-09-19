@@ -14,9 +14,15 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
-    buffer::Buf, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{
+    buffer::Buf,
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
-    }, database::DatasetId, size::{Size, SizeMut, StaticSize}, tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind}, StoragePreference
+    },
+    database::DatasetId,
+    size::{Size, SizeMut, StaticSize},
+    tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
+    StoragePreference,
 };
 use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
@@ -469,7 +475,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 
     pub(super) fn empty_leaf(kind: StorageKind) -> Self {
         match kind {
-            StorageKind::Memory => Node(MemLeaf(CopylessLeaf::new())),
+            // StorageKind::Memory => Node(MemLeaf(CopylessLeaf::new())),
             _ => Node(Leaf(LeafNode::new())),
         }
     }

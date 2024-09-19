@@ -16,7 +16,8 @@ use crate::{
 use std::{
     alloc::{self, Layout},
     cell::UnsafeCell,
-    fmt, io,
+    fmt,
+    io::{self, Write},
     mem::ManuallyDrop,
     ops::{Deref, Range},
     ptr::NonNull,
@@ -60,7 +61,6 @@ fn split_range_at(
 struct AlignedStorage {
     ptr: NonNull<u8>,
     capacity: Block<u32>,
-    owned: bool,
 }
 
 // impl Default for AlignedStorage {
@@ -81,7 +81,6 @@ impl AlignedStorage {
                 NonNull::new(alloc::alloc_zeroed(new_layout)).expect("Allocation failed.")
             },
             capacity,
-            owned: true,
         }
     }
 
@@ -124,9 +123,7 @@ impl AlignedStorage {
                 self.ptr
                     .as_ptr()
                     .copy_to_nonoverlapping(new_ptr.as_ptr(), self.capacity.to_bytes() as usize);
-                if self.owned {
-                    alloc::dealloc(self.ptr.as_ptr(), curr_layout);
-                }
+                alloc::dealloc(self.ptr.as_ptr(), curr_layout);
                 new_ptr
             });
             self.capacity = wanted_capacity;
@@ -136,9 +133,6 @@ impl AlignedStorage {
 
 impl Drop for AlignedStorage {
     fn drop(&mut self) {
-        if !self.owned {
-            return;
-        }
         unsafe {
             let layout =
                 Layout::from_size_align_unchecked(self.capacity.to_bytes() as usize, BLOCK_SIZE);
@@ -158,7 +152,6 @@ impl From<Box<[u8]>> for AlignedStorage {
                 ptr: unsafe {
                     NonNull::new((*Box::into_raw(b)).as_mut_ptr()).expect("Assume valid pointer.")
                 },
-                owned: true,
             }
         } else {
             assert!(
@@ -233,10 +226,38 @@ impl From<Box<[u8]>> for AlignedBuf {
     }
 }
 
+#[derive(Clone)]
+enum BufSource {
+    Allocated(AlignedBuf),
+    Foreign(Arc<UnsafeCell<NonNull<u8>>>, Block<u32>),
+}
+
+impl BufSource {
+    fn as_ptr(&self) -> *mut u8 {
+        match self {
+            BufSource::Allocated(buf) => unsafe { (*buf.buf.get()).ptr.as_ptr() },
+            BufSource::Foreign(ptr, _) => unsafe { (*ptr.get()).as_ptr() },
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            BufSource::Allocated(buf) => unsafe { (*buf.buf.get()).capacity.to_bytes() as usize },
+            BufSource::Foreign(_, s) => s.to_bytes() as usize,
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
+    }
+}
+
+unsafe impl Send for BufSource {}
+
 /// A shared read-only buffer, internally using block-aligned allocations.
 #[derive(Clone)]
 pub struct Buf {
-    buf: AlignedBuf,
+    buf: BufSource,
     range: Range<Block<u32>>,
 }
 
@@ -280,7 +301,6 @@ impl BufWrite {
         let curr_layout = unsafe {
             Layout::from_size_align_unchecked(self.buf.capacity.to_bytes() as usize, BLOCK_SIZE)
         };
-        debug_assert!(self.buf.owned);
         let new_cap = Block::round_up_from_bytes(self.size);
         self.buf.capacity = new_cap;
         let new_ptr = unsafe {
@@ -390,19 +410,13 @@ impl Buf {
     fn from_aligned(aligned: AlignedBuf) -> Self {
         Self {
             range: aligned.full_range(),
-            buf: aligned,
+            buf: BufSource::Allocated(aligned),
         }
     }
 
     pub(crate) unsafe fn from_raw(ptr: NonNull<u8>, size: Block<u32>) -> Self {
         Self {
-            buf: AlignedBuf {
-                buf: Arc::new(UnsafeCell::new(AlignedStorage {
-                    ptr,
-                    capacity: size,
-                    owned: false,
-                })),
-            },
+            buf: BufSource::Foreign(Arc::new(UnsafeCell::new(ptr)), size),
             range: Block(0)..size,
         }
     }
@@ -422,22 +436,37 @@ impl Buf {
 
     /// Panics if Buf was not unique, to ensure no readable references remain
     pub fn into_full_mut(self) -> MutBuf {
-        let range = self.buf.full_range();
-        MutBuf {
-            buf: self.buf.unwrap_unique(),
-            range,
+        match self.buf {
+            BufSource::Allocated(buf) => {
+                let range = buf.full_range();
+
+                MutBuf {
+                    buf: buf.unwrap_unique(),
+                    range,
+                }
+            }
+            BufSource::Foreign(_, _) => self.into_buf_write().into_buf().into_full_mut(),
         }
     }
 
     /// Convert to a mutable [BufWrite], if this is the only [Buf] referencing the backing storage.
     /// Panics if this [Buf] was not unique.
     pub fn into_buf_write(self) -> BufWrite {
-        let storage = Arc::try_unwrap(self.buf.buf)
-            .expect("AlignedBuf was not unique")
-            .into_inner();
-        BufWrite {
-            buf: storage,
-            size: self.range.end.to_bytes(),
+        match self.buf {
+            BufSource::Allocated(buf) => {
+                let storage = Arc::try_unwrap(buf.buf)
+                    .expect("AlignedBuf was not unique")
+                    .into_inner();
+                BufWrite {
+                    buf: storage,
+                    size: self.range.end.to_bytes(),
+                }
+            }
+            BufSource::Foreign(_, _) => {
+                let mut tmp = BufWrite::with_capacity(self.range.end);
+                tmp.write(self.buf.as_slice()).unwrap();
+                tmp
+            }
         }
     }
 
@@ -445,44 +474,27 @@ impl Buf {
     /// non-self-managed memory range, this property is transferred otherwise a
     /// new [CowBytes] is created.
     pub fn into_sliced_cow_bytes(self) -> SlicedCowBytes {
-        if !(unsafe { &*self.buf.buf.get() }).owned {
-            let storage = Arc::try_unwrap(self.buf.buf)
-                .expect("AlignedBuf was not unique")
-                .into_inner();
-
-            unsafe {
-                SlicedCowBytes::from_raw(storage.ptr.as_ptr(), storage.capacity.to_bytes() as usize)
-            }
-        } else {
-            CowBytes::from(self.into_boxed_slice()).into()
-        }
+        CowBytes::from(self.into_boxed_slice()).into()
     }
 
     /// If this [Buf] is unique, return its backing buffer without reallocation or copying.
     /// Panics if this [Buf] was not unique.
     pub fn into_boxed_slice(self) -> Box<[u8]> {
-        let storage = ManuallyDrop::new(
-            Arc::try_unwrap(self.buf.buf)
-                .expect("AlignedBuf was not unique")
-                .into_inner(),
-        );
-
-        if !storage.owned {
-            unsafe {
-                slice::from_raw_parts_mut(
-                    storage.ptr.as_ptr(),
-                    storage.capacity.to_bytes() as usize,
-                )
-                .to_vec()
-                .into_boxed_slice()
+        match self.buf {
+            BufSource::Allocated(buf) => {
+                let storage = ManuallyDrop::new(
+                    Arc::try_unwrap(buf.buf)
+                        .expect("AlignedBuf was not unique")
+                        .into_inner(),
+                );
+                unsafe {
+                    Box::from_raw(slice::from_raw_parts_mut(
+                        storage.ptr.as_ptr(),
+                        storage.capacity.to_bytes() as usize,
+                    ))
+                }
             }
-        } else {
-            unsafe {
-                Box::from_raw(slice::from_raw_parts_mut(
-                    storage.ptr.as_ptr(),
-                    storage.capacity.to_bytes() as usize,
-                ))
-            }
+            BufSource::Foreign(_, _) => self.buf.as_slice().to_vec().into_boxed_slice(),
         }
     }
 
@@ -550,13 +562,10 @@ impl Deref for Buf {
 
 impl AsRef<[u8]> for Buf {
     fn as_ref(&self) -> &[u8] {
-        unsafe {
-            let start = self.range.start.to_bytes() as usize;
-            let end = self.range.end.to_bytes() as usize;
-            let buf = &*self.buf.buf.get();
-            let slice = slice::from_raw_parts(buf.ptr.as_ptr(), buf.capacity.to_bytes() as usize);
-            &slice[start..end]
-        }
+        let start = self.range.start.to_bytes() as usize;
+        let end = self.range.end.to_bytes() as usize;
+        let slice = self.buf.as_slice();
+        &slice[start..end]
     }
 }
 
@@ -585,7 +594,7 @@ impl From<Box<[u8]>> for Buf {
         let aligned = AlignedBuf::from(b);
         Buf {
             range: aligned.full_range(),
-            buf: aligned,
+            buf: BufSource::Allocated(aligned),
         }
     }
 }

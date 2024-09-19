@@ -14,14 +14,13 @@ use std::{borrow::Borrow, collections::BTreeMap, iter::FromIterator};
 /// A leaf node of the tree holds pairs of keys values which are plain data.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(crate) struct LeafNode {
+pub struct LeafNode {
     storage_preference: AtomicStoragePreference,
     /// A storage preference assigned by the Migration Policy
     system_storage_preference: AtomicSystemStoragePreference,
     entries_size: usize,
     entries: BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>,
 }
-
 
 impl Size for LeafNode {
     fn size(&self) -> usize {
@@ -377,11 +376,16 @@ mod tests {
 
     use super::{CowBytes, LeafNode, Size};
     use crate::{
-        arbitrary::GenExt, buffer::BufWrite, data_management::HasStoragePreference, tree::{
+        arbitrary::GenExt,
+        buffer::BufWrite,
+        data_management::HasStoragePreference,
+        tree::{
             default_message_action::{DefaultMessageAction, DefaultMessageActionMsg},
             imp::leaf::PackedMap,
             KeyInfo,
-        }, vdev::Block, StoragePreference
+        },
+        vdev::Block,
+        StoragePreference,
     };
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
@@ -462,7 +466,11 @@ mod tests {
     #[quickcheck]
     fn check_serialization(leaf_node: LeafNode) {
         let mut data = BufWrite::with_capacity(Block(1));
-        assert!(data.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN]).unwrap() == 4);
+        assert!(
+            data.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN])
+                .unwrap()
+                == 4
+        );
         PackedMap::pack(&leaf_node, &mut data).unwrap();
         let twin = PackedMap::new(data.into_buf()).unpack_leaf();
 

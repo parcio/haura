@@ -6,7 +6,13 @@
 //! the propagating size changes to the cache. Although size increases are more
 //! difficult to handle than because nodes cannot evict other entries.
 use crate::{
-    buffer::Buf, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{HasStoragePreference, IntegrityMode}, size::{Size, StaticSize}, storage_pool::AtomicSystemStoragePreference, tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction}, AtomicStoragePreference, StoragePreference
+    buffer::Buf,
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::{HasStoragePreference, IntegrityMode},
+    size::{Size, StaticSize},
+    storage_pool::AtomicSystemStoragePreference,
+    tree::{pivot_key::LocalPivotKey, KeyInfo, MessageAction},
+    AtomicStoragePreference, StoragePreference,
 };
 use std::{
     borrow::Borrow, collections::BTreeMap, io::Write, iter::FromIterator, mem::size_of, ops::Range,
@@ -23,7 +29,7 @@ const NVMLEAF_PER_KEY_META_LEN: usize = 3 * size_of::<u32>();
 // could hold a variant which holds the original buffer and simply returns
 // slices to this buffer.
 #[derive(Clone)]
-pub(crate) struct CopylessLeaf {
+pub struct CopylessLeaf {
     state: LeafNodeState,
     meta: Meta,
 }
@@ -414,10 +420,10 @@ impl HasStoragePreference for CopylessLeaf {
     }
 }
 
-impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for CopylessLeaf {
+impl<'a> FromIterator<(CowBytes, (KeyInfo, SlicedCowBytes))> for CopylessLeaf {
     fn from_iter<T>(iter: T) -> Self
     where
-        T: IntoIterator<Item = (&'a [u8], (KeyInfo, SlicedCowBytes))>,
+        T: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
     {
         let mut storage_pref = StoragePreference::NONE;
         let mut entries_size = 0;
@@ -433,8 +439,7 @@ impl<'a> FromIterator<(&'a [u8], (KeyInfo, SlicedCowBytes))> for CopylessLeaf {
             entries_size += key.len() + NVMLEAF_PER_KEY_META_LEN + value.len() + keyinfo.size();
 
             let curr_storage_pref = keyinfo.storage_preference;
-            if let Some((ckeyinfo, cvalue)) = entries.insert(CowBytes::from(key), (keyinfo, value))
-            {
+            if let Some((ckeyinfo, cvalue)) = entries.insert(key.clone(), (keyinfo, value)) {
                 // iterator has collisions, try to compensate
                 //
                 // this entry will no longer be part of the final map, subtract its size
@@ -528,7 +533,9 @@ impl CopylessLeaf {
 
     pub fn unpack(data: Buf) -> Result<Self, std::io::Error> {
         // Skip the node
-        let data = data.into_sliced_cow_bytes().slice_from(crate::tree::imp::node::NODE_PREFIX_LEN as u32);
+        let data = data
+            .into_sliced_cow_bytes()
+            .slice_from(crate::tree::imp::node::NODE_PREFIX_LEN as u32);
         let meta_data_len: usize = u32::from_le_bytes(
             data[NVMLEAF_METADATA_LEN_OFFSET..NVMLEAF_DATA_LEN_OFFSET]
                 .try_into()
@@ -881,7 +888,7 @@ mod tests {
 
             let node: CopylessLeaf = entries
                 .iter()
-                .map(|(k, v)| (&k[..], (KeyInfo::arbitrary(g), v.clone())))
+                .map(|(k, v)| (k.clone(), (KeyInfo::arbitrary(g), v.clone())))
                 .collect();
             node.recalculate();
             node
@@ -897,7 +904,7 @@ mod tests {
             Box::new(v.shrink().map(|entries| {
                 entries
                     .iter()
-                    .map(|(k, (info, v))| (&k[..], (info.clone(), v.clone().into())))
+                    .map(|(k, (info, v))| (k.clone(), (info.clone(), v.clone().into())))
                     .collect()
             }))
         }

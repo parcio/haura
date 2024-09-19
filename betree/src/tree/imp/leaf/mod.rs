@@ -14,10 +14,10 @@ pub(super) enum FillUpResult {
     },
 }
 
-pub(crate) mod leaf;
 pub(crate) mod copyless_leaf;
+pub(crate) mod leaf;
 pub(crate) mod packed;
 
-pub(crate) use leaf::LeafNode;
-pub(crate) use copyless_leaf::CopylessLeaf;
-pub(crate) use packed::PackedMap;
+pub use copyless_leaf::CopylessLeaf;
+pub use leaf::LeafNode;
+pub use packed::PackedMap;
