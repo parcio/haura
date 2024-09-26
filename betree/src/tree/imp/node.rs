@@ -93,7 +93,7 @@ impl StorageMap {
             | (MemLeaf(_), StorageKind::Ssd) => kib!(64),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
-            | (MemLeaf(_), StorageKind::Memory) => mib!(1),
+            | (MemLeaf(_), StorageKind::Memory) => kib!(64),
             (Internal(_), _) => return None,
             (CopylessInternal(_), _) => return None,
         })
@@ -102,14 +102,14 @@ impl StorageMap {
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         Some(match (&node.0, self.get(node.correct_preference())) {
             (PackedLeaf(_), StorageKind::Hdd) | (Leaf(_), StorageKind::Hdd) => mib!(4),
-            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(1),
+            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => kib!(512),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
-            | (MemLeaf(_), _) => mib!(4),
+            | (MemLeaf(_), _) => mib!(1),
             (Internal(_), StorageKind::Ssd) => mib!(1),
             (Internal(_), StorageKind::Memory) => mib!(1),
             (Internal(_), _) => mib!(4),
-            (CopylessInternal(_), _) => mib!(4),
+            (CopylessInternal(_), _) => kib!(512),
         })
     }
 }
@@ -359,6 +359,16 @@ impl<N: StaticSize> Size for Node<N> {
             CopylessInternal(ref nvminternal) => nvminternal.actual_size().map(|size| 4 + size),
         }
     }
+
+    fn cache_size(&self) -> usize {
+        match &self.0 {
+            PackedLeaf(l) => l.size(),
+            Leaf(l) => l.size(),
+            MemLeaf(l) => l.cache_size(),
+            Internal(i) => i.size(),
+            CopylessInternal(i) => i.cache_size(),
+        }
+    }
 }
 
 impl<N: StaticSize + HasStoragePreference> Node<N> {
@@ -475,7 +485,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
 
     pub(super) fn empty_leaf(kind: StorageKind) -> Self {
         match kind {
-            // StorageKind::Memory => Node(MemLeaf(CopylessLeaf::new())),
+            StorageKind::Memory => Node(MemLeaf(CopylessLeaf::new())),
             _ => Node(Leaf(LeafNode::new())),
         }
     }
@@ -688,7 +698,7 @@ impl<N: HasStoragePreference> Node<N> {
                 }
             }
             MemLeaf(ref nvmleaf) => {
-                GetRangeResult::Data(Box::new(nvmleaf.range().map(|(k, v)| (&k[..], v.clone()))))
+                GetRangeResult::Data(Box::new(nvmleaf.range().map(|(k, v)| (&k[..], v))))
             }
             CopylessInternal(ref nvminternal) => {
                 let prefetch_option = if nvminternal.level() == 1 {

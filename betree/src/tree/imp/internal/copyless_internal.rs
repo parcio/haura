@@ -358,7 +358,7 @@ impl<N> CopylessInternalNode<N> {
     }
 
     pub fn after_insert_size_delta(&mut self, idx: usize, size_delta: isize) {
-        assert!(size_delta != 0);
+        // assert!(size_delta != 0);
         if size_delta > 0 {
             self.meta_data.entries_sizes[idx] += size_delta as usize;
             self.meta_data.entries_size += size_delta as usize;

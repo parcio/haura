@@ -16,7 +16,6 @@ use crate::{
 };
 use std::{
     borrow::Borrow, collections::BTreeMap, io::Write, iter::FromIterator, mem::size_of, ops::Range,
-    sync::OnceLock,
 };
 
 pub(crate) const NVMLEAF_METADATA_LEN_OFFSET: usize = 0;
@@ -35,15 +34,13 @@ pub struct CopylessLeaf {
 }
 
 #[derive(Clone, Debug)]
-/// A NVMLeaf can have different states depending on how much data has actually
+/// A Leaf can have different states depending on how much data has actually
 /// been loaded from disk. Or if this data is already deserialized and copied
 /// again to another memory buffer. The latter is most important for NVM.
 enum LeafNodeState {
     /// State in which a node is allowed to access the memory range independly
     /// but does not guarantee that all keys are present in the memory
     /// structure. Zero-copy possible. This state does _not_ support insertions.
-    ///
-    /// After one or more accesses the data is mirrored to memory.
     ///
     /// This state may hold k keys with { k | 0 <= k < n } if k == n the state
     /// _must_ transition to the Deserialized state. This is essentially lazy
@@ -56,7 +53,6 @@ enum LeafNodeState {
         // parallelism brings some advantages.
         // data: BTreeMap<CowBytes, (Location, OnceLock<(KeyInfo, SlicedCowBytes)>)>,
         keys: Vec<(CowBytes, Location)>,
-        data: Vec<OnceLock<(KeyInfo, SlicedCowBytes)>>,
     },
     /// Only from this state a node may be serialized again.
     Deserialized {
@@ -129,46 +125,41 @@ use thiserror::Error;
 use super::FillUpResult;
 
 #[derive(Error, Debug)]
-pub enum NVMLeafError {
+pub enum CopylessLeafError {
     #[error(
-        "NVMLeafNode attempted an invalid transition to fully deserialized while some keys are not present in memory."
+        "CopylessLeaf attempted an invalid transition to fully deserialized while some keys are not present in memory."
     )]
     AttemptedInvalidTransition,
-    #[error("NVMLeafNode attempted to transition from deserialized to deserialized.")]
+    #[error("CopylessLeaf attempted to transition from deserialized to deserialized.")]
     AlreadyDeserialized,
 }
 
 impl LeafNodeState {
     /// Transition a node from "partially in memory" to "deserialized".
-    pub fn upgrade(&mut self) -> Result<(), NVMLeafError> {
+    pub fn upgrade(&mut self) -> Result<(), CopylessLeafError> {
         match self {
-            LeafNodeState::PartiallyLoaded { data, keys, .. } => {
-                if data.iter().filter(|x| x.get().is_some()).count() < data.len() {
-                    return Err(NVMLeafError::AttemptedInvalidTransition);
-                }
+            LeafNodeState::PartiallyLoaded { keys, buf } => {
+                let it = keys
+                    .into_iter()
+                    .map(|(key, loc)| (key.clone(), unpack_entry(&buf[loc.range()])));
 
                 let other = LeafNodeState::Deserialized {
-                    data: BTreeMap::from_iter(
-                        keys.into_iter()
-                            .zip(data.into_iter())
-                            .map(|e| (e.0 .0.clone(), e.1.take().unwrap())),
-                    ),
+                    data: BTreeMap::from_iter(it),
                 };
                 let _ = std::mem::replace(self, other);
                 Ok(())
             }
-            LeafNodeState::Deserialized { .. } => Err(NVMLeafError::AlreadyDeserialized),
+            LeafNodeState::Deserialized { .. } => Err(CopylessLeafError::AlreadyDeserialized),
         }
     }
 
     /// Transition a node from "partially in memory" to "deserialized" fetching
     /// not present entries if necessary.
     pub fn force_upgrade(&mut self) {
-        self.fetch();
         let err = if let Err(e) = self.upgrade() {
             match e {
-                NVMLeafError::AttemptedInvalidTransition => Err(e),
-                NVMLeafError::AlreadyDeserialized => Ok(()),
+                CopylessLeafError::AttemptedInvalidTransition => Err(e),
+                CopylessLeafError::AlreadyDeserialized => Ok(()),
             }
         } else {
             Ok(())
@@ -176,45 +167,15 @@ impl LeafNodeState {
         err.unwrap()
     }
 
-    /// Deserialize all entries from the underlying storage. This can bring
-    /// advantages when fetching entries multiple times.
-    ///
-    /// Note: This does not perform the transition to the "deserialized" state.
-    pub fn fetch(&self) {
-        match self {
-            LeafNodeState::PartiallyLoaded { keys, .. } => {
-                for (k, _) in keys.iter() {
-                    let _ = self.get(k);
-                }
-            }
-            LeafNodeState::Deserialized { .. } => {
-                return;
-            }
-        }
-    }
-
     /// Returns an entry if it is present. This includes memory *and* disk
     /// storage. Memory is always preferred.
-    pub fn get(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
+    pub fn get(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
         match self {
-            LeafNodeState::PartiallyLoaded { buf, data, keys } => keys
+            LeafNodeState::PartiallyLoaded { buf, keys } => keys
                 .binary_search_by(|e| e.0.as_ref().cmp(key))
                 .ok()
-                .and_then(|idx| {
-                    Some(data[idx].get_or_init(|| unpack_entry(&buf[keys[idx].1.range()])))
-                }),
-            LeafNodeState::Deserialized { data } => data.get(key),
-        }
-    }
-
-    /// Returns an entry if it is located in memory.
-    pub fn get_from_cache(&self, key: &[u8]) -> Option<&(KeyInfo, SlicedCowBytes)> {
-        match self {
-            LeafNodeState::PartiallyLoaded { data, keys, .. } => keys
-                .binary_search_by(|e| key.cmp(&e.0))
-                .ok()
-                .and_then(|idx| data[idx].get()),
-            LeafNodeState::Deserialized { data } => data.get(key),
+                .and_then(|idx| Some(unpack_entry(&buf[keys[idx].1.range()]))),
+            LeafNodeState::Deserialized { data } => data.get(key).cloned(),
         }
     }
 
@@ -233,36 +194,22 @@ impl LeafNodeState {
     /// Iterate over all key value pairs.
     pub fn iter(
         &self,
-    ) -> Option<impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator>
-    {
-        match self {
-            LeafNodeState::PartiallyLoaded { .. } => None,
-            LeafNodeState::Deserialized { data } => Some(data.iter()),
-        }
-    }
-
-    /// This function is similar to [iter] but will always return an iterator,
-    /// entries which are not present in memory will be skipped. So when using
-    /// this method with partially deserialized nodes, you have to pinky promise
-    /// that you know what you're doing, okay?
-    pub fn partial_iter(
-        &self,
-    ) -> Option<impl Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + DoubleEndedIterator>
-    {
-        match self {
-            LeafNodeState::PartiallyLoaded { data, keys, .. } => Some(
-                keys.iter()
-                    .zip(data.iter())
-                    .filter_map(|(k, v)| v.get().map(|e| (&k.0, e))),
-            ),
-            LeafNodeState::Deserialized { .. } => None,
+    ) -> impl Iterator<Item = (&CowBytes, (KeyInfo, SlicedCowBytes))> + DoubleEndedIterator {
+        CopylessIter {
+            state: self,
+            start: 0,
+            end: match self {
+                LeafNodeState::PartiallyLoaded { keys, .. } => keys.len(),
+                LeafNodeState::Deserialized { data } => data.len(),
+            }
+            .saturating_sub(1),
         }
     }
 
     /// Returns the number of entries present in the node.
     pub fn len(&self) -> usize {
         match self {
-            LeafNodeState::PartiallyLoaded { data, .. } => data.len(),
+            LeafNodeState::PartiallyLoaded { keys, .. } => keys.len(),
             LeafNodeState::Deserialized { data } => data.len(),
         }
     }
@@ -298,6 +245,52 @@ impl LeafNodeState {
                 panic!("Set data on deserialized copyless leaf state.")
             }
         }
+    }
+}
+
+pub struct CopylessIter<'a> {
+    state: &'a LeafNodeState,
+    start: usize,
+    end: usize,
+}
+
+impl<'a> Iterator for CopylessIter<'a> {
+    type Item = (&'a CowBytes, (KeyInfo, SlicedCowBytes));
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start >= self.end {
+            return None;
+        }
+        let res = match self.state {
+            LeafNodeState::PartiallyLoaded { buf, keys } => keys
+                .get(self.start)
+                .map(|(key, loc)| (key, unpack_entry(&buf[loc.range()]))),
+            LeafNodeState::Deserialized { data } => data
+                .iter()
+                .nth(self.start)
+                .map(|(key, (info, val))| (key, (info.clone(), val.clone()))),
+        };
+        self.start += 1;
+        res
+    }
+}
+
+impl<'a> DoubleEndedIterator for CopylessIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.end <= self.start {
+            return None;
+        }
+        let res = match self.state {
+            LeafNodeState::PartiallyLoaded { buf, keys } => keys
+                .get(self.end)
+                .map(|(key, loc)| (key, unpack_entry(&buf[loc.range()]))),
+            LeafNodeState::Deserialized { data } => data
+                .iter()
+                .nth(self.end)
+                .map(|(key, (info, val))| (key, (info.clone(), val.clone()))),
+        };
+        self.end -= 1;
+        res
     }
 }
 
@@ -362,16 +355,14 @@ impl Size for CopylessLeaf {
     }
 
     fn actual_size(&self) -> Option<usize> {
-        if let Some(kv_iter) = self.state.iter() {
-            let (data_size, key_size) = kv_iter.fold((0, 0), |acc, (k, (info, v))| {
-                (
-                    acc.0 + v.len() + info.size(),
-                    acc.1 + NVMLEAF_PER_KEY_META_LEN + k.len(),
-                )
-            });
-            return Some(NVMLEAF_HEADER_FIXED_LEN + Meta::static_size() + data_size + key_size);
-        }
-        None
+        // let (data_size, key_size) = self.state.iter().fold((0, 0), |acc, (k, (info, v))| {
+        //     (
+        //         acc.0 + v.len() + info.size(),
+        //         acc.1 + NVMLEAF_PER_KEY_META_LEN + k.len(),
+        //     )
+        // });
+        // return Some(NVMLEAF_HEADER_FIXED_LEN + Meta::static_size() + data_size + key_size);
+        Some(self.size())
     }
 
     fn cache_size(&self) -> usize {
@@ -398,12 +389,7 @@ impl HasStoragePreference for CopylessLeaf {
     fn recalculate(&self) -> StoragePreference {
         let mut pref = StoragePreference::NONE;
 
-        for (keyinfo, _v) in self
-            .state
-            .iter()
-            .expect("Node was not ready. Check state transitions.")
-            .map(|e| e.1)
-        {
+        for (keyinfo, _v) in self.state.iter().map(|e| e.1) {
             pref.upgrade(keyinfo.storage_preference);
         }
 
@@ -574,7 +560,6 @@ impl CopylessLeaf {
             meta: meta_data,
             state: LeafNodeState::PartiallyLoaded {
                 buf: raw_data,
-                data: vec![OnceLock::new(); keys.len()],
                 keys,
             },
         })
@@ -586,7 +571,6 @@ impl CopylessLeaf {
     }
 
     pub(in crate::tree) fn get_with_info(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
-        // FIXME: This is not so nice, maybe adjust get type.
         self.state
             .get(key)
             .and_then(|o| Some((o.0.clone(), o.1.clone())))
@@ -613,7 +597,7 @@ impl CopylessLeaf {
         let mut sibling_size = 0;
         let mut sibling_pref = StoragePreference::NONE;
         let mut split_key = None;
-        for (k, (keyinfo, v)) in self.state.iter().unwrap().rev() {
+        for (k, (keyinfo, v)) in self.state.iter().rev() {
             let size_delta = k.len() + NVMLEAF_PER_KEY_META_LEN + v.len() + KeyInfo::static_size();
             sibling_size += size_delta;
             sibling_pref.upgrade(keyinfo.storage_preference);
@@ -767,15 +751,8 @@ impl CopylessLeaf {
     }
 
     /// Create an iterator over all entries.
-    /// FIXME: This also fetches entries which are not required, maybe implement special iterator for that.
-    pub fn range(&self) -> Box<dyn Iterator<Item = (&CowBytes, &(KeyInfo, SlicedCowBytes))> + '_> {
-        self.state.fetch();
-        // NOTE: The node must be in either case now, check which one it is.
-        if let Some(iter) = self.state.partial_iter() {
-            Box::new(iter)
-        } else {
-            Box::new(self.state.iter().unwrap())
-        }
+    pub fn range(&self) -> Box<dyn Iterator<Item = (&CowBytes, (KeyInfo, SlicedCowBytes))> + '_> {
+        Box::new(self.state.iter())
     }
 
     /// Merge all entries from the *right* node into the *left* node.  Returns
@@ -830,14 +807,7 @@ impl CopylessLeaf {
     }
 
     pub fn to_block_leaf(mut self) -> super::leaf::LeafNode {
-        self.state.force_upgrade();
-
-        match self.state {
-            LeafNodeState::PartiallyLoaded { .. } => unreachable!(),
-            LeafNodeState::Deserialized { data } => {
-                super::leaf::LeafNode::from_iter(data.into_iter())
-            }
-        }
+        todo!()
     }
 }
 
@@ -958,6 +928,7 @@ mod tests {
         let size_delta = leaf_node.insert(key, key_info, msg.0, DefaultMessageAction);
         let size_after = leaf_node.size();
         assert_eq!((size_before as isize + size_delta) as usize, size_after);
+        assert_eq!(leaf_node.size(), serialized_size(&leaf_node));
         assert_eq!(
             serialized_size(&leaf_node),
             leaf_node.actual_size().unwrap()
@@ -1006,6 +977,7 @@ mod tests {
         let (mut sibling, ..) = leaf_node.split(MIN_LEAF_SIZE, MAX_LEAF_SIZE);
         leaf_node.recalculate();
         leaf_node.merge(&mut sibling);
+        leaf_node.recalculate();
         assert_eq!(this.meta, leaf_node.meta);
         assert_eq!(this.state.force_data(), leaf_node.state.force_data());
         TestResult::passed()
@@ -1057,12 +1029,16 @@ mod tests {
             return TestResult::discard();
         }
 
+        assert!(leaf_node.range().count() > 0);
         let mut buf = crate::buffer::BufWrite::with_capacity(Block(1));
         buf.write(&[0; crate::tree::imp::node::NODE_PREFIX_LEN])
             .unwrap();
         let _ = leaf_node.pack(&mut buf).unwrap();
         let buf = buf.into_buf();
-        let _wire_node = CopylessLeaf::unpack(buf.into_boxed_slice().into()).unwrap();
+        let wire_node = CopylessLeaf::unpack(buf.into_boxed_slice().into()).unwrap();
+        for (key, (info, val)) in leaf_node.range() {
+            assert_eq!(wire_node.get_with_info(&key), Some((info, val)));
+        }
 
         TestResult::passed()
     }
