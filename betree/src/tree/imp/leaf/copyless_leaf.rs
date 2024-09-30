@@ -258,7 +258,7 @@ impl<'a> Iterator for CopylessIter<'a> {
     type Item = (&'a CowBytes, (KeyInfo, SlicedCowBytes));
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start >= self.end {
+        if self.start > self.end {
             return None;
         }
         let res = match self.state {
@@ -277,7 +277,7 @@ impl<'a> Iterator for CopylessIter<'a> {
 
 impl<'a> DoubleEndedIterator for CopylessIter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.end <= self.start {
+        if self.end < self.start {
             return None;
         }
         let res = match self.state {
