@@ -631,6 +631,10 @@ where
                 && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout) && self.fanout() < (max_node_size as f32).sqrt() as usize
             {
                 Some(child_idx)
+            } else if self.fanout() < 2 * min_fanout {
+                // NOTE: No further split is possible without violating tree
+                // conditions so, do everything to avoid this here.
+                Some(child_idx)
             } else {
                 None
             }
