@@ -434,15 +434,20 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     fn ensure_unpacked(&mut self) -> isize {
         let before = self.size();
 
-        let leaf = if let PackedLeaf(ref mut map) = self.0 {
-            map.unpack_leaf()
-        } else {
-            return 0;
-        };
-
-        self.0 = Leaf(leaf);
-        let after = self.size();
-        after as isize - before as isize
+        match &mut self.0 {
+            PackedLeaf(map) => {
+                self.0 = Leaf(map.unpack_leaf());
+                let after = self.size();
+                after as isize - before as isize
+            }
+            MemLeaf(mleaf) => {
+                let before = mleaf.cache_size();
+                mleaf.unpack_data();
+                let after = mleaf.cache_size();
+                after as isize - before as isize
+            }
+            _ => 0,
+        }
     }
 
     fn take(&mut self) -> Self {

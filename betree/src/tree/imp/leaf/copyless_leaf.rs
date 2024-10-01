@@ -120,23 +120,12 @@ impl KeyInfo {
     }
 }
 
-use thiserror::Error;
-
 use super::FillUpResult;
 
-#[derive(Error, Debug)]
-pub enum CopylessLeafError {
-    #[error(
-        "CopylessLeaf attempted an invalid transition to fully deserialized while some keys are not present in memory."
-    )]
-    AttemptedInvalidTransition,
-    #[error("CopylessLeaf attempted to transition from deserialized to deserialized.")]
-    AlreadyDeserialized,
-}
 
 impl LeafNodeState {
     /// Transition a node from "partially in memory" to "deserialized".
-    pub fn upgrade(&mut self) -> Result<(), CopylessLeafError> {
+    pub fn upgrade(&mut self) {
         match self {
             LeafNodeState::PartiallyLoaded { keys, buf } => {
                 let it = keys
@@ -147,24 +136,9 @@ impl LeafNodeState {
                     data: BTreeMap::from_iter(it),
                 };
                 let _ = std::mem::replace(self, other);
-                Ok(())
             }
-            LeafNodeState::Deserialized { .. } => Err(CopylessLeafError::AlreadyDeserialized),
+            LeafNodeState::Deserialized { .. } => {},
         }
-    }
-
-    /// Transition a node from "partially in memory" to "deserialized" fetching
-    /// not present entries if necessary.
-    pub fn force_upgrade(&mut self) {
-        let err = if let Err(e) = self.upgrade() {
-            match e {
-                CopylessLeafError::AttemptedInvalidTransition => Err(e),
-                CopylessLeafError::AlreadyDeserialized => Ok(()),
-            }
-        } else {
-            Ok(())
-        };
-        err.unwrap()
     }
 
     /// Returns an entry if it is present. This includes memory *and* disk
@@ -476,6 +450,11 @@ impl CopylessLeaf {
         }
     }
 
+    /// Copy data to a modifiable version of this node type.
+    pub fn unpack_data(&mut self) {
+        self.state.upgrade()
+    }
+
     pub fn pack<W: std::io::Write>(&self, mut writer: W) -> Result<IntegrityMode, std::io::Error> {
         let pivots_size: usize = self
             .state
@@ -589,7 +568,7 @@ impl CopylessLeaf {
         min_size: usize,
         max_size: usize,
     ) -> (CowBytes, isize) {
-        self.state.force_upgrade();
+        self.state.upgrade();
 
         debug_assert!(self.size() > max_size);
         debug_assert!(right_sibling.meta.entries_size == 0);
@@ -650,7 +629,7 @@ impl CopylessLeaf {
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
-        self.state.force_upgrade();
+        self.state.upgrade();
 
         let size_before = self.meta.entries_size as isize;
         let key_size = key.borrow().len();
@@ -708,7 +687,7 @@ impl CopylessLeaf {
         M: MessageAction,
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
     {
-        self.state.force_upgrade();
+        self.state.upgrade();
         let mut size_delta = 0;
         for (key, (keyinfo, msg)) in msg_buffer {
             size_delta += self.insert(key, keyinfo, msg, &msg_action);
@@ -724,7 +703,7 @@ impl CopylessLeaf {
         min_size: usize,
         max_size: usize,
     ) -> (Self, CowBytes, isize, LocalPivotKey) {
-        self.state.force_upgrade();
+        self.state.upgrade();
         // assert!(self.size() > S::MAX);
         let mut right_sibling = CopylessLeaf {
             // During a split, preference can't be inherited because the new subset of entries
@@ -759,8 +738,8 @@ impl CopylessLeaf {
     /// the size change, positive for the left node, negative for the right
     /// node.
     pub fn merge(&mut self, right_sibling: &mut Self) -> isize {
-        self.state.force_upgrade();
-        right_sibling.state.force_upgrade();
+        self.state.upgrade();
+        right_sibling.state.upgrade();
         self.state
             .force_data_mut()
             .append(&mut right_sibling.state.force_data_mut());
@@ -790,8 +769,8 @@ impl CopylessLeaf {
         min_size: usize,
         max_size: usize,
     ) -> FillUpResult {
-        self.state.force_upgrade();
-        right_sibling.state.force_upgrade();
+        self.state.upgrade();
+        right_sibling.state.upgrade();
         let size_delta = self.merge(right_sibling);
         if self.size() <= max_size {
             FillUpResult::Merged { size_delta }
