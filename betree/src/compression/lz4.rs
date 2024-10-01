@@ -103,7 +103,16 @@ use std::time::Instant;
 use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
 
+use lz4_sys::{LZ4F_compressBound, LZ4FPreferences, LZ4FCompressionContext, LZ4F_createCompressionContext};
+use std::ptr;
+use lz4_sys::LZ4FFrameInfo;
+
 impl CompressionState for Lz4Compression {
+    fn finishext2(&mut self, data: &[u8]) -> Result<Buf>
+    {
+        panic!("..");
+    }
+
     fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
         let size = data.len();
@@ -132,7 +141,16 @@ impl CompressionState for Lz4Compression {
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
         let size = data.as_ref().len();
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
+        // let prefs = LZ4FPreferences {
+        //     frame_info: Default::default(),
+        //     compression_level: self.config.level as u32,
+        //     auto_flush: 1,
+        //     favor_dec_speed: 0,
+        //     reserved: [0; 3],
+        // };
+
+
+        let mut buf: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes( (size as u32)));
 
         let mut encoder = EncoderBuilder::new()
         .level(u32::from(self.config.level))
@@ -141,9 +159,14 @@ impl CompressionState for Lz4Compression {
         .block_mode(BlockMode::Linked)
         .build(buf)?;
 
+        //io::copy(&mut data.as_ref(), &mut encoder)?;
         encoder.write_all(data.as_ref())?;
         let (compressed_data, result) = encoder.finish();
-        
+//<<<<<<< HEAD
+//        
+//=======
+//
+//>>>>>>> ca604af8439c223604ef4577063059234f01173a
         if let Err(e) = result {
             panic!("Compression failed: {:?}", e);
         }
@@ -152,8 +175,11 @@ impl CompressionState for Lz4Compression {
         buf2.write_all(compressed_data.as_slice());
 
         Ok(buf2.into_buf())
-
-        //Ok(compressed_data.into_buf())
+//<<<<<<< HEAD
+//
+//        //Ok(compressed_data.into_buf())
+//=======
+//>>>>>>> ca604af8439c223604ef4577063059234f01173a
     }
     // fn finish(&mut self) -> Buf {
     //     let (v, result) = self.encoder.finish();
@@ -161,6 +187,8 @@ impl CompressionState for Lz4Compression {
     //     v.into_buf()
     // }
 }
+
+
 
 
 impl DecompressionState for Lz4Decompression {
