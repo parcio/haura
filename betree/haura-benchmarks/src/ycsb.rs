@@ -184,7 +184,7 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 /// C - Read heavy
 /// Operations: Read 100%
 /// Distribution: Zipfian
-/// Application example: User profile cache, where profiles are constructed elsewhere (e.g., Hadoop)
+/// Access Size: 1000 bytes
 pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload C");
     println!("Filling KV store...");
