@@ -78,6 +78,7 @@ pub trait CompressionState: Write {
     /// compressed data.
     fn finish(&mut self, data: Buf) -> Result<Buf>;
     fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
+    fn finishext2(&mut self, data: &[u8]) -> Result<Buf>;
 }
 
 pub trait DecompressionState {
