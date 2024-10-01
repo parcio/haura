@@ -232,7 +232,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 let builder = &*compressor.read().unwrap();
                 let state = builder.new_compression().unwrap();
                 //let mut writer = state.write().unwrap();
-                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(128));
+                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(16));
                 {
                     buf.write_all(map.inner())?
                 }
@@ -248,7 +248,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 let builder = &*compressor.read().unwrap();
                 let state = builder.new_compression().unwrap();
                 //let mut writer = state.write().unwrap();
-                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(128));
+                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(16));
                 {
                     buf.write_all((NodeInnerType::Leaf as u32).to_be_bytes().as_ref())?;
                     PackedMap::pack(leaf, &mut buf)?
@@ -265,7 +265,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                 let builder = &*compressor.read().unwrap();
                 let state = builder.new_compression().unwrap();
                 //let mut writer = state.write().unwrap();
-                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(128));
+                let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(16));
                 {
                     buf.write_all((NodeInnerType::Internal as u32).to_be_bytes().as_ref())?;
                     serialize_into(&mut buf, internal)

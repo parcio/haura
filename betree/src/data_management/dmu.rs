@@ -255,9 +255,9 @@ where
         //println!("..zz {:?} {}", bytes_to_read, compressed_data.as_ref().len());
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             /// TODOooooooooooooooooooooooooooooooooooooooooooooooo fix this!!!!!!! layeeeee
-            //let data = decompression_state.decompress(compressed_data)?;
-            //Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice(), a)?
-            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), compressed_data.into_boxed_slice(), a)?
+            let data = decompression_state.decompress(compressed_data)?;
+            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice(), a)?
+            //Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), compressed_data.into_boxed_slice(), a)?
         };
 
         let key = ObjectKey::Unmodified { offset, generation };

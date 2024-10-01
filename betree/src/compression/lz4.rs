@@ -118,8 +118,16 @@ impl CompressionState for Lz4Compression {
 
         encoder.write_all(data.as_ref())?;
         let (compressed_data, result) = encoder.finish();
-        
-        Ok(compressed_data.as_slice().to_vec())
+    
+        if let Err(e) = result {
+            panic!("Compression failed: {:?}", e);
+        }
+
+        let mut buf2 = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
+        buf2.write_all(compressed_data.as_slice());
+
+//panic!("..");
+        Ok(buf2.as_slice().to_vec())
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
@@ -136,7 +144,16 @@ impl CompressionState for Lz4Compression {
         encoder.write_all(data.as_ref())?;
         let (compressed_data, result) = encoder.finish();
         
-        Ok(compressed_data.into_buf())
+        if let Err(e) = result {
+            panic!("Compression failed: {:?}", e);
+        }
+
+        let mut buf2 = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
+        buf2.write_all(compressed_data.as_slice());
+
+        Ok(buf2.into_buf())
+
+        //Ok(compressed_data.into_buf())
     }
     // fn finish(&mut self) -> Buf {
     //     let (v, result) = self.encoder.finish();
