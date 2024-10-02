@@ -474,7 +474,20 @@ impl Buf {
     /// non-self-managed memory range, this property is transferred otherwise a
     /// new [CowBytes] is created.
     pub fn into_sliced_cow_bytes(self) -> SlicedCowBytes {
-        CowBytes::from(self.into_boxed_slice()).into()
+        match self.buf {
+            BufSource::Allocated(_) => {
+                CowBytes::from(self.into_boxed_slice()).into()
+            },
+            BufSource::Foreign(stg, size) => {
+                let ptr = ManuallyDrop::new(
+                    Arc::try_unwrap(stg)
+                        .expect("RawBuf was not unique")
+                        .into_inner(),
+                );
+
+                unsafe { SlicedCowBytes::from_raw(ptr.as_ptr(), size.to_bytes() as usize) }
+            },
+        }
     }
 
     /// If this [Buf] is unique, return its backing buffer without reallocation or copying.

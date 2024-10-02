@@ -345,7 +345,6 @@ impl Size for CopylessLeaf {
                 Meta::static_size()
                     + std::mem::size_of::<usize>()
                     + keys.len() * Location::static_size()
-                    + keys.iter().map(|b| b.0.len()).sum::<usize>()
             }
             LeafNodeState::Deserialized { .. } => self.size(),
         }
