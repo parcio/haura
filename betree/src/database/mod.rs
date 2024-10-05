@@ -145,6 +145,7 @@ pub struct DatabaseConfiguration {
 
     /// If and how to log database metrics
     pub metrics: Option<MetricsConfiguration>,
+    pub is_nvm_tree: bool,
 }
 
 impl Default for DatabaseConfiguration {
@@ -163,6 +164,7 @@ impl Default for DatabaseConfiguration {
             sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
             migration_policy: None,
+            is_nvm_tree: true,
         }
     }
 }
@@ -229,6 +231,11 @@ impl DatabaseConfiguration {
             }
         }
 
+        // TODO: Fix the following code.
+        let mut temp = self.compression.clone().to_builder();
+        let mut compression_var = crate::compression::COMPRESSION_VAR.write().unwrap();
+        compression_var = temp.write().unwrap();
+
         Dmu::new(
             self.compression.to_builder(),
             XxHashBuilder,
@@ -240,7 +247,7 @@ impl DatabaseConfiguration {
         )
     }
 
-    fn select_root_tree(&self, dmu: Arc<RootDmu>) -> Result<(RootTree<RootDmu>, ObjectPointer)> {
+    fn select_root_tree(&self, dmu: Arc<RootDmu>, is_nvm_tree: bool) -> Result<(RootTree<RootDmu>, ObjectPointer)> {
         if let Some(cfg) = &self.metrics {
             metrics_init::<Self>(cfg, dmu.clone())?;
         }
@@ -266,6 +273,7 @@ impl DatabaseConfiguration {
                 DefaultMessageAction,
                 dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
+                is_nvm_tree,
             );
 
             // Update space accounting from last execution
@@ -319,6 +327,7 @@ impl DatabaseConfiguration {
                 DefaultMessageAction,
                 dmu,
                 ROOT_TREE_STORAGE_PREFERENCE,
+                is_nvm_tree,
             );
 
             for (tier_id, tier) in tree.dmu().handler().free_space_tier.iter().enumerate() {
@@ -372,7 +381,7 @@ type ErasedTree = dyn ErasedTreeSync<Pointer = ObjectPointer, ObjectRef = Object
 /// The database type.
 pub struct Database {
     pub(crate) root_tree: RootTree<RootDmu>,
-    builder: DatabaseConfiguration,
+    pub(crate) builder: DatabaseConfiguration,
     open_datasets: HashMap<DatasetId, Box<ErasedTree>>,
     pub(crate) db_tx: Option<Sender<DatabaseMsg>>,
 }
@@ -445,7 +454,7 @@ impl Database {
             dmu.set_report(tx.clone());
         }
 
-        let (tree, root_ptr) = builder.select_root_tree(Arc::new(dmu))?;
+        let (tree, root_ptr) = builder.select_root_tree(Arc::new(dmu), builder.is_nvm_tree)?;
 
         *tree.dmu().handler().current_generation.lock_write() = root_ptr.generation().next();
         *tree.dmu().handler().root_tree_snapshot.write() = Some(TreeInner::new_ro(

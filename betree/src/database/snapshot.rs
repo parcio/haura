@@ -22,7 +22,7 @@ pub struct Snapshot {
 
 impl Database {
     /// Open a snapshot for the given data set identified by the given name.
-    pub fn open_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8]) -> Result<Snapshot> {
+    pub fn open_snapshot<M>(&self, ds: &mut Dataset<M>, name: &[u8], is_nvm_tree: bool) -> Result<Snapshot> {
         let id = self.lookup_snapshot_id(ds.id(), name)?;
         if !ds.call_mut_open_snapshots(|set| set.insert(id)) {
             return Err(Error::InUse);
@@ -35,6 +35,7 @@ impl Database {
                 DefaultMessageAction,
                 Arc::clone(self.root_tree.dmu()),
                 StoragePreference::NONE,
+                is_nvm_tree,
             ),
             name: Box::from(name),
         })

@@ -108,12 +108,12 @@ use std::ptr;
 use lz4_sys::LZ4FFrameInfo;
 
 impl CompressionState for Lz4Compression {
-    fn finishext2(&mut self, data: &[u8]) -> Result<Buf>
-    {
-        panic!("..");
-    }
+    // fn finishext2(&mut self, data: &[u8]) -> Result<Buf>
+    // {
+    //     panic!("..");
+    // }
 
-    fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
         let size = data.len();
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));

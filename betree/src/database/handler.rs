@@ -74,6 +74,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             dmu,
             false,
             super::ROOT_TREE_STORAGE_PREFERENCE,
+            true,
         )
     }
 
@@ -87,7 +88,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         OwningRef::new(self.root_tree_snapshot.read())
             .try_map(|lock| lock.as_ref().ok_or(()))
             .ok()
-            .map(|inner| Tree::from_inner(inner, dmu, false, super::ROOT_TREE_STORAGE_PREFERENCE))
+            .map(|inner| Tree::from_inner(inner, dmu, false, super::ROOT_TREE_STORAGE_PREFERENCE, true))
     }
 
     pub(super) fn bump_generation(&self) {

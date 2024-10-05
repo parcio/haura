@@ -94,14 +94,14 @@ use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
 
 impl CompressionState for ZstdCompression {
-    fn finishext2(&mut self, data: &[u8]) -> Result<Buf>
+    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
+        panic!("..");
         let size = zstd_safe::compress_bound(data.len());
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
-        buf.write_all(&[0u8; DATA_OFF])?;
 
         let mut input = zstd::stream::raw::InBuffer::around(&data);
-        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, DATA_OFF);
+        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, 0);
         let mut finished_frame;
         loop {
             let remaining = self.writer.run(&mut input, &mut output)?;
@@ -114,67 +114,13 @@ impl CompressionState for ZstdCompression {
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
 
-        /*let og_len = data.len() as u32;
-        og_len
-            .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
-            .unwrap();
-*/
-        let mut buf2 = BufWrite::with_capacity(Block::round_up_from_bytes(output.as_slice().len() as u32));
-        buf2.write_all(output.as_slice());
-
-//<<<<<<< HEAD
-//        Ok(buf2.as_slice().to_vec())
-//=======
-        Ok(buf.into_buf())
-//>>>>>>> ca604af8439c223604ef4577063059234f01173a
-    }
-
-    fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>
-    {
-        let size = zstd_safe::compress_bound(data.len());
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
-        //buf.write_all(&[0u8; DATA_OFF])?;
-
-        let mut input = zstd::stream::raw::InBuffer::around(&data);
-        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, 0 /*DATA_OFF*/);
-        let mut finished_frame;
-        loop {
-            let remaining = self.writer.run(&mut input, &mut output)?;
-            finished_frame = remaining == 0;
-            if input.pos() > 0 || data.is_empty() {
-                break;
-            }
-        }
-
-        while self.writer.flush(&mut output)? > 0 {}
-        self.writer.finish(&mut output, finished_frame)?;
-
-        /*
-        let og_len = data.len() as u32;
-        og_len
-            .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
-            .unwrap();
-//<<<<<<< HEAD
-        let duration = start.elapsed();
-        //println!("Total time elapsed: {:?}", duration);
-        //println!("Total time elapsed: {} {}", size, buf.get_len());
-        Ok(buf.into_buf())
-        */
-
-//        let mut buf2 = BufWrite::with_capacity(Block::round_up_from_bytes(output.as_slice().len() as u32));
-//        buf2.write_all(output.as_slice());
-//        Ok(buf2.into_buf())
-//=======
-
-        Ok(buf.as_slice().to_vec())
+        Ok(output.as_slice().to_vec())
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
-        //panic!("..");
         let start = Instant::now();
         let size = zstd_safe::compress_bound(data.as_ref().len());
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
-        //buf.write_all(&[0u8; DATA_OFF])?;
 
         let mut input = zstd::stream::raw::InBuffer::around(&data);
         let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, 0);
@@ -189,23 +135,10 @@ impl CompressionState for ZstdCompression {
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
 
-        // let og_len = data.len() as u32;
-        // og_len
-        //     .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
-        //     .unwrap();
-        // let duration = start.elapsed();
-        // let b =  buf.get_len();
-        let mut buf2 = BufWrite::with_capacity(Block::round_up_from_bytes(output.as_slice().len() as u32));
-        buf2.write_all(output.as_slice());
+        let mut slicebuf = BufWrite::with_capacity(Block::round_up_from_bytes(output.as_slice().len() as u32));
+        slicebuf.write_all(output.as_slice());
 
-        let a = output.as_slice().len();
-        let b = buf2.into_buf();
-        let c = buf.into_buf();
-        //println!("== {:?}", data.as_ref());
-        //println!("== {:?}", b.as_ref());
-        //println!("compressed....: {} {} {} {}", size, data.as_ref().len(), b.as_ref().len(), c.as_ref().len());
-        Ok(b)
-//>>>>>>> ca604af8439c223604ef4577063059234f01173a
+        Ok(slicebuf.into_buf())
     }
 }
 
@@ -213,7 +146,6 @@ impl CompressionState for ZstdCompression {
 impl DecompressionState for ZstdDecompression {
     fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
-        //panic!("shukro maula");
         let size = data.len() as u32;
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
 

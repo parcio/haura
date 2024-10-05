@@ -24,15 +24,10 @@ use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
-    collections::HashMap,
-    mem::replace,
-    ops::DerefMut,
-    pin::Pin,
-    sync::{
+    clone, collections::HashMap, mem::replace, ops::DerefMut, pin::Pin, sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
-    },
-    thread::yield_now,
+    }, thread::yield_now
 };
 
 /// The Data Management Unit.
@@ -40,7 +35,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
 where
     SPL::Checksum: StaticSize,
 {
-    default_compression: Arc<std::sync::RwLock<dyn CompressionBuilder>>,
+    default_compression: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
@@ -70,7 +65,7 @@ where
 {
     /// Returns a new `Dmu`.
     pub fn new(
-        default_compression: Arc<std::sync::RwLock<dyn CompressionBuilder>>,
+        default_compression: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
         default_storage_class: u8,
         pool: SPL,
@@ -79,7 +74,9 @@ where
         handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
     ) -> Self {
         let allocation_data = (0..pool.storage_class_count())
+
             .map(|class| {
+
                 (0..pool.disk_count(class))
                     .map(|_| Mutex::new(None))
                     .collect::<Vec<_>>()
@@ -253,11 +250,12 @@ where
         //     Object::unpack_at(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data)?
         // };
         //println!("..zz {:?} {}", bytes_to_read, compressed_data.as_ref().len());
+
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
             /// TODOooooooooooooooooooooooooooooooooooooooooooooooo fix this!!!!!!! layeeeee
-            let data = decompression_state.decompress(compressed_data)?;
-            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice(), a)?
-            //Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), compressed_data.into_boxed_slice(), a)?
+            //let data = decompression_state.decompress(compressed_data)?;
+            //Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice(), a)?
+            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), compressed_data.into_boxed_slice(), a)?
         };
 
         let key = ObjectKey::Unmodified { offset, generation };

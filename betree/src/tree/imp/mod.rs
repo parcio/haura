@@ -69,6 +69,7 @@ pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
     evict: bool,
     marker: PhantomData<M>,
     storage_preference: StoragePreference,
+    is_nvm_tree: bool,
 }
 
 impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tree<X, M, I> {
@@ -79,6 +80,7 @@ impl<X: Clone + Dml, M, I: Clone + Borrow<Inner<X::ObjectRef, M>>> Clone for Tre
             evict: self.evict,
             marker: PhantomData,
             storage_preference: self.storage_preference,
+            is_nvm_tree: self.is_nvm_tree,
         }
     }
 }
@@ -127,9 +129,10 @@ where
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
+        is_nvm_tree: bool,
     ) -> Self {
-        let root_node = dml.insert(Node::empty_leaf(false), tree_id, PivotKey::Root(tree_id));
-        Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
+        let root_node = dml.insert(Node::empty_leaf(is_nvm_tree), tree_id, PivotKey::Root(tree_id));
+        Tree::new(root_node, tree_id, msg_action, dml, storage_preference, is_nvm_tree)
     }
 
     /// Opens a tree identified by the given root node.
@@ -139,6 +142,7 @@ where
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
+        is_nvm_tree: bool,
     ) -> Self {
         Tree::new(
             X::root_ref_from_ptr(root_node_ptr),
@@ -146,6 +150,7 @@ where
             msg_action,
             dml,
             storage_preference,
+            is_nvm_tree,
         )
     }
 
@@ -155,6 +160,7 @@ where
         msg_action: M,
         dml: X,
         storage_preference: StoragePreference,
+        is_nvm_tree: bool,
     ) -> Self {
         Tree {
             inner: I::from(Inner::new(tree_id, root_node, msg_action)),
@@ -162,6 +168,7 @@ where
             evict: true,
             marker: PhantomData,
             storage_preference,
+            is_nvm_tree,
         }
     }
 }
@@ -184,6 +191,7 @@ where
         dml: X,
         evict: bool,
         storage_preference: StoragePreference,
+        is_nvm_tree: bool,
     ) -> Self {
         Tree {
             inner,
@@ -191,6 +199,7 @@ where
             evict,
             marker: PhantomData,
             storage_preference,
+            is_nvm_tree,
         }
     }
 

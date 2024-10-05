@@ -134,6 +134,7 @@ pub struct ObjectStore {
     object_id_counter: Arc<AtomicU64>,
     default_storage_preference: StoragePreference,
     report: Option<Sender<DatabaseMsg>>,
+    is_nvm_tree: bool,
 }
 
 // A type alias to represent the on disk identifier for a specific object store.
@@ -256,6 +257,7 @@ impl Database {
             self.open_dataset_with_id(store.meta)?,
             StoragePreference::NONE,
             self.db_tx.clone(),
+            self.builder.is_nvm_tree,
         )
     }
 
@@ -299,7 +301,7 @@ impl Database {
                 meta: meta.id(),
             },
         )?;
-        ObjectStore::with_datasets(id, data, meta, StoragePreference::NONE, self.db_tx.clone())
+        ObjectStore::with_datasets(id, data, meta, StoragePreference::NONE, self.db_tx.clone(), self.builder.is_nvm_tree)
     }
 
     /// Create a namespaced object store, with the datasets "{name}\0data" and "{name}\0meta".
@@ -330,7 +332,7 @@ impl Database {
             },
         )?;
 
-        ObjectStore::with_datasets(id, data, meta, storage_preference, self.db_tx.clone())
+        ObjectStore::with_datasets(id, data, meta, storage_preference, self.db_tx.clone(), self.builder.is_nvm_tree)
     }
 
     pub fn close_object_store(&mut self, store: ObjectStore) {
@@ -355,6 +357,7 @@ impl<'os> ObjectStore {
         metadata: Dataset<MetaMessageAction>,
         default_storage_preference: StoragePreference,
         report: Option<Sender<DatabaseMsg>>,
+        is_nvm_tree: bool,
     ) -> Result<ObjectStore> {
         let _d_id = data.id();
         let _m_id = metadata.id();
@@ -377,6 +380,7 @@ impl<'os> ObjectStore {
             metadata,
             default_storage_preference,
             report: report.clone(),
+            is_nvm_tree,
         };
         if let Some(tx) = report {
             let _ = tx

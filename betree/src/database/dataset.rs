@@ -107,6 +107,7 @@ impl Database {
             M::default(),
             Arc::clone(self.root_tree.dmu()),
             storage_preference,
+            self.builder.is_nvm_tree,
         );
 
         if let Some(ss_id) = ds_data.previous_snapshot {
@@ -157,6 +158,7 @@ impl Database {
             DefaultMessageAction,
             Arc::clone(self.root_tree.dmu()),
             storage_preference,
+            self.builder.is_nvm_tree,
         );
         let ptr = tree.sync()?;
 

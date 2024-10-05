@@ -25,11 +25,11 @@ pub enum CompressionConfiguration {
 }
 
 impl CompressionConfiguration {
-    pub fn to_builder(&self) -> Arc<std::sync::RwLock<dyn CompressionBuilder>> {
+    pub fn to_builder(&self) -> Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>> {
         match self {
-            CompressionConfiguration::None => Arc::new(std::sync::RwLock::new(None)),
-            CompressionConfiguration::Zstd(zstd) => Arc::new(std::sync::RwLock::new(*zstd)),
-            CompressionConfiguration::Lz4(lz4) => Arc::new(std::sync::RwLock::new(*lz4)),
+            CompressionConfiguration::None => Arc::new(std::sync::RwLock::new(Box::new(None))),
+            CompressionConfiguration::Zstd(zstd) => Arc::new(std::sync::RwLock::new(Box::new(*zstd))),
+            CompressionConfiguration::Lz4(lz4) => Arc::new(std::sync::RwLock::new(Box::new(*lz4))),
         }
     }
 }
@@ -77,8 +77,8 @@ pub trait CompressionState: Write {
     /// Finishes the compression stream and returns a buffer that contains the
     /// compressed data.
     fn finish(&mut self, data: Buf) -> Result<Buf>;
-    fn finishext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
-    fn finishext2(&mut self, data: &[u8]) -> Result<Buf>;
+    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
+    //fn finishext2(&mut self, data: &[u8]) -> Result<Buf>;
 }
 
 pub trait DecompressionState {
@@ -97,13 +97,13 @@ pub use self::zstd::Zstd;
 
 
 lazy_static::lazy_static! {
-    pub static ref COMPRESSION_VAR: Arc<std::sync::RwLock<dyn CompressionBuilder>> =
-    //Arc::new(std::sync::RwLock::new(None));
-    /*CompressionConfiguration::Zstd(Zstd {
+    pub static ref COMPRESSION_VAR: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>> = CompressionConfiguration::None.to_builder();
+    /*
+    CompressionConfiguration::Zstd(Zstd {
         level: 10,
-    }).to_builder();*/
-
+    }).to_builder();
     CompressionConfiguration::Lz4(Lz4 {
         level: 10,
     }).to_builder();
+    */
 }

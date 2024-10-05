@@ -62,7 +62,7 @@ pub(super) struct NVMLeafNode
     pub data_end: usize,
     pub node_size: crate::vdev::Block<u32>,
     pub checksum: Option<crate::checksum::XxHash>,
-    pub compressor: Option<Arc<std::sync::RwLock<dyn CompressionBuilder>>>,
+    pub compressor: Option<Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>>,
     pub nvm_load_details: std::sync::Arc<std::sync::RwLock<NVMLeafNodeLoadDetails>>,
 }
 

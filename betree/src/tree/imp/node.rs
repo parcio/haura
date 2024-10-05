@@ -198,7 +198,7 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 use rand::Rng;
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
-    fn pack_and_compress(&self, metadata_size: &mut usize, compressor: Arc<std::sync::RwLock<dyn CompressionBuilder>>) -> Result<Buf, io::Error> {
+    fn pack_and_compress(&self, metadata_size: &mut usize, compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>) -> Result<Buf, io::Error> {
         /*
         let mut v = vec![5; 131072];
 

@@ -37,122 +37,9 @@ use rkyv::{
 
 use std::marker::PhantomData;
 
-struct OwnedStr<T> {
-    inner: Arc<Vec<u8>>,
-    _marker: PhantomData<T>
-}
-
-struct ArchivedOwnedStr {
-    // This will be a relative pointer to our string
-    inner: ArchivedVec<u8>,
-}
-
-impl ArchivedOwnedStr {
-    // This will help us get the bytes of our type as a str again.
-    // fn as_slice(&self) -> &[u8] {
-
-    //     unsafe {
-
-    //         // The as_ptr() function of RelPtr will get a pointer to the str
-
-    //         &*self.ptr.as_ptr()
-
-    //     }
-
-    // }
-}
-
-struct OwnedStrResolver {
-    // This will be the position that the bytes of our string are stored at.
-    // We'll use this to resolve the relative pointer of our
-    // ArchivedOwnedStr.
-    pos: usize,
-    // The archived metadata for our str may also need a resolver.
-    metadata_resolver: VecResolver,
-}
-
-// The Archive implementation defines the archived version of our type and
-// determines how to turn the resolver into the archived form. The Serialize
-// implementations determine how to make a resolver from the original value.
-impl<T> Archive for OwnedStr<T> {
-    type Archived = ArchivedVec<u8>;
-    // This is the resolver we can create our Archived version from.
-    type Resolver = VecResolver;
-
-    // The resolve function consumes the resolver and produces the archived
-
-    // value at the given position.
-
-    unsafe fn resolve(
-        &self,
-        pos: usize,
-        resolver: Self::Resolver,
-        out: *mut Self::Archived,
-    ) {
-        //println!("resolver.pos={}, pos={}", resolver.pos, pos);
-        ArchivedVec::resolve_from_len(self.inner.len(), pos, resolver, out);
-    }
-}
-
-// We restrict our serializer types with Serializer because we need its
-// capabilities to archive our type. For other types, we might need more or
-// less restrictive bounds on the type of S.
-impl<T, S: Serializer + ?Sized + ScratchSpace> Serialize<S> for OwnedStr<T> {
-    fn serialize(
-        &self,
-        serializer: &mut S
-    ) -> Result<Self::Resolver, S::Error> {
-        let mut serialized_data: Vec<u8> = Vec::new();
-
-        // bincode::serialize_into(&mut serialized_data, &self.inner)
-        // .map_err(|e| {
-        //     //debug!("Failed to serialize ObjectPointer.");
-        //     std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        // });
-        // // This is where we want to write the bytes of our string and return
-        // // a resolver that knows where those bytes were written.
-        // // We also need to serialize the metadata for our str.
-        // println!("-->self.inner.serialize_unsized(serializer)={:?}", self.inner.serialize_unsized(serializer)?);
-
-        // Ok(VecResolver::new())
-        // // Ok(VecResolver {
-        // //     pos: self.inner.serialize_unsized(serializer)?,
-        // //     //pos: serialized_data.len(),
-        // //     //metadata_resolver: ArchivedVec::serialize_from_slice(&mut self.inner.serialize_metadata(serializer))?
-        // //     //metadata_resolver: ArchivedVec::serialize_from_slice(serialized_data.as_slice(), serializer)?,
-        // // })
-        ArchivedVec::serialize_from_slice(&self.inner, serializer)
-    }
-}
-
-// impl<D: Fallible + ?Sized> DeserializeWith<Archived<Vec<u8>>, OwnedStr, D> for OwnedStr {
-//     fn deserialize_with(field: &Archived<Vec<u8>>, deserializer: &mut D) -> Result<Self, D::Error> {
-//         panic!("Failed to deserialize childbuffer's node_pointer");
-//     }
-// }
-// impl<D: Fallible + ?Sized> Deserialize<Arc<Vec<u8>>, D> for OwnedStr {
-//     fn deserialize(&self, deserializer: &mut D) -> Result<Arc<Vec<u8>>, D::Error> {
-        
-//             panic!("Failed to deserialize childbuffer's node_pointer");
-//     }
-// }
-
-impl<T, D: Fallible + ?Sized> Deserialize<OwnedStr<T>, D> for Archived<Vec<u8>> {
-    fn deserialize(&self, deserializer: &mut D) -> Result<OwnedStr<T>, D::Error> {
-        let vec: Vec<u8> = self.deserialize(deserializer)?;
-
-        // Create an Arc from the Vec<u8>
-        let arc_vec = Arc::new(vec);
-
-        // Create the OwnedStr
-        Ok(OwnedStr { inner: arc_vec, _marker: PhantomData })
-    }
-}
-
 /// Copy-on-Write smart pointer which supports cheap cloning as it is
 /// reference-counted.
-#[derive(Hash, Debug, Clone, Eq, Ord, Default)]//, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-//#[archive(check_bytes)]
+#[derive(Hash, Debug, Clone, Eq, Ord, Default)]
 pub struct CowBytes {
     // TODO Replace by own implementation
     pub(super) inner: Arc<Vec<u8>>,
@@ -178,8 +65,6 @@ impl Archive for CowBytes {
         resolver: Self::Resolver,
         out: *mut Self::Archived,
     ) {
-        //println!("xxxxxxxxxxxxxxxxxxxxxxx {} {}", self.inner.len(), resolver.len);
-        //ArchivedVec::resolve_from_len(self.inner.len(), pos, resolver, out);
         ArchivedVec::resolve_from_len(resolver.len, pos, resolver.inner, out);
     }
 }
@@ -190,46 +75,22 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
         &self,
         serializer: &mut S
     ) -> Result<Self::Resolver, S::Error> {
-        //panic!("----------------------");
-
-        let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//default_compression.read().unwrap();
+        let compression_builder = &*crate::compression::COMPRESSION_VAR.read().unwrap();
         let compressed_data = {
-            let state = compression.new_compression().unwrap();
-            // let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block(1));
-            // {
-            //     // buf.write(self.inner.as_slice());
-            //     // ()
-            //     buf.write_all(self.inner.as_slice());
-            // }
-            // println!("%%% {} {}", self.inner.len(), buf.get_len());
-             let mut newstate = state.write().unwrap();
+            let state = compression_builder.new_compression().unwrap();
+            let mut compressor = state.write().unwrap();
              {
-            //     let a = buf.into_buf();
-
-            //     let size: u32 = u32::read_from_buffer(a.as_ref()).unwrap();
-            //     let mut buf = crate::buffer::BufWrite::with_capacity(crate::vdev::Block::round_up_from_bytes(size));
-
-                
-            //     println!("%%% {} {}", size, a.as_ref().len());
-                //newstate.finishext(a.as_ref())
-                newstate.finishext(self.inner.as_slice())
-            }
+                compressor.finish_ext(self.inner.as_slice())
+             }
         };
-        //panic!("%%% {} {}", self.inner.len(), compressed_data.unwrap().len());
 
-        let mut lambda = |data: &Vec<u8>| {
-
+        let mut serializer_compressed_data = |data: &Vec<u8>| {
             Ok(CowBytesResolver {
                 len: data.len(),
                 inner: ArchivedVec::serialize_from_slice(data.as_slice(), serializer)?,
             })
         };
-        lambda(&compressed_data.unwrap())
-
-        /*Ok(CowBytesResolver {
-            len: self.inner.len(),
-            inner: ArchivedVec::serialize_from_slice(self.inner.as_slice(), serializer)?,
-        })*/
+        serializer_compressed_data(&compressed_data.unwrap())
     }
 }
 
@@ -237,25 +98,14 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
 use std::io::Write;
 
 impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
-    fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {
-        
+    fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {        
         let vec: Vec<u8> = self.deserialize(deserializer)?;
 
-         let compression = &*crate::compression::COMPRESSION_VAR.read().unwrap();//crate::compression::COMPRESSION_VAR.read().unwrap()default_compression.read().unwrap();
-
-         let mut decompression_state = compression.decompression_tag().new_decompression().unwrap();//d.new_decompression();
-
-         //let data = decompression_state.decompress(dt/*vec.as_slice()*/).unwrap();
+         let compression_builder = &*crate::compression::COMPRESSION_VAR.read().unwrap();
+         let mut decompression_state = compression_builder.decompression_tag().new_decompression().unwrap();
          let data = decompression_state.decompressext(vec.as_slice()).unwrap();
-         let arc_vec = Arc::new(data);
 
-         Ok(CowBytes { inner: arc_vec })
-         
-/*
-         let vec: Vec<u8> = self.deserialize(deserializer)?;
-        
-         let arc_vec = Arc::new(vec);
-         Ok(CowBytes { inner: arc_vec })*/
+         Ok(CowBytes { inner: Arc::new(data) })
     }
 }
 
