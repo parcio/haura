@@ -6,7 +6,7 @@ use super::{
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId},
+    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
     buffer::Buf,
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
@@ -17,14 +17,17 @@ use crate::{
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     tree::{Node, PivotKey},
-    vdev::{Block, BLOCK_SIZE},
+    vdev::{Block, File, BLOCK_SIZE},
     StoragePreference,
 };
+use byteorder::{LittleEndian, WriteBytesExt};
 use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
     collections::HashMap,
+    fs::OpenOptions,
+    io::Write,
     mem::replace,
     ops::DerefMut,
     pin::Pin,
@@ -34,6 +37,8 @@ use std::{
     },
     thread::yield_now,
 };
+
+const ALLOCATION_LOG_FILE: &str = "allocation_log.bin";
 
 /// The Data Management Unit.
 pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
@@ -60,6 +65,7 @@ where
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
+    allocation_log_file: Mutex<std::fs::File>,
 }
 
 impl<E, SPL> Dmu<E, SPL>
@@ -87,6 +93,15 @@ where
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
+        let allocation_log_file = Mutex::new(
+            OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(ALLOCATION_LOG_FILE)
+                .expect("Failed to create allocation log file"),
+        );
+
         Dmu {
             // default_compression_state: default_compression.new_compression().expect("Can't create compression state"),
             default_compression,
@@ -103,6 +118,7 @@ where
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
             report_tx: None,
+            allocation_log_file,
         }
     }
 
@@ -119,6 +135,33 @@ where
     /// Returns the underlying storage pool.
     pub fn pool(&self) -> &SPL {
         &self.pool
+    }
+
+    /// Writes the global header for the allocation logging.
+    pub fn write_global_header(&self) -> Result<(), Error> {
+        let mut file = self.allocation_log_file.lock();
+
+        // Number of storage classes
+        file.write_u8(self.pool.storage_class_count())?;
+
+        // Disks per class
+        for class in 0..self.pool.storage_class_count() {
+            let disk_count = self.pool.disk_count(class);
+            file.write_u16::<LittleEndian>(disk_count)?;
+        }
+
+        // Segments per disk
+        for class in 0..self.pool.storage_class_count() {
+            for disk in 0..self.pool.disk_count(class) {
+                let segment_count = self.pool.size_in_blocks(class, disk);
+                file.write_u64::<LittleEndian>(segment_count.as_u64())?;
+            }
+        }
+
+        // Blocks per segment (constant)
+        file.write_u64::<LittleEndian>(SEGMENT_SIZE_BYTES.try_into().unwrap())?;
+
+        Ok(())
     }
 }
 
@@ -484,6 +527,12 @@ where
 
         let strategy = self.alloc_strategy[storage_preference as usize];
 
+        // NOTE: Could we mark classes, disks and/or segments as full to prevent looping over them?
+        // We would then also need to handle this, when deallocating things.
+        // Would full mean completely full or just not having enough contiguous memory of some
+        // size?
+        // Or save the largest contiguous memory region as a value and compare against that. For
+        // that the allocator needs to support that and we have to 'bubble' the largest value up.
         'class: for &class in strategy.iter().flatten() {
             let disks_in_class = self.pool.disk_count(class);
             if disks_in_class == 0 {
@@ -536,12 +585,16 @@ where
 
                 let first_seen_segment_id = *segment_id;
                 loop {
-                    if let Some(segment_offset) = self
-                        .handler
-                        .get_allocation_bitmap(*segment_id, self)?
-                        .access()
-                        .allocate(size.as_u32())
-                    {
+                    // Has to be split because else the temporary value is dropped while borrowing
+                    let bitmap = self.handler.get_allocation_bitmap(*segment_id, self)?;
+                    let mut allocator = bitmap.access();
+                    if let Some(segment_offset) = allocator.allocate(size.as_u32()) {
+                        let mut file = self.allocation_log_file.lock();
+                        // Write local header and bitmap
+                        file.write_u8(class)?;
+                        file.write_u16::<LittleEndian>(disk_id)?;
+                        file.write_u64::<LittleEndian>(segment_id.0)?;
+                        allocator.write_bitmap(&mut *file)?;
                         break segment_id.disk_offset(segment_offset);
                     }
                     let next_segment_id = segment_id.next(disk_size);
