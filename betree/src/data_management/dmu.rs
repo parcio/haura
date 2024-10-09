@@ -6,7 +6,7 @@ use super::{
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE_BYTES},
+    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE},
     buffer::Buf,
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
@@ -159,7 +159,7 @@ where
         }
 
         // Blocks per segment (constant)
-        file.write_u64::<LittleEndian>(SEGMENT_SIZE_BYTES.try_into().unwrap())?;
+        file.write_u64::<LittleEndian>(SEGMENT_SIZE.try_into().unwrap())?;
 
         Ok(())
     }
