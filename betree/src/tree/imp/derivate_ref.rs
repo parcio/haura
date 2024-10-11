@@ -6,7 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::cache::AddSize;
+use crate::{cache::AddSize, size::Size};
 
 use super::internal::take_child_buffer::TakeChildBufferWrapper;
 
@@ -53,6 +53,16 @@ impl<T: StableDeref + DerefMut, U> DerivateRefNVM<T, TakeChildBufferWrapper<'sta
 impl<T: AddSize, U> AddSize for DerivateRefNVM<T, U> {
     fn add_size(&self, size_delta: isize) {
         self.owner.add_size(size_delta);
+    }
+}
+
+impl<T: Size, U> Size for DerivateRefNVM<T, U> {
+    fn size(&self) -> usize {
+        self.owner.size()
+    }
+
+    fn cache_size(&self) -> usize {
+        self.owner.cache_size()
     }
 }
 

@@ -895,7 +895,7 @@ where
         };
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
-        let size = object.size();
+        let size = object.cache_size();
         self.cache.write().insert(
             key,
             TaggedCacheValue::new(RwLock::new(object), pk.clone()),
@@ -916,7 +916,7 @@ where
         };
         self.modified_info.lock().insert(mid, info);
         let key = ObjectKey::Modified(mid);
-        let size = object.size();
+        let size = object.cache_size();
         let entry = {
             let mut cache = self.cache.write();
             cache.insert(

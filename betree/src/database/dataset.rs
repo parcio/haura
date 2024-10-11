@@ -175,7 +175,7 @@ impl Database {
         let mut key = vec![1];
         key.extend(name);
         self.root_tree.insert(
-            key,
+            &key[..],
             DefaultMessageAction::insert_msg(&ds_id.pack()),
             StoragePreference::NONE,
         )?;

@@ -38,7 +38,7 @@ where
                 .insert(node, self.tree_id(), pk.to_global(self.tree_id()))
         });
         info!("Root split done. {}, {}", root_node.size(), size_delta);
-        debug_assert!(before as isize + size_delta == root_node.size() as isize);
+        assert!(before as isize + size_delta == root_node.size() as isize);
         root_node.finish(size_delta);
         self.dml.verify_cache();
     }
@@ -75,12 +75,9 @@ where
             TakeChildBufferWrapper::TakeChildBuffer(ref mut parent) => {
                 parent.split_child(sibling_np, pivot_key, select_right)
             }
-            TakeChildBufferWrapper::NVMTakeChildBuffer(ref mut parent) => parent
-                .split_child(
-                    sibling_np,
-                    pivot_key,
-                    select_right,
-                ),
+            TakeChildBufferWrapper::NVMTakeChildBuffer(ref mut parent) => {
+                parent.split_child(sibling_np, pivot_key, select_right)
+            }
         };
 
         Ok((node, size_delta))

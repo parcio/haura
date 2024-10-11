@@ -1,8 +1,12 @@
 //! Implementation of the [DisjointInternalNode] node type.
-use crate::{buffer::Buf, data_management::IntegrityMode, tree::imp::{
-    node::{PivotGetMutResult, PivotGetResult},
-    PivotKey,
-}};
+use crate::{
+    buffer::Buf,
+    data_management::IntegrityMode,
+    tree::imp::{
+        node::{PivotGetMutResult, PivotGetResult},
+        PivotKey,
+    },
+};
 
 use super::{
     packed_child_buffer::PackedChildBuffer,
@@ -123,7 +127,11 @@ impl<N: StaticSize> Size for CopylessInternalNode<N> {
             + std::mem::size_of::<u32>()
             + self.children.len() * N::static_size()
             + 8
-            + self.children.iter().map(|c| c.buffer.cache_size()).sum::<usize>()
+            + self
+                .children
+                .iter()
+                .map(|c| c.buffer.cache_size())
+                .sum::<usize>()
     }
 }
 
@@ -310,7 +318,12 @@ impl<N> CopylessInternalNode<N> {
         bincode::serialize_into(&mut w, &self.children)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        for (size, child) in self.meta_data.entries_sizes.iter().zip(self.children.iter()) {
+        for (size, child) in self
+            .meta_data
+            .entries_sizes
+            .iter()
+            .zip(self.children.iter())
+        {
             assert_eq!(*size, child.buffer.size());
         }
 
@@ -362,11 +375,17 @@ impl<N> CopylessInternalNode<N> {
         if size_delta > 0 {
             self.meta_data.entries_sizes[idx] += size_delta as usize;
             self.meta_data.entries_size += size_delta as usize;
-            debug_assert_eq!(self.children[idx].buffer.size(), self.meta_data.entries_sizes[idx]);
+            debug_assert_eq!(
+                self.children[idx].buffer.size(),
+                self.meta_data.entries_sizes[idx]
+            );
         } else {
             self.meta_data.entries_sizes[idx] -= -size_delta as usize;
             self.meta_data.entries_size -= -size_delta as usize;
-            debug_assert_eq!(self.children[idx].buffer.size(), self.meta_data.entries_sizes[idx]);
+            debug_assert_eq!(
+                self.children[idx].buffer.size(),
+                self.meta_data.entries_sizes[idx]
+            );
         }
     }
 }
@@ -628,7 +647,8 @@ where
             assert_eq!(self.children[child_idx].buffer.size(), *child);
 
             if *child >= min_flush_size
-                && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout) && self.fanout() < (max_node_size as f32).sqrt() as usize
+                && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout)
+                && self.fanout() < (max_node_size as f32).sqrt() as usize
             {
                 Some(child_idx)
             } else if self.fanout() < 2 * min_fanout {
@@ -659,6 +679,16 @@ where
 pub(in crate::tree::imp) struct NVMTakeChildBuffer<'a, N: 'a + 'static> {
     node: &'a mut CopylessInternalNode<N>,
     child_idx: usize,
+}
+
+impl<'a, N: StaticSize> Size for NVMTakeChildBuffer<'a, N> {
+    fn size(&self) -> usize {
+        self.node.size()
+    }
+
+    fn cache_size(&self) -> usize {
+        self.node.cache_size()
+    }
 }
 
 impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
@@ -720,10 +750,7 @@ where
         (&*self.node).size()
     }
 
-    pub(in crate::tree::imp) fn prepare_merge(
-        &mut self,
-    ) -> PrepareMergeChild<N>
-    {
+    pub(in crate::tree::imp) fn prepare_merge(&mut self) -> PrepareMergeChild<N> {
         assert!(self.node.fanout() >= 2);
         let (pivot_key_idx, other_child_idx) = if self.child_idx + 1 < self.node.children.len() {
             (self.child_idx, self.child_idx + 1)
@@ -766,8 +793,9 @@ impl<'a, N> PrepareMergeChild<'a, N>
 where
     N: ObjectReference + HasStoragePreference,
 {
-    pub(in crate::tree::imp) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
-    {
+    pub(in crate::tree::imp) fn merge_children(
+        self,
+    ) -> MergeChildResult<Box<dyn Iterator<Item = N>>> {
         let mut right_child_links = self.node.children.remove(self.pivot_key_idx + 1);
         let pivot_key = self.node.meta_data.pivot.remove(self.pivot_key_idx);
         self.node
@@ -803,8 +831,7 @@ impl<'a, N> PrepareMergeChild<'a, N>
 where
     N: ObjectReference + HasStoragePreference,
 {
-    pub(in crate::tree::imp) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize
-    {
+    pub(in crate::tree::imp) fn rebalanced(&mut self, new_pivot_key: CowBytes) -> isize {
         {
             let (left, right) = self.node.children[self.pivot_key_idx..].split_at_mut(1);
             // Move messages around

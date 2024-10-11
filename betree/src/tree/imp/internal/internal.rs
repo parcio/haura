@@ -1,8 +1,8 @@
 //! Implementation of the [InternalNode] node type.
 use super::{
     child_buffer::ChildBuffer,
-    packed_child_buffer::PackedChildBuffer,
     copyless_internal::CopylessInternalNode,
+    packed_child_buffer::PackedChildBuffer,
     take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
 };
 
@@ -190,7 +190,10 @@ impl<N> InternalNode<N> {
         })
     }
 
-    pub fn from_disjoint_node(mut mem: CopylessInternalNode<N>, cbufs: Vec<PackedChildBuffer>) -> Self {
+    pub fn from_disjoint_node(
+        mut mem: CopylessInternalNode<N>,
+        cbufs: Vec<PackedChildBuffer>,
+    ) -> Self {
         let cbufs: Vec<ChildBuffer<N>> = cbufs
             .into_iter()
             .enumerate()
@@ -499,7 +502,6 @@ impl<N: ObjectReference> InternalNode<N> {
     /// Translate any object ref in a `ChildBuffer` from `Incomplete` to `Unmodified` state.
     pub fn complete_object_refs(mut self, d_id: DatasetId) -> Self {
         let first_pk = match self.pivot.first() {
-
             Some(p) => PivotKey::LeftOuter(p.clone(), d_id),
             None => unreachable!(
                 "The store contains an empty InternalNode, this should never be the case."
@@ -575,6 +577,12 @@ pub(in crate::tree::imp) struct TakeChildBuffer<'a, N: 'a + 'static> {
     pub child_idx: usize,
 }
 
+impl<'a, N: StaticSize> Size for TakeChildBuffer<'a, N> {
+    fn size(&self) -> usize {
+        Size::size(self.node)
+    }
+}
+
 impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
     pub(in crate::tree::imp) fn split_child(
         &mut self,
@@ -647,7 +655,9 @@ impl<'a, N> PrepareMergeChild<'a, N> {
     }
 }
 impl<'a, N: Size + HasStoragePreference> PrepareMergeChild<'a, N> {
-    pub(in crate::tree::imp) fn merge_children(self) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
+    pub(in crate::tree::imp) fn merge_children(
+        self,
+    ) -> MergeChildResult<Box<dyn Iterator<Item = N>>>
     where
         N: ObjectReference,
     {

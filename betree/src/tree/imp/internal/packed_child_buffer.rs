@@ -3,10 +3,10 @@
 //! [super::leaf::NVMNVMLeafNode].
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::HasStoragePreference,
+    data_management::{HasStoragePreference, IntegrityMode},
     size::Size,
     storage_pool::AtomicSystemStoragePreference,
-    tree::{KeyInfo, MessageAction},
+    tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
 };
 use std::{
@@ -41,24 +41,30 @@ pub(in crate::tree::imp) struct PackedChildBuffer {
     pub(in crate::tree::imp) system_storage_preference: AtomicSystemStoragePreference,
     pub(in crate::tree::imp) entries_size: usize,
     pub(in crate::tree::imp) buffer: Map,
+
+    is_leaf: bool,
 }
 
 impl Default for PackedChildBuffer {
     fn default() -> Self {
-        PackedChildBuffer::new()
+        PackedChildBuffer::new(false)
     }
 }
 
 pub const BUFFER_STATIC_SIZE: usize = HEADER;
-const NODE_ID: usize = 8;
+const NODE_ID: usize = 1;
 const HEADER: usize =
     NODE_ID + std::mem::size_of::<u32>() + std::mem::size_of::<u32>() + std::mem::size_of::<u8>();
 const KEY_IDX_SIZE: usize =
     std::mem::size_of::<u32>() + std::mem::size_of::<u8>() + std::mem::size_of::<u32>();
+const PER_KEY_BYTES: usize = 16;
 
 #[derive(Debug)]
 pub(in crate::tree::imp) enum Map {
-    Packed { entry_count: usize, data: SlicedCowBytes },
+    Packed {
+        entry_count: usize,
+        data: SlicedCowBytes,
+    },
     Unpacked(BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>),
 }
 
@@ -81,7 +87,9 @@ impl KeyIdx {
 
 impl Map {
     /// Fetch a mutable version of the internal btree map.
-    pub(in crate::tree::imp) fn unpacked(&mut self) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
+    pub(in crate::tree::imp) fn unpacked(
+        &mut self,
+    ) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
         match self {
             Map::Packed { entry_count, data } => {
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
@@ -304,13 +312,73 @@ impl PackedChildBuffer {
         self.buffer.get(key)
     }
 
-    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> Option<()> {
+    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> Option<KeyInfo> {
         self.buffer
             .unpacked()
             .get_mut(key)
             .map(|(keyinfo, _bytes)| {
                 keyinfo.storage_preference = pref;
+                keyinfo.clone()
             })
+    }
+
+    pub fn unpack_data(&mut self) {
+        self.buffer.unpacked();
+    }
+
+    pub fn split(
+        &mut self,
+        min_size: usize,
+        max_size: usize,
+    ) -> (PackedChildBuffer, CowBytes, isize, LocalPivotKey) {
+        assert!(self.size() > max_size);
+        let mut right_sibling = Self::new(self.is_leaf);
+        assert!(right_sibling.entries_size == 0);
+        assert!(self.buffer.len() > 2);
+
+        let mut sibling_size = 0;
+        let mut sibling_pref = StoragePreference::NONE;
+        let mut split_key = None;
+        for (k, (keyinfo, v)) in self.buffer.unpacked().iter().rev() {
+            sibling_size += k.len() + v.len() + PER_KEY_BYTES + keyinfo.size();
+            sibling_pref.upgrade(keyinfo.storage_preference);
+
+            if sibling_size >= min_size {
+                split_key = Some(k.clone());
+                break;
+            }
+        }
+        let split_key = split_key.unwrap();
+        right_sibling.buffer = Map::Unpacked(self.buffer.unpacked().split_off(&split_key));
+        self.entries_size -= sibling_size;
+        right_sibling.entries_size = sibling_size;
+        right_sibling.messages_preference.set(sibling_pref);
+
+        // have removed many keys from self, no longer certain about own pref, mark invalid
+        self.messages_preference.invalidate();
+
+        let size_delta = -(sibling_size as isize);
+
+        let pivot_key = self.buffer.unpacked().iter().next_back().unwrap().0.clone();
+
+        (
+            right_sibling,
+            pivot_key.clone(),
+            size_delta,
+            LocalPivotKey::Right(pivot_key),
+        )
+    }
+
+    pub(crate) fn insert_msg_buffer<I, M>(&mut self, msg_buffer: I, msg_action: M) -> isize
+    where
+        I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
+        M: MessageAction,
+    {
+        let mut size_delta = 0;
+        for (key, (keyinfo, msg)) in msg_buffer {
+            size_delta += self.insert(key, keyinfo, msg, &msg_action);
+        }
+        size_delta
     }
 }
 
@@ -322,7 +390,7 @@ pub struct PackedBufferIterator<'a> {
 }
 
 impl<'a> Iterator for PackedBufferIterator<'a> {
-    type Item = (CowBytes, (KeyInfo, SlicedCowBytes));
+    type Item = (&'a [u8], (KeyInfo, SlicedCowBytes));
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.cur >= self.entry_count {
@@ -330,7 +398,6 @@ impl<'a> Iterator for PackedBufferIterator<'a> {
         }
 
         let kpos = &self.keys[self.cur];
-        let key = self.buffer.clone().subslice(kpos.pos, kpos.len);
 
         let vpos_off = (kpos.pos + kpos.len) as usize;
         let vpos = u32::from_le_bytes(self.buffer.cut(vpos_off, 4).try_into().unwrap());
@@ -338,8 +405,7 @@ impl<'a> Iterator for PackedBufferIterator<'a> {
         let val = self.buffer.clone().subslice(vpos, vlen);
         self.cur += 1;
         Some((
-            // FIXME: Expensive copy when returning results here.
-            CowBytes::from(&key[..]),
+            self.buffer.cut(kpos.pos as usize, kpos.len as usize),
             (
                 KeyInfo {
                     storage_preference: StoragePreference::from_u8(kpos.pref),
@@ -381,7 +447,7 @@ impl<'a> Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = (CowBytes, (KeyInfo, SlicedCowBytes));
+    type Item = (&'a [u8], (KeyInfo, SlicedCowBytes));
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -389,7 +455,7 @@ impl<'a> Iterator for Iter<'a> {
             // FIXME: Is this a good way to do this now? We exploit interior
             // somewhat cheap copies to unify the return type, but it's not so
             // nice.
-            Iter::Unpacked(i) => i.next().map(|(a, b)| (a.clone(), b.clone())),
+            Iter::Unpacked(i) => i.next().map(|(a, b)| (&a[..], b.clone())),
         }
     }
 }
@@ -398,8 +464,12 @@ impl PackedChildBuffer {
     /// Returns an iterator over all messages.
     pub fn get_all_messages(
         &self,
-    ) -> impl Iterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))> + '_ {
+    ) -> impl Iterator<Item = (&[u8], (KeyInfo, SlicedCowBytes))> + '_ {
         Iter::new(self)
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffer.len()
     }
 
     /// Takes the message buffer out this `NVMChildBuffer`,
@@ -412,11 +482,12 @@ impl PackedChildBuffer {
         )
     }
 
-    pub fn append(&mut self, other: &mut Self) {
+    pub fn append(&mut self, other: &mut Self) -> isize {
         self.buffer.unpacked().append(&mut other.buffer.unpacked());
         self.entries_size += other.entries_size;
         self.messages_preference
             .upgrade_atomic(&other.messages_preference);
+        other.entries_size as isize
     }
 
     /// Splits this `NVMChildBuffer` at `pivot` so that `self` contains all
@@ -429,6 +500,7 @@ impl PackedChildBuffer {
             buffer: Map::Unpacked(buffer),
             entries_size: buffer_entries_size,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+            is_leaf: self.is_leaf,
         }
     }
 
@@ -457,6 +529,26 @@ impl PackedChildBuffer {
         right_sibling.entries_size = buffer_entries_size;
     }
 
+    pub fn rebalance_size(
+        &mut self,
+        right_sibling: &mut Self,
+        min_size: usize,
+        max_size: usize,
+    ) -> FillUpResult {
+        let size_delta = self.append(right_sibling);
+        if self.size() <= max_size {
+            FillUpResult::Merged { size_delta }
+        } else {
+            // First size_delta is from the merge operation where we split
+            let (sibling, pivot_key, split_size_delta, _) = self.split(min_size, max_size);
+            *right_sibling = sibling;
+            FillUpResult::Rebalanced {
+                pivot_key,
+                size_delta: size_delta + split_size_delta,
+            }
+        }
+    }
+
     /// Inserts a message to this buffer for the given `key`.
     pub fn insert<Q, M>(
         &mut self,
@@ -471,38 +563,73 @@ impl PackedChildBuffer {
     {
         let key = key.into();
         let key_size = key.size();
+        let old_size = self.cache_size();
 
         self.messages_preference.upgrade(keyinfo.storage_preference);
 
         match self.buffer.unpacked().entry(key.clone()) {
             Entry::Vacant(e) => {
-                let size_delta =
-                    key_size + msg.size() + keyinfo.size();
-                e.insert((keyinfo, msg));
+                // Resolve messages when the buffer is a leaf.
+                let size_delta = if self.is_leaf {
+                    let mut data = None;
+                    msg_action.apply_to_leaf(&key, msg, &mut data);
+                    if let Some(data) = data {
+                        let size = keyinfo.size() + data.len() + key_size;
+                        e.insert((keyinfo, data));
+                        size
+                    } else {
+                        0
+                    }
+                } else {
+                    let size = key_size + msg.size() + keyinfo.size();
+                    e.insert((keyinfo, msg));
+                    size
+                };
+
                 self.entries_size += size_delta;
+                assert_eq!(self.cache_size(), old_size + size_delta);
                 size_delta as isize
             }
             Entry::Occupied(mut e) => {
                 let lower = e.get_mut().clone();
                 let (_, lower_msg) = lower;
                 let lower_size = lower_msg.size();
-                let merged_msg = msg_action.merge(&key, msg, lower_msg);
-                let merged_msg_size = merged_msg.size();
-                e.get_mut().1 = merged_msg;
+
+                let (merged, merged_size) = if self.is_leaf {
+                    let mut new = Some(lower_msg.clone());
+                    msg_action.apply_to_leaf(&key, msg, &mut new);
+                    if let Some(data) = new {
+                        let new_size = data.size();
+                        (data, new_size)
+                    } else {
+                        let data = e.remove();
+                        return -(key_size as isize
+                            + data.1.len() as isize
+                            + PER_KEY_BYTES as isize);
+                    }
+                } else {
+                    let merged_msg = msg_action.merge(&key, msg, lower_msg);
+                    let merged_msg_size = merged_msg.size();
+                    (merged_msg, merged_msg_size)
+                };
+                e.get_mut().1 = merged;
+
+                self.entries_size += merged_size;
                 self.entries_size -= lower_size;
-                self.entries_size += merged_msg_size;
-                merged_msg_size as isize - lower_size as isize
+                assert_eq!(self.cache_size(), old_size + merged_size - lower_size);
+                merged_size as isize - lower_size as isize
             }
         }
     }
 
     /// Constructs a new, empty buffer.
-    pub fn new() -> Self {
+    pub fn new(is_leaf: bool) -> Self {
         PackedChildBuffer {
             messages_preference: AtomicStoragePreference::known(StoragePreference::NONE),
             buffer: Map::Unpacked(BTreeMap::new()),
             entries_size: 0,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+            is_leaf,
         }
     }
 
@@ -512,6 +639,7 @@ impl PackedChildBuffer {
     ///
     ///
     /// Packed Stream is constructed as so (all numbers are in Little Endian):
+    /// - u8: is leaf
     /// - u32: len entries
     /// - u32: entries_size
     /// - u8: storage pref
@@ -529,7 +657,7 @@ impl PackedChildBuffer {
     ///     bytes: val,
     ///   ]
     ///
-    pub fn pack<W>(&self, mut w: W) -> Result<(), std::io::Error>
+    pub fn pack<W>(&self, mut w: W) -> Result<IntegrityMode, std::io::Error>
     where
         W: std::io::Write,
     {
@@ -537,10 +665,14 @@ impl PackedChildBuffer {
         if !self.buffer.is_unpacked() {
             // Copy the contents of the buffer to the new writer without unpacking.
             w.write_all(&self.buffer.assert_packed()[..self.size()])?;
-            return Ok(())
+            return Ok(IntegrityMode::Internal);
         }
 
-        w.write_all(&[b'D', b'E', b'A', b'D', b'B', b'E', b'E', b'F'])?;
+        if self.is_leaf {
+            w.write_all(&[1])?;
+        } else {
+            w.write_all(&[0])?;
+        }
         w.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
         w.write_all(&(self.entries_size as u32).to_le_bytes())?;
         w.write_all(
@@ -569,16 +701,20 @@ impl PackedChildBuffer {
             w.write_all(&val)?;
         }
 
-        Ok(())
+        Ok(IntegrityMode::Internal)
     }
 
     pub fn unpack(buf: SlicedCowBytes) -> Result<Self, std::io::Error> {
-        assert_eq!(&buf[..NODE_ID], &[b'D', b'E', b'A', b'D', b'B', b'E', b'E', b'F']);
-
+        // assert_eq!(
+        //     &buf[..NODE_ID],
+        //     &[b'D', b'E', b'A', b'D', b'B', b'E', b'E', b'F']
+        // );
+        let is_leaf = buf[0] != 0;
         let entry_count =
             u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
         let entries_size =
             u32::from_le_bytes(buf[NODE_ID + 4..NODE_ID + 4 + 4].try_into().unwrap()) as usize;
+        assert!(entries_size < 8 * 1024 * 1024);
         let pref = u8::from_le_bytes(buf[NODE_ID + 8..NODE_ID + 9].try_into().unwrap());
         Ok(Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),
@@ -590,6 +726,7 @@ impl PackedChildBuffer {
                 entry_count,
                 data: buf,
             },
+            is_leaf,
         })
     }
 
@@ -643,6 +780,7 @@ mod tests {
                 entries_size: self.entries_size,
                 buffer: Map::Unpacked(self.buffer.assert_unpacked().clone()),
                 system_storage_preference: self.system_storage_preference.clone(),
+                is_leaf: self.is_leaf,
             }
         }
     }
@@ -679,6 +817,7 @@ mod tests {
                 system_storage_preference: AtomicSystemStoragePreference::from(
                     StoragePreference::NONE,
                 ),
+                is_leaf: false,
             }
         }
     }
@@ -798,12 +937,8 @@ mod tests {
 
     #[quickcheck]
     fn insert(mut child_buffer: PackedChildBuffer, key: CowBytes, info: KeyInfo, msg: CowBytes) {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&[0u8; NODE_ID]);
-
         check_size(&child_buffer);
         child_buffer.insert(key, info, msg.into(), crate::tree::DefaultMessageAction);
         check_size(&child_buffer);
-
     }
 }

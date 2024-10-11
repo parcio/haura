@@ -15,8 +15,7 @@ use crate::{
     database::DatasetId,
     range_validation::is_inclusive_non_empty,
     size::StaticSize,
-    storage_pool::StoragePoolLayer,
-    storage_pool::NUM_STORAGE_CLASSES,
+    storage_pool::{StoragePoolLayer, NUM_STORAGE_CLASSES},
     tree::MessageAction,
     StoragePreference,
 };
@@ -93,7 +92,7 @@ pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
 }
 
 #[derive(Clone, Debug)]
-pub struct StorageMap {
+pub(crate) struct StorageMap {
     map: [StorageKind; NUM_STORAGE_CLASSES],
     default: StorageKind,
 }
@@ -629,7 +628,7 @@ where
 mod derivate_ref;
 mod flush;
 mod internal;
-pub mod leaf;
+mod leaf;
 mod node;
 mod range;
 mod split;

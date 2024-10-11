@@ -67,24 +67,25 @@ where
                 node.actual_size()
             );
             // 1. Select the largest child buffer which can be flushed.
-            let mut child_buffer =
-                match DerivateRefNVM::try_new(node, |node| node.try_find_flush_candidate(&self.storage_map)) {
-                    // 1.1. If there is none we have to split the node.
-                    Err(_node) => match parent {
-                        None => {
-                            self.split_root_node(_node);
-                            return Ok(());
-                        }
-                        Some(ref mut parent) => {
-                            let (next_node, size_delta) = self.split_node(_node, parent)?;
-                            node = next_node;
-                            parent.add_size(size_delta);
-                            continue;
-                        }
-                    },
-                    // 1.2. If successful we flush in the following steps to this node.
-                    Ok(selected_child_buffer) => selected_child_buffer,
-                };
+            let mut child_buffer = match DerivateRefNVM::try_new(node, |node| {
+                node.try_find_flush_candidate(&self.storage_map)
+            }) {
+                // 1.1. If there is none we have to split the node.
+                Err(_node) => match parent {
+                    None => {
+                        self.split_root_node(_node);
+                        return Ok(());
+                    }
+                    Some(ref mut parent) => {
+                        let (next_node, size_delta) = self.split_node(_node, parent)?;
+                        node = next_node;
+                        parent.add_size(size_delta);
+                        continue;
+                    }
+                },
+                // 1.2. If successful we flush in the following steps to this node.
+                Ok(selected_child_buffer) => selected_child_buffer,
+            };
 
             let mut child = self.get_mut_node(child_buffer.child_pointer_mut())?;
 
@@ -127,15 +128,12 @@ where
             // 4. Remove messages from the child buffer.
             let (buffer, size_delta) = match &mut *child_buffer {
                 TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.take_buffer(),
-                TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                    obj.take_buffer()
-                }
+                TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.take_buffer(),
             };
             child_buffer.add_size(size_delta);
             self.dml.verify_cache();
             // 5. Insert messages from the child buffer into the child.
-            let size_delta_child =
-                child.insert_msg_buffer(buffer, self.msg_action());
+            let size_delta_child = child.insert_msg_buffer(buffer, self.msg_action());
             child.add_size(size_delta_child);
 
             // 6. Check if minimal leaf size is fulfilled, otherwise merge again.

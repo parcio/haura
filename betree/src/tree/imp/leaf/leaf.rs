@@ -347,7 +347,7 @@ impl LeafNode {
         }
     }
 
-    pub fn to_memory_leaf(self) -> super::copyless_leaf::CopylessLeaf {
+    pub fn to_memory_leaf(self) {
         todo!()
     }
 

@@ -112,4 +112,8 @@ impl<Val: SizeMut, Tag> SizeMut for TaggedCacheValue<Val, Tag> {
     fn size(&mut self) -> usize {
         self.value.size()
     }
+
+    fn cache_size(&mut self) -> usize {
+        self.value.cache_size()
+    }
 }

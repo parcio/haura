@@ -136,7 +136,7 @@ impl Stats for CacheStats {
     }
 }
 
-impl<V> AddSize for PinnedEntry<V> {
+impl<V: SizeMut> AddSize for PinnedEntry<V> {
     fn add_size(&self, size_delta: isize) {
         if size_delta >= 0 {
             self.size.fetch_add(size_delta as usize, Ordering::Relaxed);
@@ -309,7 +309,7 @@ impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 's
                 #[cfg(debug_assertions)]
                 {
                     if let Some(entry) = Arc::get_mut(&mut entry) {
-                        assert_eq!(entry.value.size(), size);
+                        assert_eq!(entry.value.cache_size(), size);
                     }
                 }
 
@@ -332,7 +332,7 @@ impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 's
     }
 
     fn insert(&mut self, key: K, mut value: V, size: usize) {
-        debug_assert_eq!(value.size(), size);
+        assert_eq!(value.cache_size(), size);
 
         let old_value = self.map.insert(
             key.clone(),

@@ -29,7 +29,7 @@ pub trait Size {
         }
     }
 
-    /// Size in bytes this
+    /// Current memory footprint of an object.
     fn cache_size(&self) -> usize {
         self.size()
     }
@@ -42,6 +42,9 @@ pub trait SizeMut {
     /// Returns the size (number of bytes) that this object would have
     /// if serialized using [`bincode`](../../bincode/index.html).
     fn size(&mut self) -> usize;
+
+    /// Current memory footprint of an object.
+    fn cache_size(&mut self) -> usize;
 }
 
 /// A trait which represents an serializable object
@@ -63,6 +66,11 @@ impl<T: Size> SizeMut for T {
     fn size(&mut self) -> usize {
         Size::size(self)
     }
+
+    /// Current memory footprint of an object.
+    fn cache_size(&mut self) -> usize {
+        Size::cache_size(self)
+    }
 }
 
 impl<T: StaticSize> Size for T {
@@ -74,5 +82,10 @@ impl<T: StaticSize> Size for T {
 impl<T: SizeMut> SizeMut for RwLock<T> {
     fn size(&mut self) -> usize {
         self.get_mut().size()
+    }
+
+    /// Current memory footprint of an object.
+    fn cache_size(&mut self) -> usize {
+        self.get_mut().cache_size()
     }
 }
