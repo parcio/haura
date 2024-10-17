@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+
+
+from dataclasses import dataclass
+import struct
+import sys
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.widgets import Slider
+import numpy as np
+
+
+@dataclass
+class Config:
+    num_classes: int
+    disks_per_class: list[int]
+    blocks_per_disk: list[list[int]]
+    blocks_per_segment: int
+
+
+@dataclass
+class Timestamp:
+    time: int
+    storage_class: int
+    disk: int
+    segment: int
+
+
+def parse_header(log_file: str) -> dict:
+    """Parses the global header of the allocation log file."""
+
+    with open(log_file, "rb") as f:
+        num_classes = struct.unpack("<B", f.read(1))[0]
+        disks_per_class = []
+        for _ in range(num_classes):
+            disks_per_class.append(struct.unpack("<H", f.read(2))[0])
+
+        segments_per_disk = []
+        for i in range(num_classes):
+            segments_per_disk.append([])
+            for _ in range(disks_per_class[i]):
+                segments_per_disk[i].append(struct.unpack("<Q", f.read(8))[0])
+
+        blocks_per_segment = struct.unpack("<Q", f.read(8))[0]
+
+    return {
+        "num_classes": num_classes,
+        "disks_per_class": disks_per_class,
+        "segments_per_disk": segments_per_disk,
+        "blocks_per_segment": blocks_per_segment
+    }
+
+
+def build_global_bitmap(log_file: str, config: dict) -> list[dict]:
+    """Builds a global bitmap representation for each time step."""
+
+    global_bitmap = []
+
+    with open(log_file, "rb") as f:
+        # Skip the global header (already parsed)
+        f.seek(1 + 2 * config["num_classes"] + 8 *
+               sum(config["disks_per_class"]) + 8)
+
+        while True:
+            # Read local header
+            try:
+                class_id = struct.unpack("<B", f.read(1))[0]
+                disk_id = struct.unpack("<H", f.read(2))[0]
+                segment_id = struct.unpack("<Q", f.read(8))[0]
+            except struct.error:
+                break  # End of file
+
+            bitmap_size = int(config["blocks_per_segment"] / 8)
+            bitmap_bytes = f.read(bitmap_size)
+
+            # Create numpy array from bitmap bytes
+            bitmap_np = np.unpackbits(
+                np.frombuffer(bitmap_bytes, dtype=np.uint8))
+
+            global_bitmap.append(
+                {"class_id": class_id, "disk_id": disk_id,
+                    "segment_id": segment_id, "bitmap_np": bitmap_np}
+            )
+
+    return global_bitmap
+
+
+def plot_bitmap(global_bitmap):
+    """Plots the bitmap for a single timestamp."""
+    fig, ax = plt.subplots()
+    plt.subplots_adjust(bottom=0.25)  # Adjust layout for the slider
+
+    # Initial plot
+    class_id = global_bitmap[0]["class_id"]
+    disk_id = global_bitmap[0]["disk_id"]
+    segment_id = global_bitmap[0]["segment_id"]
+    bitmap = global_bitmap[0]["bitmap_np"]
+
+    # Reshape the bitmap to a square
+    size = int(np.ceil(bitmap.shape[0] ** 0.5))
+    bitmap_square = np.pad(
+        bitmap, (0, size * size - bitmap.shape[0]), "constant"
+    ).reshape(size, size)
+    im = ax.imshow(bitmap_square, cmap="gray_r")
+
+    # Add rectangle around the bitmap
+    rect = patches.Rectangle(
+        (-0.5, -0.5), 1, len(bitmap), linewidth=1, edgecolor="r", facecolor="none"
+    )
+    ax.add_patch(rect)
+
+    ax.set_title(f"Class: {class_id}, Disk: {disk_id}, Segment: {segment_id}")
+    ax.set_xlabel("Page")
+    ax.set_ylabel("Page")
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    # Create slider
+    # Position and size of the slider
+    ax_slider = plt.axes([0.25, 0.1, 0.65, 0.03])
+    slider = Slider(
+        ax_slider,
+        "Timestamp",
+        0,
+        len(global_bitmap) - 1,
+        valinit=0,
+        valstep=1,
+    )
+
+    def update(val):
+        timestamp = int(slider.val)
+        class_id = global_bitmap[timestamp]["class_id"]
+        disk_id = global_bitmap[timestamp]["disk_id"]
+        segment_id = global_bitmap[timestamp]["segment_id"]
+        bitmap_np = global_bitmap[timestamp]["bitmap_np"]
+
+        # Calculate the size of the square
+        size = int(np.ceil(bitmap_np.shape[0] ** 0.5))
+
+        # Reshape the bitmap to a square
+        bitmap_square = np.pad(
+            bitmap_np, (0, size * size - bitmap_np.shape[0]), "constant"
+        ).reshape(size, size)
+
+        im.set_data(bitmap_square)
+        ax.set_title(f"Class: {class_id}, Disk: {
+                     disk_id}, Segment: {segment_id}")
+        fig.canvas.draw_idle()
+
+    slider.on_changed(update)
+
+    plt.show()
+
+
+if __name__ == "__main__":
+    # NOTE: This script needs ~10-15 times the memory that the log file has
+    if len(sys.argv) < 2:
+        print("Please provide a file to visualize!")
+        exit(1)
+    log_file = sys.argv[1]
+
+    config = parse_header(log_file)
+    global_bitmap = build_global_bitmap(log_file, config)
+    print(config)
+    print(len(global_bitmap))
+    plot_bitmap(global_bitmap)
