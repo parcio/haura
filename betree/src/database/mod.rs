@@ -431,7 +431,7 @@ impl Database {
         if let Some(tx) = &dml_tx {
             dmu.set_report(tx.clone());
         }
-        dmu.write_global_header();
+        dmu.write_global_header()?;
 
         let (tree, root_ptr) = builder.select_root_tree(Arc::new(dmu))?;
 
