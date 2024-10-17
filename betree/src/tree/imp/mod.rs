@@ -393,14 +393,11 @@ where
                     self.msg_action().apply(key, &msg, &mut tmp);
                 }
 
-                // This may never be false.
-                let data = tmp.unwrap();
-
                 drop(node);
                 if self.evict {
                     self.dml.evict()?;
                 }
-                Ok(Some((info, data)))
+                Ok(tmp.map(|data| (info, data)))
             }
         }
     }
