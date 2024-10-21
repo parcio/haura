@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 
+import functools
 from math import floor
 import os
 import struct
@@ -97,7 +98,7 @@ class GlobalBitMap:
     # dict [ (storage, disk, segment), list[(time, bitmap)]]
     bitmap: dict[(int, int, int), list[(int, np.ndarray)]]
     log_file: str
-    time: int = 1
+    time: int = 0
 
     def __init__(self, log_file: str, config: Config):
         self.config = config
@@ -137,6 +138,7 @@ class GlobalBitMap:
             i = 0
             # while True:
             for i in tqdm(range(timesteps), desc="Building bitmap"):
+                self.time += 1
                 # Read Allocation
                 try:
                     op_type = struct.unpack("<B", f.read(1))[0]
@@ -157,7 +159,6 @@ class GlobalBitMap:
                 new_bitmap = np.packbits(new_bitmap)
                 self.bitmap[(storage_id, disk_id, segment_id)
                             ].append((self.time, new_bitmap))
-                self.time += 1
 
     # Get the global bitmap at time. If no time is provided return the bitmap
     # of the last timestep.
@@ -172,16 +173,14 @@ class GlobalBitMap:
         bitmap = np.zeros(num_blocks, dtype=np.uint8)
         start = 0
         for storage_id in range(self.config.num_storage_ids):
-            local_bitmap = self.get_storage(storage_id, time)
-            bitmap[start:start+len(local_bitmap)] = local_bitmap.copy()
-            start += len(local_bitmap)
+            start += self.get_storage(bitmap[start:], storage_id, time)
 
         return bitmap
 
     # Get the bitmap of a storage id at time. If no time is provided return the
     # bitmap of the last timestep.
     # If it doesn't match with the config throw an errer
-    def get_storage(self, storage_id: int, time: int = None) -> np.array:
+    def get_storage(self, output_bitmap: np.array, storage_id: int, time: int = None) -> np.array:
         if time is None or time > self.time:
             time = self.time
         if time < 0:
@@ -193,19 +192,18 @@ class GlobalBitMap:
             return np.zeros(0)
 
         num_blocks = sum(self.config.blocks_per_disk[storage_id])
-        bitmap = np.zeros(num_blocks, dtype=np.uint8)
+        # bitmap = np.zeros(num_blocks, dtype=np.uint8)
         start = 0
         for disk_id in range(self.config.disks_of_storage_id(storage_id)):
-            local_bitmap = self.get_disk(storage_id, disk_id, time)
-            bitmap[start:start+len(local_bitmap)] = local_bitmap.copy()
-            start += len(local_bitmap)
+            start += self.get_disk(
+                output_bitmap[start:], storage_id, disk_id, time)
 
-        return bitmap
+        return start
 
     # Get the bitmap of a disk id at time. If no time is provided return the
     # bitmap of the last timestep.
     # If it doesn't match with the config throw an errer
-    def get_disk(self, storage_id: int, disk_id: int, time: int = None) -> np.array:
+    def get_disk(self, output_bitmap: np.array, storage_id: int, disk_id: int, time: int = None) -> int:
         if time is None or time > self.time:
             time = self.time
         if time < 0:
@@ -219,8 +217,6 @@ class GlobalBitMap:
             raise IndexError(f"Tried to access disk with id {
                              disk_id} of 0-{self.config.disks_of_storage_id(storage_id) - 1}")
 
-        num_blocks = config.blocks_of_disk(storage_id, disk_id)
-        bitmap = np.zeros(num_blocks, dtype=np.uint8)
         blocks_per_segment = self.config.blocks_per_segment
         entries = filter(lambda k: k[0] ==
                          storage_id and k[1] == disk_id, self.bitmap)
@@ -232,10 +228,11 @@ class GlobalBitMap:
             end = min(segment_id + blocks_per_segment,
                       self.config.blocks_of_disk(entry[0], entry[1]))
 
-            bitmap[segment_id:end] = np.unpackbits(bitmap_at_time)
+            output_bitmap[segment_id:end] = np.unpackbits(bitmap_at_time)
 
-            return bitmap
+        return end
 
+    @functools.lru_cache(1024)
     def _binary_search_time(self, time: int, entry: (int, int, int)) -> (int, np.array):
         bitmaps = self.bitmap[entry]
         left = 0
