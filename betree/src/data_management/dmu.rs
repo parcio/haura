@@ -93,6 +93,7 @@ where
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
+        // TODO: make append only
         let allocation_log_file = Mutex::new(
             OpenOptions::new()
                 .create(true)
@@ -244,6 +245,12 @@ where
             obj_ptr.offset().disk_id(),
             obj_ptr.size(),
         );
+        {
+            let mut file = self.allocation_log_file.lock();
+            let _ = file.write_u8(Action::Deallocate.as_bool() as u8);
+            let _ = file.write_u64::<LittleEndian>(obj_ptr.offset.as_u64());
+            let _ = file.write_u32::<LittleEndian>(obj_ptr.size.as_u32());
+        }
         if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) = (
             self.handler.copy_on_write(
                 obj_ptr.offset(),
@@ -590,12 +597,13 @@ where
                     let mut allocator = bitmap.access();
                     if let Some(segment_offset) = allocator.allocate(size.as_u32()) {
                         let mut file = self.allocation_log_file.lock();
-                        // Write local header and bitmap
-                        file.write_u8(class)?;
-                        file.write_u16::<LittleEndian>(disk_id)?;
-                        file.write_u64::<LittleEndian>(segment_id.0)?;
-                        allocator.write_bitmap(&mut *file)?;
-                        break segment_id.disk_offset(segment_offset);
+                        let disk_offset = segment_id.disk_offset(segment_offset);
+
+                        file.write_u8(Action::Allocate.as_bool() as u8)?;
+                        file.write_u64::<LittleEndian>(disk_offset.as_u64())?;
+                        file.write_u32::<LittleEndian>(size.as_u32())?;
+
+                        break disk_offset;
                     }
                     let next_segment_id = segment_id.next(disk_size);
                     trace!(

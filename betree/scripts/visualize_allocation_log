@@ -1,32 +1,64 @@
 #!/usr/bin/env python3
 
 
-from dataclasses import dataclass
+from math import floor
+import os
 import struct
 import sys
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 from matplotlib.widgets import Slider
 import numpy as np
+from tqdm import tqdm
+
+# Constants to get relevant information from the disk_offset
+MASK_STORAGE_CLASS = ((1 << 2) - 1) << (10 + 52)
+MASK_DISK_ID = ((1 << 10) - 1) << 52
+MASK_OFFSET = (1 << 52) - 1
+SEGMENT_SIZE_LOG_2 = 18
+SEGMENT_SIZE = 1 << SEGMENT_SIZE_LOG_2
+SEGMENT_SIZE_MASK = SEGMENT_SIZE - 1
+# This is the amount of bytes one (de-)allocation has in the log
+SIZE_PER_ALLOCATION = 13
 
 
-@dataclass
+def parse_disk_offset(offset: int) -> (int, int, int):
+    storage_class = (offset & MASK_STORAGE_CLASS) >> (52 + 10)
+    disk_id = ((offset & MASK_DISK_ID) >> 52)
+    block_offset = (offset & MASK_OFFSET)
+    segment_id = (block_offset & ~SEGMENT_SIZE_MASK)
+    return storage_class, disk_id, segment_id, block_offset
+
+
 class Config:
-    num_classes: int
-    disks_per_class: list[int]
+    num_storage_ids: int
+    disks_per_storage_id: list[int]
     blocks_per_disk: list[list[int]]
     blocks_per_segment: int
 
+    def __init__(self, num_storage_ids: int,
+                 disks_per_storage_id: list[int],
+                 blocks_per_disk: list[list[int]],
+                 blocks_per_segment: int,
+                 ):
+        self.num_storage_ids = num_storage_ids
+        self.disks_per_storage_id = disks_per_storage_id
+        self.blocks_per_disk = blocks_per_disk
+        self.blocks_per_segment = blocks_per_segment
 
-@dataclass
-class Timestamp:
-    time: int
-    storage_class: int
-    disk: int
-    segment: int
+    def __str__(self) -> str:
+        return f"num_storage_ids: {self.num_storage_ids}, \
+        disks_per_class: {self.disks_per_storage_id}, \
+        blocks_per_disk: {self.blocks_per_disk}, \
+        blocks_per_segment: {self.blocks_per_segment}"
+
+    def disks_of_storage_id(self, storage_id: int) -> int:
+        return self.disks_per_storage_id[storage_id]
+
+    def blocks_of_disk(self, storage_id: int, disk_id: int) -> int:
+        return self.blocks_per_disk[storage_id][disk_id]
 
 
-def parse_header(log_file: str) -> dict:
+def parse_header(log_file: str) -> Config:
     """Parses the global header of the allocation log file."""
 
     with open(log_file, "rb") as f:
@@ -35,132 +67,253 @@ def parse_header(log_file: str) -> dict:
         for _ in range(num_classes):
             disks_per_class.append(struct.unpack("<H", f.read(2))[0])
 
-        segments_per_disk = []
+        blocks_per_disk = []
         for i in range(num_classes):
-            segments_per_disk.append([])
+            blocks_per_disk.append([])
             for _ in range(disks_per_class[i]):
-                segments_per_disk[i].append(struct.unpack("<Q", f.read(8))[0])
+                blocks_per_disk[i].append(
+                    struct.unpack("<Q", f.read(8))[0])
 
         blocks_per_segment = struct.unpack("<Q", f.read(8))[0]
 
-    return {
-        "num_classes": num_classes,
-        "disks_per_class": disks_per_class,
-        "segments_per_disk": segments_per_disk,
-        "blocks_per_segment": blocks_per_segment
-    }
+    return Config(num_classes,
+                  disks_per_class,
+                  blocks_per_disk,
+                  blocks_per_segment)
 
 
-def build_global_bitmap(log_file: str, config: dict) -> list[dict]:
-    """Builds a global bitmap representation for each time step."""
-
-    global_bitmap = []
-
-    with open(log_file, "rb") as f:
-        # Skip the global header (already parsed)
-        f.seek(1 + 2 * config["num_classes"] + 8 *
-               sum(config["disks_per_class"]) + 8)
-
-        while True:
-            # Read local header
-            try:
-                class_id = struct.unpack("<B", f.read(1))[0]
-                disk_id = struct.unpack("<H", f.read(2))[0]
-                segment_id = struct.unpack("<Q", f.read(8))[0]
-            except struct.error:
-                break  # End of file
-
-            bitmap_size = int(config["blocks_per_segment"] / 8)
-            bitmap_bytes = f.read(bitmap_size)
-
-            # Create numpy array from bitmap bytes
-            bitmap_np = np.unpackbits(
-                np.frombuffer(bitmap_bytes, dtype=np.uint8))
-
-            global_bitmap.append(
-                {"class_id": class_id, "disk_id": disk_id,
-                    "segment_id": segment_id, "bitmap_np": bitmap_np}
-            )
-
-    return global_bitmap
+def remaining_bytes(file_pointer) -> int:
+    """Returns the remaining bytes in a file from the current position of the file pointer."""
+    current_position = file_pointer.tell()
+    file_pointer.seek(0, os.SEEK_END)  # Go to the end of the file
+    end_position = file_pointer.tell()
+    # Return to the original position
+    file_pointer.seek(current_position, os.SEEK_SET)
+    return end_position - current_position
 
 
-def plot_bitmap(global_bitmap):
-    """Plots the bitmap for a single timestamp."""
-    fig, ax = plt.subplots()
-    plt.subplots_adjust(bottom=0.25)  # Adjust layout for the slider
+class GlobalBitMap:
+    config: Config
+    # dict [ (storage, disk, segment), list[(time, bitmap)]]
+    bitmap: dict[(int, int, int), list[(int, np.ndarray)]]
+    log_file: str
+    time: int = 1
 
-    # Initial plot
-    class_id = global_bitmap[0]["class_id"]
-    disk_id = global_bitmap[0]["disk_id"]
-    segment_id = global_bitmap[0]["segment_id"]
-    bitmap = global_bitmap[0]["bitmap_np"]
+    def __init__(self, log_file: str, config: Config):
+        self.config = config
+        self.log_file = log_file
+        self._initialize_bitmap()
+        self._build_global_bitmap()
 
-    # Reshape the bitmap to a square
-    size = int(np.ceil(bitmap.shape[0] ** 0.5))
-    bitmap_square = np.pad(
-        bitmap, (0, size * size - bitmap.shape[0]), "constant"
-    ).reshape(size, size)
-    im = ax.imshow(bitmap_square, cmap="gray_r")
+    def __str__(self):
+        return f"Log_file: {self.log_file}\n" + f"Time: {self.time}\n" + \
+            f"Config: {self.config}\n"
 
-    # Add rectangle around the bitmap
-    rect = patches.Rectangle(
-        (-0.5, -0.5), 1, len(bitmap), linewidth=1, edgecolor="r", facecolor="none"
-    )
-    ax.add_patch(rect)
+    def _initialize_bitmap(self):
+        self.bitmap = {}
+        for storage_id in range(self.config.num_storage_ids):
+            for disk_id in range(self.config.disks_of_storage_id(storage_id)):
+                used_blocks = 0
+                blocks_in_disk = self.config.blocks_of_disk(
+                    storage_id, disk_id)
+                while (used_blocks < blocks_in_disk):
+                    segment_size = min(
+                        self.config.blocks_per_segment, blocks_in_disk - used_blocks)
 
-    ax.set_title(f"Class: {class_id}, Disk: {disk_id}, Segment: {segment_id}")
-    ax.set_xlabel("Page")
-    ax.set_ylabel("Page")
-    ax.set_xticks([])
-    ax.set_yticks([])
+                    bitmap = np.packbits(np.zeros(segment_size, dtype=bool))
+                    self.bitmap[(storage_id, disk_id, used_blocks)] = [
+                        (0, bitmap)]
+                    used_blocks += segment_size
 
-    # Create slider
-    # Position and size of the slider
-    ax_slider = plt.axes([0.25, 0.1, 0.65, 0.03])
-    slider = Slider(
-        ax_slider,
-        "Timestamp",
-        0,
-        len(global_bitmap) - 1,
-        valinit=0,
-        valstep=1,
-    )
+    def _build_global_bitmap(self):
+        """Builds a global bitmap representation for each time step."""
+        with open(self.log_file, "rb") as f:
+            # Skip the global header (already parsed)
+            f.seek(1 + 2 * self.config.num_storage_ids + 8 *
+                   sum(self.config.disks_per_storage_id) + 8)
 
-    def update(val):
-        timestamp = int(slider.val)
-        class_id = global_bitmap[timestamp]["class_id"]
-        disk_id = global_bitmap[timestamp]["disk_id"]
-        segment_id = global_bitmap[timestamp]["segment_id"]
-        bitmap_np = global_bitmap[timestamp]["bitmap_np"]
+            timesteps = remaining_bytes(f) // SIZE_PER_ALLOCATION
+
+            i = 0
+            # while True:
+            for i in tqdm(range(timesteps), desc="Building bitmap"):
+                # Read Allocation
+                try:
+                    op_type = struct.unpack("<B", f.read(1))[0]
+                    offset = struct.unpack("<Q", f.read(8))[0]
+                    num_blocks = struct.unpack("<L", f.read(4))[0]
+                except struct.error:
+                    break  # End of file
+
+                storage_id, disk_id, segment_id, block_offset = parse_disk_offset(
+                    offset)
+                segment_offset = block_offset % self.config.blocks_per_segment
+
+                # Update the bitmap at (storage_id, disk_id, segment_id) with
+                # op_type at block_offset and size
+                last_entry = self.bitmap[(storage_id, disk_id, segment_id)][-1]
+                new_bitmap = np.unpackbits(last_entry[1]).copy()
+                new_bitmap[segment_offset: segment_offset+num_blocks] = op_type
+                new_bitmap = np.packbits(new_bitmap)
+                self.bitmap[(storage_id, disk_id, segment_id)
+                            ].append((self.time, new_bitmap))
+                self.time += 1
+
+    # Get the global bitmap at time. If no time is provided return the bitmap
+    # of the last timestep.
+    def get(self, time: int = None) -> np.array:
+        if time is None or time > self.time:
+            time = self.time
+        if time < 0:
+            raise IndexError("Time has to be non-negative")
+
+        num_blocks = sum(sum(self.config.blocks_per_disk[storage_id]) for storage_id in range(
+            self.config.num_storage_ids))
+        bitmap = np.zeros(num_blocks, dtype=np.uint8)
+        start = 0
+        for storage_id in range(self.config.num_storage_ids):
+            local_bitmap = self.get_storage(storage_id, time)
+            bitmap[start:start+len(local_bitmap)] = local_bitmap.copy()
+            start += len(local_bitmap)
+
+        return bitmap
+
+    # Get the bitmap of a storage id at time. If no time is provided return the
+    # bitmap of the last timestep.
+    # If it doesn't match with the config throw an errer
+    def get_storage(self, storage_id: int, time: int = None) -> np.array:
+        if time is None or time > self.time:
+            time = self.time
+        if time < 0:
+            raise IndexError("Time has to be non-negative")
+        if storage_id >= self.config.num_storage_ids or storage_id < 0:
+            raise IndexError(f"Tried to access storage with id {
+                             storage_id} of 0-{self.config.num_storage_ids - 1}")
+        if self.config.disks_of_storage_id(storage_id) == 0:
+            return np.zeros(0)
+
+        num_blocks = sum(self.config.blocks_per_disk[storage_id])
+        bitmap = np.zeros(num_blocks, dtype=np.uint8)
+        start = 0
+        for disk_id in range(self.config.disks_of_storage_id(storage_id)):
+            local_bitmap = self.get_disk(storage_id, disk_id, time)
+            bitmap[start:start+len(local_bitmap)] = local_bitmap.copy()
+            start += len(local_bitmap)
+
+        return bitmap
+
+    # Get the bitmap of a disk id at time. If no time is provided return the
+    # bitmap of the last timestep.
+    # If it doesn't match with the config throw an errer
+    def get_disk(self, storage_id: int, disk_id: int, time: int = None) -> np.array:
+        if time is None or time > self.time:
+            time = self.time
+        if time < 0:
+            raise IndexError("Time has to be non-negative")
+        if storage_id >= self.config.num_storage_ids or storage_id < 0:
+            raise IndexError(f"Tried to access storage with id {
+                             storage_id} of 0-{self.config.num_storage_ids - 1}")
+        if self.config.disks_of_storage_id(storage_id) == 0:
+            return np.zeros(0)
+        if disk_id >= self.config.disks_of_storage_id(storage_id) or disk_id < 0:
+            raise IndexError(f"Tried to access disk with id {
+                             disk_id} of 0-{self.config.disks_of_storage_id(storage_id) - 1}")
+
+        num_blocks = config.blocks_of_disk(storage_id, disk_id)
+        bitmap = np.zeros(num_blocks, dtype=np.uint8)
+        blocks_per_segment = self.config.blocks_per_segment
+        entries = filter(lambda k: k[0] ==
+                         storage_id and k[1] == disk_id, self.bitmap)
+
+        for entry in entries:
+            segment_id = entry[2]
+            time, bitmap_at_time = self._binary_search_time(
+                time, entry)
+            end = min(segment_id + blocks_per_segment,
+                      self.config.blocks_of_disk(entry[0], entry[1]))
+
+            bitmap[segment_id:end] = np.unpackbits(bitmap_at_time)
+
+            return bitmap
+
+    def _binary_search_time(self, time: int, entry: (int, int, int)) -> (int, np.array):
+        bitmaps = self.bitmap[entry]
+        left = 0
+        right = len(bitmaps) - 1
+        result = None
+        while left <= right:
+            middle = floor((left + right) / 2)
+            if bitmaps[middle][0] == time:
+                return bitmaps[middle]
+            elif bitmaps[middle][0] < time:
+                result = bitmaps[middle]
+                left = middle + 1
+            else:
+                right = middle - 1
+
+        return result
+
+    def plot(self):
+        """Plots the bitmap with an interactive slider for timestamp selection."""
+
+        fig, ax = plt.subplots()
+        plt.subplots_adjust(bottom=0.25)
+
+        # Initial plot (last timestamp)
+        bitmap_np = self.get()
 
         # Calculate the size of the square
         size = int(np.ceil(bitmap_np.shape[0] ** 0.5))
-
-        # Reshape the bitmap to a square
         bitmap_square = np.pad(
             bitmap_np, (0, size * size - bitmap_np.shape[0]), "constant"
         ).reshape(size, size)
 
-        im.set_data(bitmap_square)
-        ax.set_title(f"Class: {class_id}, Disk: {
-                     disk_id}, Segment: {segment_id}")
-        fig.canvas.draw_idle()
+        im = ax.imshow(bitmap_square, cmap="gray_r")
 
-    slider.on_changed(update)
+        ax.set_title(f"Timestamp: {self.time - 1}")
+        ax.set_xlabel("Block")
+        ax.set_ylabel("Block")
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-    plt.show()
+        # Create slider
+        ax_slider = plt.axes([0.25, 0.1, 0.65, 0.03])
+        slider = Slider(
+            ax_slider,
+            "Timestamp",
+            0,
+            self.time - 1,
+            valinit=self.time - 1,
+            valstep=1,
+        )
+
+        def update(val):
+            timestamp = int(slider.val)
+            bitmap_np = self.get(timestamp)
+
+            # Calculate the size of the square
+            size = int(np.ceil(bitmap_np.shape[0] ** 0.5))
+            bitmap_square = np.pad(
+                bitmap_np, (0, size * size - bitmap_np.shape[0]), "constant"
+            ).reshape(size, size)
+
+            im.set_data(bitmap_square)
+            ax.set_title(f"Timestamp: {timestamp}")
+            fig.canvas.draw_idle()
+
+        slider.on_changed(update)
+
+        plt.show()
 
 
 if __name__ == "__main__":
-    # NOTE: This script needs ~10-15 times the memory that the log file has
     if len(sys.argv) < 2:
         print("Please provide a file to visualize!")
         exit(1)
     log_file = sys.argv[1]
 
     config = parse_header(log_file)
-    global_bitmap = build_global_bitmap(log_file, config)
-    print(config)
-    print(len(global_bitmap))
-    plot_bitmap(global_bitmap)
+    global_bitmap = GlobalBitMap(log_file, config)
+    print(global_bitmap)
+
+    global_bitmap.plot()
