@@ -180,7 +180,7 @@ class GlobalBitMap:
     # Get the bitmap of a storage id at time. If no time is provided return the
     # bitmap of the last timestep.
     # If it doesn't match with the config throw an errer
-    def get_storage(self, output_bitmap: np.array, storage_id: int, time: int = None) -> np.array:
+    def get_storage(self, output_bitmap: np.array, storage_id: int, time: int = None) -> int:
         if time is None or time > self.time:
             time = self.time
         if time < 0:
@@ -191,8 +191,6 @@ class GlobalBitMap:
         if self.config.disks_of_storage_id(storage_id) == 0:
             return np.zeros(0)
 
-        num_blocks = sum(self.config.blocks_per_disk[storage_id])
-        # bitmap = np.zeros(num_blocks, dtype=np.uint8)
         start = 0
         for disk_id in range(self.config.disks_of_storage_id(storage_id)):
             start += self.get_disk(
