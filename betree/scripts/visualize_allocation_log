@@ -7,7 +7,7 @@ import os
 import struct
 import sys
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
+from matplotlib.widgets import Slider, CheckButtons
 import numpy as np
 from tqdm import tqdm
 
@@ -54,6 +54,9 @@ class Config:
 
     def disks_of_storage_id(self, storage_id: int) -> int:
         return self.disks_per_storage_id[storage_id]
+
+    def blocks_of_storage_id(self, storage_id: int) -> int:
+        return sum(self.blocks_of_disk(storage_id, disk_id) for disk_id in range(self.disks_of_storage_id(storage_id)))
 
     def blocks_of_disk(self, storage_id: int, disk_id: int) -> int:
         return self.blocks_per_disk[storage_id][disk_id]
@@ -138,7 +141,6 @@ class GlobalBitMap:
             i = 0
             # while True:
             for i in tqdm(range(timesteps), desc="Building bitmap"):
-                self.time += 1
                 # Read Allocation
                 try:
                     op_type = struct.unpack("<B", f.read(1))[0]
@@ -146,6 +148,8 @@ class GlobalBitMap:
                     num_blocks = struct.unpack("<L", f.read(4))[0]
                 except struct.error:
                     break  # End of file
+
+                self.time += 1
 
                 storage_id, disk_id, segment_id, block_offset = parse_disk_offset(
                     offset)
@@ -198,9 +202,16 @@ class GlobalBitMap:
 
         return start
 
+    def get_storage_bitmap(self, storage_id: int, time: int = None) -> np.array:
+        num_blocks = self.config.blocks_of_storage_id(storage_id)
+        bitmap = np.zeros(num_blocks, dtype=np.uint8)
+        self.get_storage(bitmap, storage_id, time)
+        return bitmap
+
     # Get the bitmap of a disk id at time. If no time is provided return the
     # bitmap of the last timestep.
     # If it doesn't match with the config throw an errer
+
     def get_disk(self, output_bitmap: np.array, storage_id: int, disk_id: int, time: int = None) -> int:
         if time is None or time > self.time:
             time = self.time
@@ -230,6 +241,12 @@ class GlobalBitMap:
 
         return end
 
+    def get_disk_bitmap(self, storage_id: int, disk_id: int, time: int = None) -> np.array:
+        num_blocks = self.config.blocks_of_disk(storage_id, disk_id)
+        bitmap = np.zeros(num_blocks, dtype=np.uint8)
+        self.get_disk(bitmap, storage_id, disk_id, time)
+        return bitmap
+
     @functools.lru_cache(1024)
     def _binary_search_time(self, time: int, entry: (int, int, int)) -> (int, np.array):
         bitmaps = self.bitmap[entry]
@@ -248,7 +265,7 @@ class GlobalBitMap:
 
         return result
 
-    def plot(self):
+    def plot_simple(self):
         """Plots the bitmap with an interactive slider for timestamp selection."""
 
         fig, ax = plt.subplots()
@@ -262,9 +279,7 @@ class GlobalBitMap:
         bitmap_square = np.pad(
             bitmap_np, (0, size * size - bitmap_np.shape[0]), "constant"
         ).reshape(size, size)
-
-        im = ax.imshow(bitmap_square, cmap="gray_r")
-
+        im = ax.imshow(bitmap_square, cmap="gray_r", interpolation=None)
         ax.set_title(f"Timestamp: {self.time - 1}")
         ax.set_xlabel("Block")
         ax.set_ylabel("Block")
@@ -297,8 +312,104 @@ class GlobalBitMap:
             fig.canvas.draw_idle()
 
         slider.on_changed(update)
-
         plt.show()
+
+    def plot(self):
+        """Plots the bitmap with an interactive slider for timestamp selection and checkboxes for storage toggling."""
+        form = [
+            ["storage_0", "storage_1", "storage_2", "storage_3"],
+            ["frag_0", "frag_1", "frag_2", "frag_3"],
+            ["frag_global", "frag_global", "frag_global", "frag_global"],
+            ["slider", "slider", "slider", "slider"],
+        ]
+        gs_kw = dict(width_ratios=[1, 1, 1, 1], height_ratios=[3, 1, 1, 0.03])
+        fig, axd = plt.subplot_mosaic(
+            form, gridspec_kw=gs_kw, layout="constrained")
+
+        ims = {}
+        # Initial plot (last timestamp)
+        for storage_id in range(self.config.num_storage_ids):
+            name = f"storage_{storage_id}"
+            storage_bitmap = self.get_storage_bitmap(storage_id)
+            resized_bitmap = reshape_to_axes(storage_bitmap, axd[name], fig)
+
+            ims[name] = {}
+            ims[name]["bm"] = storage_bitmap
+            ims[name]["im"] = axd[name].imshow(
+                resized_bitmap, cmap="gray_r", aspect="auto", interpolation=None)
+            axd[name].set_title(f"Storage {storage_id}")
+            axd[name].set_xlabel("Block")
+            axd[name].set_ylabel("Block")
+            axd[name].set_xticks([])
+            axd[name].set_yticks([])
+
+        slider = Slider(
+            axd["slider"],
+            "Timestamp",
+            0,
+            self.time - 1,
+            valinit=self.time - 1,
+            valstep=1,
+        )
+
+        def update(val):
+            timestamp = int(slider.val)
+            for storage_id in range(self.config.num_storage_ids):
+                name = f"storage_{storage_id}"
+                self.get_storage(ims[name]["bm"], storage_id, timestamp)
+                resized_bitmap = reshape_to_axes(
+                    ims[name]["bm"], axd[name], fig)
+
+                ims[name]["im"].set_data(resized_bitmap)
+
+            fig.canvas.draw_idle()
+
+        # identify_axes(axd)
+        slider.on_changed(update)
+        plt.show()
+
+
+def reshape_to_axes(arr_1d, ax, fig):
+    """
+    Reshapes a 1D NumPy array to a 2D array with dimensions close to the
+    aspect ratio of the given Matplotlib axes.
+
+    Args:
+      arr_1d: The 1D NumPy array to reshape.
+      ax: The Matplotlib axes object.
+      fig: The Matplotlib figure object.
+
+    Returns:
+      A 2D NumPy array with dimensions close to the axes aspect ratio.
+    """
+
+    # Get axes dimensions in inches
+    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    width, height = bbox.width, bbox.height
+
+    # Calculate target aspect ratio
+    target_aspect = width / height
+
+    # Calculate the ideal number of columns for the target aspect ratio
+    total_pixels = len(arr_1d)
+    cols = int(np.sqrt(total_pixels * target_aspect))
+
+    # Adjust columns to find the closest aspect ratio while using all pixels
+    rows = total_pixels // cols
+    while rows * cols != total_pixels:
+        cols -= 1
+        rows = total_pixels // cols
+
+    # Reshape the 1D array to the calculated dimensions
+    arr_2d = arr_1d.reshape(rows, cols)
+
+    return arr_2d
+
+
+def identify_axes(ax_dict, fontsize=24):
+    kw = dict(ha="center", va="center", fontsize=fontsize, color="darkgrey")
+    for k, ax in ax_dict.items():
+        ax.text(0.5, 0.5, k, transform=ax.transAxes, **kw)
 
 
 if __name__ == "__main__":
@@ -311,4 +422,5 @@ if __name__ == "__main__":
     global_bitmap = GlobalBitMap(log_file, config)
     print(global_bitmap)
 
+    global_bitmap.plot_simple()
     global_bitmap.plot()
