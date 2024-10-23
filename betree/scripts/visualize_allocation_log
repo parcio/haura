@@ -342,6 +342,10 @@ class GlobalBitMap:
             axd[name].set_ylabel("Block")
             axd[name].set_xticks([])
             axd[name].set_yticks([])
+            bbox = axd[name].get_window_extent().transformed(
+                fig.dpi_scale_trans.inverted())
+            ims[name]["width"] = bbox.width
+            ims[name]["height"] = bbox.height
 
         slider = Slider(
             axd["slider"],
@@ -357,8 +361,8 @@ class GlobalBitMap:
             for storage_id in range(self.config.num_storage_ids):
                 name = f"storage_{storage_id}"
                 self.get_storage(ims[name]["bm"], storage_id, timestamp)
-                resized_bitmap = reshape_to_axes(
-                    ims[name]["bm"], axd[name], fig)
+                resized_bitmap = reshape_to_close_aspect(
+                    ims[name]["bm"], ims[name]["width"], ims[name]["height"])
 
                 ims[name]["im"].set_data(resized_bitmap)
 
@@ -404,6 +408,37 @@ def reshape_to_axes(arr_1d, ax, fig):
     arr_2d = arr_1d.reshape(rows, cols)
 
     return arr_2d
+
+
+def reshape_to_close_aspect(arr_1d, width, height):
+    """
+    Reshapes a 1D NumPy array to a 2D array with dimensions close to the
+    aspect ratio of the given width and height
+    """
+    rows, cols = get_close_aspect(width, height, len(arr_1d))
+
+    # Reshape the 1D array to the calculated dimensions
+    arr_2d = arr_1d.reshape(rows, cols)
+
+    return arr_2d
+
+
+@functools.lru_cache(128)
+def get_close_aspect(width, height, len) -> (int, int):
+    # Calculate target aspect ratio
+    target_aspect = width / height
+
+    # Calculate the ideal number of columns for the target aspect ratio
+    total_pixels = len
+    cols = int(np.sqrt(total_pixels * target_aspect))
+
+    # Adjust columns to find the closest aspect ratio while using all pixels
+    rows = total_pixels // cols
+    while rows * cols != total_pixels:
+        cols -= 1
+        rows = total_pixels // cols
+
+    return rows, cols
 
 
 def identify_axes(ax_dict, fontsize=24):
