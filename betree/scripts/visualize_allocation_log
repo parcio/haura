@@ -289,8 +289,8 @@ class GlobalBitMap:
         )
         bitmap_square = padded_bitmap.reshape(size, size)
         im = ax.imshow(bitmap_square, cmap="gray_r",
-                       interpolation=None, animated=True)
-        ax.set_title(f"Global Storage Bitmap")
+                       interpolation=None)
+        ax.set_title("Global Storage Bitmap")
         ax.set_xlabel("Block")
         ax.set_ylabel("Block")
         ax.set_xticks([])
@@ -309,6 +309,10 @@ class GlobalBitMap:
 
         def update(val):
             timestamp = int(slider.val)
+            if timestamp > self.time - 1:
+                slider.set_val(self.time - 1)
+                return
+
             self.get(padded_bitmap, timestamp)
             bitmap_square = padded_bitmap.reshape(size, size)
 
