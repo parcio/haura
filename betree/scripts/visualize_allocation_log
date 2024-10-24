@@ -273,55 +273,6 @@ class GlobalBitMap:
 
         return result
 
-    def plot_simple(self):
-        """Plots the bitmap with an interactive slider for timestamp selection."""
-
-        fig, ax = plt.subplots()
-        plt.subplots_adjust(bottom=0.25)
-
-        # Initial plot
-        bitmap_np = self.get_bitmap(1)
-
-        # Calculate the size of the square
-        size = int(np.ceil(bitmap_np.shape[0] ** 0.5))
-        padded_bitmap = np.pad(
-            bitmap_np, (0, size * size - bitmap_np.shape[0]), "constant"
-        )
-        bitmap_square = padded_bitmap.reshape(size, size)
-        im = ax.imshow(bitmap_square, cmap="gray_r",
-                       interpolation=None)
-        ax.set_title("Global Storage Bitmap")
-        ax.set_xlabel("Block")
-        ax.set_ylabel("Block")
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-        # Create slider
-        ax_slider = plt.axes([0.25, 0.1, 0.65, 0.03])
-        slider = Slider(
-            ax_slider,
-            "Timestamp",
-            0,
-            self.time - 1,
-            valinit=1,
-            valstep=1,
-        )
-
-        def update(val):
-            timestamp = int(slider.val)
-            if timestamp > self.time - 1:
-                slider.set_val(self.time - 1)
-                return
-
-            self.get(padded_bitmap, timestamp)
-            bitmap_square = padded_bitmap.reshape(size, size)
-
-            im.set_data(bitmap_square)
-            fig.canvas.draw_idle()
-
-        slider.on_changed(update)
-        plt.show()
-
     def plot(self):
         """Plots the bitmap with an interactive slider for timestamp selection and checkboxes for storage toggling."""
         form = [
