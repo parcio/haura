@@ -166,18 +166,23 @@ class GlobalBitMap:
 
     # Get the global bitmap at time. If no time is provided return the bitmap
     # of the last timestep.
-    def get(self, time: int = None) -> np.array:
+    def get(self, output_bitmap: np.array, time: int = None) -> int:
         if time is None or time > self.time:
             time = self.time
         if time < 0:
             raise IndexError("Time has to be non-negative")
 
+        start = 0
+        for storage_id in range(self.config.num_storage_ids):
+            start += self.get_storage(output_bitmap[start:], storage_id, time)
+
+        return start
+
+    def get_bitmap(self, time: int = None) -> np.array:
         num_blocks = sum(sum(self.config.blocks_per_disk[storage_id]) for storage_id in range(
             self.config.num_storage_ids))
         bitmap = np.zeros(num_blocks, dtype=np.uint8)
-        start = 0
-        for storage_id in range(self.config.num_storage_ids):
-            start += self.get_storage(bitmap[start:], storage_id, time)
+        self.get(bitmap, time)
 
         return bitmap
 
@@ -271,16 +276,18 @@ class GlobalBitMap:
         fig, ax = plt.subplots()
         plt.subplots_adjust(bottom=0.25)
 
-        # Initial plot (last timestamp)
-        bitmap_np = self.get()
+        # Initial plot
+        bitmap_np = self.get_bitmap(1)
 
         # Calculate the size of the square
         size = int(np.ceil(bitmap_np.shape[0] ** 0.5))
-        bitmap_square = np.pad(
+        padded_bitmap = np.pad(
             bitmap_np, (0, size * size - bitmap_np.shape[0]), "constant"
-        ).reshape(size, size)
-        im = ax.imshow(bitmap_square, cmap="gray_r", interpolation=None)
-        ax.set_title(f"Timestamp: {self.time - 1}")
+        )
+        bitmap_square = padded_bitmap.reshape(size, size)
+        im = ax.imshow(bitmap_square, cmap="gray_r",
+                       interpolation=None, animated=True)
+        ax.set_title(f"Global Storage Bitmap")
         ax.set_xlabel("Block")
         ax.set_ylabel("Block")
         ax.set_xticks([])
@@ -293,22 +300,16 @@ class GlobalBitMap:
             "Timestamp",
             0,
             self.time - 1,
-            valinit=self.time - 1,
+            valinit=1,
             valstep=1,
         )
 
         def update(val):
             timestamp = int(slider.val)
-            bitmap_np = self.get(timestamp)
-
-            # Calculate the size of the square
-            size = int(np.ceil(bitmap_np.shape[0] ** 0.5))
-            bitmap_square = np.pad(
-                bitmap_np, (0, size * size - bitmap_np.shape[0]), "constant"
-            ).reshape(size, size)
+            self.get(padded_bitmap, timestamp)
+            bitmap_square = padded_bitmap.reshape(size, size)
 
             im.set_data(bitmap_square)
-            ax.set_title(f"Timestamp: {timestamp}")
             fig.canvas.draw_idle()
 
         slider.on_changed(update)
@@ -326,16 +327,19 @@ class GlobalBitMap:
         fig, axd = plt.subplot_mosaic(
             form, gridspec_kw=gs_kw, layout="constrained")
 
-        ims = {}
-        # Initial plot (last timestamp)
+        ims = []
+        # Initial plot
         for storage_id in range(self.config.num_storage_ids):
             name = f"storage_{storage_id}"
+            # NOTE: We first have to plot a later timestamp to initialize the size of the axes else
+            # the bitmaps of other storages aren't correctly drawn. We manually set the starting
+            # time to 1 shortly before plotting.
             storage_bitmap = self.get_storage_bitmap(storage_id)
             resized_bitmap = reshape_to_axes(storage_bitmap, axd[name], fig)
 
-            ims[name] = {}
-            ims[name]["bm"] = storage_bitmap
-            ims[name]["im"] = axd[name].imshow(
+            ims.append({})
+            ims[storage_id]["bm"] = storage_bitmap
+            ims[storage_id]["im"] = axd[name].imshow(
                 resized_bitmap, cmap="gray_r", aspect="auto", interpolation=None)
             axd[name].set_title(f"Storage {storage_id}")
             axd[name].set_xlabel("Block")
@@ -344,8 +348,8 @@ class GlobalBitMap:
             axd[name].set_yticks([])
             bbox = axd[name].get_window_extent().transformed(
                 fig.dpi_scale_trans.inverted())
-            ims[name]["width"] = bbox.width
-            ims[name]["height"] = bbox.height
+            ims[storage_id]["width"] = bbox.width
+            ims[storage_id]["height"] = bbox.height
 
         slider = Slider(
             axd["slider"],
@@ -357,19 +361,19 @@ class GlobalBitMap:
         )
 
         def update(val):
-            timestamp = int(slider.val)
-            for storage_id in range(self.config.num_storage_ids):
-                name = f"storage_{storage_id}"
-                self.get_storage(ims[name]["bm"], storage_id, timestamp)
-                resized_bitmap = reshape_to_close_aspect(
-                    ims[name]["bm"], ims[name]["width"], ims[name]["height"])
+            timestep = int(slider.val)
 
-                ims[name]["im"].set_data(resized_bitmap)
+            for storage_id in range(self.config.num_storage_ids):
+                self.get_storage(ims[storage_id]["bm"], storage_id, timestep)
+                resized_bitmap = reshape_to_close_aspect(
+                    ims[storage_id]["bm"], ims[storage_id]["width"], ims[storage_id]["height"])
+
+                ims[storage_id]["im"].set_data(resized_bitmap)
 
             fig.canvas.draw_idle()
 
-        # identify_axes(axd)
         slider.on_changed(update)
+        slider.set_val(1)
         plt.show()
 
 
@@ -423,7 +427,7 @@ def reshape_to_close_aspect(arr_1d, width, height):
     return arr_2d
 
 
-@functools.lru_cache(128)
+@ functools.lru_cache(128)
 def get_close_aspect(width, height, len) -> (int, int):
     # Calculate target aspect ratio
     target_aspect = width / height
