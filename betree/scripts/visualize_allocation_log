@@ -113,7 +113,7 @@ class GlobalBitMap:
         self._build_global_bitmap()
 
     def __str__(self):
-        return f"Log_file: {self.log_file}\n" + f"Time: {self.time}\n" + \
+        return f"Log_file: {self.log_file}\nTime: {self.time}\n" + \
             f"Config: {self.config}\n"
 
     def _initialize_bitmap(self):
@@ -201,7 +201,7 @@ class GlobalBitMap:
             raise IndexError(f"Tried to access storage with id {
                              storage_id} of 0-{self.config.num_storage_ids - 1}")
         if self.config.disks_of_storage_id(storage_id) == 0:
-            return np.zeros(0)
+            return 0
 
         start = 0
         for disk_id in range(self.config.disks_of_storage_id(storage_id)):
@@ -228,7 +228,7 @@ class GlobalBitMap:
             raise IndexError(f"Tried to access storage with id {
                              storage_id} of 0-{self.config.num_storage_ids - 1}")
         if self.config.disks_of_storage_id(storage_id) == 0:
-            return np.zeros(0)
+            return 0
         if disk_id >= self.config.disks_of_storage_id(storage_id) or disk_id < 0:
             raise IndexError(f"Tried to access disk with id {
                              disk_id} of 0-{self.config.disks_of_storage_id(storage_id) - 1}")
