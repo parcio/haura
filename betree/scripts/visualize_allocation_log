@@ -98,6 +98,9 @@ def remaining_bytes(file_pointer) -> int:
 
 class GlobalBitMap:
     config: Config
+    # NOTE: the bitmap is stored as packed bits and has to be unpacked for accurate plotting,
+    # based on some experimentation storing unpacked (and using 8x more memory) isn't worth it for
+    # faster plotting
     # dict [ (storage, disk, segment), list[(time, bitmap)]]
     bitmap: dict[(int, int, int), list[(int, np.ndarray)]]
     log_file: str
