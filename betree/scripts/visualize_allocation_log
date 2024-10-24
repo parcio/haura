@@ -276,14 +276,19 @@ class GlobalBitMap:
     def plot(self):
         """Plots the bitmap with an interactive slider for timestamp selection and checkboxes for storage toggling."""
         form = [
-            ["storage_0", "storage_1", "storage_2", "storage_3"],
-            ["frag_0", "frag_1", "frag_2", "frag_3"],
-            ["frag_global", "frag_global", "frag_global", "frag_global"],
-            ["slider", "slider", "slider", "slider"],
+            [".", ".", ".", ".", ".", "."],
+            [".", "storage_0", "storage_1", "storage_2", "storage_3", "."],
+            [".", "frag_0", "frag_1", "frag_2", "frag_3", "."],
+            [".", "frag_global", "frag_global", "frag_global", "frag_global", "."],
+            [".", "slider", "slider", "slider", "slider", "."],
+            [".", ".", ".", ".", ".", "."],
         ]
-        gs_kw = dict(width_ratios=[1, 1, 1, 1], height_ratios=[3, 1, 1, 0.03])
+        gs_kw = dict(width_ratios=[0.03, 1, 1, 1, 1, 0.03], height_ratios=[
+                     0.03, 3, 1, 1, 0.1, 0.03])
         fig, axd = plt.subplot_mosaic(
             form, gridspec_kw=gs_kw, layout="constrained")
+        fig.set_size_inches(16, 9)
+        fig.set_dpi(1920/16)
 
         ims = []
         # Initial plot
@@ -309,17 +314,24 @@ class GlobalBitMap:
             ims[storage_id]["width"] = bbox.width
             ims[storage_id]["height"] = bbox.height
 
+        # Create the format specifier with appropriate spacing to prevent moving of axes
+        max_digits = len(str(self.time - 1))
+        valfmt = f"%{max_digits}d"
         slider = Slider(
             axd["slider"],
-            "Timestamp",
+            "",
             0,
             self.time - 1,
             valinit=self.time - 1,
             valstep=1,
+            valfmt=valfmt,
         )
 
         def update(val):
             timestep = int(slider.val)
+            if timestep > self.time - 1:
+                slider.set_val(self.time - 1)
+                return
 
             for storage_id in range(self.config.num_storage_ids):
                 self.get_storage(ims[storage_id]["bm"], storage_id, timestep)
@@ -419,5 +431,4 @@ if __name__ == "__main__":
     global_bitmap = GlobalBitMap(log_file, config)
     print(global_bitmap)
 
-    global_bitmap.plot_simple()
     global_bitmap.plot()
