@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
-
 import functools
 from math import floor
 import os
 import struct
 import sys
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, CheckButtons
+from matplotlib.animation import FFMpegWriter
+from matplotlib.widgets import Slider
 import numpy as np
 from tqdm import tqdm
 
@@ -219,7 +219,6 @@ class GlobalBitMap:
     # Get the bitmap of a disk id at time. If no time is provided return the
     # bitmap of the last timestep.
     # If it doesn't match with the config throw an errer
-
     def get_disk(self, output_bitmap: np.array, storage_id: int, disk_id: int, time: int = None) -> int:
         if time is None or time > self.time:
             time = self.time
@@ -343,6 +342,15 @@ class GlobalBitMap:
             fig.canvas.draw_idle()
 
         slider.on_changed(update)
+
+        slider.set_val(1)
+        writer = FFMpegWriter(fps=60, bitrate=1800)
+        writer.setup(fig, "test.mp4", dpi=100)
+        for i in tqdm(range(self.time)):
+            slider.set_val(slider.val + 1)
+            writer.grab_frame()
+        writer.finish()
+
         slider.set_val(1)
         plt.show()
 
