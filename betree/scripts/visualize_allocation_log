@@ -5,6 +5,7 @@ from math import floor
 import os
 import struct
 import sys
+
 import matplotlib.pyplot as plt
 from matplotlib.animation import FFMpegWriter
 from matplotlib.widgets import Slider
@@ -105,16 +106,18 @@ class GlobalBitMap:
     bitmap: dict[(int, int, int), list[(int, np.ndarray)]]
     log_file: str
     time: int = 0
+    disk_begins: list[list] = []
 
     def __init__(self, log_file: str, config: Config):
         self.config = config
         self.log_file = log_file
         self._initialize_bitmap()
+        self._initialize_begins()
         self._build_global_bitmap()
 
     def __str__(self):
         return f"Log_file: {self.log_file}\nTime: {self.time}\n" + \
-            f"Config: {self.config}\n"
+            f"Config: {self.config}\nDisk_begins: {self.disk_begins}\n"
 
     def _initialize_bitmap(self):
         self.bitmap = {}
@@ -131,6 +134,14 @@ class GlobalBitMap:
                     self.bitmap[(storage_id, disk_id, used_blocks)] = [
                         (0, bitmap)]
                     used_blocks += segment_size
+
+    def _initialize_begins(self):
+        for storage_id in range(self.config.num_storage_ids):
+            self.disk_begins.append([])
+            offset = 0
+            for disk_id in range(self.config.disks_of_storage_id(storage_id)):
+                self.disk_begins[storage_id].append(offset)
+                offset += self.config.blocks_of_disk(storage_id, disk_id)
 
     def _build_global_bitmap(self):
         """Builds a global bitmap representation for each time step."""
@@ -297,12 +308,15 @@ class GlobalBitMap:
             # the bitmaps of other storages aren't correctly drawn. We manually set the starting
             # time to 1 shortly before plotting.
             storage_bitmap = self.get_storage_bitmap(storage_id)
-            resized_bitmap = reshape_to_axes(storage_bitmap, axd[name], fig)
+            colored_bitmap = self._color_disks(storage_bitmap, storage_id)
+            resized_bitmap = reshape_to_axes(
+                colored_bitmap, axd[name], fig)
 
             ims.append({})
-            ims[storage_id]["bm"] = storage_bitmap
+            ims[storage_id]["storage_bitmap"] = storage_bitmap
+            ims[storage_id]["resized_bitmap"] = resized_bitmap
             ims[storage_id]["im"] = axd[name].imshow(
-                resized_bitmap, cmap="gray_r", aspect="auto", interpolation=None)
+                resized_bitmap, aspect="auto", interpolation=None)
             axd[name].set_title(f"Storage {storage_id}")
             axd[name].set_xlabel("Block")
             axd[name].set_ylabel("Block")
@@ -333,11 +347,14 @@ class GlobalBitMap:
                 return
 
             for storage_id in range(self.config.num_storage_ids):
-                self.get_storage(ims[storage_id]["bm"], storage_id, timestep)
+                self.get_storage(
+                    ims[storage_id]["storage_bitmap"], storage_id, timestep)
                 resized_bitmap = reshape_to_close_aspect(
-                    ims[storage_id]["bm"], ims[storage_id]["width"], ims[storage_id]["height"])
+                    ims[storage_id]["storage_bitmap"], ims[storage_id]["width"], ims[storage_id]["height"])
+                ims[storage_id]["resized_bitmap"][:, :, 3] = resized_bitmap * 255
 
-                ims[storage_id]["im"].set_data(resized_bitmap)
+                ims[storage_id]["im"].set_data(
+                    ims[storage_id]["resized_bitmap"])
 
             fig.canvas.draw_idle()
 
@@ -354,11 +371,43 @@ class GlobalBitMap:
         slider.set_val(1)
         plt.show()
 
+    def _color_disks(self, storage_bitmap: np.array, storage_id: int) -> np.ndarray:
+        """Colors the disks within a storage differently."""
+        colored_bitmap = np.zeros((len(storage_bitmap), 4), dtype=np.uint8)
+        colored_bitmap[:, 3] = storage_bitmap
+        for disk_id in range(self.config.disks_of_storage_id(storage_id)):
+            start = self.disk_begins[storage_id][disk_id]
+            end = start + self.config.blocks_of_disk(storage_id, disk_id)
+            length = end - start
 
-def reshape_to_axes(arr_1d, ax, fig):
+            color = id_to_color(disk_id)
+            color_array = np.tile(color, (length, 1))
+
+            colored_bitmap[start:end, 0:3] = color_array
+
+        return colored_bitmap
+
+
+color_mapping = [
+    (0, 0, 0),
+    (0, 0, 255),
+    (0, 255, 0),
+    (0, 255, 255),
+    (255, 0, 0),
+    (255, 0, 255),
+    (255, 255, 0),
+    (255, 255, 255),
+]
+
+
+def id_to_color(id: int) -> (int, int, int):
+    return color_mapping[id % len(color_mapping)]
+
+
+def reshape_to_axes(arr, ax, fig):
     """
-    Reshapes a 1D NumPy array to a 2D array with dimensions close to the
-    aspect ratio of the given Matplotlib axes.
+    Reshapes the first dimension of a NumPy array to a array with the first two
+    dimensions close to the aspect ratio of the given Matplotlib axes.
 
     Args:
       arr_1d: The 1D NumPy array to reshape.
@@ -377,7 +426,7 @@ def reshape_to_axes(arr_1d, ax, fig):
     target_aspect = width / height
 
     # Calculate the ideal number of columns for the target aspect ratio
-    total_pixels = len(arr_1d)
+    total_pixels = len(arr)
     cols = int(np.sqrt(total_pixels * target_aspect))
 
     # Adjust columns to find the closest aspect ratio while using all pixels
@@ -386,10 +435,8 @@ def reshape_to_axes(arr_1d, ax, fig):
         cols -= 1
         rows = total_pixels // cols
 
-    # Reshape the 1D array to the calculated dimensions
-    arr_2d = arr_1d.reshape(rows, cols)
-
-    return arr_2d
+    # Reshape the array to the calculated dimensions
+    return arr.reshape(rows, cols, 4)
 
 
 def reshape_to_close_aspect(arr_1d, width, height):
@@ -405,7 +452,7 @@ def reshape_to_close_aspect(arr_1d, width, height):
     return arr_2d
 
 
-@ functools.lru_cache(128)
+@functools.lru_cache(128)
 def get_close_aspect(width, height, len) -> (int, int):
     # Calculate target aspect ratio
     target_aspect = width / height
