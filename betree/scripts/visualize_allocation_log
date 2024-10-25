@@ -383,7 +383,7 @@ class GlobalBitMap:
         fig.set_size_inches(16, 9)
         fig.set_dpi(1920/16)
 
-        self._plot_fragmentation(axd)
+        vlines = self._plot_fragmentation(axd)
 
         ims = []
         # Initial plot
@@ -393,9 +393,16 @@ class GlobalBitMap:
             # the bitmaps of other storages aren't correctly drawn. We manually set the starting
             # time to 1 shortly before plotting.
             storage_bitmap = self.get_storage_bitmap(storage_id)
-            colored_bitmap = self._color_disks(storage_bitmap, storage_id)
-            resized_bitmap = reshape_to_axes(
-                colored_bitmap, axd[name], fig)
+            if len(storage_bitmap) != 0:
+                colored_bitmap = self._color_disks(storage_bitmap, storage_id)
+                resized_bitmap = reshape_to_axes(
+                    colored_bitmap, axd[name], fig)
+            else:
+                storage_ax = axd[f"storage_{storage_id}"]
+                kw = dict(ha="center", va="center",
+                          fontsize=12, color="darkgrey")
+                storage_ax.text(
+                    0.5, 0.5, "[Empty]", transform=storage_ax.transAxes, **kw)
 
             ims.append({})
             ims[storage_id]["storage_bitmap"] = storage_bitmap
@@ -434,13 +441,17 @@ class GlobalBitMap:
             for storage_id in range(self.config.num_storage_ids):
                 self.get_storage(
                     ims[storage_id]["storage_bitmap"], storage_id, timestep)
-                resized_bitmap = reshape_to_close_aspect(
-                    ims[storage_id]["storage_bitmap"], ims[storage_id]["width"], ims[storage_id]["height"])
-                ims[storage_id]["resized_bitmap"][:, :, 3] = resized_bitmap * 255
+                if len(ims[storage_id]["storage_bitmap"]) != 0:
+                    resized_bitmap = reshape_to_close_aspect(
+                        ims[storage_id]["storage_bitmap"], ims[storage_id]["width"], ims[storage_id]["height"])
+                    ims[storage_id]["resized_bitmap"][:,
+                                                      :, 3] = resized_bitmap * 255
 
-                ims[storage_id]["im"].set_data(
-                    ims[storage_id]["resized_bitmap"])
+                    ims[storage_id]["im"].set_data(
+                        ims[storage_id]["resized_bitmap"])
+                    vlines[storage_id].set_xdata([timestep, timestep])
 
+            vlines["global"].set_xdata([timestep, timestep])
             fig.canvas.draw_idle()
 
         slider.on_changed(update)
@@ -456,27 +467,48 @@ class GlobalBitMap:
         slider.set_val(1)
         plt.show()
 
-    def _plot_fragmentation(self, axd):
+    def _plot_fragmentation(self, axd) -> dict:
         """Plots the fragmentation data."""
+        # Vertical lines that indicate the timestamp
+        vlines = {}
+
         for storage_id in range(self.config.num_storage_ids):
-            # Extract fragmentation values from storage_frag
-            frag_values = [frag for frag, _,
-                           _ in self.storage_frag[storage_id]]
-            axd[f"frag_{storage_id}"].plot(frag_values)
-            axd[f"frag_{storage_id}"].set_xlim([0, self.time - 1])
-            axd[f"frag_{storage_id}"].set_ylim([0, 1])
-            axd[f"frag_{storage_id}"].set_xlabel("Timestamp")
-            if storage_id == 0:
-                axd[f"frag_{storage_id}"].set_ylabel("Fragmentation")
+            frag_ax = axd[f"frag_{storage_id}"]
+            if self.config.blocks_of_storage_id(storage_id) != 0:
+                # Extract fragmentation values from storage_frag
+                frag_values = [frag for frag, _,
+                               _ in self.storage_frag[storage_id]]
+                frag_ax.plot(frag_values)
+                frag_ax.set_xlim([0, self.time - 1])
+                frag_ax.set_ylim([0, 1])
+                frag_ax.set_xlabel("Timestamp")
+                if storage_id == 0:
+                    frag_ax.set_ylabel("Fragmentation")
+
+                vlines[storage_id] = frag_ax.axvline(
+                    # Initial position at the end
+                    x=self.time - 1, color="red", linestyle="--", linewidth=1)
+            else:
+                kw = dict(ha="center", va="center",
+                          fontsize=12, color="darkgrey")
+                frag_ax.text(
+                    0.5, 0.5, "[Empty]", transform=frag_ax.transAxes, **kw)
 
         # Extract fragmentation values from global_frag
+        global_frag_ax = axd["frag_global"]
         frag_values = [frag for frag, _, _ in self.global_frag]
-        axd["frag_global"].plot(frag_values)
-        axd["frag_global"].set_ylim([0, 1])
-        axd["frag_global"].set_xlim([0, self.time - 1])
-        axd["frag_global"].set_title("Global Fragmentation")
-        axd["frag_global"].set_xlabel("Timestamp")
-        axd["frag_global"].set_ylabel("Fragmentation")
+        global_frag_ax.plot(frag_values)
+        global_frag_ax.set_ylim([0, 1])
+        global_frag_ax.set_xlim([0, self.time - 1])
+        global_frag_ax.set_title("Global Fragmentation")
+        global_frag_ax.set_xlabel("Timestamp")
+        global_frag_ax.set_ylabel("Fragmentation")
+
+        vlines["global"] = global_frag_ax.axvline(
+            # Initial position at the end
+            x=self.time - 1, color="red", linestyle="--", linewidth=1)
+
+        return vlines
 
     def _color_disks(self, storage_bitmap: np.array, storage_id: int) -> np.ndarray:
         """Colors the disks within a storage differently."""
@@ -591,6 +623,8 @@ def fragmentation_of_bitmap(bitmap: np.array) -> (float, int, int):
 
 
 def calculate_fragmentation(total_free: int, largest_free: int) -> float:
+    if total_free == 0:
+        return 0
     return 1 - (largest_free / total_free)
 
 
