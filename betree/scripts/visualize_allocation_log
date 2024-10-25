@@ -2,6 +2,7 @@
 
 import functools
 from math import floor
+from multiprocessing import Pool
 import os
 import struct
 import sys
@@ -170,7 +171,7 @@ class GlobalBitMap:
 
             timesteps = remaining_bytes(f) // SIZE_PER_ALLOCATION
 
-            for _ in tqdm(range(timesteps), desc="Building Global Bitmap"):
+            for _ in tqdm(range(timesteps), desc="Building Global Bitmap", unit="Timestep"):
                 # Read Allocation
                 try:
                     op_type = struct.unpack("<B", f.read(1))[0]
@@ -213,17 +214,46 @@ class GlobalBitMap:
             self.storage_frag[storage_id].append((frag, total_size, largest_size))
 
     def _build_fragmentation(self):
-        for timestep in tqdm(range(1, self.time), "Calculating Fragmentation Data"):
+        """Builds fragmentation data in parallel using a worker pool."""
+
+        num_processes = os.cpu_count()
+        # smaller chunk size because the processes need time to spin up and for progress bars
+        chunk_size = max(1, self.time // (num_processes * 10))
+
+        with Pool(processes=num_processes) as pool:
+            # Split the work into chunks
+            tasks = [(i, min(i + chunk_size, self.time))
+                     for i in range(1, self.time, chunk_size)]
+            results = pool.starmap(self._build_fragmentation_chunk,
+                                   tqdm(tasks, total=len(tasks),
+                                        desc="Calculating Fragmentation",
+                                        unit="chunk"))
+
+        # Collect and stitch the results
+        for i, (storage_frag_chunk, global_frag_chunk) in enumerate(results):
+            start_time = tasks[i][0]
+            for storage_id in range(self.config.num_storage_ids):
+                self.storage_frag[storage_id][start_time:] = storage_frag_chunk[storage_id]
+            self.global_frag[start_time - 1:] = global_frag_chunk  # Adjust index for global_frag
+
+    def _build_fragmentation_chunk(self, start_time, end_time):
+        """Calculates fragmentation for a chunk of timesteps."""
+        storage_frag_chunk = [[] for _ in range(self.config.num_storage_ids)]
+        global_frag_chunk = []
+
+        for timestep in range(start_time, end_time):
             largest_free = 0
             total_free = 0
             for storage_id in range(self.config.num_storage_ids):
                 frag, total, largest = self.calculate_fragmentation_storage(storage_id, timestep)
-                self.storage_frag[storage_id].append((frag, total, largest))
+                storage_frag_chunk[storage_id].append((frag, total, largest))
                 largest_free = max(largest, largest_free)
                 total_free += total
 
             frag = calculate_fragmentation(total_free, largest_free)
-            self.global_frag.append((frag, total_free, largest_free))
+            global_frag_chunk.append((frag, total_free, largest_free))
+
+        return storage_frag_chunk, global_frag_chunk
 
     def calculate_fragmentation(self, time: int = None) -> tuple[float, int, int]:
         time = self._get_valid_time(time)
@@ -378,7 +408,6 @@ class GlobalBitMap:
             # the bitmaps of other storages aren't correctly drawn. We manually set the starting
             # time to 1 shortly before plotting.
             storage_bitmap = self.get_storage_bitmap(storage_id)
-            resized_bitmap = None
             if len(storage_bitmap) != 0:
                 colored_bitmap = self._color_disks(storage_bitmap, storage_id)
                 resized_bitmap = reshape_to_axes(colored_bitmap, axd[name], fig)
