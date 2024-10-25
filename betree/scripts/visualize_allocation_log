@@ -62,6 +62,20 @@ class Config:
     def blocks_of_disk(self, storage_id: int, disk_id: int) -> int:
         return self.blocks_per_disk[storage_id][disk_id]
 
+    def is_valid_storage(self, storage_id) -> bool:
+        if storage_id >= self.num_storage_ids or storage_id < 0:
+            return False
+        return True
+
+    def is_valid_disk(self, storage_id, disk_id) -> bool:
+        if not self.is_valid_storage(storage_id):
+            return False
+
+        if disk_id >= self.disks_of_storage_id(storage_id) or disk_id < 0:
+            return False
+
+        return True
+
 
 def parse_header(log_file: str) -> Config:
     """Parses the global header of the allocation log file."""
@@ -178,13 +192,17 @@ class GlobalBitMap:
                 self.bitmap[(storage_id, disk_id, segment_id)
                             ].append((self.time, new_bitmap))
 
+    def _get_valid_time(self, time: int = None) -> int:
+        if time is None or time > self.time:
+            return self.time
+        if time < 0:
+            return 0
+        return time
+
     # Get the global bitmap at time. If no time is provided return the bitmap
     # of the last timestep.
     def get(self, output_bitmap: np.array, time: int = None) -> int:
-        if time is None or time > self.time:
-            time = self.time
-        if time < 0:
-            raise IndexError("Time has to be non-negative")
+        time = self._get_valid_time(time)
 
         start = 0
         for storage_id in range(self.config.num_storage_ids):
@@ -204,14 +222,8 @@ class GlobalBitMap:
     # bitmap of the last timestep.
     # If it doesn't match with the config throw an errer
     def get_storage(self, output_bitmap: np.array, storage_id: int, time: int = None) -> int:
-        if time is None or time > self.time:
-            time = self.time
-        if time < 0:
-            raise IndexError("Time has to be non-negative")
-        if storage_id >= self.config.num_storage_ids or storage_id < 0:
-            raise IndexError(f"Tried to access storage with id {
-                             storage_id} of 0-{self.config.num_storage_ids - 1}")
-        if self.config.disks_of_storage_id(storage_id) == 0:
+        time = self._get_valid_time(time)
+        if not config.is_valid_storage(storage_id):
             return 0
 
         start = 0
@@ -231,18 +243,9 @@ class GlobalBitMap:
     # bitmap of the last timestep.
     # If it doesn't match with the config throw an errer
     def get_disk(self, output_bitmap: np.array, storage_id: int, disk_id: int, time: int = None) -> int:
-        if time is None or time > self.time:
-            time = self.time
-        if time < 0:
-            raise IndexError("Time has to be non-negative")
-        if storage_id >= self.config.num_storage_ids or storage_id < 0:
-            raise IndexError(f"Tried to access storage with id {
-                             storage_id} of 0-{self.config.num_storage_ids - 1}")
-        if self.config.disks_of_storage_id(storage_id) == 0:
+        time = self._get_valid_time(time)
+        if not self.config.is_valid_disk(storage_id, disk_id):
             return 0
-        if disk_id >= self.config.disks_of_storage_id(storage_id) or disk_id < 0:
-            raise IndexError(f"Tried to access disk with id {
-                             disk_id} of 0-{self.config.disks_of_storage_id(storage_id) - 1}")
 
         blocks_per_segment = self.config.blocks_per_segment
         entries = filter(lambda k: k[0] ==
