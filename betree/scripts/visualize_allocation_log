@@ -121,6 +121,10 @@ class GlobalBitMap:
     log_file: str
     time: int = 0
     disk_begins: list[list] = []
+    # storage_id[timestep[(frag, total_free, largest_free)]]
+    storage_frag: list[list[(float, int, int)]] = []
+    # timestep[(frag, total_free, largest_free)]
+    global_frag: list[(float, int, int)] = []
 
     def __init__(self, log_file: str, config: Config):
         self.config = config
@@ -128,6 +132,8 @@ class GlobalBitMap:
         self._initialize_bitmap()
         self._initialize_begins()
         self._build_global_bitmap()
+        self._initialize_frag()
+        self._build_fragmentation()
 
     def __str__(self):
         return f"Log_file: {self.log_file}\nTime: {self.time}\n" + \
@@ -196,6 +202,82 @@ class GlobalBitMap:
         if time < 0:
             return 0
         return time
+
+    def _initialize_frag(self):
+        for storage_id in range(self.config.num_storage_ids):
+            largest_size = 0
+            total_size = 0
+            for disk_id in range(self.config.disks_of_storage_id(storage_id)):
+                blocks = self.config.blocks_of_disk(storage_id, disk_id)
+                largest_size = max(largest_size, blocks)
+                total_size += blocks
+
+            self.storage_frag.append([])
+            self.storage_frag[storage_id].append(
+                (calculate_fragmentation(largest_size, total_size), total_size, largest_size))
+
+    def _build_fragmentation(self):
+        for timestep in tqdm(range(1, self.time), "Calculating Fragmentation Data"):
+            largest_free = 0
+            total_free = 0
+            for storage_id in range(self.config.num_storage_ids):
+                frag, total, largest = self.calculate_fragmentation_storage(
+                    storage_id, timestep)
+                self.storage_frag[storage_id].append((frag, total, largest))
+                largest_free = max(largest, largest_free)
+                total_free += total
+
+            self.global_frag.append((calculate_fragmentation(
+                total_free, largest_free), total_free, largest_free))
+
+    def calculate_fragmentation(self, time: int = None) -> (float, int, int):
+        time = self._get_valid_time(time)
+
+        largest_free = 0
+        total_free = 0
+        for storage_id in range(self.config.num_storage_ids):
+            _, total, largest = self.calculate_fragmentation_storage(
+                storage_id, time)
+            largest_free = max(largest, largest_free)
+            total_free += total
+
+        return calculate_fragmentation(total_free, largest_free), total_free, largest_free
+
+    def calculate_fragmentation_storage(self, storage_id, time: int = None) -> (float, int, int):
+        time = self._get_valid_time(time)
+        if not self.config.is_valid_storage(storage_id):
+            return (0.0, 0, 0)
+
+        largest_free = 0
+        total_free = 0
+        for disk_id in range(self.config.disks_of_storage_id(storage_id)):
+            _, total, largest = self.calculate_fragmentation_disk(
+                storage_id, disk_id, time)
+            largest_free = max(largest, largest_free)
+            total_free += total
+
+        return calculate_fragmentation(total_free, largest_free), total_free, largest_free
+
+    def calculate_fragmentation_disk(self, storage_id, disk_id, time: int = None) -> (float, int, int):
+        time = self._get_valid_time(time)
+        if not self.config.is_valid_disk(storage_id, disk_id):
+            return (0.0, 0, 0)
+
+        entries = filter(lambda k: k[0] ==
+                         storage_id and k[1] == disk_id, self.bitmap)
+
+        largest_free = 0
+        total_free = 0
+        for entry in entries:
+            time, bitmap_at_time = self._binary_search_time(
+                time, entry)
+
+            segment_bitmap = np.unpackbits(bitmap_at_time)
+            _, total, largest = fragmentation_of_bitmap(segment_bitmap)
+            largest_free = max(largest, largest_free)
+            total_free += total
+
+        return calculate_fragmentation(total_free, largest_free), total_free, largest_free
 
     # Get the global bitmap at time. If no time is provided return the bitmap
     # of the last timestep.
@@ -301,6 +383,8 @@ class GlobalBitMap:
         fig.set_size_inches(16, 9)
         fig.set_dpi(1920/16)
 
+        self._plot_fragmentation(axd)
+
         ims = []
         # Initial plot
         for storage_id in range(self.config.num_storage_ids):
@@ -371,6 +455,28 @@ class GlobalBitMap:
 
         slider.set_val(1)
         plt.show()
+
+    def _plot_fragmentation(self, axd):
+        """Plots the fragmentation data."""
+        for storage_id in range(self.config.num_storage_ids):
+            # Extract fragmentation values from storage_frag
+            frag_values = [frag for frag, _,
+                           _ in self.storage_frag[storage_id]]
+            axd[f"frag_{storage_id}"].plot(frag_values)
+            axd[f"frag_{storage_id}"].set_xlim([0, self.time - 1])
+            axd[f"frag_{storage_id}"].set_ylim([0, 1])
+            axd[f"frag_{storage_id}"].set_xlabel("Timestamp")
+            if storage_id == 0:
+                axd[f"frag_{storage_id}"].set_ylabel("Fragmentation")
+
+        # Extract fragmentation values from global_frag
+        frag_values = [frag for frag, _, _ in self.global_frag]
+        axd["frag_global"].plot(frag_values)
+        axd["frag_global"].set_ylim([0, 1])
+        axd["frag_global"].set_xlim([0, self.time - 1])
+        axd["frag_global"].set_title("Global Fragmentation")
+        axd["frag_global"].set_xlabel("Timestamp")
+        axd["frag_global"].set_ylabel("Fragmentation")
 
     def _color_disks(self, storage_bitmap: np.array, storage_id: int) -> np.ndarray:
         """Colors the disks within a storage differently."""
@@ -469,6 +575,42 @@ def get_close_aspect(width, height, len) -> (int, int):
         rows = total_pixels // cols
 
     return rows, cols
+
+
+def fragmentation_of_bitmap(bitmap: np.array) -> (float, int, int):
+    """Calculates the fragmentation of a bitmap."""
+    if len(bitmap) == 0:
+        return 0
+
+    # total_free = len(np.where(bitmap == 0))
+    total_free = np.count_nonzero(bitmap == 0)
+    largest_free = longest_repeating_0s(bitmap)
+    frag = calculate_fragmentation(largest_free, total_free)
+
+    return frag, total_free, largest_free
+
+
+def calculate_fragmentation(total_free: int, largest_free: int) -> float:
+    return 1 - (largest_free / total_free)
+
+
+def longest_repeating_0s(arr: np.array) -> int:
+    """
+    Calculates the maximum consecutive count of 0s in a binary numpy array.
+
+    Args:
+      binary_array: A numpy array containing only 0s and 1s.
+
+    Returns:
+      Maximum consecutive count of 0s.
+    """
+    # Find indices where the array changes value
+    indices = np.where(np.diff(arr))[0] + 1
+    # Split the array at these indices
+    splits = np.split(arr, indices)
+
+    # Calculate lengths of splits and find maximum for 0
+    return max([len(s) for s in splits if s[0] == 0], default=0)
 
 
 def identify_axes(ax_dict, fontsize=24):
