@@ -166,9 +166,7 @@ class GlobalBitMap:
 
             timesteps = remaining_bytes(f) // SIZE_PER_ALLOCATION
 
-            i = 0
-            # while True:
-            for i in tqdm(range(timesteps), desc="Building bitmap"):
+            for _ in tqdm(range(timesteps), desc="Building Global Bitmap"):
                 # Read Allocation
                 try:
                     op_type = struct.unpack("<B", f.read(1))[0]
