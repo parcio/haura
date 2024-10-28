@@ -7,6 +7,7 @@ import os
 import struct
 import sys
 
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.animation import FFMpegWriter
 from matplotlib.widgets import Slider
@@ -384,6 +385,16 @@ class GlobalBitMap:
 
     def plot(self):
         """Plots the bitmap with an interactive slider for timestamp selection and checkboxes for storage toggling."""
+        fig, axd = self._setup_plot()
+        ims = self._setup_bitmaps(fig, axd)
+        vlines = self._plot_fragmentation(axd)
+        slider = self._setup_slider(fig, axd, ims, vlines)
+
+        self.export_to_video("test.mp4", fig, slider)
+
+        plt.show()
+
+    def _setup_plot(self) -> tuple[plt.Figure, dict[str, matplotlib.axes.Axes]]:
         form = [
             [".", ".", ".", ".", ".", "."],
             [".", "storage_0", "storage_1", "storage_2", "storage_3", "."],
@@ -397,17 +408,15 @@ class GlobalBitMap:
         fig, axd = plt.subplot_mosaic(form, gridspec_kw=gs_kw, layout="constrained")
         fig.set_size_inches(16, 9)
         fig.set_dpi(1920 / 16)
+        return fig, axd
 
-        vlines = self._plot_fragmentation(axd)
-
+    def _setup_bitmaps(self, fig, axd):
         ims = []
+
         # Initial plot
         for storage_id in range(self.config.num_storage_ids):
             name = f"storage_{storage_id}"
-            # NOTE: We first have to plot a later timestamp to initialize the size of the axes else
-            # the bitmaps of other storages aren't correctly drawn. We manually set the starting
-            # time to 1 shortly before plotting.
-            storage_bitmap = self.get_storage_bitmap(storage_id)
+            storage_bitmap = self.get_storage_bitmap(storage_id, 0)
             if len(storage_bitmap) != 0:
                 colored_bitmap = self._color_disks(storage_bitmap, storage_id)
                 resized_bitmap = reshape_to_axes(colored_bitmap, axd[name], fig)
@@ -429,53 +438,7 @@ class GlobalBitMap:
             ims[storage_id]["width"] = bbox.width
             ims[storage_id]["height"] = bbox.height
 
-        # Create the format specifier with appropriate spacing to prevent moving of axes
-        max_digits = len(str(self.time - 1))
-        valfmt = f"%{max_digits}d"
-        slider = Slider(
-            axd["slider"],
-            "",
-            0,
-            self.time - 1,
-            valinit=self.time - 1,
-            valstep=1,
-            valfmt=valfmt
-        )
-
-        def update(val):
-            timestep = int(val)
-            if timestep > self.time - 1:
-                slider.set_val(self.time - 1)
-                return
-
-            for storage_id in range(self.config.num_storage_ids):
-                self.get_storage(ims[storage_id]["storage_bitmap"], storage_id, timestep)
-                if len(ims[storage_id]["storage_bitmap"]) != 0:
-                    resized_bitmap = reshape_to_close_aspect(
-                        ims[storage_id]["storage_bitmap"],
-                        ims[storage_id]["width"],
-                        ims[storage_id]["height"]
-                    )
-                    ims[storage_id]["resized_bitmap"][:, :, 3] = resized_bitmap * 255
-
-                    ims[storage_id]["im"].set_data(ims[storage_id]["resized_bitmap"])
-                    vlines[storage_id].set_xdata([timestep, timestep])
-
-            vlines["global"].set_xdata([timestep, timestep])
-            fig.canvas.draw_idle()
-
-        slider.on_changed(update)
-
-        slider.set_val(1)
-        writer = FFMpegWriter(fps=60, bitrate=1800)
-        writer.setup(fig, "test.mp4", dpi=100)
-        for i in tqdm(range(self.time)):
-            slider.set_val(slider.val + 1)
-            writer.grab_frame()
-        writer.finish()
-
-        slider.set_val(1)
-        plt.show()
+        return ims
 
     def _plot_fragmentation(self, axd) -> dict:
         """Plots the fragmentation data."""
@@ -525,6 +488,58 @@ class GlobalBitMap:
         )
 
         return vlines
+
+    def _setup_slider(self, fig, axd, ims, vlines) -> Slider:
+        # Create the format specifier with appropriate spacing to prevent moving of axes
+        max_digits = len(str(self.time - 1))
+        valfmt = f"%{max_digits}d"
+        slider = Slider(
+            axd["slider"],
+            "",
+            0,
+            self.time - 1,
+            valinit=0,
+            valstep=1,
+            valfmt=valfmt
+        )
+
+        def update(val):
+            timestep = int(val)
+            if timestep > self.time - 1:
+                slider.set_val(self.time - 1)
+                return
+
+            for storage_id in range(self.config.num_storage_ids):
+                self.get_storage(ims[storage_id]["storage_bitmap"], storage_id, timestep)
+                if len(ims[storage_id]["storage_bitmap"]) != 0:
+                    resized_bitmap = reshape_to_close_aspect(
+                        ims[storage_id]["storage_bitmap"],
+                        ims[storage_id]["width"],
+                        ims[storage_id]["height"]
+                    )
+                    ims[storage_id]["resized_bitmap"][:, :, 3] = resized_bitmap * 255
+
+                    ims[storage_id]["im"].set_data(ims[storage_id]["resized_bitmap"])
+                    vlines[storage_id].set_xdata([timestep, timestep])
+
+            vlines["global"].set_xdata([timestep, timestep])
+            fig.canvas.draw_idle()
+
+        slider.on_changed(update)
+
+        return slider
+
+    def export_to_video(self, filename: str, fig, slider, start: int = 0, end: int = None, fps=60, bitrate=1800, dpi=100):
+        if end is None or end > self.time:
+            end = self.time
+
+        slider.set_val(start)
+        writer = FFMpegWriter(fps=60, bitrate=1800)
+        writer.setup(fig, "test.mp4", dpi=100)
+        for _ in tqdm(range(end)):
+            slider.set_val(slider.val + 1)
+            writer.grab_frame()
+        writer.finish()
 
     def _color_disks(self, storage_bitmap: np.array, storage_id: int) -> np.ndarray:
         """Colors the disks within a storage differently."""
