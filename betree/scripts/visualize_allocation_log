@@ -2,10 +2,13 @@
 
 import functools
 from math import floor
-from multiprocessing import Pool
+from multiprocessing import Pool, Value, Lock
 import os
+import shutil
 import struct
+import subprocess
 import sys
+import time
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -390,8 +393,6 @@ class GlobalBitMap:
         vlines = self._plot_fragmentation(axd)
         slider = self._setup_slider(fig, axd, ims, vlines)
 
-        self.export_to_video("test.mp4", fig, slider)
-
         plt.show()
 
     def _setup_plot(self) -> tuple[plt.Figure, dict[str, matplotlib.axes.Axes]]:
@@ -529,17 +530,95 @@ class GlobalBitMap:
 
         return slider
 
-    def export_to_video(self, filename: str, fig, slider, start: int = 0, end: int = None, fps=60, bitrate=1800, dpi=100):
+    def export_to_video(self, filename: str, start: int = 0, end: int = None, fps: int = 60, bitrate: int = 4500, dpi: int = 100, nproc: int = None):
         if end is None or end > self.time:
             end = self.time
+        if nproc is None:
+            nproc = os.cpu_count()
+
+        timesteps_total = end - start
+        guarranteed_size = timesteps_total // nproc
+        optional_size = timesteps_total % nproc
+        temp_dir = ".exporting_temp"
+        tasks = []
+        chunk_filenames = []
+        for i in range(nproc):
+            name = f"{filename}_{i}.mp4"
+            chunk_filenames.append(name)
+            chunk_begin = guarranteed_size * i + min(i, optional_size)
+            chunk_end = chunk_begin + guarranteed_size + (1 if i < optional_size else 0)
+            tasks.append((f"{temp_dir}/{name}", chunk_begin, chunk_end, fps, bitrate, dpi))
+
+        if not os.path.exists(temp_dir):
+            os.mkdir(temp_dir)
+
+        # Create shared counter and lock
+        counter = Value('i', 0)
+        lock = Lock()
+
+        def init_pool(shared_counter, shared_lock):
+            """Initializer function for worker processes."""
+            global counter, lock
+            counter = shared_counter
+            lock = shared_lock
+
+        with Pool(processes=nproc, initializer=init_pool, initargs=(counter, lock)) as pool:
+            results = []
+            for task in tasks:
+                results.append(pool.apply_async(self._export_to_video_chunk, args=task))
+
+            # Global progress bar
+            with tqdm(total=timesteps_total, desc="Exporting Video", unit="frame") as pbar:
+                previous_count = 0
+                while True:
+                    with lock:
+                        current_count = counter.value
+
+                    if current_count != previous_count:
+                        pbar.update(current_count - previous_count)
+                        previous_count = current_count
+                    if current_count >= timesteps_total:
+                        break
+
+                    time.sleep(1.0)
+
+            for result in results:
+                result.get()  # Ensure all tasks are finished
+
+        # Stitch video chunks using FFmpeg
+        with open(f"{temp_dir}/mylist.txt", mode="w") as f:
+            for name in chunk_filenames:
+                f.write(f"file '{name}'\n")
+        ffmpeg_concat_cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", f"{temp_dir}/mylist.txt", "-c", "copy", f"{filename}.mp4"]
+        subprocess.run(ffmpeg_concat_cmd, check=True)
+
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"Error deleting temporary directory '{temp_dir}': {e}")
+
+    def _export_to_video_chunk(self, filename: str, start: int, end: int, fps=60, bitrate=1800, dpi=100) -> bool:
+        # NOTE: We have to create and setup a new plot within the chunk function because a
+        # matplotlib figure is not picklable.
+        fig, axd = self._setup_plot()
+        ims = self._setup_bitmaps(fig, axd)
+        vlines = self._plot_fragmentation(axd)
+        slider = self._setup_slider(fig, axd, ims, vlines)
 
         slider.set_val(start)
-        writer = FFMpegWriter(fps=60, bitrate=1800)
-        writer.setup(fig, "test.mp4", dpi=100)
-        for _ in tqdm(range(end)):
+        writer = FFMpegWriter(fps=fps, bitrate=bitrate)
+        writer.setup(fig, filename, dpi=dpi)
+        for _ in range(end - start):
             slider.set_val(slider.val + 1)
             writer.grab_frame()
+
+            with lock:
+                counter.value += 1
+
         writer.finish()
+        plt.close(fig)
+
+        return True
 
     def _color_disks(self, storage_bitmap: np.array, storage_id: int) -> np.ndarray:
         """Colors the disks within a storage differently."""
@@ -693,4 +772,5 @@ if __name__ == "__main__":
     global_bitmap = GlobalBitMap(log_file, config)
     print(global_bitmap)
 
-    global_bitmap.plot()
+    global_bitmap.export_to_video("test", nproc=1)
+    # global_bitmap.plot()
