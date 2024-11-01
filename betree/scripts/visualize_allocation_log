@@ -1,93 +1,150 @@
 #!/usr/bin/env python3
 
+import argparse
 import functools
-from math import floor
 from multiprocessing import Pool, Value, Lock
 import os
 import shutil
-import struct
 import subprocess
-import sys
+import struct
 import time
+from typing import Iterator, Any, IO
 
 import matplotlib
-import matplotlib.pyplot as plt
 from matplotlib.animation import FFMpegWriter
+import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import numpy as np
+from sortedcontainers import SortedDict
 from tqdm import tqdm
 
-# Constants to get relevant information from the disk_offset
-MASK_STORAGE_CLASS = ((1 << 2) - 1) << (10 + 52)
+# Constants to get relevant information from the disk_offset.
+MASK_LAYER_ID = ((1 << 2) - 1) << (10 + 52)
 MASK_DISK_ID = ((1 << 10) - 1) << 52
 MASK_OFFSET = (1 << 52) - 1
 SEGMENT_SIZE_LOG_2 = 18
 SEGMENT_SIZE = 1 << SEGMENT_SIZE_LOG_2
 SEGMENT_SIZE_MASK = SEGMENT_SIZE - 1
-# This is the amount of bytes one (de-)allocation has in the log
+# This is the amount of bytes one (de-)allocation has in the log.
 SIZE_PER_ALLOCATION = 13
 
 
-def parse_disk_offset(offset: int) -> tuple[int, int, int, int]:
-    storage_class = (offset & MASK_STORAGE_CLASS) >> (52 + 10)
-    disk_id = (offset & MASK_DISK_ID) >> 52
-    block_offset = offset & MASK_OFFSET
-    segment_id = block_offset & ~SEGMENT_SIZE_MASK
-    return storage_class, disk_id, segment_id, block_offset
+class StorageConfig:
+    """Represents the storage configuration of the system"""
 
-
-class Config:
-    num_storage_ids: int
-    disks_per_storage_id: list[int]
-    blocks_per_disk: list[list[int]]
-    blocks_per_segment: int
-
-    def __init__(self, num_storage_ids: int, disks_per_storage_id: list[int],
+    def __init__(self, num_layers: int, disks_per_layer: list[int],
                  blocks_per_disk: list[list[int]], blocks_per_segment: int):
-        self.num_storage_ids = num_storage_ids
-        self.disks_per_storage_id = disks_per_storage_id
+        self.num_layers = num_layers
+        self.disks_per_layer = disks_per_layer
         self.blocks_per_disk = blocks_per_disk
         self.blocks_per_segment = blocks_per_segment
 
     def __str__(self) -> str:
-        return f"num_storage_ids: {self.num_storage_ids}, \
-        disks_per_class: {self.disks_per_storage_id}, \
-        blocks_per_disk: {self.blocks_per_disk}, \
-        blocks_per_segment: {self.blocks_per_segment}"
+        return (f"StorageConfig(num_layers={self.num_layers}, "
+                f"disks_per_layer={self.disks_per_layer}, "
+                f"blocks_per_disk={self.blocks_per_disk}, "
+                f"blocks_per_segment={self.blocks_per_segment})")
 
     def blocks_global(self) -> int:
-        return sum(self.blocks_of_storage_id(storage_id) for
-                   storage_id in range(self.num_storage_ids))
+        """Returns the total number of blocks in the system."""
+        return sum(self.blocks_of_layer(layer) for
+                   layer in range(self.num_layers))
 
-    def disks_of_storage_id(self, storage_id: int) -> int:
-        return self.disks_per_storage_id[storage_id]
+    def disks_of_layer(self, layer: int) -> int:
+        """Returns the number of disks in the specified layer."""
+        return self.disks_per_layer[layer]
 
-    def blocks_of_storage_id(self, storage_id: int) -> int:
-        return sum(self.blocks_of_disk(storage_id, disk_id) for
-                   disk_id in range(self.disks_of_storage_id(storage_id)))
+    def blocks_of_layer(self, layer: int) -> int:
+        """Returns the total number of blocks in the specified layer."""
+        return sum(self.blocks_of_disk(layer, disk_id) for
+                   disk_id in range(self.disks_of_layer(layer)))
 
-    def blocks_of_disk(self, storage_id: int, disk_id: int) -> int:
-        return self.blocks_per_disk[storage_id][disk_id]
+    def blocks_of_disk(self, layer: int, disk_id: int) -> int:
+        """Returns the number of blocks in the specified disk."""
+        return self.blocks_per_disk[layer][disk_id]
 
-    def is_valid_storage(self, storage_id: int) -> bool:
-        if storage_id >= self.num_storage_ids or storage_id < 0:
-            return False
-        return True
+    def segments_of_disk(self, layer: int, disk_id: int) -> int:
+        """Returns the number of segments in the specified disk."""
+        bod = self.blocks_of_disk(layer, disk_id)
+        if (bod % self.blocks_per_segment != 0):
+            return bod // self.blocks_per_segment + 1
+        else:
+            return bod // self.blocks_per_segment
 
-    def is_valid_disk(self, storage_id: int, disk_id: int) -> bool:
-        if not self.is_valid_storage(storage_id):
-            return False
+    def is_valid_layer(self, layer: int) -> bool:
+        """Checks if the given layer is valid."""
+        return 0 <= layer < self.num_layers
 
-        if disk_id >= self.disks_of_storage_id(storage_id) or disk_id < 0:
-            return False
+    def is_valid_disk(self, layer: int, disk_id: int) -> bool:
+        """Checks if the given disk ID is valid."""
+        return self.is_valid_layer(layer) and \
+            0 <= disk_id < self.disks_of_layer(layer)
 
-        return True
+
+class Timestamp:
+    time: int
+    op_type: int
+    offset: int
+    num_blocks: int
+    layer_id: int
+    disk_id: int
+    block_offset: int
+    segment_id: int
+    segment_offset: int
+
+    def __init__(self, op_type: int, offset: int, num_blocks: int, time: int):
+        self.op_type = op_type
+        self.offset = offset
+        self.num_blocks = num_blocks
+        self.time = time
+        self._parse_offset()
+
+    def __str__(self) -> str:
+        return (f"Timestep(op_type: {self.op_type}, "
+                f"offset: {self.offset}, "
+                f"num_blocks: {self.num_blocks}, "
+                f"time: {self.time}, "
+                f"layer_id: {self.layer_id}, "
+                f"disk_id: {self.disk_id}, "
+                f"block_offset: {self.block_offset}, "
+                f"segment_id: {self.segment_id}, "
+                f"segment_offset: {self.segment_offset})")
+
+    def _parse_offset(self):
+        """Parses the offset into human readable values"""
+        self.layer_id = (self.offset & MASK_LAYER_ID) >> (52 + 10)
+        self.disk_id = (self.offset & MASK_DISK_ID) >> 52
+        self.block_offset = self.offset & MASK_OFFSET
+        # In haura the segment id is a multiple of the segment size. This is ugly for plotting.
+        self.segment_id = (self.block_offset & ~SEGMENT_SIZE_MASK) // SEGMENT_SIZE
+        self.segment_offset = self.block_offset % SEGMENT_SIZE
 
 
-def parse_header(log_file: str) -> Config:
-    """Parses the global header of the allocation log file."""
+class Parser:
+    """Parses the allocation log file."""
+    log_file: str
+    _file_handle: IO[Any]
+    timesteps: int
+    time: int
 
-    with open(log_file, "rb") as f:
+    def __init__(self, log_file: str):
+        self.log_file = log_file
+        self._file_handle = open(log_file, "rb")  # Open the file in binary mode
+
+        # Precalculate the number of timesteps.
+        _ = self.parse_header()
+        self.timesteps = self._remaining_bytes() // SIZE_PER_ALLOCATION
+        self._file_handle.seek(0)
+
+    def __del__(self):
+        self._file_handle.close()
+
+    def __len__(self) -> int:
+        return self.timesteps
+
+    def parse_header(self) -> StorageConfig:
+        """Parses the header of the log file and returns a StorageConfig."""
+        f = self._file_handle
         num_classes = struct.unpack("<B", f.read(1))[0]
         disks_per_class = []
         for _ in range(num_classes):
@@ -101,293 +158,296 @@ def parse_header(log_file: str) -> Config:
 
         blocks_per_segment = struct.unpack("<Q", f.read(8))[0]
 
-    return Config(num_classes, disks_per_class, blocks_per_disk, blocks_per_segment)
+        return StorageConfig(num_classes, disks_per_class, blocks_per_disk, blocks_per_segment)
+
+    def __iter__(self) -> Iterator[Timestamp]:
+        """Prepares the iterator by skipping the header. Returns itself as the iterator."""
+        self._file_handle.seek(0)
+        _ = self.parse_header()
+        self.time = 0
+        return self
+
+    def __next__(self) -> Timestamp:
+        """Reads the next allocation from the log file and returns a timestamp."""
+        try:
+            op_type = struct.unpack("<B", self._file_handle.read(1))[0]
+            offset = struct.unpack("<Q", self._file_handle.read(8))[0]
+            num_blocks = struct.unpack("<L", self._file_handle.read(4))[0]
+        except struct.error:
+            raise StopIteration
+
+        self.time += 1
+
+        return Timestamp(op_type, offset, num_blocks, self.time)
+
+    def _remaining_bytes(self) -> int:
+        """Returns the remaining bytes in a file from the current position of the file pointer."""
+        f = self._file_handle
+        current_position = f.tell()
+        f.seek(0, os.SEEK_END)
+        end_position = f.tell()
+        # Return to the original position.
+        f.seek(current_position, os.SEEK_SET)
+        return end_position - current_position
 
 
-def remaining_bytes(file_pointer) -> int:
-    """Returns the remaining bytes in a file from the current position of the file pointer."""
-    current_position = file_pointer.tell()
-    file_pointer.seek(0, os.SEEK_END)  # Go to the end of the file
-    end_position = file_pointer.tell()
-    # Return to the original position
-    file_pointer.seek(current_position, os.SEEK_SET)
-    return end_position - current_position
+class Fragmentation:
+    def fragmentation_of_bitmap(bitmap: np.array) -> tuple[float, int, int]:
+        """Calculates the fragmentation of a bitmap."""
+        if len(bitmap) == 0:
+            return 0
+
+        total_free = np.count_nonzero(bitmap == 0)
+        largest_free = Fragmentation.longest_repeating_0s(bitmap)
+        frag = Fragmentation.calculate_fragmentation(total_free, largest_free)
+
+        return frag, total_free, largest_free
+
+    def calculate_fragmentation(total_free: int, largest_free: int) -> float:
+        """Calculates the fragmentation based on [wikipedia](https://en.m.wikipedia.org/wiki/Fragmentation_(computing)#Comparison)."""
+        if total_free == 0:
+            return 0
+        return 1 - (largest_free / total_free)
+
+    def longest_repeating_0s(arr: np.array) -> int:
+        """Calculates the maximum consecutive count of 0s in a binary numpy array."""
+        # Find indices where the array changes value.
+        indices = np.where(np.diff(arr))[0] + 1
+        # Split the array at these indices.
+        splits = np.split(arr, indices)
+
+        # Calculate lengths of splits and find maximum for 0.
+        return max([len(s) for s in splits if s[0] == 0], default=0)
+
+
+class Segment:
+    id: tuple[int, int, int]  # layer, disk, segment
+    size: int  # number of blocks in segment
+    change_list: list[Timestamp]
+    frag_list: SortedDict[int, tuple[float, int, int]]  # frag, total_free, largest_free
+
+    def __init__(self, layer: int, disk: int, segment: int, size: int):
+        self.id = (layer, disk, segment)
+        self.size = size
+        self.change_list = []
+        self.frag_list = SortedDict({})
+
+    def __str__(self) -> str:
+        return (f"Segment(id: {self.id}, "
+                f"size: {self.size}, "
+                f"change_list: {self.change_list}, "
+                f"frag_list: {self.frag_list}")
+
+    def add_timestamp(self, timestamp: Timestamp):
+        """Adds a Timestamp to the changelist."""
+        self.change_list.append(timestamp)
+
+    def calculate_fragmentation(self):
+        """Calculates the fragmentation of a segment for every timestamp available."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        self.frag_list[0] = Fragmentation.fragmentation_of_bitmap(bitmap)
+        for timestamp in tqdm(self.change_list, desc=f"Calculating fragmentation of segment {self.id}", leave=False, unit="timestamp"):
+            begin = timestamp.segment_offset
+            end = begin + timestamp.num_blocks
+            bitmap[begin:end] = timestamp.op_type
+
+            self.frag_list[timestamp.time] = Fragmentation.fragmentation_of_bitmap(bitmap)
+
+    def get_bitmap(self, time: int) -> np.array:
+        """Returns the allocation bitmap of a segment at the specified time or a available time
+           before, if the requested time is not in the changelist."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        if len(self.change_list) == 0:
+            return bitmap
+
+        for timestamp in self.change_list:
+            if timestamp.time > time:
+                break
+            begin = timestamp.segment_offset
+            end = begin + timestamp.num_blocks
+            bitmap[begin:end] = timestamp.op_type
+
+        return bitmap
+
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of a segment at the specified
+           time or a available time before, if the requested time is not in the fraglist."""
+        key = self.frag_list.bisect_right(time) - 1
+        return self.frag_list.peekitem(key)[1]
+
+
+class Disk:
+    id: tuple[int, int]  # layer, disk
+    size: int
+    segments: list[Segment]
+
+    def __init__(self, layer: int, disk: int, size: int):
+        self.id = (layer, disk)
+        self.size = size
+        self.segments = []
+
+    def __str__(self) -> str:
+        out = f"Disk(id: {self.id}, "
+        for segment in self.segments:
+            out += str(segment)
+        return out + ")"
+
+    def add_timestamp(self, timestamp: Timestamp):
+        """Adds a Timestamp to the respective segment."""
+        try:
+            self.segments[timestamp.segment_id].add_timestamp(timestamp)
+        except IndexError as e:
+            print(f"Error adding timestamp '{timestamp}': {e}")
+
+    def calculate_fragmentation(self):
+        """Calculates the fragmentation of every segment for every timestamp available."""
+        for segment in tqdm(self.segments, desc=f"Calculating fragmentation of disk {self.id}", leave=False, unit="segment"):
+            segment.calculate_fragmentation()
+
+    def get_bitmap(self, time: int) -> np.array:
+        """Returns the allocation bitmap of a disk at the specified time or a available time
+           before, if the requested time is not in the changelist."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        start = 0
+        for segment in self.segments:
+            bitmap[start:start + segment.size] = segment.get_bitmap(time)
+            start += segment.size
+
+        return bitmap
+
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of a disk at the specified
+           time or a available time before, if the requested time is not in the fraglist."""
+        total_free = 0
+        largest_free = 0
+        for segment in self.segments:
+            _, total, largest = segment.get_fragmentation(time)
+            total_free += total
+            largest_free = max(largest_free, largest)
+
+        return Fragmentation.calculate_fragmentation(total_free, largest_free), total_free, largest_free
+
+
+class Layer:
+    id: int
+    size: int
+    disks: list[Disk]
+
+    def __init__(self, id: int, size: int):
+        self.id = id
+        self.size = size
+        self.disks = []
+
+    def __str__(self) -> str:
+        out = f"Layer(id: {self.id}, "
+        for disk in self.disks:
+            out += str(disk)
+        return out + ")"
+
+    def add_timestamp(self, timestamp: Timestamp):
+        """Adds a Timestamp to the respective disk."""
+        self.disks[timestamp.disk_id].add_timestamp(timestamp)
+
+    def calculate_fragmentation(self):
+        """Calculates the fragmentation of every disk for every timestamp available."""
+        for disk in tqdm(self.disks, desc=f"Calculating fragmentation of layer {self.id}", leave=False, unit="disk"):
+            disk.calculate_fragmentation()
+
+    def get_bitmap(self, time: int) -> np.array:
+        """Returns the allocation bitmap of a Layer at the specified time or a available time
+           before, if the requested time is not in the changelist."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        start = 0
+        for disk in self.disks:
+            bitmap[start:start + disk.size] = disk.get_bitmap(time)
+            start += disk.size
+
+        return bitmap
+
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of a layer at the specified
+           time or a available time before, if the requested time is not in the fraglist."""
+        total_free = 0
+        largest_free = 0
+        for disk in self.disks:
+            _, total, largest = disk.get_fragmentation(time)
+            total_free += total
+            largest_free = max(largest_free, largest)
+
+        return Fragmentation.calculate_fragmentation(total_free, largest_free), total_free, largest_free
 
 
 class GlobalBitMap:
-    config: Config
-    # NOTE: the bitmap is stored as packed bits and has to be unpacked for accurate plotting,
-    # based on some experimentation storing unpacked (and using 8x more memory) isn't worth it for
-    # faster plotting
-    # dict [tuple[storage, disk, segment], list[tuple[time, bitmap]]]
-    bitmap: dict[tuple[int, int, int], list[tuple[int, np.ndarray]]]
     log_file: str
-    time: int = 0
-    disk_begins: list[list] = []
-    # storage_id[timestep[tuple[frag, total_free, largest_free]]]
-    storage_frag: list[list[tuple[float, int, int]]] = []
-    # timestep[tuple[frag, total_free, largest_free]]
-    global_frag: list[tuple[float, int, int]] = []
+    storage_config: StorageConfig
+    layers: list[Layer]
+    size: int
+    time: int
 
-    def __init__(self, log_file: str, config: Config):
-        self.config = config
+    def __init__(self, log_file: str):
         self.log_file = log_file
-        self._initialize_bitmap()
-        self._initialize_begins()
-        self._build_global_bitmap()
-        self._initialize_frag()
-        self._build_fragmentation()
+        self.storage_config = Parser(log_file).parse_header()
+        self.size = self.storage_config.blocks_global()
+
+        # Create the storage structure based on the config.
+        self.layers = []
+        for layer in range(self.storage_config.num_layers):
+            self.layers.append(Layer(layer, self.storage_config.blocks_of_layer(layer)))
+            for disk in range(self.storage_config.disks_of_layer(layer)):
+                self.layers[layer].disks.append(Disk(layer, disk, self.storage_config.blocks_of_disk(layer, disk)))
+                num_segments = self.storage_config.segments_of_disk(layer, disk)
+                for segment in range(num_segments):
+                    if segment < num_segments - 1:  # not the last segment
+                        size = self.storage_config.blocks_per_segment
+                    else:
+                        size = (self.storage_config.blocks_of_disk(layer, disk)
+                                - segment * self.storage_config.blocks_per_segment)
+                    self.layers[layer].disks[disk].segments.append(Segment(layer, disk, segment, size))
+
+        self._build_bitmap()
+        self._calculate_fragmentation()
 
     def __str__(self) -> str:
-        return f"Log_file: {self.log_file}\nTime: {self.time}\n" + \
-            f"Config: {self.config}\nDisk_begins: {self.disk_begins}\n"
+        out = (f"GlobalBitMap(log_file: {self.log_file}, "
+               f"storage_config: {self.storage_config}, "
+               f"size: {self.size}, "
+               f"time: {self.time}, ")
+        return out + ")"
 
-    def _initialize_bitmap(self):
-        self.bitmap = {}
-        for storage_id in range(self.config.num_storage_ids):
-            for disk_id in range(self.config.disks_of_storage_id(storage_id)):
-                used_blocks = 0
-                blocks_in_disk = self.config.blocks_of_disk(
-                    storage_id, disk_id)
-                while used_blocks < blocks_in_disk:
-                    segment_size = min(self.config.blocks_per_segment, blocks_in_disk - used_blocks)
+    def _build_bitmap(self):
+        """Builds the bitmap of the storage based on the provided log file."""
+        parser = Parser(log_file)
+        for timestamp in tqdm(parser, desc="Building Bitmap", unit="timestep"):
+            self.layers[timestamp.layer_id].add_timestamp(timestamp)
 
-                    bitmap = np.packbits(np.zeros(segment_size, dtype=bool))
-                    self.bitmap[(storage_id, disk_id, used_blocks)] = [(0, bitmap)]
-                    used_blocks += segment_size
+            self.time = timestamp.time
 
-    def _initialize_begins(self):
-        for storage_id in range(self.config.num_storage_ids):
-            self.disk_begins.append([])
-            offset = 0
-            for disk_id in range(self.config.disks_of_storage_id(storage_id)):
-                self.disk_begins[storage_id].append(offset)
-                offset += self.config.blocks_of_disk(storage_id, disk_id)
+    def _calculate_fragmentation(self):
+        """Calculates the fragmentation of every layer for every timestamp available."""
+        for layer in tqdm(self.layers, desc="Calculating fragmentation", unit="layer"):
+            layer.calculate_fragmentation()
 
-    def _build_global_bitmap(self):
-        """Builds a global bitmap representation for each time step."""
-        with open(self.log_file, "rb") as f:
-            # Skip the global header (already parsed)
-            header_length = (1
-                             + 2 * self.config.num_storage_ids
-                             + 8 * sum(self.config.disks_per_storage_id) + 8)
-            f.seek(header_length)
-
-            timesteps = remaining_bytes(f) // SIZE_PER_ALLOCATION
-
-            for _ in tqdm(range(timesteps), desc="Building Global Bitmap", unit="Timestep"):
-                # Read Allocation
-                try:
-                    op_type = struct.unpack("<B", f.read(1))[0]
-                    offset = struct.unpack("<Q", f.read(8))[0]
-                    num_blocks = struct.unpack("<L", f.read(4))[0]
-                except struct.error:
-                    break  # End of file
-
-                self.time += 1
-
-                storage_id, disk_id, segment_id, block_offset = parse_disk_offset(offset)
-                segment_offset = block_offset % self.config.blocks_per_segment
-
-                # Update the bitmap at (storage_id, disk_id, segment_id)
-                # with op_type at block_offset and size
-                last_entry = self.bitmap[(storage_id, disk_id, segment_id)][-1]
-                new_bitmap = np.unpackbits(last_entry[1]).copy()
-                new_bitmap[segment_offset: segment_offset + num_blocks] = op_type
-                new_bitmap = np.packbits(new_bitmap)
-                self.bitmap[(storage_id, disk_id, segment_id)].append((self.time, new_bitmap))
-
-    def _get_valid_time(self, time: int = None) -> int:
-        if time is None or time > self.time:
-            return self.time
-        if time < 0:
-            return 0
-        return time
-
-    def _initialize_frag(self):
-        for storage_id in range(self.config.num_storage_ids):
-            largest_size = 0
-            total_size = 0
-            for disk_id in range(self.config.disks_of_storage_id(storage_id)):
-                blocks = self.config.blocks_of_disk(storage_id, disk_id)
-                largest_size = max(largest_size, blocks)
-                total_size += blocks
-
-            self.storage_frag.append([])
-            frag = calculate_fragmentation(largest_size, total_size)
-            self.storage_frag[storage_id].append((frag, total_size, largest_size))
-
-    def _build_fragmentation(self):
-        """Builds fragmentation data in parallel using a worker pool."""
-
-        num_processes = os.cpu_count()
-        # smaller chunk size because the processes need time to spin up and for progress bars
-        chunk_size = max(1, self.time // (num_processes * 10))
-
-        with Pool(processes=num_processes) as pool:
-            # Split the work into chunks
-            tasks = [(i, min(i + chunk_size, self.time))
-                     for i in range(1, self.time, chunk_size)]
-            results = pool.starmap(self._build_fragmentation_chunk,
-                                   tqdm(tasks, total=len(tasks),
-                                        desc="Calculating Fragmentation",
-                                        unit="chunk"))
-
-        # Collect and stitch the results
-        for i, (storage_frag_chunk, global_frag_chunk) in enumerate(results):
-            start_time = tasks[i][0]
-            for storage_id in range(self.config.num_storage_ids):
-                self.storage_frag[storage_id][start_time:] = storage_frag_chunk[storage_id]
-            self.global_frag[start_time - 1:] = global_frag_chunk  # Adjust index for global_frag
-
-    def _build_fragmentation_chunk(self, start_time, end_time):
-        """Calculates fragmentation for a chunk of timesteps."""
-        storage_frag_chunk = [[] for _ in range(self.config.num_storage_ids)]
-        global_frag_chunk = []
-
-        for timestep in range(start_time, end_time):
-            largest_free = 0
-            total_free = 0
-            for storage_id in range(self.config.num_storage_ids):
-                frag, total, largest = self.calculate_fragmentation_storage(storage_id, timestep)
-                storage_frag_chunk[storage_id].append((frag, total, largest))
-                largest_free = max(largest, largest_free)
-                total_free += total
-
-            frag = calculate_fragmentation(total_free, largest_free)
-            global_frag_chunk.append((frag, total_free, largest_free))
-
-        return storage_frag_chunk, global_frag_chunk
-
-    def calculate_fragmentation(self, time: int = None) -> tuple[float, int, int]:
-        time = self._get_valid_time(time)
-
-        largest_free = 0
-        total_free = 0
-        for storage_id in range(self.config.num_storage_ids):
-            _, total, largest = self.calculate_fragmentation_storage(storage_id, time)
-            largest_free = max(largest, largest_free)
-            total_free += total
-
-        return calculate_fragmentation(total_free, largest_free), total_free, largest_free
-
-    def calculate_fragmentation_storage(self, storage_id: int, time: int = None) -> tuple[float, int, int]:
-        time = self._get_valid_time(time)
-        if not self.config.is_valid_storage(storage_id):
-            return (0.0, 0, 0)
-
-        largest_free = 0
-        total_free = 0
-        for disk_id in range(self.config.disks_of_storage_id(storage_id)):
-            _, total, largest = self.calculate_fragmentation_disk(storage_id, disk_id, time)
-            largest_free = max(largest, largest_free)
-            total_free += total
-
-        return calculate_fragmentation(total_free, largest_free), total_free, largest_free
-
-    def calculate_fragmentation_disk(self, storage_id: int, disk_id: int, time: int = None) -> tuple[float, int, int]:
-        time = self._get_valid_time(time)
-        if not self.config.is_valid_disk(storage_id, disk_id):
-            return (0.0, 0, 0)
-
-        entries = filter(lambda k: k[0] == storage_id and k[1] == disk_id, self.bitmap)
-
-        largest_free = 0
-        total_free = 0
-        for entry in entries:
-            time, bitmap_at_time = self._binary_search_time(time, entry)
-
-            segment_bitmap = np.unpackbits(bitmap_at_time)
-            _, total, largest = fragmentation_of_bitmap(segment_bitmap)
-            largest_free = max(largest, largest_free)
-            total_free += total
-
-        return calculate_fragmentation(total_free, largest_free), total_free, largest_free
-
-    # Get the global bitmap at time. If no time is provided return the bitmap
-    # of the last timestep.
-    def get(self, output_bitmap: np.array, time: int = None) -> int:
-        time = self._get_valid_time(time)
-
+    def get_bitmap(self, time: int) -> np.array:
+        """Returns the allocation bitmap the storage at the specified time."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
         start = 0
-        for storage_id in range(self.config.num_storage_ids):
-            start += self.get_storage(output_bitmap[start:], storage_id, time)
+        for layer in self.layers:
+            bitmap[start:start + layer.size] = layer.get_bitmap(time)
+            start += layer.size
 
-        return start
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of the storage."""
+        total_free = 0
+        largest_free = 0
+        for layer in self.layers:
+            _, total, largest = layer.get_fragmentation(time)
+            total_free += total
+            largest_free = max(largest_free, largest)
 
-    def get_bitmap(self, time: int = None) -> np.array:
-        num_blocks = self.config.blocks_global()
-        bitmap = np.zeros(num_blocks, dtype=np.uint8)
-        self.get(bitmap, time)
-
-        return bitmap
-
-    # Get the bitmap of a storage id at time. If no time is provided return the
-    # bitmap of the last timestep.
-    # If it doesn't match with the config throw an errer
-    def get_storage(self, output_bitmap: np.array, storage_id: int, time: int = None) -> int:
-        time = self._get_valid_time(time)
-        if not self.config.is_valid_storage(storage_id):
-            return 0
-
-        start = 0
-        for disk_id in range(self.config.disks_of_storage_id(storage_id)):
-            start += self.get_disk(output_bitmap[start:], storage_id, disk_id, time)
-
-        return start
-
-    def get_storage_bitmap(self, storage_id: int, time: int = None) -> np.array:
-        num_blocks = self.config.blocks_of_storage_id(storage_id)
-        bitmap = np.zeros(num_blocks, dtype=np.uint8)
-        self.get_storage(bitmap, storage_id, time)
-        return bitmap
-
-    # Get the bitmap of a disk id at time. If no time is provided return the
-    # bitmap of the last timestep.
-    # If it doesn't match with the config throw an errer
-    def get_disk(self, output_bitmap: np.array, storage_id: int, disk_id: int, time: int = None) -> int:
-        time = self._get_valid_time(time)
-        if not self.config.is_valid_disk(storage_id, disk_id):
-            return 0
-
-        blocks_per_segment = self.config.blocks_per_segment
-        entries = filter(lambda k: k[0] == storage_id and k[1] == disk_id, self.bitmap)
-
-        for entry in entries:
-            segment_id = entry[2]
-            time, bitmap_at_time = self._binary_search_time(time, entry)
-            end = min(segment_id + blocks_per_segment, self.config.blocks_of_disk(entry[0], entry[1]))
-
-            output_bitmap[segment_id:end] = np.unpackbits(bitmap_at_time)
-
-        return end
-
-    def get_disk_bitmap(self, storage_id: int, disk_id: int, time: int = None) -> np.array:
-        num_blocks = self.config.blocks_of_disk(storage_id, disk_id)
-        bitmap = np.zeros(num_blocks, dtype=np.uint8)
-        self.get_disk(bitmap, storage_id, disk_id, time)
-        return bitmap
-
-    @functools.lru_cache(1024)
-    def _binary_search_time(self, time: int, entry: (int, int, int)) -> tuple[int, np.array]:
-        bitmaps = self.bitmap[entry]
-        left = 0
-        right = len(bitmaps) - 1
-        result = None
-        while left <= right:
-            middle = floor((left + right) / 2)
-            if bitmaps[middle][0] == time:
-                return bitmaps[middle]
-            elif bitmaps[middle][0] < time:
-                result = bitmaps[middle]
-                left = middle + 1
-            else:
-                right = middle - 1
-
-        return result
+        return Fragmentation.calculate_fragmentation(total_free, largest_free), total_free, largest_free
 
     def plot(self):
-        """Plots the bitmap with an interactive slider for timestamp selection and checkboxes for storage toggling."""
+        """Plots the bitmap with an interactive slider for timestamp selection."""
         fig, axd = self._setup_plot()
         ims = self._setup_bitmaps(fig, axd)
         vlines = self._plot_fragmentation(axd)
@@ -396,9 +456,10 @@ class GlobalBitMap:
         plt.show()
 
     def _setup_plot(self) -> tuple[plt.Figure, dict[str, matplotlib.axes.Axes]]:
+        """Helper method for setting up the plot."""
         form = [
             [".", ".", ".", ".", ".", "."],
-            [".", "storage_0", "storage_1", "storage_2", "storage_3", "."],
+            [".", "layer_0", "layer_1", "layer_2", "layer_3", "."],
             [".", "frag_0", "frag_1", "frag_2", "frag_3", "."],
             [".", "frag_global", "frag_global", "frag_global", "frag_global", "."],
             [".", "slider", "slider", "slider", "slider", "."],
@@ -406,73 +467,79 @@ class GlobalBitMap:
         ]
         gs_kw = {"width_ratios": [0.03, 1, 1, 1, 1, 0.03],
                  "height_ratios": [0.03, 3, 1, 1, 0.1, 0.03]}
-        fig, axd = plt.subplot_mosaic(form, gridspec_kw=gs_kw, layout="constrained")
+        fig, axd = plt.subplot_mosaic(
+            form, gridspec_kw=gs_kw, layout="constrained")
         fig.set_size_inches(16, 9)
         fig.set_dpi(1920 / 16)
         return fig, axd
 
     def _setup_bitmaps(self, fig, axd):
+        """Helper method for setting up the bitmaps of the layer."""
         ims = []
 
-        # Initial plot
-        for storage_id in range(self.config.num_storage_ids):
-            name = f"storage_{storage_id}"
-            storage_bitmap = self.get_storage_bitmap(storage_id, 0)
-            if len(storage_bitmap) != 0:
-                colored_bitmap = self._color_disks(storage_bitmap, storage_id)
-                resized_bitmap = reshape_to_axes(colored_bitmap, axd[name], fig)
-            else:
-                storage_ax = axd[f"storage_{storage_id}"]
-                kw = {"ha": "center", "va": "center", "fontsize": 12, "color": "darkgrey"}
-                storage_ax.text(0.5, 0.5, "[Empty]", transform=storage_ax.transAxes, **kw)
-
+        for layer in self.layers:
+            name = f"layer_{layer.id}"
             ims.append({})
-            ims[storage_id]["storage_bitmap"] = storage_bitmap
-            ims[storage_id]["resized_bitmap"] = resized_bitmap
-            ims[storage_id]["im"] = axd[name].imshow(resized_bitmap, aspect="auto", interpolation=None)
-            axd[name].set_title(f"Storage {storage_id}")
-            axd[name].set_xlabel("Block")
-            axd[name].set_ylabel("Block")
+            if layer.size == 0:
+                kw = {"ha": "center", "va": "center", "fontsize": 12, "color": "darkgrey"}
+                axd[name].text(0.5, 0.5, "[Empty]", transform=axd[name].transAxes, **kw)
+            else:
+                bbox = axd[name].get_window_extent().transformed(
+                    fig.dpi_scale_trans.inverted())
+                ims[layer.id]["width"] = bbox.width
+                ims[layer.id]["height"] = bbox.height
+
+                layer_bitmap = layer.get_bitmap(self.time - 1)
+                colored_bitmap = self._color_disks(layer_bitmap, layer.id)
+                rows, cols = get_close_aspect(ims[layer.id]["width"],
+                                              ims[layer.id]["height"],
+                                              len(colored_bitmap[:, 0]))
+                resized_bitmap = colored_bitmap.reshape(rows, cols, 4)
+                ims[layer.id]["bitmap"] = resized_bitmap
+                ims[layer.id]["im"] = axd[name].imshow(
+                    resized_bitmap, aspect="auto", interpolation=None)
+                axd[name].set_xlabel("Block")
+                axd[name].set_ylabel("Block")
+
+            axd[name].set_title(f"Layer {layer.id}")
             axd[name].set_xticks([])
             axd[name].set_yticks([])
-            bbox = axd[name].get_window_extent().transformed(fig.dpi_scale_trans.inverted())
-            ims[storage_id]["width"] = bbox.width
-            ims[storage_id]["height"] = bbox.height
 
         return ims
 
     def _plot_fragmentation(self, axd) -> dict:
-        """Plots the fragmentation data."""
+        """Helper method for plotting the fragmentation of the layers and the storage."""
         # Vertical lines that indicate the timestamp
         vlines = {}
 
-        for storage_id in range(self.config.num_storage_ids):
-            frag_ax = axd[f"frag_{storage_id}"]
-            if self.config.blocks_of_storage_id(storage_id) != 0:
-                # Extract fragmentation values from storage_frag
-                frag_values = [frag for frag, _,
-                               _ in self.storage_frag[storage_id]]
+        for layer in self.layers:
+            frag_ax = axd[f"frag_{layer.id}"]
+            if self.storage_config.blocks_of_layer(layer.id) != 0:
+                frag_values = []
+                for i in range(self.time):
+                    frag, _, _ = layer.get_fragmentation(i)
+                    frag_values.append(frag)
+
                 frag_ax.plot(frag_values)
                 frag_ax.set_xlim([0, self.time - 1])
                 frag_ax.set_ylim([0, 1])
                 frag_ax.set_xlabel("Timestamp")
-                if storage_id == 0:
+                if layer.id == 0:
                     frag_ax.set_ylabel("Fragmentation")
 
-                # Initial position at the end
-                vlines[storage_id] = frag_ax.axvline(
-                    x=self.time - 1,
-                    color="red",
-                    linestyle="--",
-                    linewidth=1
-                )
+                vlines[layer.id] = frag_ax.axvline(
+                    x=0, color="red", linestyle="--", linewidth=1)
             else:
-                kw = {"ha": "center", "va": "center", "fontsize": 12, "color": "darkgrey"}
-                frag_ax.text(0.5, 0.5, "[Empty]", transform=frag_ax.transAxes, **kw)
+                kw = {"ha": "center", "va": "center",
+                      "fontsize": 12, "color": "darkgrey"}
+                frag_ax.text(0.5, 0.5, "[Empty]",
+                             transform=frag_ax.transAxes, **kw)
 
-        # Extract fragmentation values from global_frag
+        frag_values = []
+        for i in range(self.time):
+            frag, _, _ = layer.get_fragmentation(i)
+            frag_values.append(frag)
         global_frag_ax = axd["frag_global"]
-        frag_values = [frag for frag, _, _ in self.global_frag]
         global_frag_ax.plot(frag_values)
         global_frag_ax.set_ylim([0, 1])
         global_frag_ax.set_xlim([0, self.time - 1])
@@ -480,18 +547,16 @@ class GlobalBitMap:
         global_frag_ax.set_xlabel("Timestamp")
         global_frag_ax.set_ylabel("Fragmentation")
 
-        # Initial position at the end
         vlines["global"] = global_frag_ax.axvline(
-            x=self.time - 1,
-            color="red",
-            linestyle="--",
-            linewidth=1
-        )
+            x=0, color="red", linestyle="--", linewidth=1)
 
         return vlines
 
     def _setup_slider(self, fig, axd, ims, vlines) -> Slider:
-        # Create the format specifier with appropriate spacing to prevent moving of axes
+        """Helper method for setting up the slider for interactive plotting."""
+        # TODO: remove moving of entire plot, when the slider value increases
+
+        # Create the format specifier with appropriate spacing to prevent moving of axes.
         max_digits = len(str(self.time - 1))
         valfmt = f"%{max_digits}d"
         slider = Slider(
@@ -510,18 +575,20 @@ class GlobalBitMap:
                 slider.set_val(self.time - 1)
                 return
 
-            for storage_id in range(self.config.num_storage_ids):
-                self.get_storage(ims[storage_id]["storage_bitmap"], storage_id, timestep)
-                if len(ims[storage_id]["storage_bitmap"]) != 0:
-                    resized_bitmap = reshape_to_close_aspect(
-                        ims[storage_id]["storage_bitmap"],
-                        ims[storage_id]["width"],
-                        ims[storage_id]["height"]
-                    )
-                    ims[storage_id]["resized_bitmap"][:, :, 3] = resized_bitmap * 255
+            for layer in self.layers:
+                if layer.size == 0:
+                    continue
 
-                    ims[storage_id]["im"].set_data(ims[storage_id]["resized_bitmap"])
-                    vlines[storage_id].set_xdata([timestep, timestep])
+                # Times 255 because the bitmap is mapped to the alpha channel.
+                bitmap = layer.get_bitmap(timestep) * 255
+
+                rows, cols = get_close_aspect(ims[layer.id]["width"],
+                                              ims[layer.id]["height"],
+                                              len(bitmap))
+                resized_bitmap = bitmap.reshape(rows, cols)
+                ims[layer.id]["bitmap"][:, :, 3] = resized_bitmap
+                ims[layer.id]["im"].set_data(ims[layer.id]["bitmap"])
+                vlines[layer.id].set_xdata([timestep, timestep])
 
             vlines["global"].set_xdata([timestep, timestep])
             fig.canvas.draw_idle()
@@ -530,12 +597,31 @@ class GlobalBitMap:
 
         return slider
 
+    def _color_disks(self, layer_bitmap: np.array, layer_id: int) -> np.ndarray:
+        """Colors the disks within a layer differently."""
+        colored_bitmap = np.zeros((len(layer_bitmap), 4), dtype=np.uint8)
+        colored_bitmap[:, 3] = layer_bitmap
+        start = 0
+        for disk_id in range(self.storage_config.disks_of_layer(layer_id)):
+            length = self.storage_config.blocks_of_disk(layer_id, disk_id)
+
+            color = id_to_color(disk_id)
+            color_array = np.tile(color, (length, 1))
+
+            colored_bitmap[start:start + length, 0:3] = color_array
+            start += length
+
+        return colored_bitmap
+
     def export_to_video(self, filename: str, start: int = 0, end: int = None, fps: int = 60, bitrate: int = 4500, dpi: int = 100, nproc: int = None):
+        """Export the plot to a mp4 file for later watching. For that it can use multiple processes
+           and works with files in temporary directory, which it cleans up after finishing."""
         if end is None or end > self.time:
             end = self.time
         if nproc is None:
             nproc = os.cpu_count()
 
+        # Split the work into chunks.
         timesteps_total = end - start
         guarranteed_size = timesteps_total // nproc
         optional_size = timesteps_total % nproc
@@ -552,7 +638,7 @@ class GlobalBitMap:
         if not os.path.exists(temp_dir):
             os.mkdir(temp_dir)
 
-        # Create shared counter and lock
+        # Create shared counter and lock for the global progress bar.
         counter = Value('i', 0)
         lock = Lock()
 
@@ -563,11 +649,9 @@ class GlobalBitMap:
             lock = shared_lock
 
         with Pool(processes=nproc, initializer=init_pool, initargs=(counter, lock)) as pool:
-            results = []
-            for task in tasks:
-                results.append(pool.apply_async(self._export_to_video_chunk, args=task))
+            result = pool.starmap_async(self._export_to_video_chunk, tasks)
 
-            # Global progress bar
+            # Display a global progress bar.
             with tqdm(total=timesteps_total, desc="Exporting Video", unit="frame") as pbar:
                 previous_count = 0
                 while True:
@@ -582,10 +666,9 @@ class GlobalBitMap:
 
                     time.sleep(1.0)
 
-            for result in results:
-                result.get()  # Ensure all tasks are finished
+            result.get()
 
-        # Stitch video chunks using FFmpeg
+        # Stitch video chunks together using FFmpeg.
         with open(f"{temp_dir}/mylist.txt", mode="w") as f:
             for name in chunk_filenames:
                 f.write(f"file '{name}'\n")
@@ -598,6 +681,7 @@ class GlobalBitMap:
             print(f"Error deleting temporary directory '{temp_dir}': {e}")
 
     def _export_to_video_chunk(self, filename: str, start: int, end: int, fps=60, bitrate=1800, dpi=100) -> bool:
+        """Helper method that gets executed in each process used in exporting to video."""
         # NOTE: We have to create and setup a new plot within the chunk function because a
         # matplotlib figure is not picklable.
         fig, axd = self._setup_plot()
@@ -612,6 +696,7 @@ class GlobalBitMap:
             slider.set_val(slider.val + 1)
             writer.grab_frame()
 
+            # Update the global progress bar.
             with lock:
                 counter.value += 1
 
@@ -620,96 +705,31 @@ class GlobalBitMap:
 
         return True
 
-    def _color_disks(self, storage_bitmap: np.array, storage_id: int) -> np.ndarray:
-        """Colors the disks within a storage differently."""
-        colored_bitmap = np.zeros((len(storage_bitmap), 4), dtype=np.uint8)
-        colored_bitmap[:, 3] = storage_bitmap
-        for disk_id in range(self.config.disks_of_storage_id(storage_id)):
-            start = self.disk_begins[storage_id][disk_id]
-            end = start + self.config.blocks_of_disk(storage_id, disk_id)
-            length = end - start
-
-            color = id_to_color(disk_id)
-            color_array = np.tile(color, (length, 1))
-
-            colored_bitmap[start:end, 0:3] = color_array
-
-        return colored_bitmap
-
-
-color_mapping = [
-    (0, 0, 0),
-    (0, 0, 255),
-    (0, 255, 0),
-    (0, 255, 255),
-    (255, 0, 0),
-    (255, 0, 255),
-    (255, 255, 0),
-]
-
 
 def id_to_color(i: int) -> tuple[int, int, int]:
-    return color_mapping[i % len(color_mapping)]
-
-
-def reshape_to_axes(arr: np.ndarray, ax, fig) -> np.ndarray:
-    """
-    Reshapes the first dimension of a NumPy array to a array with the first two
-    dimensions close to the aspect ratio of the given Matplotlib axes.
-
-    Args:
-      arr_1d: The 1D NumPy array to reshape.
-      ax: The Matplotlib axes object.
-      fig: The Matplotlib figure object.
-
-    Returns:
-      A 2D NumPy array with dimensions close to the axes aspect ratio.
-    """
-
-    # Get axes dimensions in inches
-    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
-    width, height = bbox.width, bbox.height
-
-    # Calculate target aspect ratio
-    target_aspect = width / height
-
-    # Calculate the ideal number of columns for the target aspect ratio
-    total_pixels = len(arr)
-    cols = int(np.sqrt(total_pixels * target_aspect))
-
-    # Adjust columns to find the closest aspect ratio while using all pixels
-    rows = total_pixels // cols
-    while rows * cols != total_pixels:
-        cols -= 1
-        rows = total_pixels // cols
-
-    # Reshape the array to the calculated dimensions
-    return arr.reshape(rows, cols, 4)
-
-
-def reshape_to_close_aspect(arr_1d, width, height):
-    """
-    Reshapes a 1D NumPy array to a 2D array with dimensions close to the
-    aspect ratio of the given width and height
-    """
-    rows, cols = get_close_aspect(width, height, len(arr_1d))
-
-    # Reshape the 1D array to the calculated dimensions
-    arr_2d = arr_1d.reshape(rows, cols)
-
-    return arr_2d
+    """Maps the id to a color specified in the COLOR_MAPPING"""
+    COLOR_MAPPING = [
+        (0, 0, 0),
+        (0, 0, 255),
+        (0, 255, 0),
+        (0, 255, 255),
+        (255, 0, 0),
+        (255, 0, 255),
+        (255, 255, 0),
+    ]
+    return COLOR_MAPPING[i % len(COLOR_MAPPING)]
 
 
 @functools.lru_cache(128)
-def get_close_aspect(width: int, height: int, length: int) -> tuple[int, int]:
-    # Calculate target aspect ratio
+def get_close_aspect(width: int, height: int, total_pixels: int) -> tuple[int, int]:
+    """Returns an aspect ratio, that is close to the provided width and height and is able to
+       display the pixels comfortably"""
     target_aspect = width / height
 
-    # Calculate the ideal number of columns for the target aspect ratio
-    total_pixels = length
+    # Calculate the ideal number of columns for the target aspect ratio.
     cols = int(np.sqrt(total_pixels * target_aspect))
 
-    # Adjust columns to find the closest aspect ratio while using all pixels
+    # Adjust columns to find the closest aspect ratio while using all pixels.
     rows = total_pixels // cols
     while rows * cols != total_pixels:
         cols -= 1
@@ -718,59 +738,20 @@ def get_close_aspect(width: int, height: int, length: int) -> tuple[int, int]:
     return rows, cols
 
 
-def fragmentation_of_bitmap(bitmap: np.array) -> tuple[float, int, int]:
-    """Calculates the fragmentation of a bitmap."""
-    if len(bitmap) == 0:
-        return 0
-
-    # total_free = len(np.where(bitmap == 0))
-    total_free = np.count_nonzero(bitmap == 0)
-    largest_free = longest_repeating_0s(bitmap)
-    frag = calculate_fragmentation(total_free, largest_free)
-
-    return frag, total_free, largest_free
-
-
-def calculate_fragmentation(total_free: int, largest_free: int) -> float:
-    if total_free == 0:
-        return 0
-    return 1 - (largest_free / total_free)
-
-
-def longest_repeating_0s(arr: np.array) -> int:
-    """
-    Calculates the maximum consecutive count of 0s in a binary numpy array.
-
-    Args:
-      binary_array: A numpy array containing only 0s and 1s.
-
-    Returns:
-      Maximum consecutive count of 0s.
-    """
-    # Find indices where the array changes value
-    indices = np.where(np.diff(arr))[0] + 1
-    # Split the array at these indices
-    splits = np.split(arr, indices)
-
-    # Calculate lengths of splits and find maximum for 0
-    return max([len(s) for s in splits if s[0] == 0], default=0)
-
-
-def identify_axes(ax_dict, fontsize=24):
-    kw = {"ha": "center", "va": "center", "fontsize": fontsize, "color": "darkgrey"}
-    for k, ax in ax_dict.items():
-        ax.text(0.5, 0.5, k, transform=ax.transAxes, **kw)
-
-
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Please provide a file to visualize!")
-        sys.exit(1)
-    log_file = sys.argv[1]
+    parser = argparse.ArgumentParser(description="Visualize allocation log.")
+    parser.add_argument("input_file", help="Path to the allocation log file.")
+    parser.add_argument("-p", "--processes", type=int, default=os.cpu_count(),
+                        help="Number of processes to use for video export (default: all CPU cores)")
+    parser.add_argument("-e", "--export", metavar="output_file", nargs="?", const="output",
+                        help="Export the visualization to a video file (default: output.mp4)")
 
-    config = parse_header(log_file)
-    global_bitmap = GlobalBitMap(log_file, config)
-    print(global_bitmap)
+    args = parser.parse_args()
 
-    global_bitmap.export_to_video("test", nproc=1)
-    # global_bitmap.plot()
+    log_file = args.input_file
+    global_bitmap = GlobalBitMap(log_file)
+
+    if args.export:
+        global_bitmap.export_to_video(args.export, nproc=args.processes)
+    else:
+        global_bitmap.plot()
