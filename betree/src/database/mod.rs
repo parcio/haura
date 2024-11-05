@@ -232,9 +232,9 @@ impl DatabaseConfiguration {
         }
 
         // TODO: Fix the following code.
-        let mut temp = self.compression.clone().to_builder();
+        let mut dmu_compressor = self.compression.clone().to_builder();
         let mut compression_var = crate::compression::COMPRESSION_VAR.write().unwrap();
-        compression_var = temp.write().unwrap();
+        compression_var = dmu_compressor.write().unwrap();
 
         Dmu::new(
             self.compression.to_builder(),
@@ -244,6 +244,7 @@ impl DatabaseConfiguration {
             strategy,
             ClockCache::new(self.cache_size),
             handler,
+            self.is_nvm_tree,
         )
     }
 

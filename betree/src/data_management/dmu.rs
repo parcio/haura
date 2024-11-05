@@ -55,6 +55,7 @@ where
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
+    is_nvm_tree: bool,
 }
 
 impl<E, SPL> Dmu<E, SPL>
@@ -72,6 +73,7 @@ where
         alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
         handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
+        is_nvm_tree: bool,
     ) -> Self {
         let allocation_data = (0..pool.storage_class_count())
 
@@ -101,6 +103,7 @@ where
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
             report_tx: None,
+            is_nvm_tree,
         }
     }
 
@@ -228,13 +231,10 @@ where
     fn fetch(&self, op: &<Self as Dml>::ObjectPointer, pivot_key: PivotKey) -> Result<(), Error> {
         // FIXME: reuse decompression_state
         debug!("Fetching {op:?}");
-        let a = op.decompression_tag();
-        let mut b = a.new_decompression()?;
         let mut decompression_state = op.decompression_tag().new_decompression()?;
         let offset = op.offset();
         let generation = op.generation();
 
-        // TODO: Karim.. add comments
         let mut bytes_to_read = op.size();
         let meta_data_len = 0;
         if (meta_data_len != 0) {
@@ -245,17 +245,14 @@ where
             .pool
             .read(bytes_to_read, op.offset(), op.checksum().clone())?;
 
-        // let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-        //     let data = decompression_state.decompress(&compressed_data)?;
-        //     Object::unpack_at(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data)?
-        // };
-        //println!("..zz {:?} {}", bytes_to_read, compressed_data.as_ref().len());
-
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            /// TODOooooooooooooooooooooooooooooooooooooooooooooooo fix this!!!!!!! layeeeee
-            //let data = decompression_state.decompress(compressed_data)?;
-            //Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice(), a)?
-            Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), compressed_data.into_boxed_slice(), a)?
+            if( self.is_nvm_tree) {
+                Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), compressed_data.into_boxed_slice(), op.decompression_tag())?
+            }
+            else {                
+                let data = decompression_state.decompress(compressed_data)?;
+                Object::unpack_at(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice())?
+            }
         };
 
         let key = ObjectKey::Unmodified { offset, generation };
@@ -404,37 +401,11 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
-        // TODO: Karim.. add comments
         let mut metadata_size = 0;
         let compression = &*self.default_compression.read().unwrap();
-        // let compressed_data = {
-        //     // FIXME: cache this
-        //     let a = compression.new_compression().unwrap();
-        //     let mut state = a.write().unwrap();
-        //     {
-        //         object.pack(&mut *state, &mut metadata_size)?;
-        //         drop(object);
-        //     }
-        //     state.finish()
-        // };
 
-        // let compressed_data = {
-        //     // FIXME: cache this
-        //     let mut state = compression.new_compression().unwrap();
-        //     let mut buf = crate::buffer::BufWrite::with_capacity(Block(128));
-        //     {
-        //         object.pack(&mut buf, &mut metadata_size)?;
-        //         drop(object);
-        //     }
-        //     let mut newstate = state.write().unwrap();
-        //     {
-        //         newstate.finish(buf.into_buf())
-        //     }
-            
-        // };
-        //panic!("2------------------------------------{:?}", compressed_data);
         let compressed_data : Buf = object.pack_and_compress(&mut metadata_size, self.default_compression.clone()).unwrap();
-        //println!("2------------------------------------{:?}", compressed_data);
+
         drop(object);
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
@@ -444,11 +415,6 @@ where
         assert!(size.to_bytes() as usize >= compressed_data.len());
         let offset = self.allocate(storage_class, size)?;
         assert_eq!(size.to_bytes() as usize, compressed_data.len());
-        /*if size.to_bytes() as usize != compressed_data.len() {
-            let mut v = compressed_data.into_vec();
-            v.resize(size.to_bytes() as usize, 0);
-            compressed_data = v.into_boxed_slice();
-        }*/
         
         let info = self.modified_info.lock().remove(&mid).unwrap();
 
