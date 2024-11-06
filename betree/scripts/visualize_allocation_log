@@ -137,7 +137,11 @@ class Parser:
         self._file_handle.seek(0)
 
     def __del__(self):
-        self._file_handle.close()
+        try:
+            self._file_handle.close()
+        except AttributeError:
+            # Happens when the file does not exist
+            pass
 
     def __len__(self) -> int:
         return self.timesteps
@@ -386,7 +390,13 @@ class GlobalBitMap:
 
     def __init__(self, log_file: str):
         self.log_file = log_file
-        self.storage_config = Parser(log_file).parse_header()
+        try:
+            self.storage_config = Parser(log_file).parse_header()
+        except FileNotFoundError as e:
+            print(f"Input file `{log_file}` does not exist. Can't continue.")
+            print(e)
+            exit(1)
+
         self.size = self.storage_config.blocks_global()
 
         # Create the storage structure based on the config.
