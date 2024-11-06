@@ -738,6 +738,35 @@ def get_close_aspect(width: int, height: int, total_pixels: int) -> tuple[int, i
     return rows, cols
 
 
+def get_valid_backends():
+    def is_backend_module(fname):
+        """Identifies if a filename is a matplotlib backend module"""
+        return fname.startswith('backend_') and fname.endswith('.py')
+
+    def backend_fname_formatter(fname):
+        """Removes the extension of the given filename, then takes away the leading 'backend_'."""
+        return os.path.splitext(fname)[0][8:]
+
+    # get the directory where the backends live
+    backends_dir = os.path.dirname(matplotlib.backends.__file__)
+
+    # filter all files in that directory to identify all files which provide a backend
+    backend_fnames = filter(is_backend_module, os.listdir(backends_dir))
+
+    backends = [backend_fname_formatter(fname) for fname in backend_fnames]
+
+    # validate backends
+    backends_valid = []
+    for b in backends:
+        try:
+            plt.switch_backend(b)
+            backends_valid += [b]
+        except:
+            continue
+
+    return backends, backends_valid
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize allocation log.")
     parser.add_argument("input_file", help="Path to the allocation log file.")
@@ -745,12 +774,24 @@ if __name__ == "__main__":
                         help="Number of processes to use for video export (default: all CPU cores)")
     parser.add_argument("-e", "--export", metavar="output_file", nargs="?", const="output",
                         help="Export the visualization to a video file (default: output.mp4)")
+    parser.add_argument("-b", "--backend", type=str, default="TkAgg",
+                        help="Specify the backend for Matplotlib (default: TkAgg)")
 
     args = parser.parse_args()
 
     log_file = args.input_file
     global_bitmap = GlobalBitMap(log_file)
 
+    try:
+        matplotlib.pyplot.switch_backend(args.backend)
+    except ModuleNotFoundError as e:
+        print(f"\n\033[31mTrying to use invalid backend: {args.backend} ({e})\033[0m\n")
+        backends, backends_valid = get_valid_backends()
+        print(f"Available backends: \t{backends}")
+        print(f"Installed backends: \t{backends_valid}")
+        exit(1)
+
+    print(f"Using '{matplotlib.get_backend()}' as a backend for matplotlib.")
     if args.export:
         global_bitmap.export_to_video(args.export, nproc=args.processes)
     else:
