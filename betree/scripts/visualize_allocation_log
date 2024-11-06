@@ -547,7 +547,7 @@ class GlobalBitMap:
 
         frag_values = []
         for i in range(self.time):
-            frag, _, _ = layer.get_fragmentation(i)
+            frag, _, _ = self.get_fragmentation(i)
             frag_values.append(frag)
         global_frag_ax = axd["frag_global"]
         global_frag_ax.plot(frag_values)
