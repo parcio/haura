@@ -13,7 +13,7 @@ from typing import Iterator, Any, IO
 import matplotlib
 from matplotlib.animation import FFMpegWriter
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
+from matplotlib.widgets import Slider, CheckButtons
 import numpy as np
 from sortedcontainers import SortedDict
 from tqdm import tqdm
@@ -456,164 +456,144 @@ class GlobalBitMap:
 
         return Fragmentation.calculate_fragmentation(total_free, largest_free), total_free, largest_free
 
-    def plot(self):
-        """Plots the bitmap with an interactive slider for timestamp selection."""
-        fig, axd = self._setup_plot()
-        ims = self._setup_bitmaps(fig, axd)
-        vlines = self._plot_fragmentation(axd)
-        slider = self._setup_slider(fig, axd, ims, vlines)
 
+class Plotter:
+    """Handles plotting the bitmap and fragmentation data with interactive controls."""
+    global_bitmap: GlobalBitMap
+    plot_config: dict
+    layers: list[bool]
+    time: int
+
+    def __init__(self, layers, components, checkboxes):
+        self.time = 0
+
+        # Define initial plotting configuration
+        self.plot_config = {
+            "bitmaps": False,
+            "frag_local": False,
+            "frag_global": False,
+            "slider": False,
+            "checkboxes": checkboxes,
+        }
+
+        for key in components:
+            if key not in self.plot_config.keys():
+                print(f"\033[31mThe component '{key}' does not exist.\033[0m")
+                print("Available components are: ")
+                print(self.plot_config.keys())
+                exit(1)
+            else:
+                self.plot_config[key] = True
+
+        self.layers = layers
+
+    def plot(self):
+        """Sets up the plot and displays it"""
+        self.fig = plt.figure(layout="constrained")
+        self.fig.set_size_inches(16, 9)
+        self.fig.set_dpi(1920 / 16)
+        self._create_layout(self.fig)
         plt.show()
 
-    def _setup_plot(self) -> tuple[plt.Figure, dict[str, matplotlib.axes.Axes]]:
-        """Helper method for setting up the plot."""
-        form = [
-            [".", ".", ".", ".", ".", "."],
-            [".", "layer_0", "layer_1", "layer_2", "layer_3", "."],
-            [".", "frag_0", "frag_1", "frag_2", "frag_3", "."],
-            [".", "frag_global", "frag_global", "frag_global", "frag_global", "."],
-            [".", "slider", "slider", "slider", "slider", "."],
-            [".", ".", ".", ".", ".", "."],
-        ]
-        gs_kw = {"width_ratios": [0.03, 1, 1, 1, 1, 0.03],
-                 "height_ratios": [0.03, 3, 1, 1, 0.1, 0.03]}
-        fig, axd = plt.subplot_mosaic(
-            form, gridspec_kw=gs_kw, layout="constrained")
-        fig.set_size_inches(16, 9)
-        fig.set_dpi(1920 / 16)
-        return fig, axd
+    def _create_layout(self, fig):
+        layout, gridspec = self._get_layout_gridspec()
+        self.axd = fig.subplot_mosaic(layout, gridspec_kw=gridspec)
+        self.ims = self._setup_bitmaps()
+        self.vlines_local = self._local_fragmentation()
+        self.vlines_global = self._global_fragmentation()
+        self.slider = self._setup_slider()
+        self.checkboxes = self._setup_checkboxes()
+        # self.slider.set_val(self.time)
 
-    def _setup_bitmaps(self, fig, axd):
-        """Helper method for setting up the bitmaps of the layer."""
-        ims = []
+    def _get_layout_gridspec(self) -> tuple[list[list[str]], list[list[str]]]:
+        layout = []
+        gridspec = {"width_ratios": [], "height_ratios": []}
 
+        if self.plot_config["checkboxes"]:
+            gridspec["width_ratios"].append(0.4)
         for layer in self.layers:
-            name = f"layer_{layer.id}"
-            ims.append({})
+            gridspec["width_ratios"].append(1)
+
+        if self.plot_config["bitmaps"]:
+            layout.append([])
+            gridspec["height_ratios"].append(3)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append(f"bitmap_{layer}")
+
+        if self.plot_config["frag_local"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append(f"frag_{layer}")
+
+        if self.plot_config["frag_global"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("frag_global")
+
+        if self.plot_config["slider"]:
+            layout.append([])
+            gridspec["height_ratios"].append(0.1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("slider")
+
+        return layout, gridspec
+
+    def _setup_bitmaps(self):
+        if not self.plot_config["bitmaps"]:
+            return
+
+        ims = {}
+        for layer in self.global_bitmap.layers:
+            if layer.id not in self.layers:
+                continue
+
+            name = f"bitmap_{layer.id}"
+            ims[layer.id] = {}
             if layer.size == 0:
                 kw = {"ha": "center", "va": "center", "fontsize": 12, "color": "darkgrey"}
-                axd[name].text(0.5, 0.5, "[Empty]", transform=axd[name].transAxes, **kw)
+                self.axd[name].text(0.5, 0.5, "[Empty]", transform=self.axd[name].transAxes, **kw)
             else:
-                bbox = axd[name].get_window_extent().transformed(
-                    fig.dpi_scale_trans.inverted())
+                bbox = self.axd[name].get_window_extent().transformed(
+                    self.fig.dpi_scale_trans.inverted())
                 ims[layer.id]["width"] = bbox.width
                 ims[layer.id]["height"] = bbox.height
 
-                layer_bitmap = layer.get_bitmap(self.time - 1)
-                colored_bitmap = self._color_disks(layer_bitmap, layer.id)
+                layer_bitmap = layer.get_bitmap(self.time)
+                colored_bitmap = self._color_disks(
+                    layer_bitmap, layer.id)
                 rows, cols = get_close_aspect(ims[layer.id]["width"],
                                               ims[layer.id]["height"],
                                               len(colored_bitmap[:, 0]))
                 resized_bitmap = colored_bitmap.reshape(rows, cols, 4)
                 ims[layer.id]["bitmap"] = resized_bitmap
-                ims[layer.id]["im"] = axd[name].imshow(
+                ims[layer.id]["im"] = self.axd[name].imshow(
                     resized_bitmap, aspect="auto", interpolation=None)
-                axd[name].set_xlabel("Block")
-                axd[name].set_ylabel("Block")
+                self.axd[name].set_xlabel("Block")
+                self.axd[name].set_ylabel("Block")
 
-            axd[name].set_title(f"Layer {layer.id}")
-            axd[name].set_xticks([])
-            axd[name].set_yticks([])
+            self.axd[name].set_title(f"Layer {layer.id}")
+            self.axd[name].set_xticks([])
+            self.axd[name].set_yticks([])
 
         return ims
-
-    def _plot_fragmentation(self, axd) -> dict:
-        """Helper method for plotting the fragmentation of the layers and the storage."""
-        # Vertical lines that indicate the timestamp
-        vlines = {}
-
-        for layer in self.layers:
-            frag_ax = axd[f"frag_{layer.id}"]
-            if self.storage_config.blocks_of_layer(layer.id) != 0:
-                frag_values = []
-                for i in range(self.time):
-                    frag, _, _ = layer.get_fragmentation(i)
-                    frag_values.append(frag)
-
-                frag_ax.plot(frag_values)
-                frag_ax.set_xlim([0, self.time - 1])
-                frag_ax.set_ylim([0, 1])
-                frag_ax.set_xlabel("Timestamp")
-                if layer.id == 0:
-                    frag_ax.set_ylabel("Fragmentation")
-
-                vlines[layer.id] = frag_ax.axvline(
-                    x=0, color="red", linestyle="--", linewidth=1)
-            else:
-                kw = {"ha": "center", "va": "center",
-                      "fontsize": 12, "color": "darkgrey"}
-                frag_ax.text(0.5, 0.5, "[Empty]",
-                             transform=frag_ax.transAxes, **kw)
-
-        frag_values = []
-        for i in range(self.time):
-            frag, _, _ = self.get_fragmentation(i)
-            frag_values.append(frag)
-        global_frag_ax = axd["frag_global"]
-        global_frag_ax.plot(frag_values)
-        global_frag_ax.set_ylim([0, 1])
-        global_frag_ax.set_xlim([0, self.time - 1])
-        global_frag_ax.set_title("Global Fragmentation")
-        global_frag_ax.set_xlabel("Timestamp")
-        global_frag_ax.set_ylabel("Fragmentation")
-
-        vlines["global"] = global_frag_ax.axvline(
-            x=0, color="red", linestyle="--", linewidth=1)
-
-        return vlines
-
-    def _setup_slider(self, fig, axd, ims, vlines) -> Slider:
-        """Helper method for setting up the slider for interactive plotting."""
-        # TODO: remove moving of entire plot, when the slider value increases
-
-        # Create the format specifier with appropriate spacing to prevent moving of axes.
-        max_digits = len(str(self.time - 1))
-        valfmt = f"%{max_digits}d"
-        slider = Slider(
-            axd["slider"],
-            "",
-            0,
-            self.time - 1,
-            valinit=0,
-            valstep=1,
-            valfmt=valfmt
-        )
-
-        def update(val):
-            timestep = int(val)
-            if timestep > self.time - 1:
-                slider.set_val(self.time - 1)
-                return
-
-            for layer in self.layers:
-                if layer.size == 0:
-                    continue
-
-                # Times 255 because the bitmap is mapped to the alpha channel.
-                bitmap = layer.get_bitmap(timestep) * 255
-
-                rows, cols = get_close_aspect(ims[layer.id]["width"],
-                                              ims[layer.id]["height"],
-                                              len(bitmap))
-                resized_bitmap = bitmap.reshape(rows, cols)
-                ims[layer.id]["bitmap"][:, :, 3] = resized_bitmap
-                ims[layer.id]["im"].set_data(ims[layer.id]["bitmap"])
-                vlines[layer.id].set_xdata([timestep, timestep])
-
-            vlines["global"].set_xdata([timestep, timestep])
-            fig.canvas.draw_idle()
-
-        slider.on_changed(update)
-
-        return slider
 
     def _color_disks(self, layer_bitmap: np.array, layer_id: int) -> np.ndarray:
         """Colors the disks within a layer differently."""
         colored_bitmap = np.zeros((len(layer_bitmap), 4), dtype=np.uint8)
         colored_bitmap[:, 3] = layer_bitmap
         start = 0
-        for disk_id in range(self.storage_config.disks_of_layer(layer_id)):
-            length = self.storage_config.blocks_of_disk(layer_id, disk_id)
+        for disk_id in range(self.global_bitmap.storage_config.disks_of_layer(layer_id)):
+            length = self.global_bitmap.storage_config.blocks_of_disk(layer_id, disk_id)
 
             color = id_to_color(disk_id)
             color_array = np.tile(color, (length, 1))
@@ -623,11 +603,156 @@ class GlobalBitMap:
 
         return colored_bitmap
 
+    def _local_fragmentation(self):
+        """Helper method for plotting the fragmentation of the layers and the storage."""
+        if not self.plot_config["frag_local"]:
+            return
+
+        # Vertical lines that indicate the timestamp
+        vlines = {}
+
+        for i, layer in enumerate(self.layers):
+            frag_ax = self.axd[f"frag_{layer}"]
+            if self.global_bitmap.storage_config.blocks_of_layer(layer) != 0:
+                frag_values = []
+                for i in range(self.global_bitmap.time):
+                    frag, _, _ = self.global_bitmap.layers[layer].get_fragmentation(i)
+                    frag_values.append(frag)
+
+                frag_ax.plot(frag_values)
+                frag_ax.set_xlim([0, self.global_bitmap.time - 1])
+                frag_ax.set_ylim([0, 1])
+                frag_ax.set_xlabel("Timestamp")
+                if i == 0:
+                    frag_ax.set_ylabel("Fragmentation")
+
+                vlines[layer] = frag_ax.axvline(
+                    x=self.time, color="red", linestyle="--", linewidth=1)
+            else:
+                kw = {"ha": "center", "va": "center",
+                      "fontsize": 12, "color": "darkgrey"}
+                frag_ax.text(0.5, 0.5, "[Empty]",
+                             transform=frag_ax.transAxes, **kw)
+
+        return vlines
+
+    def _global_fragmentation(self):
+        if not self.plot_config["frag_global"]:
+            return
+
+        # Vertical line that indicates the timestamp
+        frag_values = []
+        for i in range(self.global_bitmap.time):
+            frag, _, _ = self.global_bitmap.get_fragmentation(i)
+            frag_values.append(frag)
+        global_frag_ax = self.axd["frag_global"]
+        global_frag_ax.plot(frag_values)
+        global_frag_ax.set_ylim([0, 1])
+        global_frag_ax.set_xlim([0, self.global_bitmap.time - 1])
+        global_frag_ax.set_title("Global Fragmentation")
+        global_frag_ax.set_xlabel("Timestamp")
+        global_frag_ax.set_ylabel("Fragmentation")
+
+        return global_frag_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _setup_slider(self):
+        """Helper method for setting up the slider for interactive plotting."""
+        if not self.plot_config["slider"]:
+            return
+        # TODO: remove moving of entire plot, when the slider value increases
+
+        # Create the format specifier with appropriate spacing to prevent moving of axes.
+        max_digits = len(str(self.global_bitmap.time - 1))
+        valfmt = f"%{max_digits}d"
+        slider = Slider(
+            self.axd["slider"],
+            "",
+            0,
+            self.global_bitmap.time - 1,
+            valinit=self.time,
+            valstep=1,
+            valfmt=valfmt
+        )
+
+        def update(val):
+            self.time = int(val)
+            if self.time > self.global_bitmap.time - 1:
+                slider.set_val(self.global_bitmap.time - 1)
+                return
+
+            for layer_id in self.layers:
+                layer = self.global_bitmap.layers[layer_id]
+                if layer.size == 0:
+                    continue
+
+                if self.plot_config["bitmaps"]:
+                    # Times 255 because the bitmap is mapped to the alpha channel.
+                    bitmap = layer.get_bitmap(self.time) * 255
+
+                    rows, cols = get_close_aspect(self.ims[layer_id]["width"],
+                                                  self.ims[layer_id]["height"],
+                                                  len(bitmap))
+                    resized_bitmap = bitmap.reshape(rows, cols)
+                    self.ims[layer_id]["bitmap"][:, :, 3] = resized_bitmap
+                    self.ims[layer_id]["im"].set_data(self.ims[layer_id]["bitmap"])
+
+                if self.plot_config["frag_local"]:
+                    self.vlines_local[layer_id].set_xdata([self.time, self.time])
+
+            if self.plot_config["frag_global"]:
+                self.vlines_global.set_xdata([self.time, self.time])
+            self.fig.canvas.draw_idle()
+
+        slider.on_changed(update)
+
+        return slider
+
+    def _setup_checkboxes(self):
+        """Sets up checkboxes for controlling plot visibility."""
+
+        labels = []
+        actives = []
+        for k, v in self.plot_config.items():
+            labels.append(k)
+            actives.append(v)
+
+        for layer in self.global_bitmap.layers:
+            labels.append(f"layer_{layer.id}")
+            if layer.id in self.layers:
+                actives.append(True)
+            else:
+                actives.append(False)
+
+        # Create checkboxes
+        self.axd["checkboxes"].set_axis_off()
+        checkboxes = CheckButtons(self.axd["checkboxes"], labels, actives)
+
+        def update_visibility(label):
+            """Updates plot visibility based on checkbox changes."""
+            plt.clf()
+
+            if label in self.plot_config:
+                self.plot_config[label] = not self.plot_config[label]
+            else:
+                layer_id = int(label.split("_")[-1])
+                try:
+                    self.layers.remove(layer_id)
+                except ValueError:
+                    self.layers.append(layer_id)
+                self.layers.sort()
+
+            self._create_layout(self.fig)
+            self.fig.canvas.mouse_grabber = None
+            self.fig.canvas.draw_idle()
+
+        checkboxes.on_clicked(update_visibility)
+        return checkboxes
+
     def export_to_video(self, filename: str, start: int = 0, end: int = None, fps: int = 60, bitrate: int = 4500, dpi: int = 100, nproc: int = None):
         """Export the plot to a mp4 file for later watching. For that it can use multiple processes
            and works with files in temporary directory, which it cleans up after finishing."""
-        if end is None or end > self.time:
-            end = self.time
+        if end is None or end > self.global_bitmap.time:
+            end = self.global_bitmap.time
         if nproc is None:
             nproc = os.cpu_count()
 
@@ -694,16 +819,16 @@ class GlobalBitMap:
         """Helper method that gets executed in each process used in exporting to video."""
         # NOTE: We have to create and setup a new plot within the chunk function because a
         # matplotlib figure is not picklable.
-        fig, axd = self._setup_plot()
-        ims = self._setup_bitmaps(fig, axd)
-        vlines = self._plot_fragmentation(axd)
-        slider = self._setup_slider(fig, axd, ims, vlines)
+        self.fig = plt.figure(layout="constrained")
+        self.fig.set_size_inches(16, 9)
+        self.fig.set_dpi(1920 / 16)
+        self._create_layout(self.fig)
 
-        slider.set_val(start)
+        self.slider.set_val(start)
         writer = FFMpegWriter(fps=fps, bitrate=bitrate)
-        writer.setup(fig, filename, dpi=dpi)
+        writer.setup(self.fig, filename, dpi=dpi)
         for _ in range(end - start):
-            slider.set_val(slider.val + 1)
+            self.slider.set_val(self.slider.val + 1)
             writer.grab_frame()
 
             # Update the global progress bar.
@@ -711,7 +836,7 @@ class GlobalBitMap:
                 counter.value += 1
 
         writer.finish()
-        plt.close(fig)
+        plt.close(self.fig)
 
         return True
 
@@ -780,17 +905,22 @@ def get_valid_backends():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize allocation log.")
     parser.add_argument("input_file", help="Path to the allocation log file.")
-    parser.add_argument("-p", "--processes", type=int, default=os.cpu_count(),
-                        help="Number of processes to use for video export (default: all CPU cores)")
-    parser.add_argument("-e", "--export", metavar="output_file", nargs="?", const="output",
-                        help="Export the visualization to a video file (default: output.mp4)")
     parser.add_argument("-b", "--backend", type=str, default="TkAgg",
                         help="Specify the backend for Matplotlib (default: TkAgg)")
+    parser.add_argument("-c", "--components", nargs="+", default=["slider", "bitmaps", "frag_local", "frag_global"],
+                        help="Specify the components that should be plotted (default: slider bitmaps frag_local frag_global)")
+    parser.add_argument("-e", "--export", metavar="output_file", nargs="?", const="output",
+                        help="Export the visualization to a video file (default: output.mp4)")
+    parser.add_argument("-l", "--layers", nargs="+", default=[i for i in range(4)],
+                        help="Specify the layers that should be plotted (default: 1 2 3 4)")
+    parser.add_argument("-p", "--processes", type=int, default=os.cpu_count(),
+                        help="Number of processes to use for video export (default: all CPU cores)")
+    parser.add_argument("--disable-checkboxes", default=True, action="store_true",
+                        help="Disable the checkboxes (default: False)")
 
     args = parser.parse_args()
 
     log_file = args.input_file
-    global_bitmap = GlobalBitMap(log_file)
 
     try:
         matplotlib.pyplot.switch_backend(args.backend)
@@ -800,9 +930,12 @@ if __name__ == "__main__":
         print(f"Available backends: \t{backends}")
         print(f"Installed backends: \t{backends_valid}")
         exit(1)
-
     print(f"Using '{matplotlib.get_backend()}' as a backend for matplotlib.")
+
+    print(args.layers, args.components)
+    plotter = Plotter(args.layers, args.components, args.disable_checkboxes)
+    plotter.global_bitmap = GlobalBitMap(log_file)
     if args.export:
-        global_bitmap.export_to_video(args.export, nproc=args.processes)
+        plotter.export_to_video(args.export, nproc=args.processes, end=100)
     else:
-        global_bitmap.plot()
+        plotter.plot()
