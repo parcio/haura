@@ -611,8 +611,8 @@ class Plotter:
                 ims[layer.id]["height"] = bbox.height
 
                 layer_bitmap = layer.get_bitmap(self.time)
-                colored_bitmap = self._color_disks(
-                    layer_bitmap, layer.id)
+                packed_bitmap = np.packbits(layer_bitmap)
+                colored_bitmap = self._color_disks(packed_bitmap, layer.id)
                 rows, cols = get_close_aspect(ims[layer.id]["width"],
                                               ims[layer.id]["height"],
                                               len(colored_bitmap[:, 0]))
@@ -635,7 +635,7 @@ class Plotter:
         colored_bitmap[:, 3] = layer_bitmap
         start = 0
         for disk_id in range(self.global_bitmap.storage_config.disks_of_layer(layer_id)):
-            length = self.global_bitmap.storage_config.blocks_of_disk(layer_id, disk_id)
+            length = self.global_bitmap.storage_config.blocks_of_disk(layer_id, disk_id) // 8
 
             color = id_to_color(disk_id)
             color_array = np.tile(color, (length, 1))
@@ -795,8 +795,7 @@ class Plotter:
                 continue
 
             if self.plot_config["bitmaps"]:
-                # Times 255 because the bitmap is mapped to the alpha channel.
-                bitmap = layer.get_bitmap(self.time) * 255
+                bitmap = np.packbits(layer.get_bitmap(self.time))
 
                 rows, cols = get_close_aspect(self.ims[layer_id]["width"],
                                               self.ims[layer_id]["height"],
@@ -1057,6 +1056,6 @@ if __name__ == "__main__":
 
     plotter.global_bitmap = GlobalBitMap(log_file)
     if args.export:
-        plotter.export_to_video(args.export, nproc=args.processes, end=100)
+        plotter.export_to_video(args.export, nproc=args.processes)
     else:
         plotter.plot()
