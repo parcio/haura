@@ -689,8 +689,8 @@ class Plotter:
                 frag_ax.set_xlim([0, self.global_bitmap.time - 1])
                 frag_ax.set_ylim([0, 1])
                 frag_ax.set_xlabel("Timestamp")
-                if i == 0:
-                    frag_ax.set_ylabel("Fragmentation")
+                # TODO: only plot ylabel on left most layer
+                frag_ax.set_ylabel("Fragmentation")
 
                 vlines[layer] = frag_ax.axvline(
                     x=self.time, color="red", linestyle="--", linewidth=1)
@@ -699,6 +699,8 @@ class Plotter:
                       "fontsize": 12, "color": "darkgrey"}
                 frag_ax.text(0.5, 0.5, "[Empty]",
                              transform=frag_ax.transAxes, **kw)
+                frag_ax.set_xticks([], [])
+                frag_ax.set_yticks([], [])
 
         return vlines
 
@@ -737,10 +739,11 @@ class Plotter:
                     free_values.append(free)
 
                 free_ax.plot(free_values)
+                free_ax.set_ylim(0)
                 free_ax.set_xlim([0, self.global_bitmap.time - 1])
                 free_ax.set_xlabel("Timestamp")
-                if i == 0:
-                    free_ax.set_ylabel("Blocks")
+                # TODO: only plot ylabel on left most layer
+                free_ax.set_ylabel("Blocks")
 
                 vlines[layer] = free_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
             else:
@@ -748,6 +751,8 @@ class Plotter:
                       "fontsize": 12, "color": "darkgrey"}
                 free_ax.text(0.5, 0.5, "[Empty]",
                              transform=free_ax.transAxes, **kw)
+                free_ax.set_xticks([], [])
+                free_ax.set_yticks([], [])
 
         return vlines
 
@@ -761,6 +766,7 @@ class Plotter:
             free_values.append(free)
         global_free_ax = self.axd["free_global"]
         global_free_ax.plot(free_values)
+        global_free_ax.set_ylim(0)
         global_free_ax.set_xlim([0, self.global_bitmap.time - 1])
         global_free_ax.set_title("Global Free Blocks")
         global_free_ax.set_xlabel("Timestamp")
@@ -774,6 +780,7 @@ class Plotter:
 
         failed_allocations_ax = self.axd["allocation_tries"]
         failed_allocations_ax.plot(self.global_bitmap.tries)
+        failed_allocations_ax.set_ylim(0)
         failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
         failed_allocations_ax.set_title("Allocation Tries")
         failed_allocations_ax.set_xlabel("Timestamp")
