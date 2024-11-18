@@ -29,16 +29,18 @@ impl SegmentAllocator {
 
     /// Allocates a block of the given `size`.
     /// Returns `None` if the allocation request cannot be satisfied.
-    pub fn allocate(&mut self, size: u32) -> Option<u32> {
+    pub fn allocate(&mut self, size: u32) -> (Option<u32>, u32) {
         if size == 0 {
-            return Some(0);
+            return (Some(0), 0);
         }
+        let mut tries = 0;
         let offset = {
             let mut idx = 0;
             loop {
+                tries += 1;
                 loop {
                     if idx + size > SEGMENT_SIZE as u32 {
-                        return None;
+                        return (None, tries);
                     }
                     if !self.data[idx as usize] {
                         break;
@@ -56,7 +58,7 @@ impl SegmentAllocator {
             }
         };
         self.mark(offset, size, Action::Allocate);
-        Some(offset)
+        (Some(offset), tries)
     }
 
     /// Allocates a block of the given `size` at `offset`.

@@ -250,6 +250,7 @@ where
             let _ = file.write_u8(Action::Deallocate.as_bool() as u8);
             let _ = file.write_u64::<LittleEndian>(obj_ptr.offset.as_u64());
             let _ = file.write_u32::<LittleEndian>(obj_ptr.size.as_u32());
+            let _ = file.write_u32::<LittleEndian>(0);
         }
         if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) = (
             self.handler.copy_on_write(
@@ -540,6 +541,7 @@ where
         // size?
         // Or save the largest contiguous memory region as a value and compare against that. For
         // that the allocator needs to support that and we have to 'bubble' the largest value up.
+        let mut total_tries: u32 = 0;
         'class: for &class in strategy.iter().flatten() {
             let disks_in_class = self.pool.disk_count(class);
             if disks_in_class == 0 {
@@ -595,13 +597,16 @@ where
                     // Has to be split because else the temporary value is dropped while borrowing
                     let bitmap = self.handler.get_allocation_bitmap(*segment_id, self)?;
                     let mut allocator = bitmap.access();
-                    if let Some(segment_offset) = allocator.allocate(size.as_u32()) {
+                    let allocation = allocator.allocate(size.as_u32());
+                    total_tries += allocation.1;
+                    if let Some(segment_offset) = allocation.0 {
                         let mut file = self.allocation_log_file.lock();
                         let disk_offset = segment_id.disk_offset(segment_offset);
 
                         file.write_u8(Action::Allocate.as_bool() as u8)?;
                         file.write_u64::<LittleEndian>(disk_offset.as_u64())?;
                         file.write_u32::<LittleEndian>(size.as_u32())?;
+                        file.write_u32::<LittleEndian>(total_tries)?;
 
                         break disk_offset;
                     }
