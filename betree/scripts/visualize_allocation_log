@@ -478,6 +478,8 @@ class Plotter:
             "bitmaps": False,
             "frag_local": False,
             "frag_global": False,
+            "free_local": False,
+            "free_global": False,
             "allocation_tries": False,
             "slider": False,
             "checkboxes": not args.disable_checkboxes,
@@ -513,8 +515,10 @@ class Plotter:
         layout, gridspec = self._get_layout_gridspec()
         self.axd = fig.subplot_mosaic(layout, gridspec_kw=gridspec)
         self.ims = self._setup_bitmaps()
-        self.vlines_local = self._local_fragmentation()
-        self.vlines_global = self._global_fragmentation()
+        self.vlines_frag_local = self._fragmentation_local()
+        self.vline_frag_global = self._fragmentation_global()
+        self.vlines_free_local = self._free_local()
+        self.vline_free_global = self._free_global()
         self.vline_allocation_tries = self._allocation_tries()
         self.slider = self._setup_slider()
         self.checkboxes = self._setup_checkboxes()
@@ -551,6 +555,22 @@ class Plotter:
                 layout[-1].append("checkboxes")
             for layer in self.layers:
                 layout[-1].append("frag_global")
+
+        if self.plot_config["free_local"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append(f"free_{layer}")
+
+        if self.plot_config["free_global"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("free_global")
 
         if self.plot_config["allocation_tries"]:
             layout.append([])
@@ -625,7 +645,7 @@ class Plotter:
 
         return colored_bitmap
 
-    def _local_fragmentation(self):
+    def _fragmentation_local(self):
         """Helper method for plotting the fragmentation of the layers and the storage."""
         if not self.plot_config["frag_local"]:
             return
@@ -658,7 +678,7 @@ class Plotter:
 
         return vlines
 
-    def _global_fragmentation(self):
+    def _fragmentation_global(self):
         if not self.plot_config["frag_global"]:
             return
 
@@ -676,6 +696,53 @@ class Plotter:
         global_frag_ax.set_ylabel("Fragmentation")
 
         return global_frag_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _free_local(self):
+        if not self.plot_config["free_local"]:
+            return
+
+        # Vertical lines that indicate the timestamp
+        vlines = {}
+
+        for i, layer in enumerate(self.layers):
+            free_ax = self.axd[f"free_{layer}"]
+            if self.global_bitmap.storage_config.blocks_of_layer(layer) != 0:
+                free_values = []
+                for i in range(self.global_bitmap.time):
+                    _, _, free = self.global_bitmap.layers[layer].get_fragmentation(i)
+                    free_values.append(free)
+
+                free_ax.plot(free_values)
+                free_ax.set_xlim([0, self.global_bitmap.time - 1])
+                free_ax.set_xlabel("Timestamp")
+                if i == 0:
+                    free_ax.set_ylabel("Blocks")
+
+                vlines[layer] = free_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+            else:
+                kw = {"ha": "center", "va": "center",
+                      "fontsize": 12, "color": "darkgrey"}
+                free_ax.text(0.5, 0.5, "[Empty]",
+                             transform=free_ax.transAxes, **kw)
+
+        return vlines
+
+    def _free_global(self):
+        if not self.plot_config["free_global"]:
+            return
+
+        free_values = []
+        for i in range(self.global_bitmap.time):
+            _, _, free = self.global_bitmap.get_fragmentation(i)
+            free_values.append(free)
+        global_free_ax = self.axd["free_global"]
+        global_free_ax.plot(free_values)
+        global_free_ax.set_xlim([0, self.global_bitmap.time - 1])
+        global_free_ax.set_title("Global Free Blocks")
+        global_free_ax.set_xlabel("Timestamp")
+        global_free_ax.set_ylabel("Blocks")
+
+        return global_free_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
 
     def _allocation_tries(self):
         if not self.plot_config["allocation_tries"]:
@@ -739,10 +806,16 @@ class Plotter:
                 self.ims[layer_id]["im"].set_data(self.ims[layer_id]["bitmap"])
 
             if self.plot_config["frag_local"]:
-                self.vlines_local[layer_id].set_xdata([self.time, self.time])
+                self.vlines_frag_local[layer_id].set_xdata([self.time, self.time])
+
+            if self.plot_config["free_local"]:
+                self.vlines_free_local[layer_id].set_xdata([self.time, self.time])
 
         if self.plot_config["frag_global"]:
-            self.vlines_global.set_xdata([self.time, self.time])
+            self.vline_frag_global.set_xdata([self.time, self.time])
+
+        if self.plot_config["free_global"]:
+            self.vline_free_global.set_xdata([self.time, self.time])
 
         if self.plot_config["allocation_tries"]:
             self.vline_allocation_tries.set_xdata([self.time, self.time])
