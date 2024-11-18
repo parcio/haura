@@ -741,7 +741,8 @@ class Plotter:
                     free_values.append(free)
 
                 free_ax.plot(free_values)
-                free_ax.set_ylim(0)
+                free_ax.set_yscale("log")
+                free_ax.set_ylim(1)
                 free_ax.set_xlim([0, self.global_bitmap.time - 1])
                 free_ax.set_xlabel("Timestamp")
                 # TODO: only plot ylabel on left most layer
@@ -768,7 +769,8 @@ class Plotter:
             free_values.append(free)
         global_free_ax = self.axd["free_global"]
         global_free_ax.plot(free_values)
-        global_free_ax.set_ylim(0)
+        global_free_ax.set_yscale("log")
+        global_free_ax.set_ylim(1)
         global_free_ax.set_xlim([0, self.global_bitmap.time - 1])
         global_free_ax.set_title("Global Free Blocks")
         global_free_ax.set_xlabel("Timestamp")
