@@ -470,7 +470,7 @@ class Plotter:
     layers: list[bool]
     time: int
 
-    def __init__(self, layers, components, disable_checkboxes):
+    def __init__(self, args):
         self.time = 0
 
         # Define initial plotting configuration
@@ -480,10 +480,17 @@ class Plotter:
             "frag_global": False,
             "allocation_tries": False,
             "slider": False,
-            "checkboxes": not disable_checkboxes,
+            "checkboxes": not args.disable_checkboxes,
         }
 
-        for key in components:
+        if args.available_components:
+            print("\033[1mAvailable Components:\033[0m")
+            for component in self.plot_config.keys():
+                print(component)
+
+            exit(1)
+
+        for key in args.components:
             if key not in self.plot_config.keys():
                 print(f"\033[31mThe component '{key}' does not exist.\033[0m")
                 print("Available components are: ")
@@ -492,7 +499,7 @@ class Plotter:
             else:
                 self.plot_config[key] = True
 
-        self.layers = layers
+        self.layers = [int(i) for i in args.layers]
 
     def plot(self):
         """Sets up the plot and displays it"""
@@ -948,18 +955,22 @@ if __name__ == "__main__":
                         help="Specify the backend for Matplotlib (default: TkAgg)")
     parser.add_argument("-c", "--components", nargs="+", default=["slider", "bitmaps", "frag_local", "frag_global"],
                         help="Specify the components that should be plotted (default: slider bitmaps frag_local frag_global)")
+    parser.add_argument("--available-components", default=False, action="store_true",
+                        help="Print the components available to be plotted.")
+    parser.add_argument("-d", "--disable-checkboxes", default=False, action="store_true",
+                        help="Disable the checkboxes (default: False)")
     parser.add_argument("-e", "--export", metavar="output_file", nargs="?", const="output",
                         help="Export the visualization to a video file (default: output.mp4)")
     parser.add_argument("-l", "--layers", nargs="+", default=[i for i in range(4)],
                         help="Specify the layers that should be plotted (default: 1 2 3 4)")
     parser.add_argument("-p", "--processes", type=int, default=os.cpu_count(),
                         help="Number of processes to use for video export (default: all CPU cores)")
-    parser.add_argument("--disable-checkboxes", default=False, action="store_true",
-                        help="Disable the checkboxes (default: False)")
 
     args = parser.parse_args()
 
     log_file = args.input_file
+
+    plotter = Plotter(args)
 
     try:
         matplotlib.pyplot.switch_backend(args.backend)
@@ -969,10 +980,8 @@ if __name__ == "__main__":
         print(f"Available backends: \t{backends}")
         print(f"Installed backends: \t{backends_valid}")
         exit(1)
-    print(f"Using '{matplotlib.get_backend()}' as a backend for matplotlib.")
+    print(f"Using \033[1m{matplotlib.get_backend()}\033[0m as a backend for matplotlib.")
 
-    print(args.layers, args.components)
-    plotter = Plotter(args.layers, args.components, args.disable_checkboxes)
     plotter.global_bitmap = GlobalBitMap(log_file)
     if args.export:
         plotter.export_to_video(args.export, nproc=args.processes, end=100)
