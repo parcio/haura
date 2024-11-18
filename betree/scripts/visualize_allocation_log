@@ -388,7 +388,8 @@ class GlobalBitMap:
     log_file: str
     storage_config: StorageConfig
     layers: list[Layer]
-    tries: np.array
+    tries: list[int]
+    sizes: list[int]
     size: int
     time: int
 
@@ -402,7 +403,8 @@ class GlobalBitMap:
             exit(1)
 
         self.size = self.storage_config.blocks_global()
-        self.tries = np.zeros(self.size)
+        self.tries = []
+        self.sizes = []
 
         # Create the storage structure based on the config.
         self.layers = []
@@ -434,7 +436,9 @@ class GlobalBitMap:
         parser = Parser(log_file)
         for timestamp in tqdm(parser, desc="Building Bitmap", unit="timestep"):
             self.layers[timestamp.layer_id].add_timestamp(timestamp)
-            self.tries[timestamp.time] = timestamp.tries
+            # TODO: What to do with deallocations (0s)
+            self.tries.append(timestamp.tries)
+            self.sizes.append(timestamp.num_blocks)
 
             self.time = timestamp.time
 
@@ -481,6 +485,8 @@ class Plotter:
             "free_local": False,
             "free_global": False,
             "allocation_tries": False,
+            "allocation_sizes": False,
+            "allocation_sizes_ecdf": False,  # empirical cumulative distribution function
             "slider": False,
             "checkboxes": not args.disable_checkboxes,
         }
@@ -520,6 +526,8 @@ class Plotter:
         self.vlines_free_local = self._free_local()
         self.vline_free_global = self._free_global()
         self.vline_allocation_tries = self._allocation_tries()
+        _ = self._allocation_sizes()
+        _ = self._allocation_sizes_ecdf()
         self.slider = self._setup_slider()
         self.checkboxes = self._setup_checkboxes()
 
@@ -579,6 +587,22 @@ class Plotter:
                 layout[-1].append("checkboxes")
             for layer in self.layers:
                 layout[-1].append("allocation_tries")
+
+        if self.plot_config["allocation_sizes"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_sizes")
+
+        if self.plot_config["allocation_sizes_ecdf"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_sizes_ecdf")
 
         if self.plot_config["slider"]:
             layout.append([])
@@ -756,6 +780,31 @@ class Plotter:
         failed_allocations_ax.set_ylabel("Tries")
 
         return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_sizes(self):
+        if not self.plot_config["allocation_sizes"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_sizes"]
+        failed_allocations_ax.hist(self.global_bitmap.sizes, bins=int(np.std(self.global_bitmap.sizes)))
+        failed_allocations_ax.set_title("Allocation sizes")
+        failed_allocations_ax.set_xlim(0, max(self.global_bitmap.sizes))
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlabel("Sizes")
+        failed_allocations_ax.set_ylabel("Amount")
+
+    def _allocation_sizes_ecdf(self):
+        if not self.plot_config["allocation_sizes_ecdf"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_sizes_ecdf"]
+        failed_allocations_ax.hist(self.global_bitmap.sizes, bins=max(self.global_bitmap.sizes),
+                                   density=True, cumulative=True)
+        failed_allocations_ax.set_title("Allocation sizes ECDF")
+        failed_allocations_ax.set_xlim(0, max(self.global_bitmap.sizes))
+        failed_allocations_ax.set_ylim(0, 1)
+        failed_allocations_ax.set_xlabel("Sizes")
+        failed_allocations_ax.set_ylabel("Proportion")
 
     def _setup_slider(self):
         """Helper method for setting up the slider for interactive plotting."""
