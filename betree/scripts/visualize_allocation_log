@@ -202,7 +202,7 @@ class Fragmentation:
     def fragmentation_of_bitmap(bitmap: np.array) -> tuple[float, int, int]:
         """Calculates the fragmentation of a bitmap."""
         if len(bitmap) == 0:
-            return 0
+            return 0, 0, 0
 
         total_free = np.count_nonzero(bitmap == 0)
         largest_free = Fragmentation.longest_repeating_0s(bitmap)
@@ -260,7 +260,7 @@ class Segment:
 
             self.frag_list[timestamp.time] = Fragmentation.fragmentation_of_bitmap(bitmap)
 
-    def get_bitmap(self, time: int) -> np.array:
+    def get_bitmap(self, time: int) -> np.ndarray:
         """Returns the allocation bitmap of a segment at the specified time or a available time
            before, if the requested time is not in the changelist."""
         bitmap = np.zeros(self.size, dtype=np.uint8)
@@ -311,7 +311,7 @@ class Disk:
         for segment in tqdm(self.segments, desc=f"Calculating fragmentation of disk {self.id}", leave=False, unit="segment"):
             segment.calculate_fragmentation()
 
-    def get_bitmap(self, time: int) -> np.array:
+    def get_bitmap(self, time: int) -> np.ndarray:
         """Returns the allocation bitmap of a disk at the specified time or a available time
            before, if the requested time is not in the changelist."""
         bitmap = np.zeros(self.size, dtype=np.uint8)
@@ -360,7 +360,7 @@ class Layer:
         for disk in tqdm(self.disks, desc=f"Calculating fragmentation of layer {self.id}", leave=False, unit="disk"):
             disk.calculate_fragmentation()
 
-    def get_bitmap(self, time: int) -> np.array:
+    def get_bitmap(self, time: int) -> np.ndarray:
         """Returns the allocation bitmap of a Layer at the specified time or a available time
            before, if the requested time is not in the changelist."""
         bitmap = np.zeros(self.size, dtype=np.uint8)
@@ -447,13 +447,15 @@ class GlobalBitMap:
         for layer in tqdm(self.layers, desc="Calculating fragmentation", unit="layer"):
             layer.calculate_fragmentation()
 
-    def get_bitmap(self, time: int) -> np.array:
+    def get_bitmap(self, time: int) -> np.ndarray:
         """Returns the allocation bitmap the storage at the specified time."""
         bitmap = np.zeros(self.size, dtype=np.uint8)
         start = 0
         for layer in self.layers:
             bitmap[start:start + layer.size] = layer.get_bitmap(time)
             start += layer.size
+
+        return bitmap
 
     def get_fragmentation(self, time) -> tuple[float, int, int]:
         """Returns the fragmentation, largest and total free space of the storage."""
@@ -653,7 +655,7 @@ class Plotter:
 
         return ims
 
-    def _color_disks(self, layer_bitmap: np.array, layer_id: int) -> np.ndarray:
+    def _color_disks(self, layer_bitmap: np.ndarray, layer_id: int) -> np.ndarray:
         """Colors the disks within a layer differently."""
         colored_bitmap = np.zeros((len(layer_bitmap), 4), dtype=np.uint8)
         colored_bitmap[:, 3] = layer_bitmap
