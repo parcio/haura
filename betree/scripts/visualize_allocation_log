@@ -661,6 +661,15 @@ class Plotter:
                 self.axd[name].set_xlabel("Block")
                 self.axd[name].set_ylabel("Block")
 
+                # Draw horizontal lines to seperate segments.
+                begin = 0
+                for disk in layer.disks:
+                    for i, segment in enumerate(disk.segments):
+                        # Do not draw line before first segment.
+                        if i > 0:
+                            _ = self.axd[name].axhline(begin / cols / 8, 0, 1, color="black", linestyle="--", linewidth=1)
+                        begin += segment.size
+
             self.axd[name].set_title(f"Layer {layer.id}")
             self.axd[name].set_xticks([])
             self.axd[name].set_yticks([])
@@ -1080,7 +1089,6 @@ class Plotter:
 def id_to_color(i: int) -> tuple[int, int, int]:
     """Maps the id to a color specified in the COLOR_MAPPING"""
     COLOR_MAPPING = [
-        (0, 0, 0),
         (0, 0, 255),
         (0, 255, 0),
         (0, 255, 255),
