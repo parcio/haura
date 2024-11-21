@@ -388,7 +388,7 @@ class GlobalBitMap:
     log_file: str
     storage_config: StorageConfig
     layers: list[Layer]
-    tries: list[int]
+    tries: tuple[np.ndarray, np.ndarray]
     sizes: list[int]
     size: int
     time: int
@@ -403,7 +403,7 @@ class GlobalBitMap:
             exit(1)
 
         self.size = self.storage_config.blocks_global()
-        self.tries = []
+        self.tries = (np.array([]), np.array([]))
         self.sizes = []
 
         # Create the storage structure based on the config.
@@ -436,8 +436,8 @@ class GlobalBitMap:
         parser = Parser(log_file)
         for timestamp in tqdm(parser, desc="Building Bitmap", unit="timestep"):
             self.layers[timestamp.layer_id].add_timestamp(timestamp)
-            # TODO: What to do with deallocations (0s)
-            self.tries.append(timestamp.tries)
+            if timestamp.tries != 0:
+                self.tries = (np.append(self.tries[0], timestamp.time), np.append(self.tries[1], timestamp.tries))
             self.sizes.append(timestamp.num_blocks)
 
             self.time = timestamp.time
@@ -487,6 +487,7 @@ class Plotter:
             "free_local": False,
             "free_global": False,
             "allocation_tries": False,
+            "allocation_tries_aligned": False,
             "allocation_sizes": False,
             "allocation_sizes_ecdf": False,  # empirical cumulative distribution function
             "slider": False,
@@ -494,22 +495,24 @@ class Plotter:
         }
 
         if args.available_components:
-            print("\033[1mAvailable Components:\033[0m")
-            for component in self.plot_config.keys():
-                print(component)
+            self.print_available_components()
 
             exit(1)
 
         for key in args.components:
             if key not in self.plot_config.keys():
                 print(f"\033[31mThe component '{key}' does not exist.\033[0m")
-                print("Available components are: ")
-                print(self.plot_config.keys())
+                self.print_available_components()
                 exit(1)
             else:
                 self.plot_config[key] = True
 
         self.layers = [int(i) for i in args.layers]
+
+    def print_available_components(self):
+        print("\033[1mAvailable Components:\033[0m")
+        for component in self.plot_config.keys():
+            print(component)
 
     def plot(self):
         """Sets up the plot and displays it"""
@@ -528,6 +531,7 @@ class Plotter:
         self.vlines_free_local = self._free_local()
         self.vline_free_global = self._free_global()
         self.vline_allocation_tries = self._allocation_tries()
+        self.vline_allocation_tries_aligned = self._allocation_tries_aligned()
         _ = self._allocation_sizes()
         _ = self._allocation_sizes_ecdf()
         self.slider = self._setup_slider()
@@ -589,6 +593,14 @@ class Plotter:
                 layout[-1].append("checkboxes")
             for layer in self.layers:
                 layout[-1].append("allocation_tries")
+
+        if self.plot_config["allocation_tries_aligned"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_tries_aligned")
 
         if self.plot_config["allocation_sizes"]:
             layout.append([])
@@ -782,11 +794,49 @@ class Plotter:
         if not self.plot_config["allocation_tries"]:
             return
 
+        data = self.global_bitmap.tries[1]
+        x_values = np.arange(0, len(data))
+
         failed_allocations_ax = self.axd["allocation_tries"]
-        failed_allocations_ax.plot(self.global_bitmap.tries)
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Tries")
+
+        window_sizes = [100, 500]
+        colors = ['red', 'orange', 'black', 'purple']
+        line_styles = ['-', '--', '-.', ':']
+        moving_average = np.zeros_like(data, dtype=float)
+
+        for i, window_size in enumerate(window_sizes):
+            moving_average = np.zeros_like(data, dtype=float)
+            for j in range(len(data)):
+                window_start = max(0, j - window_size + 1)
+                window_end = j + 1
+                moving_average[j] = np.mean(data[window_start:window_end])
+
+            # Plot with different colors and line styles
+            failed_allocations_ax.plot(x_values, moving_average,
+                                       linewidth=1.5,
+                                       color=colors[i % len(colors)],
+                                       linestyle=line_styles[i % len(line_styles)],
+                                       label=f"Moving Average ({window_size})")
+
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlim([0, len(data)])
+        failed_allocations_ax.set_title("Allocation Tries")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Tries")
+        failed_allocations_ax.legend(loc="upper left")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_tries_aligned(self):
+        if not self.plot_config["allocation_tries_aligned"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_tries_aligned"]
+        failed_allocations_ax.scatter(self.global_bitmap.tries[0], self.global_bitmap.tries[1], s=3.0, linewidths=0)
         failed_allocations_ax.set_ylim(0)
         failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
-        failed_allocations_ax.set_title("Allocation Tries")
+        failed_allocations_ax.set_title("Allocation Tries Aligned")
         failed_allocations_ax.set_xlabel("Timestamp")
         failed_allocations_ax.set_ylabel("Tries")
 
@@ -877,7 +927,12 @@ class Plotter:
             self.vline_free_global.set_xdata([self.time, self.time])
 
         if self.plot_config["allocation_tries"]:
-            self.vline_allocation_tries.set_xdata([self.time, self.time])
+            # Get the index of the last allocation that happened before or at the current timestamp.
+            index = np.argmax(self.global_bitmap.tries[0] > self.time) - 1
+            self.vline_allocation_tries.set_xdata([index, index])
+
+        if self.plot_config["allocation_tries_aligned"]:
+            self.vline_allocation_tries_aligned.set_xdata([self.time, self.time])
 
         self.fig.canvas.draw_idle()
 
@@ -1006,7 +1061,10 @@ class Plotter:
         writer.setup(self.fig, filename, dpi=dpi)
         for _ in range(end - start):
             self.time += 1
-            self._timestamp_update()
+            if self.plot_config["slider"]:
+                self.slider.set_val(self.time)
+            else:
+                self._timestamp_update()
             writer.grab_frame()
 
             # Update the global progress bar.
