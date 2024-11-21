@@ -98,4 +98,8 @@ where
     fn drop_cache(&self) {
         (**self).drop_cache();
     }
+
+    fn is_nvm_tree(&self) -> bool {
+        (**self).is_nvm_tree()
+    }
 }

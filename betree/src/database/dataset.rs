@@ -431,9 +431,10 @@ impl DatasetInner<DefaultMessageAction> {
         storage_preference: StoragePreference,
     ) -> Result<()> {
         if data.len() > unsafe{crate::g_MAX_MESSAGE_SIZE} {
-            panic!("> {} {}", data.len(), unsafe{crate::g_MAX_MESSAGE_SIZE} );
+            panic!("Error::MessageTooLarge -> size:{} max_allowed:{}", data.len(), unsafe{crate::g_MAX_MESSAGE_SIZE} );
             return Err(Error::MessageTooLarge);
         }
+
         self.insert_msg_with_pref(
             key,
             DefaultMessageAction::insert_msg(data),
@@ -461,9 +462,10 @@ impl DatasetInner<DefaultMessageAction> {
         let msg_size = unsafe{crate::g_MAX_MESSAGE_SIZE};
             
         if offset as usize + data.len() > msg_size {
-            panic!("> {} {}", offset as usize + data.len(), msg_size);
+            panic!("Error::MessageTooLarge -> size:{} max_allowed:{}", offset as usize + data.len(), msg_size);
             return Err(Error::MessageTooLarge);
         }
+        
         // TODO: In case of overfilling the underlying storage we should notify in _any_ case that the writing is not successfull, for this
         // we need to know wether the space to write out has been expanded. For this we need further information which we ideally do not want
         // to read out from the disk here.

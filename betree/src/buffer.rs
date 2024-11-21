@@ -85,12 +85,12 @@ impl AlignedStorage {
             ))
             .max(self.capacity + MIN_GROWTH_SIZE);
 
-        // if wanted_capacity.to_bytes() > 8 * 1024 * 1024 {
-        //     log::warn!(
-        //         "Requested allocation of >8MiB: {} byte",
-        //         wanted_capacity.to_bytes()
-        //     );
-        // }
+        if wanted_capacity.to_bytes() > 8 * 1024 * 1024 {
+            log::warn!(
+                "Requested allocation of >8MiB: {} byte",
+                wanted_capacity.to_bytes()
+            );
+        }
 
         unsafe {
             let curr_layout =
@@ -249,7 +249,7 @@ pub struct BufWrite {
 }
 
 impl BufWrite {
-    pub fn get_len(&self) -> u32 {
+    pub fn get_size(&self) -> u32 {
         self.size
     }
 
@@ -294,7 +294,8 @@ impl io::Write for BufWrite {
     }
 }
 
-	
+
+// Implementation of WriteBuf trait for BufWrite with methods for buffer manipulation
 unsafe impl zstd::stream::raw::WriteBuf for BufWrite {
     fn as_slice(&self) -> &[u8] {
         self.as_ref()
@@ -308,8 +309,7 @@ unsafe impl zstd::stream::raw::WriteBuf for BufWrite {
     unsafe fn filled_until(&mut self, n: usize) {
         self.size = n as u32
     }
-   }
-
+}
 
 impl io::Seek for BufWrite {
     fn seek(&mut self, seek: io::SeekFrom) -> io::Result<u64> {

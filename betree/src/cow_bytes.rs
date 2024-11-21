@@ -75,22 +75,29 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
         &self,
         serializer: &mut S
     ) -> Result<Self::Resolver, S::Error> {
-        let compression_builder = &*crate::compression::COMPRESSION_VAR.read().unwrap();
-        let compressed_data = {
-            let state = compression_builder.new_compression().unwrap();
-            let mut compressor = state.write().unwrap();
-             {
-                compressor.finish_ext(self.inner.as_slice())
-             }
-        };
+        unsafe {
+            panic!("");
+            if let Some(ref compression_var) = crate::compression::COMPRESSION_VAR {
+                let compression_builder = &*compression_var.read().unwrap();
+                let compressed_data = {
+                    let state = compression_builder.new_compression().unwrap();
+                    let mut compressor = state.write().unwrap();
+                    {
+                        compressor.finish_ext(self.inner.as_slice())
+                    }
+                };
 
-        let mut serializer_compressed_data = |data: &Vec<u8>| {
-            Ok(CowBytesResolver {
-                len: data.len(),
-                inner: ArchivedVec::serialize_from_slice(data.as_slice(), serializer)?,
-            })
-        };
-        serializer_compressed_data(&compressed_data.unwrap())
+                let mut serializer_compressed_data = |data: &Vec<u8>| {
+                    Ok(CowBytesResolver {
+                        len: data.len(),
+                        inner: ArchivedVec::serialize_from_slice(data.as_slice(), serializer)?,
+                    })
+                };
+                serializer_compressed_data(&compressed_data.unwrap())
+            } else {
+                panic!("This should not happend!");
+            }
+        }
     }
 }
 
@@ -98,16 +105,23 @@ impl<S: Serializer + ?Sized + ScratchSpace> Serialize<S> for CowBytes {
 use std::io::Write;
 
 impl<D: Fallible + ?Sized> Deserialize<CowBytes, D> for ArchivedVec<u8> {
-    fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {        
-        let vec: Vec<u8> = self.deserialize(deserializer)?;
+    fn deserialize(&self, deserializer: &mut D) -> Result<CowBytes, D::Error> {
+        panic!("");
 
-         let compression_builder = &*crate::compression::COMPRESSION_VAR.read().unwrap();
-         let mut decompression_state = compression_builder.decompression_tag().new_decompression().unwrap();
-         let data = decompression_state.decompressext(vec.as_slice()).unwrap();
+        unsafe {
+            if let Some(ref compression_var) = crate::compression::COMPRESSION_VAR {
+                let vec: Vec<u8> = self.deserialize(deserializer)?;
+                let compression_builder = &*compression_var.read().unwrap();
+                let mut decompression_state = compression_builder.decompression_tag().new_decompression().unwrap();
+                let data = decompression_state.decompress_ext(vec.as_slice()).unwrap();
 
-         Ok(CowBytes { inner: Arc::new(data) })
+                Ok(CowBytes { inner: Arc::new(data) })
+            } else {
+                panic!("This should not happend!");
+            }
+        }
     }
-}
+ }
 
 impl AsRef<[u8]> for ArchivedCowBytes {
     fn as_ref(&self) -> &[u8] {

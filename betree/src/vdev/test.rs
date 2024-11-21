@@ -104,7 +104,7 @@ impl VdevRead for FailingLeafVdev {
         start: usize,
         end: usize
     ) -> Result<&'static [u8], Error> {
-        unimplemented!("Implement test case!");
+        unimplemented!();
     }
 
     async fn scrub<C: Checksum>(

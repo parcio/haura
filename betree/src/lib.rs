@@ -43,12 +43,13 @@ pub mod env_logger;
 #[cfg(test)]
 mod arbitrary;
 
-static mut g_MAX_INTERNAL_NODE_SIZE: usize = 0;
-static mut g_MIN_FLUSH_SIZE: usize = 0;
-static mut g_MIN_LEAF_NODE_SIZE: usize = 0;
-static mut g_MAX_LEAF_NODE_SIZE: usize = 0;
-static mut g_MAX_MESSAGE_SIZE: usize = 0;
-static mut g_CHUNK_SIZE: u32 = 0;
+// Global variables temporarily moved from the tree module (Note: move them back to their original location)
+static mut g_MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
+static mut g_MIN_FLUSH_SIZE: usize = 256 * 1024;
+static mut g_MIN_LEAF_NODE_SIZE: usize = 1024 * 1024;
+static mut g_MAX_LEAF_NODE_SIZE: usize = 1024 * 1024; //MIN_LEAF_NODE_SIZE;
+static mut g_MAX_MESSAGE_SIZE: usize = 512 * 1024;
+static mut g_CHUNK_SIZE: u32 = 128 * 1024;
 
 pub use self::{
     database::{Database, DatabaseConfiguration, Dataset, Error, Snapshot},

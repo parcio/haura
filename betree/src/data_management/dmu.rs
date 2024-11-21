@@ -177,10 +177,8 @@ where
     ///     - Previous eviction after write back (`InWriteback(_)`) Will change
     ///       `or` to `Unmodified(_)`.
     fn fix_or(&self, or: &mut <Self as Dml>::ObjectRef) {
-        //println!("..a...");
-
         match or {
-            ObjRef::Unmodified(..) =>             panic!("unreachable!()"),
+            ObjRef::Unmodified(..) => unreachable!(),
             ObjRef::Modified(mid, pk) => {
                 //println!("..a");
 
@@ -188,14 +186,13 @@ where
                 *or = ObjRef::InWriteback(*mid, pk.clone());
             }
             ObjRef::InWriteback(mid, pk) => {
-                //println!("..b");
 
                 // The object must have been written back recently.
                 debug!("{mid:?} moved to Unmodified");
                 let ptr = self.written_back.lock().remove(mid).unwrap();
                 *or = ObjRef::Unmodified(ptr, pk.clone());
             }
-            ObjRef::Incomplete(..) =>             panic!("c unreachable!()"),
+            ObjRef::Incomplete(..) => unreachable!(),
         }
     }
 
@@ -246,10 +243,10 @@ where
             .read(bytes_to_read, op.offset(), op.checksum().clone())?;
 
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            if( self.is_nvm_tree) {
+            if (self.is_nvm_tree) {
                 Object::unpack_and_decompress(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), compressed_data.into_boxed_slice(), op.decompression_tag())?
             }
-            else {                
+            else {
                 let data = decompression_state.decompress(compressed_data)?;
                 Object::unpack_at(op.size(), op.checksum().clone().into(), self.pool.clone().into(), op.offset(), op.info(), data.into_boxed_slice())?
             }
@@ -733,24 +730,18 @@ where
     fn get(&self, or: &mut Self::ObjectRef) -> Result<Self::CacheValueRef, Error> {
         let mut cache = self.cache.read();
         loop {
-            //println!("..1");
             if let Some(entry) = cache.get(&or.as_key(), true) {
-                //println!("..2");
                 drop(cache);
                 return Ok(CacheValueRef::read(entry));
             }
             if let ObjRef::Unmodified(ref ptr, ref pk) = *or {
-                //println!("..3");
                 drop(cache);
-                //println!("..3.1");                    
                 self.fetch(ptr, pk.clone())?;
-                //println!("..3.2");
                 if let Some(report_tx) = &self.report_tx {
                     let _ = report_tx
                         .send(DmlMsg::fetch(ptr.offset(), ptr.size(), pk.clone()))
                         .map_err(|_| warn!("Channel Receiver has been dropped."));
                 }
-                //println!("..3.3");                
                 // Check if any storage hints are available and update the node.
                 // This moves the object reference into the modified state.
                 if let Some(pref) = self.storage_hints.lock().remove(pk) {
@@ -758,10 +749,8 @@ where
                         obj.set_system_storage_preference(pref)
                     }
                 }
-                //println!("..3.4");
                 cache = self.cache.read();
             } else {
-                //println!("..3");
                 self.fix_or(or);
             }
         }
@@ -984,6 +973,10 @@ where
 
     fn cache_stats(&self) -> Self::CacheStats {
         self.cache.read().stats()
+    }
+
+    fn is_nvm_tree(&self) -> bool {
+        self.is_nvm_tree
     }
 
     fn drop_cache(&self) {

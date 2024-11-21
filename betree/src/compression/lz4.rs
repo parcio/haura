@@ -59,31 +59,10 @@ impl CompressionBuilder for Lz4 {
     }
 }
 
-// impl CompressionConfiguration for Lz4 {
-//     fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
-//         let encoder = EncoderBuilder::new()
-//             .level(u32::from(self.level))
-//             .checksum(ContentChecksum::NoChecksum)
-//             .block_size(BlockSize::Max4MB)
-//             .block_mode(BlockMode::Linked)
-//             .build(BufWrite::with_capacity(DEFAULT_BUFFER_SIZE))?;
-
-//         Ok(Box::new(Lz4Compression { config: self.clone(), encoder }))
-//     }
-
-//     fn decompression_tag(&self) -> DecompressionTag { DecompressionTag::Lz4 }
-// }
-
 impl Lz4 {
     pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
-        //let mut decoder = Decoder::new(BufReader::with_capacity(DEFAULT_BUFFER_SIZE))?;
-        //decoder.set_parameter(DParameter::Format(FrameFormat::Magicless))?;
-
         Ok(Box::new(Lz4Decompression))
     }
-    // pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
-    //     Ok(Box::new(Lz4Decompression))
-    // }
 }
 
 impl io::Write for Lz4Compression {
@@ -99,6 +78,7 @@ impl io::Write for Lz4Compression {
         unimplemented!()
     }
 }
+
 use std::time::Instant;
 use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
@@ -108,11 +88,6 @@ use std::ptr;
 use lz4_sys::LZ4FFrameInfo;
 
 impl CompressionState for Lz4Compression {
-    // fn finishext2(&mut self, data: &[u8]) -> Result<Buf>
-    // {
-    //     panic!("..");
-    // }
-
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
         let size = data.len();
@@ -132,23 +107,14 @@ impl CompressionState for Lz4Compression {
             panic!("Compression failed: {:?}", e);
         }
 
-        let mut buf2 = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
-        buf2.write_all(compressed_data.as_slice());
+        let mut buf_opt = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
+        buf_opt.write_all(compressed_data.as_slice());
 
-//panic!("..");
-        Ok(buf2.as_slice().to_vec())
+        Ok(buf_opt.as_slice().to_vec())
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
         let size = data.as_ref().len();
-        // let prefs = LZ4FPreferences {
-        //     frame_info: Default::default(),
-        //     compression_level: self.config.level as u32,
-        //     auto_flush: 1,
-        //     favor_dec_speed: 0,
-        //     reserved: [0; 3],
-        // };
-
 
         let mut buf: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes( (size as u32)));
 
@@ -159,42 +125,23 @@ impl CompressionState for Lz4Compression {
         .block_mode(BlockMode::Linked)
         .build(buf)?;
 
-        //io::copy(&mut data.as_ref(), &mut encoder)?;
         encoder.write_all(data.as_ref())?;
         let (compressed_data, result) = encoder.finish();
-//<<<<<<< HEAD
-//        
-//=======
-//
-//>>>>>>> ca604af8439c223604ef4577063059234f01173a
+
         if let Err(e) = result {
             panic!("Compression failed: {:?}", e);
         }
 
-        let mut buf2 = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
-        buf2.write_all(compressed_data.as_slice());
+        let mut buf_opt = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
+        buf_opt.write_all(compressed_data.as_slice());
 
-        Ok(buf2.into_buf())
-//<<<<<<< HEAD
-//
-//        //Ok(compressed_data.into_buf())
-//=======
-//>>>>>>> ca604af8439c223604ef4577063059234f01173a
+        Ok(buf_opt.into_buf())
     }
-    // fn finish(&mut self) -> Buf {
-    //     let (v, result) = self.encoder.finish();
-    //     result.unwrap();
-    //     v.into_buf()
-    // }
 }
 
-
-
-
 impl DecompressionState for Lz4Decompression {
-    fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+    fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
-        //panic!("..");
         let size = data.as_ref().len() as u32;
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
         let mut decoder = Decoder::new(data.as_ref())?;
@@ -211,9 +158,4 @@ impl DecompressionState for Lz4Decompression {
         io::copy(&mut decoder, &mut buf)?;
         Ok(buf.into_buf())
     }
-    // fn decompress(&mut self, data: &[u8]) -> Result<Box<[u8]>> {
-    //     let mut output = Vec::with_capacity(DEFAULT_BUFFER_SIZE.to_bytes() as usize);
-    //     Decoder::new(&data[..])?.read_to_end(&mut output)?;
-    //     Ok(output.into_boxed_slice())
-    // }
 }

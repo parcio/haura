@@ -1,6 +1,7 @@
 //! This module provides a `Checksum` trait for verifying data integrity.
 
 use crate::size::{Size, StaticSize};
+// Serde-related functionality is used using namespace resolution operator
 //use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{error::Error, fmt, hash::Hasher, iter::once};
 use twox_hash;

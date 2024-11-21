@@ -87,10 +87,8 @@ where
                     Ok(selected_child_buffer) => selected_child_buffer,
                 };
 
-            // TODO: Karim... add comments...
-            //let mut child = self.get_mut_node(child_buffer.node_pointer_mut())?;
+            // Match on the node pointer and retrieve the corresponding mutable node
             let mut child;
-
             match child_buffer.node_pointer_mut() {
                 TakeChildBufferWrapper::TakeChildBuffer(obj) => {
                     child = self.get_mut_node(obj.as_mut().unwrap().node_pointer_mut())?;
@@ -100,7 +98,6 @@ where
                     child = self.get_mut_node(&mut _node.write().as_mut().unwrap().as_mut().unwrap().children[idx].as_mut().unwrap().node_pointer)?;
                 },
             };
-            // TODO: Karim... End of new code
 
             
             // 2. Iterate down to child if too large

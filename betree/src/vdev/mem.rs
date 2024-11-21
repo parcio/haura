@@ -57,9 +57,9 @@ impl Memory {
         let inner_offset = offset.to_bytes() as usize + start;
         let size = end - start;
 
-        let x = &self.mem.read()[inner_offset];
+        let slice = &self.mem.read()[inner_offset];
 
-        Ok(unsafe { std::slice::from_raw_parts(x, size)})
+        Ok(unsafe { std::slice::from_raw_parts(slice, size)})
    }
    
     fn slice_read(&self, size: Block<u32>, offset: Block<u64>) -> Result<Buf> {
@@ -109,8 +109,6 @@ impl VdevRead for Memory {
         start: usize,
         end: usize
     ) -> Result<&'static [u8]> {
-       // println!("1> {:?}, {}, {}", offset, start, end);
-
         self.ref_to_slice(offset, start, end)
     }
 

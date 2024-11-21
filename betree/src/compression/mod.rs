@@ -78,12 +78,11 @@ pub trait CompressionState: Write {
     /// compressed data.
     fn finish(&mut self, data: Buf) -> Result<Buf>;
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
-    //fn finishext2(&mut self, data: &[u8]) -> Result<Buf>;
 }
 
 pub trait DecompressionState {
-    fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
     fn decompress(&mut self, data: Buf) -> Result<Buf>;
+    fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
 }
 
 mod none;
@@ -96,14 +95,16 @@ mod zstd;
 pub use self::zstd::Zstd;
 
 
-lazy_static::lazy_static! {
-    pub static ref COMPRESSION_VAR: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>> = CompressionConfiguration::None.to_builder();
-    /*
-    CompressionConfiguration::Zstd(Zstd {
-        level: 10,
-    }).to_builder();
-    CompressionConfiguration::Lz4(Lz4 {
-        level: 10,
-    }).to_builder();
-    */
-}
+// lazy_static::lazy_static! {
+//     pub static ref COMPRESSION_VAR: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>> = CompressionConfiguration::None.to_builder();
+//     /*
+//     CompressionConfiguration::Zstd(Zstd {
+//         level: 10,
+//     }).to_builder();
+//     CompressionConfiguration::Lz4(Lz4 {
+//         level: 10,
+//     }).to_builder();
+//     */
+// }
+
+pub static mut COMPRESSION_VAR: Option<Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>> = std::option::Option::None;

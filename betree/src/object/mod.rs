@@ -505,18 +505,13 @@ impl<'os> ObjectStore {
         key: &[u8],
         storage_preference: StoragePreference,
     ) -> Result<Option<(ObjectHandle<'os>, ObjectInfo)>> {
-        //println!("..1");
         if key.contains(&0) {
             return Err(Error::KeyContainsNullByte);
         }
-        ///println!("..2");
 
         let info = self.read_object_info(key)?;
-        //println!("..3");
 
         if let (Some(info), Some(tx)) = (info.clone(), self.report.as_ref()) {
-            //println!("..3.1");
-
             let _ = tx
                 .send(DatabaseMsg::ObjectOpen(
                     GlobalObjectId::build(self.id, info.object_id),
@@ -525,7 +520,6 @@ impl<'os> ObjectStore {
                 ))
                 .map_err(|_| warn!("Channel Receiver has been dropped."));
         }
-        //println!("..4");
 
         Ok(info.map(|info| {
             (
@@ -658,12 +652,10 @@ impl<'os> ObjectStore {
 
     fn read_object_info(&'os self, key: &[u8]) -> Result<Option<ObjectInfo>> {
         if let Some(meta) = self.metadata.get(key)? {
-            //println!("+ success : {:?}", key);
             Ok(Some(
                 ObjectInfo::read_from_buffer_with_ctx(meta::ENDIAN, &meta).unwrap(),
             ))
         } else {
-            //println!("- fail: {:?}", key);
             Ok(None)
         }
     }
@@ -889,7 +881,6 @@ impl<'ds> ObjectHandle<'ds> {
         &self,
         chunk_range: Range<u32>,
     ) -> Result<impl Iterator<Item = Result<(Range<u64>, SlicedCowBytes)>>> {
-        //println!("==={:?}", chunk_range);
         // FIXME: This is incorrect, correctly we shoud measure how long each individual fetch takes
         let start = Instant::now();
         let iter = self.store.data.range(
@@ -957,7 +948,6 @@ impl<'ds> ObjectHandle<'ds> {
         for chunk in chunk_range.split_at_chunk_bounds() {
             let len = chunk.single_chunk_len() as usize;
             let key = object_chunk_key(self.object.id, chunk.start.chunk_id);
-            //println!(".. {}.. {:?}", len, chunk_range);
             self.store
                 .data
                 .upsert_with_pref(&key[..], &buf[..len], chunk.start.offset, storage_pref)

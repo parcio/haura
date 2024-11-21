@@ -55,12 +55,12 @@ impl KeyInfo {
     }
 }
 
-// pub(super) const MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
-// const MIN_FLUSH_SIZE: usize = 256 * 1024;
+//pub(super) const MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
+//const MIN_FLUSH_SIZE: usize = 256 * 1024;
 const MIN_FANOUT: usize = 4;
-// const MIN_LEAF_NODE_SIZE: usize = 1024 * 1024;
-// const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
-// pub(crate) const MAX_MESSAGE_SIZE: usize = 128 * 1024;
+//const MIN_LEAF_NODE_SIZE: usize = 1024 * 1024;
+//const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
+//pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// The actual tree type.
 pub struct Tree<X: Dml, M, I: Borrow<Inner<X::ObjectRef, M>>> {
@@ -267,7 +267,6 @@ where
                 Some(PivotGetResult::Target(Some(np))) => break Some(self.get_node(np)?),
                 Some(PivotGetResult::Target(None)) => break Some(node),
                 Some(PivotGetResult::NextNode(np)) => self.get_node(np)?,
-                // TODO: Karim.. add comments..
                 Some(PivotGetResult::NVMTarget{np, idx}) => {
                     if let Ok(data) = np.read() {
                         let child;
@@ -311,7 +310,6 @@ where
                 }
                 Some(PivotGetMutResult::Target(None)) => break Some(node),
                 Some(PivotGetMutResult::NextNode(np)) => self.get_mut_node_mut(np)?,
-                // TODO: Karim.. add comments..
                 Some(PivotGetMutResult::NVMTarget {
                     idx,
                     first_bool,
@@ -470,7 +468,6 @@ where
             let next_node = match node.get(key, &mut msgs) {
                 GetResult::NextNode(np) => self.get_node(np)?,
                 GetResult::Data(data) => break data,
-                // TODO: Karim.. add comments..
                 GetResult::NVMNextNode {
                     np,
                     idx
@@ -521,7 +518,6 @@ where
                 ApplyResult::NextNode(np) => self.get_mut_node_mut(np)?,
                 ApplyResult::Leaf(info) => break info,
                 ApplyResult::NVMLeaf(info) => break info,
-                // TODO: Karim.. add comments..
                 ApplyResult::NVMNextNode {
                     node,
                     idx
@@ -582,7 +578,6 @@ where
             loop {
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-                        // TODO: Karim.. add comments..
                         let mut auto;
 
                         match child_buffer.node_pointer_mut() {
@@ -612,7 +607,7 @@ where
         let added_size = node.insert(key, msg, self.msg_action(), op_preference);
         node.add_size(added_size);
 
-        // TODO: Load all remaining data for NVM.... becase root_needs_merge iterates through all the children.. Also it just looks for children.len().. should keep this data in metadata as well?
+        // TODO: Load all remaining data for NVM... because root_needs_merge iterates through all the children. It only checks for children.len(); should this data also be kept in metadata?
         
         if parent.is_none() && node.root_needs_merge() {
             // TODO Merge, this is not implemented with the 'rebalance_tree'

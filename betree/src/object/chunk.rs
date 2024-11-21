@@ -1,7 +1,7 @@
 use std::iter;
 
 /// 128 kibibyte
-//pub const CHUNK_SIZE: u32 = 128 * 1024;
+//pub const CHUNK_SIZE: u32 = 128 * 1024; // Grouped it with other tree-related constants and configurations
 
 pub const CHUNK_MAX: u32 = u32::MAX - 1024;
 // pub const CHUNK_META_SIZE: u32 = CHUNK_MAX + 1;

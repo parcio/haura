@@ -92,7 +92,7 @@ impl<V: Vdev + VdevRead + VdevLeafRead + VdevLeafWrite + 'static> VdevRead for M
         start: usize,
         end: usize
     ) -> Result<&'static [u8]> {
-        unimplemented!("This case should not occur!");
+        unimplemented!();
     }
 
     async fn read<C: Checksum>(

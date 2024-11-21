@@ -208,9 +208,6 @@ where
                             if let Ok(_node) = prefetch_np.0.read() {
                                 let _node_pointer = _node.as_ref().unwrap().children.get(prefetch_np.1).map(|child| &child.as_ref().unwrap().node_pointer);
 
-                                //let f = self.dml.prefetch(&_node_pointer.expect("REASON").read())?;
-                                //replace(prefetch, f)
-
                                 if let Some(__np) = _node_pointer {
                                     let f = self.dml.prefetch(&__np.read())?;
                                     replace(prefetch, f)
@@ -219,8 +216,7 @@ where
                                 }
 
                             } else {
-                                //prefetch.take()
-                                panic!("...");
+                                panic!("Failed to read node pointer!");
                             }
                         } else {
                             prefetch.take()
@@ -236,7 +232,7 @@ where
                 
                             self.get_node(_np)?
                         } else {
-                            unimplemented!("should not happen!");
+                            unimplemented!("Failed to read NVM data!");
                         }
                     }
                     GetRangeResult::NVMData {

@@ -120,15 +120,15 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         data: Box<[u8]>,
     ) -> Result<Self, io::Error>;
 
-    // fn unpack_at_(
-    //     size: crate::vdev::Block<u32>,
-    //     checksum: crate::checksum::XxHash,
-    //     pool: RootSpu,
-    //     disk_offset: DiskOffset,
-    //     d_id: DatasetId,
-    //     data: Box<[u8]>,
-    //     c: Arc<std::sync::RwLock<dyn CompressionBuilder>>,
-    // ) -> Result<Self, io::Error>;
+    /* fn unpack_at_(
+        size: crate::vdev::Block<u32>,
+        checksum: crate::checksum::XxHash,
+        pool: RootSpu,
+        disk_offset: DiskOffset,
+        d_id: DatasetId,
+        data: Box<[u8]>,
+        c: Arc<std::sync::RwLock<dyn CompressionBuilder>>,
+    ) -> Result<Self, io::Error>; */
 
     fn unpack_and_decompress(
         size: crate::vdev::Block<u32>,
@@ -248,6 +248,7 @@ pub trait Dml: Sized {
     fn verify_cache(&self);
     /// Evicts excessive cache entries.
     fn evict(&self) -> Result<(), Error>;
+    fn is_nvm_tree(&self) -> bool;
 }
 
 /// Legible result of a copy-on-write call. This describes wether the given

@@ -28,8 +28,3 @@ type Value = SlicedCowBytes;
 
 use self::imp::KeyInfo;
 pub(crate) use self::{errors::Error, /*imp::MAX_MESSAGE_SIZE,*/ layer::ErasedTreeSync};
-
-
-lazy_static::lazy_static! {
-    pub static ref IS_NVM_TREE: bool = false;
-}

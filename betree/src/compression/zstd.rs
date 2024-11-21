@@ -70,7 +70,6 @@ impl Zstd {
     pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
         let mut decoder = Decoder::new()?;
         decoder.set_parameter(DParameter::Format(FrameFormat::Magicless))?;
-        // decoder.set_parameter(DParameter::ForceIgnoreChecksum(true))?;
 
         Ok(Box::new(ZstdDecompression { writer: decoder }))
     }
@@ -89,6 +88,7 @@ impl io::Write for ZstdCompression {
         unimplemented!()
     }
 }
+
 use std::time::Instant;
 use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
@@ -96,12 +96,12 @@ const DATA_OFF: usize = mem::size_of::<u32>();
 impl CompressionState for ZstdCompression {
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
-        panic!("..");
         let size = zstd_safe::compress_bound(data.len());
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
+        buf.write_all(&[0u8; DATA_OFF])?;
 
         let mut input = zstd::stream::raw::InBuffer::around(&data);
-        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, 0);
+        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, DATA_OFF);
         let mut finished_frame;
         loop {
             let remaining = self.writer.run(&mut input, &mut output)?;
@@ -114,16 +114,22 @@ impl CompressionState for ZstdCompression {
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
 
-        Ok(output.as_slice().to_vec())
+        let og_len = data.len() as u32;
+        og_len
+            .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
+            .unwrap();
+
+        Ok(buf.as_slice().to_vec())
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
         let start = Instant::now();
         let size = zstd_safe::compress_bound(data.as_ref().len());
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
+        buf.write_all(&[0u8; DATA_OFF])?;
 
         let mut input = zstd::stream::raw::InBuffer::around(&data);
-        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, 0);
+        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, DATA_OFF);
         let mut finished_frame;
         loop {
             let remaining = self.writer.run(&mut input, &mut output)?;
@@ -132,21 +138,25 @@ impl CompressionState for ZstdCompression {
                 break;
             }
         }
+
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
 
-        let mut slicebuf = BufWrite::with_capacity(Block::round_up_from_bytes(output.as_slice().len() as u32));
-        slicebuf.write_all(output.as_slice());
+        let og_len = data.len() as u32;
+        og_len
+            .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
+            .unwrap();
+        let duration = start.elapsed();
 
-        Ok(slicebuf.into_buf())
+        Ok(buf.into_buf())
     }
 }
 
 
 impl DecompressionState for ZstdDecompression {
-    fn decompressext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+    fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
     {
-        let size = data.len() as u32;
+        let size = u32::read_from_buffer(data).unwrap();
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
 
         let mut input = zstd::stream::raw::InBuffer::around(&data[DATA_OFF..]);
@@ -177,17 +187,10 @@ impl DecompressionState for ZstdDecompression {
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        //let start = Instant::now();
-        //panic!("..why");
-
-        let size = data.as_ref().len() as u32;
+        let size = u32::read_from_buffer(data.as_ref()).unwrap();
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
 
-//<<<<<<< HEAD
-        let mut input = zstd::stream::raw::InBuffer::around(&data[/*DATA_OFF*/..]);
-//=======
-//        let mut input = zstd::stream::raw::InBuffer::around(&data[..]);
-//>>>>>>> ca604af8439c223604ef4577063059234f01173a
+        let mut input = zstd::stream::raw::InBuffer::around(&data[DATA_OFF..]);
         let mut output = zstd::stream::raw::OutBuffer::around(&mut buf);
 
         let mut finished_frame;
@@ -210,9 +213,7 @@ impl DecompressionState for ZstdDecompression {
 
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
-        //let duration = start.elapsed();
-        //println!("Total time elapsed: {:?}", duration);
-        println!("Total time elapsed: {} {}", size, buf.get_len());
+
         Ok(buf.into_buf())
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     atomic_option::AtomicOption,
     cache::ClockCache,
     checksum::{XxHash, XxHashBuilder},
-    compression::CompressionConfiguration,
+    compression::{CompressionConfiguration, COMPRESSION_VAR},
     cow_bytes::SlicedCowBytes,
     data_management::{
         self, Dml, DmlWithHandler, DmlWithReport, DmlWithStorageHints, Dmu, TaggedCacheValue,
@@ -155,16 +155,13 @@ impl Default for DatabaseConfiguration {
             // identity mapping
             alloc_strategy: [vec![0], vec![1], vec![2], vec![3]],
             default_storage_class: 0,
-            /*compression: CompressionConfiguration::Zstd(crate::compression::Zstd {
-                     level: 10,
-                 }),*/
             compression: CompressionConfiguration::None,
             cache_size: DEFAULT_CACHE_SIZE,
             access_mode: AccessMode::OpenIfExists,
             sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
             migration_policy: None,
-            is_nvm_tree: true,
+            is_nvm_tree: false,
         }
     }
 }
@@ -232,10 +229,24 @@ impl DatabaseConfiguration {
         }
 
         // TODO: Fix the following code.
+        //let abc = self.compression;
         let mut dmu_compressor = self.compression.clone().to_builder();
-        let mut compression_var = crate::compression::COMPRESSION_VAR.write().unwrap();
-        compression_var = dmu_compressor.write().unwrap();
+        //let mut compression_var = crate::compression::COMPRESSION_VAR.write().unwrap();
+        //compression_var = dmu_compressor.write().unwrap();
+        //println!("{:?}", compression_var);
+        //compression_var =  abc.to_builder().read().unwrap();
+        //println!("{:?}", &*crate::compression::COMPRESSION_VAR.read().unwrap());
 
+        unsafe {
+            crate::compression::COMPRESSION_VAR = Some(dmu_compressor);
+        }
+
+        unsafe {
+            if let Some(ref compression_var) = crate::compression::COMPRESSION_VAR {
+        println!("{:?}", &*compression_var.read().unwrap());
+    } else {
+        panic!("This should not happend!");
+    }}
         Dmu::new(
             self.compression.to_builder(),
             XxHashBuilder,
@@ -429,7 +440,7 @@ impl Database {
     }
 
     pub fn buildex(builder: DatabaseConfiguration, n_MAX_INTERNAL_NODE_SIZE :usize, n_MIN_FLUSH_SIZE :usize, n_MIN_LEAF_NODE_SIZE :usize, n_MAX_MESSAGE_SIZE :usize, n_CHUNK_SIZE: u32) -> Result<Self> {
-        println!(" {} {} {} {} {} ========================== ", n_MAX_INTERNAL_NODE_SIZE, n_MIN_FLUSH_SIZE, n_MIN_LEAF_NODE_SIZE, n_MAX_MESSAGE_SIZE, n_CHUNK_SIZE);
+        println!("MAX_INTERNAL_NODE_SIZE {}, MIN_FLUSH_SIZE {}, MIN_LEAF_NODE_SIZE {}, MAX_MESSAGE_SIZE {}, CHUNK_SIZE {}", n_MAX_INTERNAL_NODE_SIZE, n_MIN_FLUSH_SIZE, n_MIN_LEAF_NODE_SIZE, n_MAX_MESSAGE_SIZE, n_CHUNK_SIZE);
         unsafe {
             super::g_MAX_INTERNAL_NODE_SIZE=n_MAX_INTERNAL_NODE_SIZE;
             super::g_MIN_FLUSH_SIZE=n_MIN_FLUSH_SIZE;
