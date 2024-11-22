@@ -27,7 +27,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
     collections::HashMap,
     fs::OpenOptions,
-    io::Write,
+    io::{BufWriter, Write},
     mem::replace,
     ops::DerefMut,
     pin::Pin,
@@ -65,7 +65,8 @@ where
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
-    allocation_log_file: Mutex<std::fs::File>,
+    #[cfg(feature = "allocation_log")]
+    allocation_log_file: Mutex<BufWriter<std::fs::File>>,
 }
 
 impl<E, SPL> Dmu<E, SPL>
@@ -93,15 +94,15 @@ where
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
-        // TODO: make append only
-        let allocation_log_file = Mutex::new(
+        #[cfg(feature = "allocation_log")]
+        let allocation_log_file = Mutex::new(BufWriter::new(
             OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
                 .open(ALLOCATION_LOG_FILE)
                 .expect("Failed to create allocation log file"),
-        );
+        ));
 
         Dmu {
             // default_compression_state: default_compression.new_compression().expect("Can't create compression state"),
@@ -119,6 +120,7 @@ where
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
             report_tx: None,
+            #[cfg(feature = "allocation_log")]
             allocation_log_file,
         }
     }
@@ -140,27 +142,30 @@ where
 
     /// Writes the global header for the allocation logging.
     pub fn write_global_header(&self) -> Result<(), Error> {
-        let mut file = self.allocation_log_file.lock();
+        #[cfg(feature = "allocation_log")]
+        {
+            let mut file = self.allocation_log_file.lock();
 
-        // Number of storage classes
-        file.write_u8(self.pool.storage_class_count())?;
+            // Number of storage classes
+            file.write_u8(self.pool.storage_class_count())?;
 
-        // Disks per class
-        for class in 0..self.pool.storage_class_count() {
-            let disk_count = self.pool.disk_count(class);
-            file.write_u16::<LittleEndian>(disk_count)?;
-        }
-
-        // Segments per disk
-        for class in 0..self.pool.storage_class_count() {
-            for disk in 0..self.pool.disk_count(class) {
-                let segment_count = self.pool.size_in_blocks(class, disk);
-                file.write_u64::<LittleEndian>(segment_count.as_u64())?;
+            // Disks per class
+            for class in 0..self.pool.storage_class_count() {
+                let disk_count = self.pool.disk_count(class);
+                file.write_u16::<LittleEndian>(disk_count)?;
             }
-        }
 
-        // Blocks per segment (constant)
-        file.write_u64::<LittleEndian>(SEGMENT_SIZE.try_into().unwrap())?;
+            // Segments per disk
+            for class in 0..self.pool.storage_class_count() {
+                for disk in 0..self.pool.disk_count(class) {
+                    let segment_count = self.pool.size_in_blocks(class, disk);
+                    file.write_u64::<LittleEndian>(segment_count.as_u64())?;
+                }
+            }
+
+            // Blocks per segment (constant)
+            file.write_u64::<LittleEndian>(SEGMENT_SIZE.try_into().unwrap())?;
+        }
 
         Ok(())
     }
@@ -245,6 +250,7 @@ where
             obj_ptr.offset().disk_id(),
             obj_ptr.size(),
         );
+        #[cfg(feature = "allocation_log")]
         {
             let mut file = self.allocation_log_file.lock();
             let _ = file.write_u8(Action::Deallocate.as_bool() as u8);
@@ -600,13 +606,16 @@ where
                     let allocation = allocator.allocate(size.as_u32());
                     total_tries += allocation.1;
                     if let Some(segment_offset) = allocation.0 {
-                        let mut file = self.allocation_log_file.lock();
                         let disk_offset = segment_id.disk_offset(segment_offset);
 
-                        file.write_u8(Action::Allocate.as_bool() as u8)?;
-                        file.write_u64::<LittleEndian>(disk_offset.as_u64())?;
-                        file.write_u32::<LittleEndian>(size.as_u32())?;
-                        file.write_u32::<LittleEndian>(total_tries)?;
+                        #[cfg(feature = "allocation_log")]
+                        {
+                            let mut file = self.allocation_log_file.lock();
+                            file.write_u8(Action::Allocate.as_bool() as u8)?;
+                            file.write_u64::<LittleEndian>(disk_offset.as_u64())?;
+                            file.write_u32::<LittleEndian>(size.as_u32())?;
+                            file.write_u32::<LittleEndian>(total_tries)?;
+                        }
 
                         break disk_offset;
                     }
