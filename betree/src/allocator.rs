@@ -18,6 +18,11 @@ pub struct SegmentAllocator {
     data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
 }
 
+#[cfg(not(feature = "allocation_log"))]
+type AllocateReturnType = Option<u32>;
+#[cfg(feature = "allocation_log")]
+type AllocateReturnType = (Option<u32>, u32);
+
 impl SegmentAllocator {
     /// Constructs a new `SegmentAllocator` given the segment allocation bitmap.
     /// The `bitmap` must have a length of `SEGMENT_SIZE`.
@@ -29,17 +34,27 @@ impl SegmentAllocator {
 
     /// Allocates a block of the given `size`.
     /// Returns `None` if the allocation request cannot be satisfied.
-    pub fn allocate(&mut self, size: u32) -> (Option<u32>, u32) {
+    pub fn allocate(&mut self, size: u32) -> AllocateReturnType {
         if size == 0 {
+            #[cfg(not(feature = "allocation_log"))]
+            return Some(0);
+            #[cfg(feature = "allocation_log")]
             return (Some(0), 0);
         }
+        #[cfg(feature = "allocation_log")]
         let mut tries = 0;
         let offset = {
             let mut idx = 0;
             loop {
-                tries += 1;
+                #[cfg(feature = "allocation_log")]
+                {
+                    tries += 1;
+                }
                 loop {
                     if idx + size > SEGMENT_SIZE as u32 {
+                        #[cfg(not(feature = "allocation_log"))]
+                        return None;
+                        #[cfg(feature = "allocation_log")]
                         return (None, tries);
                     }
                     if !self.data[idx as usize] {
@@ -58,7 +73,10 @@ impl SegmentAllocator {
             }
         };
         self.mark(offset, size, Action::Allocate);
-        (Some(offset), tries)
+        #[cfg(not(feature = "allocation_log"))]
+        return Some(offset);
+        #[cfg(feature = "allocation_log")]
+        return (Some(offset), tries);
     }
 
     /// Allocates a block of the given `size` at `offset`.
@@ -103,12 +121,6 @@ impl SegmentAllocator {
         }
 
         range.fill(action.as_bool());
-    }
-
-    /// Writes the bitmap to a writer.
-    pub fn write_bitmap<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        writer.write_all(self.data.as_raw_slice())?;
-        Ok(())
     }
 }
 

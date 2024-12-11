@@ -547,6 +547,7 @@ where
         // size?
         // Or save the largest contiguous memory region as a value and compare against that. For
         // that the allocator needs to support that and we have to 'bubble' the largest value up.
+        #[cfg(feature = "allocation_log")]
         let mut total_tries: u32 = 0;
         'class: for &class in strategy.iter().flatten() {
             let disks_in_class = self.pool.disk_count(class);
@@ -604,8 +605,18 @@ where
                     let bitmap = self.handler.get_allocation_bitmap(*segment_id, self)?;
                     let mut allocator = bitmap.access();
                     let allocation = allocator.allocate(size.as_u32());
-                    total_tries += allocation.1;
-                    if let Some(segment_offset) = allocation.0 {
+                    #[cfg(feature = "allocation_log")]
+                    {
+                        total_tries += allocation.1;
+                    }
+
+                    // This has to be done like that, such that offset is in scope below
+                    #[cfg(feature = "allocation_log")]
+                    let offset = allocation.0;
+                    #[cfg(not(feature = "allocation_log"))]
+                    let offset = allocation;
+
+                    if let Some(segment_offset) = offset {
                         let disk_offset = segment_id.disk_offset(segment_offset);
 
                         #[cfg(feature = "allocation_log")]
@@ -619,6 +630,7 @@ where
 
                         break disk_offset;
                     }
+
                     let next_segment_id = segment_id.next(disk_size);
                     trace!(
                         "Next allocator segment: {:?} -> {:?} ({:?})",
