@@ -30,6 +30,7 @@ use std::{
     io::{BufWriter, Write},
     mem::replace,
     ops::DerefMut,
+    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -37,8 +38,6 @@ use std::{
     },
     thread::yield_now,
 };
-
-const ALLOCATION_LOG_FILE: &str = "allocation_log.bin";
 
 /// The Data Management Unit.
 pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
@@ -83,6 +82,7 @@ where
         alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
         handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
+        #[cfg(feature = "allocation_log")] allocation_log_file_path: PathBuf,
     ) -> Self {
         let allocation_data = (0..pool.storage_class_count())
             .map(|class| {
@@ -100,7 +100,7 @@ where
                 .create(true)
                 .write(true)
                 .truncate(true)
-                .open(ALLOCATION_LOG_FILE)
+                .open(allocation_log_file_path)
                 .expect("Failed to create allocation log file"),
         ));
 

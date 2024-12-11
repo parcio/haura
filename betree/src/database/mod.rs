@@ -31,7 +31,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     iter::FromIterator,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -147,6 +147,9 @@ pub struct DatabaseConfiguration {
 
     /// If and how to log database metrics
     pub metrics: Option<MetricsConfiguration>,
+
+    /// Where to log the allocations
+    pub allocation_log_file_path: PathBuf,
 }
 
 impl Default for DatabaseConfiguration {
@@ -162,6 +165,7 @@ impl Default for DatabaseConfiguration {
             sync_interval_ms: Some(DEFAULT_SYNC_INTERVAL_MS),
             metrics: None,
             migration_policy: None,
+            allocation_log_file_path: PathBuf::from("allocation_log.bin"),
         }
     }
 }
@@ -237,6 +241,8 @@ impl DatabaseConfiguration {
             strategy,
             ClockCache::new(self.cache_size),
             handler,
+            #[cfg(feature = "allocation_log")]
+            self.allocation_log_file_path.clone(),
         )
     }
 
