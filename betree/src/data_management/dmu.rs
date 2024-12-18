@@ -25,6 +25,7 @@ use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
+    arch::x86_64::{__rdtscp, _rdtsc},
     collections::HashMap,
     fs::OpenOptions,
     io::{BufWriter, Write},
@@ -256,7 +257,8 @@ where
             let _ = file.write_u8(Action::Deallocate.as_bool() as u8);
             let _ = file.write_u64::<LittleEndian>(obj_ptr.offset.as_u64());
             let _ = file.write_u32::<LittleEndian>(obj_ptr.size.as_u32());
-            let _ = file.write_u32::<LittleEndian>(0);
+            let _ = file.write_u64::<LittleEndian>(0);
+            let _ = file.write_u64::<LittleEndian>(0);
         }
         if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) = (
             self.handler.copy_on_write(
@@ -548,7 +550,9 @@ where
         // Or save the largest contiguous memory region as a value and compare against that. For
         // that the allocator needs to support that and we have to 'bubble' the largest value up.
         #[cfg(feature = "allocation_log")]
-        let mut total_tries: u32 = 0;
+        let mut start_cycles_global = get_cycles();
+        #[cfg(feature = "allocation_log")]
+        let mut total_cycles_local: u64 = 0;
         'class: for &class in strategy.iter().flatten() {
             let disks_in_class = self.pool.disk_count(class);
             if disks_in_class == 0 {
@@ -604,31 +608,35 @@ where
                     // Has to be split because else the temporary value is dropped while borrowing
                     let bitmap = self.handler.get_allocation_bitmap(*segment_id, self)?;
                     let mut allocator = bitmap.access();
-                    let allocation = allocator.allocate(size.as_u32());
+
+                    #[cfg(not(feature = "allocation_log"))]
+                    {
+                        let allocation = allocator.allocate(size.as_u32());
+                        if let Some(segment_offset) = allocation {
+                            let disk_offset = segment_id.disk_offset(segment_offset);
+                            break disk_offset;
+                        }
+                    }
                     #[cfg(feature = "allocation_log")]
                     {
-                        total_tries += allocation.1;
-                    }
+                        let start_cycles_allocation = get_cycles();
+                        let allocation = allocator.allocate(size.as_u32());
+                        let end_cycles_allocation = get_cycles();
+                        total_cycles_local += end_cycles_allocation - start_cycles_allocation;
 
-                    // This has to be done like that, such that offset is in scope below
-                    #[cfg(feature = "allocation_log")]
-                    let offset = allocation.0;
-                    #[cfg(not(feature = "allocation_log"))]
-                    let offset = allocation;
+                        if let Some(segment_offset) = allocation {
+                            let disk_offset = segment_id.disk_offset(segment_offset);
+                            let total_cycles_global = end_cycles_allocation - start_cycles_global;
 
-                    if let Some(segment_offset) = offset {
-                        let disk_offset = segment_id.disk_offset(segment_offset);
-
-                        #[cfg(feature = "allocation_log")]
-                        {
                             let mut file = self.allocation_log_file.lock();
                             file.write_u8(Action::Allocate.as_bool() as u8)?;
                             file.write_u64::<LittleEndian>(disk_offset.as_u64())?;
                             file.write_u32::<LittleEndian>(size.as_u32())?;
-                            file.write_u32::<LittleEndian>(total_tries)?;
-                        }
+                            file.write_u64::<LittleEndian>(total_cycles_local)?;
+                            file.write_u64::<LittleEndian>(total_cycles_global)?;
 
-                        break disk_offset;
+                            break disk_offset;
+                        }
                     }
 
                     let next_segment_id = segment_id.next(disk_size);
@@ -1116,5 +1124,13 @@ where
 
     fn set_report(&mut self, tx: Sender<DmlMsg>) {
         self.report_tx = Some(tx);
+    }
+}
+
+fn get_cycles() -> u64 {
+    unsafe {
+        //let mut aux = 0;
+        //__rdtscp(aux)
+        _rdtsc()
     }
 }

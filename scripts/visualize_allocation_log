@@ -26,7 +26,7 @@ SEGMENT_SIZE_LOG_2 = 18
 SEGMENT_SIZE = 1 << SEGMENT_SIZE_LOG_2
 SEGMENT_SIZE_MASK = SEGMENT_SIZE - 1
 # This is the amount of bytes one (de-)allocation has in the log.
-SIZE_PER_ALLOCATION = 17
+SIZE_PER_ALLOCATION = 29
 
 
 class StorageConfig:
@@ -86,17 +86,20 @@ class Timestamp:
     op_type: int
     offset: int
     num_blocks: int
+    cycles_alloc: int
+    cycles_total: int
     layer_id: int
     disk_id: int
     block_offset: int
     segment_id: int
     segment_offset: int
 
-    def __init__(self, op_type: int, offset: int, num_blocks: int, tries: int, time: int):
+    def __init__(self, op_type: int, offset: int, num_blocks: int, cycles_alloc: int, cycles_total: int, time: int):
         self.op_type = op_type
         self.offset = offset
         self.num_blocks = num_blocks
-        self.tries = tries
+        self.cycles_alloc = cycles_alloc
+        self.cycles_total = cycles_total
         self.time = time
         self._parse_offset()
 
@@ -104,7 +107,8 @@ class Timestamp:
         return (f"Timestep(op_type: {self.op_type}, "
                 f"offset: {self.offset}, "
                 f"num_blocks: {self.num_blocks}, "
-                f"tries: {self.tries}, "
+                f"cycles_alloc: {self.cycles_alloc}, "
+                f"cycles_total: {self.cycles_total}, "
                 f"time: {self.time}, "
                 f"layer_id: {self.layer_id}, "
                 f"disk_id: {self.disk_id}, "
@@ -179,13 +183,14 @@ class Parser:
             op_type = struct.unpack("<B", self._file_handle.read(1))[0]
             offset = struct.unpack("<Q", self._file_handle.read(8))[0]
             num_blocks = struct.unpack("<L", self._file_handle.read(4))[0]
-            tries = struct.unpack("<L", self._file_handle.read(4))[0]
+            cycles_alloc = struct.unpack("<Q", self._file_handle.read(8))[0]
+            cycles_total = struct.unpack("<Q", self._file_handle.read(8))[0]
         except struct.error:
             raise StopIteration
 
         self.time += 1
 
-        return Timestamp(op_type, offset, num_blocks, tries, self.time)
+        return Timestamp(op_type, offset, num_blocks, cycles_alloc, cycles_total, self.time)
 
     def _remaining_bytes(self) -> int:
         """Returns the remaining bytes in a file from the current position of the file pointer."""
@@ -388,7 +393,8 @@ class GlobalBitMap:
     log_file: str
     storage_config: StorageConfig
     layers: list[Layer]
-    tries: tuple[np.ndarray, np.ndarray]
+    cycles_alloc: tuple[np.ndarray, np.ndarray]
+    cycles_total: tuple[np.ndarray, np.ndarray]
     sizes: list[int]
     size: int
     time: int
@@ -403,7 +409,8 @@ class GlobalBitMap:
             exit(1)
 
         self.size = self.storage_config.blocks_global()
-        self.tries = (np.array([]), np.array([]))
+        self.cycles_alloc = (np.array([]), np.array([]))
+        self.cycles_total = (np.array([]), np.array([]))
         self.sizes = []
 
         # Create the storage structure based on the config.
@@ -436,8 +443,10 @@ class GlobalBitMap:
         parser = Parser(log_file)
         for timestamp in tqdm(parser, desc="Building Bitmap", unit="timestep"):
             self.layers[timestamp.layer_id].add_timestamp(timestamp)
-            if timestamp.tries != 0:
-                self.tries = (np.append(self.tries[0], timestamp.time), np.append(self.tries[1], timestamp.tries))
+            if timestamp.cycles_alloc != 0:
+                self.cycles_alloc = (np.append(self.cycles_alloc[0], timestamp.time), np.append(self.cycles_alloc[1], timestamp.cycles_alloc))
+            if timestamp.cycles_total != 0:
+                self.cycles_total = (np.append(self.cycles_total[0], timestamp.time), np.append(self.cycles_total[1], timestamp.cycles_total))
             self.sizes.append(timestamp.num_blocks)
 
             self.time = timestamp.time
@@ -486,8 +495,10 @@ class Plotter:
             "frag_global": False,
             "free_local": False,
             "free_global": False,
-            "allocation_tries": False,
-            "allocation_tries_aligned": False,
+            "allocation_cycles_alloc": False,
+            "allocation_cycles_total": False,
+            "allocation_cycles_alloc_aligned": False,
+            "allocation_cycles_total_aligned": False,
             "allocation_sizes": False,
             "allocation_sizes_ecdf": False,  # empirical cumulative distribution function
             "slider": False,
@@ -530,8 +541,10 @@ class Plotter:
         self.vline_frag_global = self._fragmentation_global()
         self.vlines_free_local = self._free_local()
         self.vline_free_global = self._free_global()
-        self.vline_allocation_tries = self._allocation_tries()
-        self.vline_allocation_tries_aligned = self._allocation_tries_aligned()
+        self.vline_allocation_cycles_alloc = self._allocation_cycles_alloc()
+        self.vline_allocation_cycles_total = self._allocation_cycles_total()
+        self.vline_allocation_cycles_alloc_aligned = self._allocation_cycles_alloc_aligned()
+        self.vline_allocation_cycles_total_aligned = self._allocation_cycles_total_aligned()
         _ = self._allocation_sizes()
         _ = self._allocation_sizes_ecdf()
         self.slider = self._setup_slider()
@@ -586,21 +599,37 @@ class Plotter:
             for layer in self.layers:
                 layout[-1].append("free_global")
 
-        if self.plot_config["allocation_tries"]:
+        if self.plot_config["allocation_cycles_alloc"]:
             layout.append([])
             gridspec["height_ratios"].append(1)
             if self.plot_config["checkboxes"]:
                 layout[-1].append("checkboxes")
             for layer in self.layers:
-                layout[-1].append("allocation_tries")
+                layout[-1].append("allocation_cycles_alloc")
 
-        if self.plot_config["allocation_tries_aligned"]:
+        if self.plot_config["allocation_cycles_total"]:
             layout.append([])
             gridspec["height_ratios"].append(1)
             if self.plot_config["checkboxes"]:
                 layout[-1].append("checkboxes")
             for layer in self.layers:
-                layout[-1].append("allocation_tries_aligned")
+                layout[-1].append("allocation_cycles_total")
+
+        if self.plot_config["allocation_cycles_alloc_aligned"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_alloc_aligned")
+
+        if self.plot_config["allocation_cycles_total_aligned"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_total_aligned")
 
         if self.plot_config["allocation_sizes"]:
             layout.append([])
@@ -799,17 +828,18 @@ class Plotter:
 
         return global_free_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
 
-    def _allocation_tries(self):
-        if not self.plot_config["allocation_tries"]:
+    def _allocation_cycles_alloc(self):
+        if not self.plot_config["allocation_cycles_alloc"]:
             return
 
-        data = self.global_bitmap.tries[1]
+        data = self.global_bitmap.cycles_alloc[1]
         x_values = np.arange(0, len(data))
 
-        failed_allocations_ax = self.axd["allocation_tries"]
-        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Tries")
+        failed_allocations_ax = self.axd["allocation_cycles_alloc"]
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles alloc")
 
-        window_sizes = [100, 500]
+        # window_sizes = [100, 500]
+        window_sizes = []
         colors = ['red', 'orange', 'black', 'purple']
         line_styles = ['-', '--', '-.', ':']
         moving_average = np.zeros_like(data, dtype=float)
@@ -830,24 +860,77 @@ class Plotter:
 
         failed_allocations_ax.set_ylim(0)
         failed_allocations_ax.set_xlim([0, len(data)])
-        failed_allocations_ax.set_title("Allocation Tries")
+        failed_allocations_ax.set_title("Allocation Cycles Allocator")
         failed_allocations_ax.set_xlabel("Allocation")
-        failed_allocations_ax.set_ylabel("Tries")
+        failed_allocations_ax.set_ylabel("Cycles")
+        failed_allocations_ax.legend()
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_total(self):
+        if not self.plot_config["allocation_cycles_total"]:
+            return
+
+        data = self.global_bitmap.cycles_total[1]
+        x_values = np.arange(0, len(data))
+
+        failed_allocations_ax = self.axd["allocation_cycles_total"]
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles Total")
+
+        # window_sizes = [100, 500]
+        window_sizes = []
+        colors = ['red', 'orange', 'black', 'purple']
+        line_styles = ['-', '--', '-.', ':']
+        moving_average = np.zeros_like(data, dtype=float)
+
+        for i, window_size in enumerate(window_sizes):
+            moving_average = np.zeros_like(data, dtype=float)
+            for j in range(len(data)):
+                window_start = max(0, j - window_size + 1)
+                window_end = j + 1
+                moving_average[j] = np.mean(data[window_start:window_end])
+
+            # Plot with different colors and line styles
+            failed_allocations_ax.plot(x_values, moving_average,
+                                       linewidth=1.5,
+                                       color=colors[i % len(colors)],
+                                       linestyle=line_styles[i % len(line_styles)],
+                                       label=f"Moving Average ({window_size})")
+
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlim([0, len(data)])
+        failed_allocations_ax.set_title("Allocation Cycles Total")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Cycles")
         failed_allocations_ax.legend(loc="upper left")
 
         return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
 
-    def _allocation_tries_aligned(self):
-        if not self.plot_config["allocation_tries_aligned"]:
+    def _allocation_cycles_alloc_aligned(self):
+        if not self.plot_config["allocation_cycles_alloc_aligned"]:
             return
 
-        failed_allocations_ax = self.axd["allocation_tries_aligned"]
-        failed_allocations_ax.scatter(self.global_bitmap.tries[0], self.global_bitmap.tries[1], s=3.0, linewidths=0)
+        failed_allocations_ax = self.axd["allocation_cycles_alloc_aligned"]
+        failed_allocations_ax.scatter(self.global_bitmap.cycles_alloc[0], self.global_bitmap.cycles_alloc[1], s=3.0, linewidths=0)
         failed_allocations_ax.set_ylim(0)
         failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
-        failed_allocations_ax.set_title("Allocation Tries Aligned")
+        failed_allocations_ax.set_title("Allocation Cycles Allocator Timestep Aligned")
         failed_allocations_ax.set_xlabel("Timestamp")
-        failed_allocations_ax.set_ylabel("Tries")
+        failed_allocations_ax.set_ylabel("Cycles")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_total_aligned(self):
+        if not self.plot_config["allocation_cycles_total_aligned"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_cycles_total_aligned"]
+        failed_allocations_ax.scatter(self.global_bitmap.cycles_total[0], self.global_bitmap.cycles_total[1], s=3.0, linewidths=0)
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
+        failed_allocations_ax.set_title("Allocation Cycles Total Timestep Aligned")
+        failed_allocations_ax.set_xlabel("Timestamp")
+        failed_allocations_ax.set_ylabel("Cycles")
 
         return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
 
@@ -935,13 +1018,25 @@ class Plotter:
         if self.plot_config["free_global"]:
             self.vline_free_global.set_xdata([self.time, self.time])
 
-        if self.plot_config["allocation_tries"]:
+        if self.plot_config["allocation_cycles_alloc"]:
             # Get the index of the last allocation that happened before or at the current timestamp.
-            index = np.argmax(self.global_bitmap.tries[0] > self.time) - 1
-            self.vline_allocation_tries.set_xdata([index, index])
+            index = np.argmax(self.global_bitmap.cycles_alloc[0] > self.time) - 1
+            self.vline_allocation_cycles_alloc.set_xdata([index, index])
 
-        if self.plot_config["allocation_tries_aligned"]:
-            self.vline_allocation_tries_aligned.set_xdata([self.time, self.time])
+        if self.plot_config["allocation_cycles_total"]:
+            # Get the index of the last allocation that happened before or at the current timestamp.
+            index = np.argmax(self.global_bitmap.cycles_total[0] > self.time) - 1
+            self.vline_allocation_cycles_total.set_xdata([index, index])
+
+        if self.plot_config["allocation_cycles_alloc_aligned"]:
+            # Get the index of the last allocation that happened before or at the current timestamp.
+            index = np.argmax(self.global_bitmap.cycles_alloc[0] > self.time) - 1
+            self.vline_allocation_cycles_alloc_aligned.set_xdata([index, index])
+
+        if self.plot_config["allocation_cycles_total_aligned"]:
+            # Get the index of the last allocation that happened before or at the current timestamp.
+            index = np.argmax(self.global_bitmap.cycles_total[0] > self.time) - 1
+            self.vline_allocation_cycles_total_aligned.set_xdata([index, index])
 
         self.fig.canvas.draw_idle()
 
