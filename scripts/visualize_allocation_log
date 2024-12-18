@@ -497,8 +497,10 @@ class Plotter:
             "free_global": False,
             "allocation_cycles_alloc": False,
             "allocation_cycles_total": False,
+            "allocation_cycles_proportion": False,
             "allocation_cycles_alloc_aligned": False,
             "allocation_cycles_total_aligned": False,
+            "allocation_cycles_proportion_aligned": False,
             "allocation_sizes": False,
             "allocation_sizes_ecdf": False,  # empirical cumulative distribution function
             "slider": False,
@@ -545,6 +547,8 @@ class Plotter:
         self.vline_allocation_cycles_total = self._allocation_cycles_total()
         self.vline_allocation_cycles_alloc_aligned = self._allocation_cycles_alloc_aligned()
         self.vline_allocation_cycles_total_aligned = self._allocation_cycles_total_aligned()
+        self.vline_allocation_cycles_proportion = self._allocation_cycles_proportion()
+        self.vline_allocation_cycles_proportion_aligned = self._allocation_cycles_proportion_aligned()
         _ = self._allocation_sizes()
         _ = self._allocation_sizes_ecdf()
         self.slider = self._setup_slider()
@@ -615,6 +619,14 @@ class Plotter:
             for layer in self.layers:
                 layout[-1].append("allocation_cycles_total")
 
+        if self.plot_config["allocation_cycles_proportion"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_proportion")
+
         if self.plot_config["allocation_cycles_alloc_aligned"]:
             layout.append([])
             gridspec["height_ratios"].append(1)
@@ -630,6 +642,14 @@ class Plotter:
                 layout[-1].append("checkboxes")
             for layer in self.layers:
                 layout[-1].append("allocation_cycles_total_aligned")
+
+        if self.plot_config["allocation_cycles_proportion_aligned"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_proportion_aligned")
 
         if self.plot_config["allocation_sizes"]:
             layout.append([])
@@ -836,7 +856,7 @@ class Plotter:
         x_values = np.arange(0, len(data))
 
         failed_allocations_ax = self.axd["allocation_cycles_alloc"]
-        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles alloc")
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles Alloc")
 
         # window_sizes = [100, 500]
         window_sizes = []
@@ -863,7 +883,7 @@ class Plotter:
         failed_allocations_ax.set_title("Allocation Cycles Allocator")
         failed_allocations_ax.set_xlabel("Allocation")
         failed_allocations_ax.set_ylabel("Cycles")
-        failed_allocations_ax.legend()
+        # failed_allocations_ax.legend()
 
         return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
 
@@ -902,7 +922,42 @@ class Plotter:
         failed_allocations_ax.set_title("Allocation Cycles Total")
         failed_allocations_ax.set_xlabel("Allocation")
         failed_allocations_ax.set_ylabel("Cycles")
-        failed_allocations_ax.legend(loc="upper left")
+        # failed_allocations_ax.legend(loc="upper left")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_proportion(self):
+        if not self.plot_config["allocation_cycles_proportion"]:
+            return
+
+        data = self.global_bitmap.cycles_alloc[1] / self.global_bitmap.cycles_total[1]
+        x_values = np.arange(0, len(data))
+
+        failed_allocations_ax = self.axd["allocation_cycles_proportion"]
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles Allocator/Total")
+
+        failed_allocations_ax.set_ylim([0, 1])
+        failed_allocations_ax.set_xlim([0, len(data)])
+        failed_allocations_ax.set_title("Allocation Cycles Allocator/Total")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Proportion")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_proportion_aligned(self):
+        if not self.plot_config["allocation_cycles_proportion_aligned"]:
+            return
+
+        data = self.global_bitmap.cycles_alloc[1] / self.global_bitmap.cycles_total[1]
+
+        failed_allocations_ax = self.axd["allocation_cycles_proportion_aligned"]
+        failed_allocations_ax.scatter(self.global_bitmap.cycles_alloc[0], data, s=3.0, linewidths=0, label="Allocation Cycles Allocator/Total Timestep Aligned")
+
+        failed_allocations_ax.set_ylim([0, 1])
+        failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
+        failed_allocations_ax.set_title("Allocation Cycles Allocator/Total Timestep Aligned")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Proportion")
 
         return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
 
@@ -1028,15 +1083,19 @@ class Plotter:
             index = np.argmax(self.global_bitmap.cycles_total[0] > self.time) - 1
             self.vline_allocation_cycles_total.set_xdata([index, index])
 
-        if self.plot_config["allocation_cycles_alloc_aligned"]:
-            # Get the index of the last allocation that happened before or at the current timestamp.
-            index = np.argmax(self.global_bitmap.cycles_alloc[0] > self.time) - 1
-            self.vline_allocation_cycles_alloc_aligned.set_xdata([index, index])
-
-        if self.plot_config["allocation_cycles_total_aligned"]:
+        if self.plot_config["allocation_cycles_proportion"]:
             # Get the index of the last allocation that happened before or at the current timestamp.
             index = np.argmax(self.global_bitmap.cycles_total[0] > self.time) - 1
-            self.vline_allocation_cycles_total_aligned.set_xdata([index, index])
+            self.vline_allocation_cycles_proportion.set_xdata([index, index])
+
+        if self.plot_config["allocation_cycles_alloc_aligned"]:
+            self.vline_allocation_cycles_alloc_aligned.set_xdata([self.time, self.time])
+
+        if self.plot_config["allocation_cycles_total_aligned"]:
+            self.vline_allocation_cycles_total_aligned.set_xdata([self.time, self.time])
+
+        if self.plot_config["allocation_cycles_proportion_aligned"]:
+            self.vline_allocation_cycles_proportion_aligned.set_xdata([self.time, self.time])
 
         self.fig.canvas.draw_idle()
 
