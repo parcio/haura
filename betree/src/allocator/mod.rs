@@ -3,6 +3,9 @@ use bitvec::prelude::*;
 use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 
+mod first_fit;
+pub use self::first_fit::FirstFit;
+
 mod segment_allocator;
 pub use self::segment_allocator::SegmentAllocator;
 
@@ -18,6 +21,11 @@ const SEGMENT_SIZE_MASK: usize = SEGMENT_SIZE - 1;
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")] // This will deserialize "firstfit" as FirstFit
 pub enum AllocatorType {
+    /// **First Fit:**
+    /// This allocator searches the segment from the beginning and allocates the
+    /// first free block that is large enough to satisfy the request.
+    FirstFit,
+
     /// **Segment Allocator:**
     /// This is a first fit allocator that was used before making the allocators
     /// generic. It is not efficient and mainly included for reference.
@@ -269,8 +277,10 @@ mod tests {
     }
 
     // Generate tests for each allocator
+    generate_small_tests!(test_first_fit, FirstFit);
     generate_small_tests!(test_segment_allocator, SegmentAllocator);
 
     // Generate fuzz tests for each allocator
+    generate_fuzz_tests!(test_first_fit_fuzz, FirstFit);
     generate_fuzz_tests!(test_segment_allocator_fuzz, SegmentAllocator);
 }
