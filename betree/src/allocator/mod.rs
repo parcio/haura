@@ -285,7 +285,7 @@ mod tests {
             allocator.deallocate(offset, 12);
         }
 
-        // 8.  Large Allocation Followed by Small Allocations
+        // Large Allocation Followed by Small Allocations
         let large_offset = allocator.allocate(100).unwrap();
         _ = allocator.allocate(4).unwrap();
         _ = allocator.allocate(7).unwrap();
