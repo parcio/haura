@@ -12,6 +12,9 @@ pub use self::next_fit::NextFit;
 mod best_fit_simple;
 pub use self::best_fit_simple::BestFitSimple;
 
+mod worst_fit_simple;
+pub use self::worst_fit_simple::WorstFitSimple;
+
 mod segment_allocator;
 pub use self::segment_allocator::SegmentAllocator;
 
@@ -42,6 +45,12 @@ pub enum AllocatorType {
     /// free block that is large enough to satisfy the request. This simple
     /// version uses a linear search to find the best fit.
     BestFitSimple,
+
+    /// **Worst Fit (Simple):**
+    /// This allocator searches the entire segment and allocates the largest
+    /// free block. This simple version uses a linear search to find the worst
+    /// fit.
+    WorstFitSimple,
 
     /// **Segment Allocator:**
     /// This is a first fit allocator that was used before making the allocators
@@ -297,11 +306,13 @@ mod tests {
     generate_small_tests!(test_first_fit, FirstFit);
     generate_small_tests!(test_next_fit, NextFit);
     generate_small_tests!(test_best_fit_simple, BestFitSimple);
+    generate_small_tests!(test_worst_fit_simple, WorstFitSimple);
     generate_small_tests!(test_segment_allocator, SegmentAllocator);
 
     // Generate fuzz tests for each allocator
     generate_fuzz_tests!(test_first_fit_fuzz, FirstFit);
     generate_fuzz_tests!(test_next_fit_fuzz, NextFit);
     generate_fuzz_tests!(test_best_fit_simple_fuzz, BestFitSimple);
+    generate_fuzz_tests!(test_worst_fit_simple_fuzz, WorstFitSimple);
     generate_fuzz_tests!(test_segment_allocator_fuzz, SegmentAllocator);
 }
