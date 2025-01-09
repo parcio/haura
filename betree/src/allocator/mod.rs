@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 mod first_fit;
 pub use self::first_fit::FirstFit;
 
+mod next_fit;
+pub use self::next_fit::NextFit;
+
 mod segment_allocator;
 pub use self::segment_allocator::SegmentAllocator;
 
@@ -25,6 +28,11 @@ pub enum AllocatorType {
     /// This allocator searches the segment from the beginning and allocates the
     /// first free block that is large enough to satisfy the request.
     FirstFit,
+
+    /// **Next Fit:**
+    /// This allocator starts searching from the last allocation and continues
+    /// searching the segment for the next free block that is large enough.
+    NextFit,
 
     /// **Segment Allocator:**
     /// This is a first fit allocator that was used before making the allocators
@@ -278,9 +286,11 @@ mod tests {
 
     // Generate tests for each allocator
     generate_small_tests!(test_first_fit, FirstFit);
+    generate_small_tests!(test_next_fit, NextFit);
     generate_small_tests!(test_segment_allocator, SegmentAllocator);
 
     // Generate fuzz tests for each allocator
     generate_fuzz_tests!(test_first_fit_fuzz, FirstFit);
+    generate_fuzz_tests!(test_next_fit_fuzz, NextFit);
     generate_fuzz_tests!(test_segment_allocator_fuzz, SegmentAllocator);
 }
