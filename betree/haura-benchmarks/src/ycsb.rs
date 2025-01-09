@@ -1,6 +1,29 @@
-//! Benchmarks based on the YCSB-{A,B,C,D,E} workloads.
+//! Benchmarks based on the YCSB-{A,B,C,D,E,F} workloads.
 //!
 //! Link: https://web.archive.org/web/20170809211159id_/http://www.cs.toronto.edu/~delara/courses/csc2231/papers/cooper.pdf
+//!
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | Workload | Operations   | Record selection | Application example                             |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | A        | Read: 50%    | Zipfian          | Session store recording recent actions in a user|
+//! |          | Update: 50%  |                  | session                                         |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | B        | Read: 95%    | Zipfian          | Photo tagging; add a tag is an update, but most |
+//! |          | Update: 5%   |                  | operations are to read tags                     |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | C        | Read: 100%   | Zipfian          | User profile cache, where profiles are          |
+//! |          |              |                  | constructed elsewhere (e.g., Hadoop)            |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | D        | Read: 95%    | Latest           | User status updates; people want to read the    |
+//! |          | Insert: 5%   |                  | latest statuses                                 |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | E        | Scan: 95%    | Zipfian/Uniform* | Threaded conversations, where each scan is for  |
+//! |          | Insert: 5%   |                  | the posts in a given thread (assumed to be      |
+//! |          |              |                  | clustered by thread id)                         |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | F        | Read-modify- | Varies           | Read a record, modify it, and write it back     |
+//! |          | write        |                  |                                                 |
+//! +----------+--------------+------------------+-------------------------------------------------+
 
 use betree_perf::KvClient;
 use rand::distributions::Distribution;
@@ -327,6 +350,7 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     unimplemented!()
     // TODO: implement when a scan with count is available
+    // keys are contiguous
 }
 
 /// F - Read-modify-write
