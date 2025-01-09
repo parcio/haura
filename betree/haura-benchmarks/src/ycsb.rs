@@ -348,9 +348,103 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 /// Application example: Threaded conversations, where each scan is for the posts in a given thread
 /// (assumed to be clustered by thread id)
 pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
-    unimplemented!()
-    // TODO: implement when a scan with count is available
-    // keys are contiguous
+    println!("Running YCSB Workload E");
+    println!("Filling KV store...");
+    // Reserve 20% extra space for new insertions
+    let initial_size = size / ENTRY_SIZE as u64;
+    let total_size = initial_size + (initial_size / 5);
+
+    // Only fill initial portion
+    let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
+
+    // Fill rest of keys for potential inserts
+    for idx in initial_size..total_size {
+        let k = (idx as u64).to_be_bytes();
+        keys.push(k);
+    }
+
+    println!("Creating distribution...");
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(format!("ycsb_e.csv"))
+        .unwrap();
+    let mut w = std::io::BufWriter::new(f);
+    w.write_all(b"threads,ops,time_ns\n").unwrap();
+
+    // Thread-safe current size tracking
+    let current_size = Arc::new(AtomicUsize::new(initial_size as usize));
+
+    for workers in 1..=threads {
+        println!("Running benchmark with {workers} threads...");
+        let threads = (0..workers)
+            .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
+            .enumerate()
+            .map(|(id, (tx, rx))| {
+                let keys = keys.clone();
+                let ds = client.ds.clone();
+                let current_size = Arc::clone(&current_size);
+                (
+                    std::thread::spawn(move || {
+                        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
+                        let mut total = 0;
+                        let value = vec![0u8; ENTRY_SIZE];
+
+                        while let Ok(start) = rx.recv() {
+                            while start.elapsed().as_secs() < runtime {
+                                for _ in 0..100 {
+                                    if rng.gen_bool(0.95) {
+                                        // 95% scans
+                                        let max = current_size.load(AtomicOrdering::Relaxed);
+                                        // Get start key using zipfian
+                                        let dist =
+                                            zipf::ZipfDistribution::new(max, ZIPF_EXP).unwrap();
+                                        let start_idx = dist.sample(&mut rng) - 1;
+
+                                        // Uniform random scan length between 1 and 100
+                                        let scan_length = rng.gen_range(1..=100);
+                                        let end_idx = (start_idx + scan_length).min(max - 1);
+
+                                        // Perform the range scan
+                                        let start_key = &keys[start_idx][..];
+                                        let end_key = &keys[end_idx][..];
+                                        // Consume the iterator to actually perform the scan
+                                        for _entry in ds.range(start_key..end_key).unwrap(){ }
+                                    } else {
+                                        // 5% inserts of new records
+                                        let current = current_size.load(AtomicOrdering::Relaxed);
+                                        if current < keys.len() {
+                                            ds.insert(keys[current].to_vec(), &value).unwrap();
+                                            current_size.fetch_add(1, AtomicOrdering::Relaxed);
+                                        }
+                                    }
+                                    total += 1;
+                                }
+                            }
+                        }
+                        total
+                    }),
+                    tx,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let start = std::time::Instant::now();
+        for (_t, tx) in threads.iter() {
+            tx.send(start).unwrap();
+        }
+        let mut total = 0;
+        for (t, tx) in threads.into_iter() {
+            drop(tx);
+            total += t.join().unwrap();
+        }
+        let end = start.elapsed();
+        w.write_fmt(format_args!("{workers},{total},{}\n", end.as_nanos()))
+            .unwrap();
+        w.flush().unwrap();
+        println!("Achieved: {} ops/sec", total as f32 / end.as_secs_f32());
+        println!("          {} ns avg", end.as_nanos() / total);
+    }
 }
 
 /// F - Read-modify-write
