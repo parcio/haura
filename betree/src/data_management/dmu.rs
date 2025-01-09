@@ -6,7 +6,7 @@ use super::{
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE},
+    allocator::{Action, Allocator, SegmentAllocator, SegmentId, SEGMENT_SIZE},
     buffer::Buf,
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
@@ -39,6 +39,8 @@ use std::{
     },
     thread::yield_now,
 };
+
+type DefaultAllocator = SegmentAllocator;
 
 /// The Data Management Unit.
 pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
