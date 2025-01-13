@@ -6,7 +6,7 @@ use super::{
     CopyOnWriteEvent, Dml, HasStoragePreference, Object, ObjectReference,
 };
 use crate::{
-    allocator::{Action, SegmentAllocator, SegmentId},
+    allocator::{Action, SegmentAllocator, SegmentId, SEGMENT_SIZE},
     buffer::Buf,
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
@@ -17,16 +17,21 @@ use crate::{
     size::{Size, SizeMut, StaticSize},
     storage_pool::{DiskOffset, StoragePoolLayer, NUM_STORAGE_CLASSES},
     tree::{Node, PivotKey},
-    vdev::{Block, BLOCK_SIZE},
+    vdev::{Block, File, BLOCK_SIZE},
     StoragePreference,
 };
+use byteorder::{LittleEndian, WriteBytesExt};
 use crossbeam_channel::Sender;
 use futures::{executor::block_on, future::ok, prelude::*};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
+    arch::x86_64::{__rdtscp, _rdtsc},
     collections::HashMap,
+    fs::OpenOptions,
+    io::{BufWriter, Write},
     mem::replace,
     ops::DerefMut,
+    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -60,6 +65,8 @@ where
     next_modified_node_id: AtomicU64,
     next_disk_id: AtomicU64,
     report_tx: Option<Sender<DmlMsg>>,
+    #[cfg(feature = "allocation_log")]
+    allocation_log_file: Mutex<BufWriter<std::fs::File>>,
 }
 
 impl<E, SPL> Dmu<E, SPL>
@@ -76,6 +83,7 @@ where
         alloc_strategy: [[Option<u8>; NUM_STORAGE_CLASSES]; NUM_STORAGE_CLASSES],
         cache: E,
         handler: Handler<ObjRef<ObjectPointer<SPL::Checksum>>>,
+        #[cfg(feature = "allocation_log")] allocation_log_file_path: PathBuf,
     ) -> Self {
         let allocation_data = (0..pool.storage_class_count())
             .map(|class| {
@@ -86,6 +94,16 @@ where
             })
             .collect::<Vec<_>>()
             .into_boxed_slice();
+
+        #[cfg(feature = "allocation_log")]
+        let allocation_log_file = Mutex::new(BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(allocation_log_file_path)
+                .expect("Failed to create allocation log file"),
+        ));
 
         Dmu {
             // default_compression_state: default_compression.new_compression().expect("Can't create compression state"),
@@ -103,6 +121,8 @@ where
             next_modified_node_id: AtomicU64::new(1),
             next_disk_id: AtomicU64::new(0),
             report_tx: None,
+            #[cfg(feature = "allocation_log")]
+            allocation_log_file,
         }
     }
 
@@ -119,6 +139,36 @@ where
     /// Returns the underlying storage pool.
     pub fn pool(&self) -> &SPL {
         &self.pool
+    }
+
+    /// Writes the global header for the allocation logging.
+    pub fn write_global_header(&self) -> Result<(), Error> {
+        #[cfg(feature = "allocation_log")]
+        {
+            let mut file = self.allocation_log_file.lock();
+
+            // Number of storage classes
+            file.write_u8(self.pool.storage_class_count())?;
+
+            // Disks per class
+            for class in 0..self.pool.storage_class_count() {
+                let disk_count = self.pool.disk_count(class);
+                file.write_u16::<LittleEndian>(disk_count)?;
+            }
+
+            // Segments per disk
+            for class in 0..self.pool.storage_class_count() {
+                for disk in 0..self.pool.disk_count(class) {
+                    let segment_count = self.pool.size_in_blocks(class, disk);
+                    file.write_u64::<LittleEndian>(segment_count.as_u64())?;
+                }
+            }
+
+            // Blocks per segment (constant)
+            file.write_u64::<LittleEndian>(SEGMENT_SIZE.try_into().unwrap())?;
+        }
+
+        Ok(())
     }
 }
 
@@ -201,6 +251,15 @@ where
             obj_ptr.offset().disk_id(),
             obj_ptr.size(),
         );
+        #[cfg(feature = "allocation_log")]
+        {
+            let mut file = self.allocation_log_file.lock();
+            let _ = file.write_u8(Action::Deallocate.as_bool() as u8);
+            let _ = file.write_u64::<LittleEndian>(obj_ptr.offset.as_u64());
+            let _ = file.write_u32::<LittleEndian>(obj_ptr.size.as_u32());
+            let _ = file.write_u64::<LittleEndian>(0);
+            let _ = file.write_u64::<LittleEndian>(0);
+        }
         if let (CopyOnWriteEvent::Removed, Some(tx), CopyOnWriteReason::Remove) = (
             self.handler.copy_on_write(
                 obj_ptr.offset(),
@@ -484,6 +543,16 @@ where
 
         let strategy = self.alloc_strategy[storage_preference as usize];
 
+        // NOTE: Could we mark classes, disks and/or segments as full to prevent looping over them?
+        // We would then also need to handle this, when deallocating things.
+        // Would full mean completely full or just not having enough contiguous memory of some
+        // size?
+        // Or save the largest contiguous memory region as a value and compare against that. For
+        // that the allocator needs to support that and we have to 'bubble' the largest value up.
+        #[cfg(feature = "allocation_log")]
+        let mut start_cycles_global = get_cycles();
+        #[cfg(feature = "allocation_log")]
+        let mut total_cycles_local: u64 = 0;
         'class: for &class in strategy.iter().flatten() {
             let disks_in_class = self.pool.disk_count(class);
             if disks_in_class == 0 {
@@ -536,14 +605,40 @@ where
 
                 let first_seen_segment_id = *segment_id;
                 loop {
-                    if let Some(segment_offset) = self
-                        .handler
-                        .get_allocation_bitmap(*segment_id, self)?
-                        .access()
-                        .allocate(size.as_u32())
+                    // Has to be split because else the temporary value is dropped while borrowing
+                    let bitmap = self.handler.get_allocation_bitmap(*segment_id, self)?;
+                    let mut allocator = bitmap.access();
+
+                    #[cfg(not(feature = "allocation_log"))]
                     {
-                        break segment_id.disk_offset(segment_offset);
+                        let allocation = allocator.allocate(size.as_u32());
+                        if let Some(segment_offset) = allocation {
+                            let disk_offset = segment_id.disk_offset(segment_offset);
+                            break disk_offset;
+                        }
                     }
+                    #[cfg(feature = "allocation_log")]
+                    {
+                        let start_cycles_allocation = get_cycles();
+                        let allocation = allocator.allocate(size.as_u32());
+                        let end_cycles_allocation = get_cycles();
+                        total_cycles_local += end_cycles_allocation - start_cycles_allocation;
+
+                        if let Some(segment_offset) = allocation {
+                            let disk_offset = segment_id.disk_offset(segment_offset);
+                            let total_cycles_global = end_cycles_allocation - start_cycles_global;
+
+                            let mut file = self.allocation_log_file.lock();
+                            file.write_u8(Action::Allocate.as_bool() as u8)?;
+                            file.write_u64::<LittleEndian>(disk_offset.as_u64())?;
+                            file.write_u32::<LittleEndian>(size.as_u32())?;
+                            file.write_u64::<LittleEndian>(total_cycles_local)?;
+                            file.write_u64::<LittleEndian>(total_cycles_global)?;
+
+                            break disk_offset;
+                        }
+                    }
+
                     let next_segment_id = segment_id.next(disk_size);
                     trace!(
                         "Next allocator segment: {:?} -> {:?} ({:?})",
@@ -1029,5 +1124,13 @@ where
 
     fn set_report(&mut self, tx: Sender<DmlMsg>) {
         self.report_tx = Some(tx);
+    }
+}
+
+fn get_cycles() -> u64 {
+    unsafe {
+        //let mut aux = 0;
+        //__rdtscp(aux)
+        _rdtsc()
     }
 }

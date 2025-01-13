@@ -1,0 +1,1341 @@
+#!/usr/bin/env python3
+
+import argparse
+import functools
+from multiprocessing import Pool, Value, Lock
+import os
+import shutil
+import subprocess
+import struct
+import time
+from typing import Iterator, Any, IO
+
+import matplotlib
+from matplotlib.animation import FFMpegWriter
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, CheckButtons
+import numpy as np
+from sortedcontainers import SortedDict
+from tqdm import tqdm
+
+# Constants to get relevant information from the disk_offset.
+MASK_LAYER_ID = ((1 << 2) - 1) << (10 + 52)
+MASK_DISK_ID = ((1 << 10) - 1) << 52
+MASK_OFFSET = (1 << 52) - 1
+SEGMENT_SIZE_LOG_2 = 18
+SEGMENT_SIZE = 1 << SEGMENT_SIZE_LOG_2
+SEGMENT_SIZE_MASK = SEGMENT_SIZE - 1
+# This is the amount of bytes one (de-)allocation has in the log.
+SIZE_PER_ALLOCATION = 29
+
+
+class StorageConfig:
+    """Represents the storage configuration of the system"""
+
+    def __init__(self, num_layers: int, disks_per_layer: list[int],
+                 blocks_per_disk: list[list[int]], blocks_per_segment: int):
+        self.num_layers = num_layers
+        self.disks_per_layer = disks_per_layer
+        self.blocks_per_disk = blocks_per_disk
+        self.blocks_per_segment = blocks_per_segment
+
+    def __str__(self) -> str:
+        return (f"StorageConfig(num_layers={self.num_layers}, "
+                f"disks_per_layer={self.disks_per_layer}, "
+                f"blocks_per_disk={self.blocks_per_disk}, "
+                f"blocks_per_segment={self.blocks_per_segment})")
+
+    def blocks_global(self) -> int:
+        """Returns the total number of blocks in the system."""
+        return sum(self.blocks_of_layer(layer) for
+                   layer in range(self.num_layers))
+
+    def disks_of_layer(self, layer: int) -> int:
+        """Returns the number of disks in the specified layer."""
+        return self.disks_per_layer[layer]
+
+    def blocks_of_layer(self, layer: int) -> int:
+        """Returns the total number of blocks in the specified layer."""
+        return sum(self.blocks_of_disk(layer, disk_id) for
+                   disk_id in range(self.disks_of_layer(layer)))
+
+    def blocks_of_disk(self, layer: int, disk_id: int) -> int:
+        """Returns the number of blocks in the specified disk."""
+        return self.blocks_per_disk[layer][disk_id]
+
+    def segments_of_disk(self, layer: int, disk_id: int) -> int:
+        """Returns the number of segments in the specified disk."""
+        bod = self.blocks_of_disk(layer, disk_id)
+        if (bod % self.blocks_per_segment != 0):
+            return bod // self.blocks_per_segment + 1
+        else:
+            return bod // self.blocks_per_segment
+
+    def is_valid_layer(self, layer: int) -> bool:
+        """Checks if the given layer is valid."""
+        return 0 <= layer < self.num_layers
+
+    def is_valid_disk(self, layer: int, disk_id: int) -> bool:
+        """Checks if the given disk ID is valid."""
+        return self.is_valid_layer(layer) and \
+            0 <= disk_id < self.disks_of_layer(layer)
+
+
+class Timestamp:
+    time: int
+    op_type: int
+    offset: int
+    num_blocks: int
+    cycles_alloc: int
+    cycles_total: int
+    layer_id: int
+    disk_id: int
+    block_offset: int
+    segment_id: int
+    segment_offset: int
+
+    def __init__(self, op_type: int, offset: int, num_blocks: int, cycles_alloc: int, cycles_total: int, time: int):
+        self.op_type = op_type
+        self.offset = offset
+        self.num_blocks = num_blocks
+        self.cycles_alloc = cycles_alloc
+        self.cycles_total = cycles_total
+        self.time = time
+        self._parse_offset()
+
+    def __str__(self) -> str:
+        return (f"Timestep(op_type: {self.op_type}, "
+                f"offset: {self.offset}, "
+                f"num_blocks: {self.num_blocks}, "
+                f"cycles_alloc: {self.cycles_alloc}, "
+                f"cycles_total: {self.cycles_total}, "
+                f"time: {self.time}, "
+                f"layer_id: {self.layer_id}, "
+                f"disk_id: {self.disk_id}, "
+                f"block_offset: {self.block_offset}, "
+                f"segment_id: {self.segment_id}, "
+                f"segment_offset: {self.segment_offset})")
+
+    def _parse_offset(self):
+        """Parses the offset into human readable values"""
+        self.layer_id = (self.offset & MASK_LAYER_ID) >> (52 + 10)
+        self.disk_id = (self.offset & MASK_DISK_ID) >> 52
+        self.block_offset = self.offset & MASK_OFFSET
+        # In haura the segment id is a multiple of the segment size. This is ugly for plotting.
+        self.segment_id = (self.block_offset & ~SEGMENT_SIZE_MASK) // SEGMENT_SIZE
+        self.segment_offset = self.block_offset % SEGMENT_SIZE
+
+
+class Parser:
+    """Parses the allocation log file."""
+    log_file: str
+    _file_handle: IO[Any]
+    timesteps: int
+    time: int
+
+    def __init__(self, log_file: str):
+        self.log_file = log_file
+        self._file_handle = open(log_file, "rb")  # Open the file in binary mode
+
+        # Precalculate the number of timesteps.
+        _ = self.parse_header()
+        self.timesteps = self._remaining_bytes() // SIZE_PER_ALLOCATION
+        self._file_handle.seek(0)
+
+    def __del__(self):
+        try:
+            self._file_handle.close()
+        except AttributeError:
+            # Happens when the file does not exist
+            pass
+
+    def __len__(self) -> int:
+        return self.timesteps
+
+    def parse_header(self) -> StorageConfig:
+        """Parses the header of the log file and returns a StorageConfig."""
+        f = self._file_handle
+        num_classes = struct.unpack("<B", f.read(1))[0]
+        disks_per_class = []
+        for _ in range(num_classes):
+            disks_per_class.append(struct.unpack("<H", f.read(2))[0])
+
+        blocks_per_disk = []
+        for i in range(num_classes):
+            blocks_per_disk.append([])
+            for _ in range(disks_per_class[i]):
+                blocks_per_disk[i].append(struct.unpack("<Q", f.read(8))[0])
+
+        blocks_per_segment = struct.unpack("<Q", f.read(8))[0]
+
+        return StorageConfig(num_classes, disks_per_class, blocks_per_disk, blocks_per_segment)
+
+    def __iter__(self) -> Iterator[Timestamp]:
+        """Prepares the iterator by skipping the header. Returns itself as the iterator."""
+        self._file_handle.seek(0)
+        _ = self.parse_header()
+        self.time = 0
+        return self
+
+    def __next__(self) -> Timestamp:
+        """Reads the next allocation from the log file and returns a timestamp."""
+        try:
+            op_type = struct.unpack("<B", self._file_handle.read(1))[0]
+            offset = struct.unpack("<Q", self._file_handle.read(8))[0]
+            num_blocks = struct.unpack("<L", self._file_handle.read(4))[0]
+            cycles_alloc = struct.unpack("<Q", self._file_handle.read(8))[0]
+            cycles_total = struct.unpack("<Q", self._file_handle.read(8))[0]
+        except struct.error:
+            raise StopIteration
+
+        self.time += 1
+
+        return Timestamp(op_type, offset, num_blocks, cycles_alloc, cycles_total, self.time)
+
+    def _remaining_bytes(self) -> int:
+        """Returns the remaining bytes in a file from the current position of the file pointer."""
+        f = self._file_handle
+        current_position = f.tell()
+        f.seek(0, os.SEEK_END)
+        end_position = f.tell()
+        # Return to the original position.
+        f.seek(current_position, os.SEEK_SET)
+        return end_position - current_position
+
+
+class Fragmentation:
+    def fragmentation_of_bitmap(bitmap: np.array) -> tuple[float, int, int]:
+        """Calculates the fragmentation of a bitmap."""
+        if len(bitmap) == 0:
+            return 0, 0, 0
+
+        total_free = np.count_nonzero(bitmap == 0)
+        largest_free = Fragmentation.longest_repeating_0s(bitmap)
+        frag = Fragmentation.calculate_fragmentation(total_free, largest_free)
+
+        return frag, total_free, largest_free
+
+    def calculate_fragmentation(total_free: int, largest_free: int) -> float:
+        """Calculates the fragmentation based on [wikipedia](https://en.m.wikipedia.org/wiki/Fragmentation_(computing)#Comparison)."""
+        if total_free == 0:
+            return 0
+        return 1 - (largest_free / total_free)
+
+    def longest_repeating_0s(arr: np.array) -> int:
+        """Calculates the maximum consecutive count of 0s in a binary numpy array."""
+        # Find indices where the array changes value.
+        indices = np.where(np.diff(arr))[0] + 1
+        # Split the array at these indices.
+        splits = np.split(arr, indices)
+
+        # Calculate lengths of splits and find maximum for 0.
+        return max([len(s) for s in splits if s[0] == 0], default=0)
+
+
+class Segment:
+    id: tuple[int, int, int]  # layer, disk, segment
+    size: int  # number of blocks in segment
+    change_list: list[Timestamp]
+    frag_list: SortedDict[int, tuple[float, int, int]]  # frag, total_free, largest_free
+
+    def __init__(self, layer: int, disk: int, segment: int, size: int):
+        self.id = (layer, disk, segment)
+        self.size = size
+        self.change_list = []
+        self.frag_list = SortedDict({})
+
+    def __str__(self) -> str:
+        return (f"Segment(id: {self.id}, "
+                f"size: {self.size}, "
+                f"change_list: {self.change_list}, "
+                f"frag_list: {self.frag_list}")
+
+    def add_timestamp(self, timestamp: Timestamp):
+        """Adds a Timestamp to the changelist."""
+        self.change_list.append(timestamp)
+
+    def calculate_fragmentation(self):
+        """Calculates the fragmentation of a segment for every timestamp available."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        self.frag_list[0] = Fragmentation.fragmentation_of_bitmap(bitmap)
+        for timestamp in tqdm(self.change_list, desc=f"Calculating fragmentation of segment {self.id}", leave=False, unit="timestamp"):
+            begin = timestamp.segment_offset
+            end = begin + timestamp.num_blocks
+            bitmap[begin:end] = timestamp.op_type
+
+            self.frag_list[timestamp.time] = Fragmentation.fragmentation_of_bitmap(bitmap)
+
+    def get_bitmap(self, time: int) -> np.ndarray:
+        """Returns the allocation bitmap of a segment at the specified time or a available time
+           before, if the requested time is not in the changelist."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        if len(self.change_list) == 0:
+            return bitmap
+
+        for timestamp in self.change_list:
+            if timestamp.time > time:
+                break
+            begin = timestamp.segment_offset
+            end = begin + timestamp.num_blocks
+            bitmap[begin:end] = timestamp.op_type
+
+        return bitmap
+
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of a segment at the specified
+           time or a available time before, if the requested time is not in the fraglist."""
+        key = self.frag_list.bisect_right(time) - 1
+        return self.frag_list.peekitem(key)[1]
+
+
+class Disk:
+    id: tuple[int, int]  # layer, disk
+    size: int
+    segments: list[Segment]
+
+    def __init__(self, layer: int, disk: int, size: int):
+        self.id = (layer, disk)
+        self.size = size
+        self.segments = []
+
+    def __str__(self) -> str:
+        out = f"Disk(id: {self.id}, "
+        for segment in self.segments:
+            out += str(segment)
+        return out + ")"
+
+    def add_timestamp(self, timestamp: Timestamp):
+        """Adds a Timestamp to the respective segment."""
+        try:
+            self.segments[timestamp.segment_id].add_timestamp(timestamp)
+        except IndexError as e:
+            print(f"Error adding timestamp '{timestamp}': {e}")
+
+    def calculate_fragmentation(self):
+        """Calculates the fragmentation of every segment for every timestamp available."""
+        for segment in tqdm(self.segments, desc=f"Calculating fragmentation of disk {self.id}", leave=False, unit="segment"):
+            segment.calculate_fragmentation()
+
+    def get_bitmap(self, time: int) -> np.ndarray:
+        """Returns the allocation bitmap of a disk at the specified time or a available time
+           before, if the requested time is not in the changelist."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        start = 0
+        for segment in self.segments:
+            bitmap[start:start + segment.size] = segment.get_bitmap(time)
+            start += segment.size
+
+        return bitmap
+
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of a disk at the specified
+           time or a available time before, if the requested time is not in the fraglist."""
+        total_free = 0
+        largest_free = 0
+        for segment in self.segments:
+            _, total, largest = segment.get_fragmentation(time)
+            total_free += total
+            largest_free = max(largest_free, largest)
+
+        return Fragmentation.calculate_fragmentation(total_free, largest_free), total_free, largest_free
+
+
+class Layer:
+    id: int
+    size: int
+    disks: list[Disk]
+
+    def __init__(self, id: int, size: int):
+        self.id = id
+        self.size = size
+        self.disks = []
+
+    def __str__(self) -> str:
+        out = f"Layer(id: {self.id}, "
+        for disk in self.disks:
+            out += str(disk)
+        return out + ")"
+
+    def add_timestamp(self, timestamp: Timestamp):
+        """Adds a Timestamp to the respective disk."""
+        self.disks[timestamp.disk_id].add_timestamp(timestamp)
+
+    def calculate_fragmentation(self):
+        """Calculates the fragmentation of every disk for every timestamp available."""
+        for disk in tqdm(self.disks, desc=f"Calculating fragmentation of layer {self.id}", leave=False, unit="disk"):
+            disk.calculate_fragmentation()
+
+    def get_bitmap(self, time: int) -> np.ndarray:
+        """Returns the allocation bitmap of a Layer at the specified time or a available time
+           before, if the requested time is not in the changelist."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        start = 0
+        for disk in self.disks:
+            bitmap[start:start + disk.size] = disk.get_bitmap(time)
+            start += disk.size
+
+        return bitmap
+
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of a layer at the specified
+           time or a available time before, if the requested time is not in the fraglist."""
+        total_free = 0
+        largest_free = 0
+        for disk in self.disks:
+            _, total, largest = disk.get_fragmentation(time)
+            total_free += total
+            largest_free = max(largest_free, largest)
+
+        return Fragmentation.calculate_fragmentation(total_free, largest_free), total_free, largest_free
+
+
+class GlobalBitMap:
+    log_file: str
+    storage_config: StorageConfig
+    layers: list[Layer]
+    cycles_alloc: tuple[np.ndarray, np.ndarray]
+    cycles_total: tuple[np.ndarray, np.ndarray]
+    sizes: list[int]
+    size: int
+    time: int
+
+    def __init__(self, log_file: str):
+        self.log_file = log_file
+        try:
+            self.storage_config = Parser(log_file).parse_header()
+        except FileNotFoundError as e:
+            print(f"Input file `{log_file}` does not exist. Can't continue.")
+            print(e)
+            exit(1)
+
+        self.size = self.storage_config.blocks_global()
+        self.cycles_alloc = (np.array([]), np.array([]))
+        self.cycles_total = (np.array([]), np.array([]))
+        self.sizes = []
+
+        # Create the storage structure based on the config.
+        self.layers = []
+        for layer in range(self.storage_config.num_layers):
+            self.layers.append(Layer(layer, self.storage_config.blocks_of_layer(layer)))
+            for disk in range(self.storage_config.disks_of_layer(layer)):
+                self.layers[layer].disks.append(Disk(layer, disk, self.storage_config.blocks_of_disk(layer, disk)))
+                num_segments = self.storage_config.segments_of_disk(layer, disk)
+                for segment in range(num_segments):
+                    if segment < num_segments - 1:  # not the last segment
+                        size = self.storage_config.blocks_per_segment
+                    else:
+                        size = (self.storage_config.blocks_of_disk(layer, disk)
+                                - segment * self.storage_config.blocks_per_segment)
+                    self.layers[layer].disks[disk].segments.append(Segment(layer, disk, segment, size))
+
+        self._build_bitmap()
+        self._calculate_fragmentation()
+
+    def __str__(self) -> str:
+        out = (f"GlobalBitMap(log_file: {self.log_file}, "
+               f"storage_config: {self.storage_config}, "
+               f"size: {self.size}, "
+               f"time: {self.time}, ")
+        return out + ")"
+
+    def _build_bitmap(self):
+        """Builds the bitmap of the storage based on the provided log file."""
+        parser = Parser(log_file)
+        for timestamp in tqdm(parser, desc="Building Bitmap", unit="timestep"):
+            self.layers[timestamp.layer_id].add_timestamp(timestamp)
+            if timestamp.cycles_alloc != 0:
+                self.cycles_alloc = (np.append(self.cycles_alloc[0], timestamp.time), np.append(self.cycles_alloc[1], timestamp.cycles_alloc))
+            if timestamp.cycles_total != 0:
+                self.cycles_total = (np.append(self.cycles_total[0], timestamp.time), np.append(self.cycles_total[1], timestamp.cycles_total))
+            self.sizes.append(timestamp.num_blocks)
+
+            self.time = timestamp.time
+
+    def _calculate_fragmentation(self):
+        """Calculates the fragmentation of every layer for every timestamp available."""
+        for layer in tqdm(self.layers, desc="Calculating fragmentation", unit="layer"):
+            layer.calculate_fragmentation()
+
+    def get_bitmap(self, time: int) -> np.ndarray:
+        """Returns the allocation bitmap the storage at the specified time."""
+        bitmap = np.zeros(self.size, dtype=np.uint8)
+        start = 0
+        for layer in self.layers:
+            bitmap[start:start + layer.size] = layer.get_bitmap(time)
+            start += layer.size
+
+        return bitmap
+
+    def get_fragmentation(self, time) -> tuple[float, int, int]:
+        """Returns the fragmentation, largest and total free space of the storage."""
+        total_free = 0
+        largest_free = 0
+        for layer in self.layers:
+            _, total, largest = layer.get_fragmentation(time)
+            total_free += total
+            largest_free = max(largest_free, largest)
+
+        return Fragmentation.calculate_fragmentation(total_free, largest_free), total_free, largest_free
+
+
+class Plotter:
+    """Handles plotting the bitmap and fragmentation data with interactive controls."""
+    global_bitmap: GlobalBitMap
+    plot_config: dict
+    layers: list[bool]
+    time: int
+
+    def __init__(self, args):
+        self.time = 0
+
+        # Define initial plotting configuration
+        self.plot_config = {
+            "bitmaps": False,
+            "frag_local": False,
+            "frag_global": False,
+            "free_local": False,
+            "free_global": False,
+            "allocation_cycles_alloc": False,
+            "allocation_cycles_total": False,
+            "allocation_cycles_proportion": False,
+            "allocation_cycles_alloc_aligned": False,
+            "allocation_cycles_total_aligned": False,
+            "allocation_cycles_proportion_aligned": False,
+            "allocation_sizes": False,
+            "allocation_sizes_ecdf": False,  # empirical cumulative distribution function
+            "slider": False,
+            "checkboxes": not args.disable_checkboxes,
+        }
+
+        if args.available_components:
+            self.print_available_components()
+
+            exit(1)
+
+        for key in args.components:
+            if key not in self.plot_config.keys():
+                print(f"\033[31mThe component '{key}' does not exist.\033[0m")
+                self.print_available_components()
+                exit(1)
+            else:
+                self.plot_config[key] = True
+
+        self.layers = [int(i) for i in args.layers]
+
+    def print_available_components(self):
+        print("\033[1mAvailable Components:\033[0m")
+        for component in self.plot_config.keys():
+            print(component)
+
+    def plot(self):
+        """Sets up the plot and displays it"""
+        self.fig = plt.figure(layout="constrained")
+        self.fig.set_size_inches(16, 9)
+        self.fig.set_dpi(1920 / 16)
+        self._create_layout(self.fig)
+        plt.show()
+
+    def _create_layout(self, fig):
+        layout, gridspec = self._get_layout_gridspec()
+        self.axd = fig.subplot_mosaic(layout, gridspec_kw=gridspec)
+        self.ims = self._setup_bitmaps()
+        self.vlines_frag_local = self._fragmentation_local()
+        self.vline_frag_global = self._fragmentation_global()
+        self.vlines_free_local = self._free_local()
+        self.vline_free_global = self._free_global()
+        self.vline_allocation_cycles_alloc = self._allocation_cycles_alloc()
+        self.vline_allocation_cycles_total = self._allocation_cycles_total()
+        self.vline_allocation_cycles_alloc_aligned = self._allocation_cycles_alloc_aligned()
+        self.vline_allocation_cycles_total_aligned = self._allocation_cycles_total_aligned()
+        self.vline_allocation_cycles_proportion = self._allocation_cycles_proportion()
+        self.vline_allocation_cycles_proportion_aligned = self._allocation_cycles_proportion_aligned()
+        _ = self._allocation_sizes()
+        _ = self._allocation_sizes_ecdf()
+        self.slider = self._setup_slider()
+        self.checkboxes = self._setup_checkboxes()
+
+    def _get_layout_gridspec(self) -> tuple[list[list[str]], list[list[str]]]:
+        layout = []
+        gridspec = {"width_ratios": [], "height_ratios": []}
+
+        if self.plot_config["checkboxes"]:
+            gridspec["width_ratios"].append(0.4)
+        for layer in self.layers:
+            gridspec["width_ratios"].append(1)
+
+        if self.plot_config["bitmaps"]:
+            layout.append([])
+            gridspec["height_ratios"].append(3)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append(f"bitmap_{layer}")
+
+        if self.plot_config["frag_local"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append(f"frag_{layer}")
+
+        if self.plot_config["frag_global"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("frag_global")
+
+        if self.plot_config["free_local"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append(f"free_{layer}")
+
+        if self.plot_config["free_global"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("free_global")
+
+        if self.plot_config["allocation_cycles_alloc"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_alloc")
+
+        if self.plot_config["allocation_cycles_total"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_total")
+
+        if self.plot_config["allocation_cycles_proportion"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_proportion")
+
+        if self.plot_config["allocation_cycles_alloc_aligned"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_alloc_aligned")
+
+        if self.plot_config["allocation_cycles_total_aligned"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_total_aligned")
+
+        if self.plot_config["allocation_cycles_proportion_aligned"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_cycles_proportion_aligned")
+
+        if self.plot_config["allocation_sizes"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_sizes")
+
+        if self.plot_config["allocation_sizes_ecdf"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_sizes_ecdf")
+
+        if self.plot_config["slider"]:
+            layout.append([])
+            gridspec["height_ratios"].append(0.1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("slider")
+
+        return layout, gridspec
+
+    def _setup_bitmaps(self):
+        if not self.plot_config["bitmaps"]:
+            return
+
+        ims = {}
+        for layer in self.global_bitmap.layers:
+            if layer.id not in self.layers:
+                continue
+
+            name = f"bitmap_{layer.id}"
+            ims[layer.id] = {}
+            if layer.size == 0:
+                kw = {"ha": "center", "va": "center", "fontsize": 12, "color": "darkgrey"}
+                self.axd[name].text(0.5, 0.5, "[Empty]", transform=self.axd[name].transAxes, **kw)
+            else:
+                bbox = self.axd[name].get_window_extent().transformed(
+                    self.fig.dpi_scale_trans.inverted())
+                ims[layer.id]["width"] = bbox.width
+                ims[layer.id]["height"] = bbox.height
+
+                layer_bitmap = layer.get_bitmap(self.time)
+                packed_bitmap = np.packbits(layer_bitmap)
+                colored_bitmap = self._color_disks(packed_bitmap, layer.id)
+                rows, cols = get_close_aspect(ims[layer.id]["width"],
+                                              ims[layer.id]["height"],
+                                              len(colored_bitmap[:, 0]))
+                resized_bitmap = colored_bitmap.reshape(rows, cols, 4)
+                ims[layer.id]["bitmap"] = resized_bitmap
+                ims[layer.id]["im"] = self.axd[name].imshow(
+                    resized_bitmap, aspect="auto", interpolation=None)
+                self.axd[name].set_xlabel("Block")
+                self.axd[name].set_ylabel("Block")
+
+                # Draw horizontal lines to seperate segments.
+                begin = 0
+                for disk in layer.disks:
+                    for i, segment in enumerate(disk.segments):
+                        # Do not draw line before first segment.
+                        if i > 0:
+                            _ = self.axd[name].axhline(begin / cols / 8, 0, 1, color="black", linestyle="--", linewidth=1)
+                        begin += segment.size
+
+            self.axd[name].set_title(f"Layer {layer.id}")
+            self.axd[name].set_xticks([])
+            self.axd[name].set_yticks([])
+
+        return ims
+
+    def _color_disks(self, layer_bitmap: np.ndarray, layer_id: int) -> np.ndarray:
+        """Colors the disks within a layer differently."""
+        colored_bitmap = np.zeros((len(layer_bitmap), 4), dtype=np.uint8)
+        colored_bitmap[:, 3] = layer_bitmap
+        start = 0
+        for disk_id in range(self.global_bitmap.storage_config.disks_of_layer(layer_id)):
+            length = self.global_bitmap.storage_config.blocks_of_disk(layer_id, disk_id) // 8
+
+            color = id_to_color(disk_id)
+            color_array = np.tile(color, (length, 1))
+
+            colored_bitmap[start:start + length, 0:3] = color_array
+            start += length
+
+        return colored_bitmap
+
+    def _fragmentation_local(self):
+        """Helper method for plotting the fragmentation of the layers and the storage."""
+        if not self.plot_config["frag_local"]:
+            return
+
+        # Vertical lines that indicate the timestamp
+        vlines = {}
+
+        for i, layer in enumerate(self.layers):
+            frag_ax = self.axd[f"frag_{layer}"]
+            if self.global_bitmap.storage_config.blocks_of_layer(layer) != 0:
+                frag_values = []
+                for i in range(self.global_bitmap.time):
+                    frag, _, _ = self.global_bitmap.layers[layer].get_fragmentation(i)
+                    frag_values.append(frag)
+
+                frag_ax.plot(frag_values)
+                frag_ax.set_xlim([0, self.global_bitmap.time - 1])
+                frag_ax.set_ylim([0, 1])
+                frag_ax.set_xlabel("Timestamp")
+                # TODO: only plot ylabel on left most layer
+                frag_ax.set_ylabel("Fragmentation")
+
+                vlines[layer] = frag_ax.axvline(
+                    x=self.time, color="red", linestyle="--", linewidth=1)
+            else:
+                kw = {"ha": "center", "va": "center",
+                      "fontsize": 12, "color": "darkgrey"}
+                frag_ax.text(0.5, 0.5, "[Empty]",
+                             transform=frag_ax.transAxes, **kw)
+                frag_ax.set_xticks([], [])
+                frag_ax.set_yticks([], [])
+
+        return vlines
+
+    def _fragmentation_global(self):
+        if not self.plot_config["frag_global"]:
+            return
+
+        # Vertical line that indicates the timestamp
+        frag_values = []
+        for i in range(self.global_bitmap.time):
+            frag, _, _ = self.global_bitmap.get_fragmentation(i)
+            frag_values.append(frag)
+        global_frag_ax = self.axd["frag_global"]
+        global_frag_ax.plot(frag_values)
+        global_frag_ax.set_ylim([0, 1])
+        global_frag_ax.set_xlim([0, self.global_bitmap.time - 1])
+        global_frag_ax.set_title("Global Fragmentation")
+        global_frag_ax.set_xlabel("Timestamp")
+        global_frag_ax.set_ylabel("Fragmentation")
+
+        return global_frag_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _free_local(self):
+        if not self.plot_config["free_local"]:
+            return
+
+        # Vertical lines that indicate the timestamp
+        vlines = {}
+
+        for i, layer in enumerate(self.layers):
+            free_ax = self.axd[f"free_{layer}"]
+            if self.global_bitmap.storage_config.blocks_of_layer(layer) != 0:
+                free_values = []
+                for i in range(self.global_bitmap.time):
+                    _, _, free = self.global_bitmap.layers[layer].get_fragmentation(i)
+                    free_values.append(free)
+
+                free_ax.plot(free_values)
+                free_ax.set_yscale("log")
+                free_ax.set_ylim(1)
+                free_ax.set_xlim([0, self.global_bitmap.time - 1])
+                free_ax.set_xlabel("Timestamp")
+                # TODO: only plot ylabel on left most layer
+                free_ax.set_ylabel("Blocks")
+
+                vlines[layer] = free_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+            else:
+                kw = {"ha": "center", "va": "center",
+                      "fontsize": 12, "color": "darkgrey"}
+                free_ax.text(0.5, 0.5, "[Empty]",
+                             transform=free_ax.transAxes, **kw)
+                free_ax.set_xticks([], [])
+                free_ax.set_yticks([], [])
+
+        return vlines
+
+    def _free_global(self):
+        if not self.plot_config["free_global"]:
+            return
+
+        free_values = []
+        for i in range(self.global_bitmap.time):
+            _, _, free = self.global_bitmap.get_fragmentation(i)
+            free_values.append(free)
+        global_free_ax = self.axd["free_global"]
+        global_free_ax.plot(free_values)
+        global_free_ax.set_yscale("log")
+        global_free_ax.set_ylim(1)
+        global_free_ax.set_xlim([0, self.global_bitmap.time - 1])
+        global_free_ax.set_title("Global Free Blocks")
+        global_free_ax.set_xlabel("Timestamp")
+        global_free_ax.set_ylabel("Blocks")
+
+        return global_free_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_alloc(self):
+        if not self.plot_config["allocation_cycles_alloc"]:
+            return
+
+        data = self.global_bitmap.cycles_alloc[1]
+        x_values = np.arange(0, len(data))
+
+        failed_allocations_ax = self.axd["allocation_cycles_alloc"]
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles Alloc")
+
+        # window_sizes = [100, 500]
+        window_sizes = []
+        colors = ['red', 'orange', 'black', 'purple']
+        line_styles = ['-', '--', '-.', ':']
+        moving_average = np.zeros_like(data, dtype=float)
+
+        for i, window_size in enumerate(window_sizes):
+            moving_average = np.zeros_like(data, dtype=float)
+            for j in range(len(data)):
+                window_start = max(0, j - window_size + 1)
+                window_end = j + 1
+                moving_average[j] = np.mean(data[window_start:window_end])
+
+            # Plot with different colors and line styles
+            failed_allocations_ax.plot(x_values, moving_average,
+                                       linewidth=1.5,
+                                       color=colors[i % len(colors)],
+                                       linestyle=line_styles[i % len(line_styles)],
+                                       label=f"Moving Average ({window_size})")
+
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlim([0, len(data)])
+        failed_allocations_ax.set_title("Allocation Cycles Allocator")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Cycles")
+        # failed_allocations_ax.legend()
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_total(self):
+        if not self.plot_config["allocation_cycles_total"]:
+            return
+
+        data = self.global_bitmap.cycles_total[1]
+        x_values = np.arange(0, len(data))
+
+        failed_allocations_ax = self.axd["allocation_cycles_total"]
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles Total")
+
+        # window_sizes = [100, 500]
+        window_sizes = []
+        colors = ['red', 'orange', 'black', 'purple']
+        line_styles = ['-', '--', '-.', ':']
+        moving_average = np.zeros_like(data, dtype=float)
+
+        for i, window_size in enumerate(window_sizes):
+            moving_average = np.zeros_like(data, dtype=float)
+            for j in range(len(data)):
+                window_start = max(0, j - window_size + 1)
+                window_end = j + 1
+                moving_average[j] = np.mean(data[window_start:window_end])
+
+            # Plot with different colors and line styles
+            failed_allocations_ax.plot(x_values, moving_average,
+                                       linewidth=1.5,
+                                       color=colors[i % len(colors)],
+                                       linestyle=line_styles[i % len(line_styles)],
+                                       label=f"Moving Average ({window_size})")
+
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlim([0, len(data)])
+        failed_allocations_ax.set_title("Allocation Cycles Total")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Cycles")
+        # failed_allocations_ax.legend(loc="upper left")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_proportion(self):
+        if not self.plot_config["allocation_cycles_proportion"]:
+            return
+
+        data = self.global_bitmap.cycles_alloc[1] / self.global_bitmap.cycles_total[1]
+        x_values = np.arange(0, len(data))
+
+        failed_allocations_ax = self.axd["allocation_cycles_proportion"]
+        failed_allocations_ax.scatter(x_values, data, s=3.0, linewidths=0, label="Allocation Cycles Allocator/Total")
+
+        failed_allocations_ax.set_ylim([0, 1])
+        failed_allocations_ax.set_xlim([0, len(data)])
+        failed_allocations_ax.set_title("Allocation Cycles Allocator/Total")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Proportion")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_proportion_aligned(self):
+        if not self.plot_config["allocation_cycles_proportion_aligned"]:
+            return
+
+        data = self.global_bitmap.cycles_alloc[1] / self.global_bitmap.cycles_total[1]
+
+        failed_allocations_ax = self.axd["allocation_cycles_proportion_aligned"]
+        failed_allocations_ax.scatter(self.global_bitmap.cycles_alloc[0], data, s=3.0, linewidths=0, label="Allocation Cycles Allocator/Total Timestep Aligned")
+
+        failed_allocations_ax.set_ylim([0, 1])
+        failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
+        failed_allocations_ax.set_title("Allocation Cycles Allocator/Total Timestep Aligned")
+        failed_allocations_ax.set_xlabel("Allocation")
+        failed_allocations_ax.set_ylabel("Proportion")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_alloc_aligned(self):
+        if not self.plot_config["allocation_cycles_alloc_aligned"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_cycles_alloc_aligned"]
+        failed_allocations_ax.scatter(self.global_bitmap.cycles_alloc[0], self.global_bitmap.cycles_alloc[1], s=3.0, linewidths=0)
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
+        failed_allocations_ax.set_title("Allocation Cycles Allocator Timestep Aligned")
+        failed_allocations_ax.set_xlabel("Timestamp")
+        failed_allocations_ax.set_ylabel("Cycles")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_cycles_total_aligned(self):
+        if not self.plot_config["allocation_cycles_total_aligned"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_cycles_total_aligned"]
+        failed_allocations_ax.scatter(self.global_bitmap.cycles_total[0], self.global_bitmap.cycles_total[1], s=3.0, linewidths=0)
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlim([0, self.global_bitmap.time - 1])
+        failed_allocations_ax.set_title("Allocation Cycles Total Timestep Aligned")
+        failed_allocations_ax.set_xlabel("Timestamp")
+        failed_allocations_ax.set_ylabel("Cycles")
+
+        return failed_allocations_ax.axvline(x=self.time, color="red", linestyle="--", linewidth=1)
+
+    def _allocation_sizes(self):
+        if not self.plot_config["allocation_sizes"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_sizes"]
+        failed_allocations_ax.hist(self.global_bitmap.sizes, bins=int(np.std(self.global_bitmap.sizes)))
+        failed_allocations_ax.set_title("Allocation sizes")
+        failed_allocations_ax.set_xlim(0, max(self.global_bitmap.sizes))
+        failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_xlabel("Sizes")
+        failed_allocations_ax.set_ylabel("Amount")
+
+    def _allocation_sizes_ecdf(self):
+        if not self.plot_config["allocation_sizes_ecdf"]:
+            return
+
+        failed_allocations_ax = self.axd["allocation_sizes_ecdf"]
+        failed_allocations_ax.hist(self.global_bitmap.sizes, bins=max(self.global_bitmap.sizes),
+                                   density=True, cumulative=True)
+        failed_allocations_ax.set_title("Allocation sizes ECDF")
+        failed_allocations_ax.set_xlim(0, max(self.global_bitmap.sizes))
+        failed_allocations_ax.set_ylim(0, 1)
+        failed_allocations_ax.set_xlabel("Sizes")
+        failed_allocations_ax.set_ylabel("Proportion")
+
+    def _setup_slider(self):
+        """Helper method for setting up the slider for interactive plotting."""
+        if not self.plot_config["slider"]:
+            return
+        # TODO: remove moving of entire plot, when the slider value increases
+
+        # Create the format specifier with appropriate spacing to prevent moving of axes.
+        max_digits = len(str(self.global_bitmap.time - 1))
+        valfmt = f"%{max_digits}d"
+        slider = Slider(
+            self.axd["slider"],
+            "",
+            0,
+            self.global_bitmap.time - 1,
+            valinit=self.time,
+            valstep=1,
+            valfmt=valfmt
+        )
+
+        def update(val):
+            self.time = int(val)
+            if self.time > self.global_bitmap.time - 1:
+                slider.set_val(self.global_bitmap.time - 1)
+                return
+
+            self._timestamp_update()
+
+        slider.on_changed(update)
+
+        return slider
+
+    def _timestamp_update(self):
+        for layer_id in self.layers:
+            layer = self.global_bitmap.layers[layer_id]
+            if layer.size == 0:
+                continue
+
+            if self.plot_config["bitmaps"]:
+                bitmap = np.packbits(layer.get_bitmap(self.time))
+
+                rows, cols = get_close_aspect(self.ims[layer_id]["width"],
+                                              self.ims[layer_id]["height"],
+                                              len(bitmap))
+                resized_bitmap = bitmap.reshape(rows, cols)
+                self.ims[layer_id]["bitmap"][:, :, 3] = resized_bitmap
+                self.ims[layer_id]["im"].set_data(self.ims[layer_id]["bitmap"])
+
+            if self.plot_config["frag_local"]:
+                self.vlines_frag_local[layer_id].set_xdata([self.time, self.time])
+
+            if self.plot_config["free_local"]:
+                self.vlines_free_local[layer_id].set_xdata([self.time, self.time])
+
+        if self.plot_config["frag_global"]:
+            self.vline_frag_global.set_xdata([self.time, self.time])
+
+        if self.plot_config["free_global"]:
+            self.vline_free_global.set_xdata([self.time, self.time])
+
+        if self.plot_config["allocation_cycles_alloc"]:
+            # Get the index of the last allocation that happened before or at the current timestamp.
+            index = np.argmax(self.global_bitmap.cycles_alloc[0] > self.time) - 1
+            self.vline_allocation_cycles_alloc.set_xdata([index, index])
+
+        if self.plot_config["allocation_cycles_total"]:
+            # Get the index of the last allocation that happened before or at the current timestamp.
+            index = np.argmax(self.global_bitmap.cycles_total[0] > self.time) - 1
+            self.vline_allocation_cycles_total.set_xdata([index, index])
+
+        if self.plot_config["allocation_cycles_proportion"]:
+            # Get the index of the last allocation that happened before or at the current timestamp.
+            index = np.argmax(self.global_bitmap.cycles_total[0] > self.time) - 1
+            self.vline_allocation_cycles_proportion.set_xdata([index, index])
+
+        if self.plot_config["allocation_cycles_alloc_aligned"]:
+            self.vline_allocation_cycles_alloc_aligned.set_xdata([self.time, self.time])
+
+        if self.plot_config["allocation_cycles_total_aligned"]:
+            self.vline_allocation_cycles_total_aligned.set_xdata([self.time, self.time])
+
+        if self.plot_config["allocation_cycles_proportion_aligned"]:
+            self.vline_allocation_cycles_proportion_aligned.set_xdata([self.time, self.time])
+
+        self.fig.canvas.draw_idle()
+
+    def _setup_checkboxes(self):
+        """Sets up checkboxes for controlling plot visibility."""
+        if not self.plot_config["checkboxes"]:
+            return
+
+        labels = []
+        actives = []
+        for k, v in self.plot_config.items():
+            labels.append(k)
+            actives.append(v)
+
+        for layer in self.global_bitmap.layers:
+            labels.append(f"layer_{layer.id}")
+            if layer.id in self.layers:
+                actives.append(True)
+            else:
+                actives.append(False)
+
+        # Create checkboxes
+        self.axd["checkboxes"].set_axis_off()
+        checkboxes = CheckButtons(self.axd["checkboxes"], labels, actives)
+
+        def update_visibility(label):
+            """Updates plot visibility based on checkbox changes."""
+            plt.clf()
+
+            if label in self.plot_config:
+                self.plot_config[label] = not self.plot_config[label]
+            else:
+                layer_id = int(label.split("_")[-1])
+                try:
+                    self.layers.remove(layer_id)
+                except ValueError:
+                    self.layers.append(layer_id)
+                self.layers.sort()
+
+            self._create_layout(self.fig)
+            self.fig.canvas.mouse_grabber = None
+            self.fig.canvas.draw_idle()
+
+        checkboxes.on_clicked(update_visibility)
+        return checkboxes
+
+    def export_to_video(self, filename: str, start: int = 0, end: int = None, fps: int = 60, bitrate: int = 4500, dpi: int = 100, nproc: int = None):
+        """Export the plot to a mp4 file for later watching. For that it can use multiple processes
+           and works with files in temporary directory, which it cleans up after finishing."""
+        if end is None or end > self.global_bitmap.time:
+            end = self.global_bitmap.time
+        if nproc is None:
+            nproc = os.cpu_count()
+
+        # Split the work into chunks.
+        timesteps_total = end - start
+        guarranteed_size = timesteps_total // nproc
+        optional_size = timesteps_total % nproc
+        temp_dir = ".exporting_temp"
+        tasks = []
+        chunk_filenames = []
+        for i in range(nproc):
+            name = f"{filename}_{i}.mp4"
+            chunk_filenames.append(name)
+            chunk_begin = guarranteed_size * i + min(i, optional_size)
+            chunk_end = chunk_begin + guarranteed_size + (1 if i < optional_size else 0)
+            tasks.append((f"{temp_dir}/{name}", chunk_begin, chunk_end, fps, bitrate, dpi))
+
+        if not os.path.exists(temp_dir):
+            os.mkdir(temp_dir)
+
+        # Create shared counter and lock for the global progress bar.
+        counter = Value('i', 0)
+        lock = Lock()
+
+        def init_pool(shared_counter, shared_lock):
+            """Initializer function for worker processes."""
+            global counter, lock
+            counter = shared_counter
+            lock = shared_lock
+
+        with Pool(processes=nproc, initializer=init_pool, initargs=(counter, lock)) as pool:
+            result = pool.starmap_async(self._export_to_video_chunk, tasks)
+
+            # Display a global progress bar.
+            with tqdm(total=timesteps_total, desc="Exporting Video", unit="frame") as pbar:
+                previous_count = 0
+                while True:
+                    with lock:
+                        current_count = counter.value
+
+                    if current_count != previous_count:
+                        pbar.update(current_count - previous_count)
+                        previous_count = current_count
+                    if current_count >= timesteps_total:
+                        break
+
+                    time.sleep(1.0)
+
+            result.get()
+
+        # Stitch video chunks together using FFmpeg.
+        with open(f"{temp_dir}/mylist.txt", mode="w") as f:
+            for name in chunk_filenames:
+                f.write(f"file '{name}'\n")
+        ffmpeg_concat_cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", f"{temp_dir}/mylist.txt", "-c", "copy", f"{filename}.mp4"]
+        subprocess.run(ffmpeg_concat_cmd, check=True)
+
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"Error deleting temporary directory '{temp_dir}': {e}")
+
+    def _export_to_video_chunk(self, filename: str, start: int, end: int, fps=60, bitrate=1800, dpi=100) -> bool:
+        """Helper method that gets executed in each process used in exporting to video."""
+        # NOTE: We have to create and setup a new plot within the chunk function because a
+        # matplotlib figure is not picklable.
+        self.fig = plt.figure(layout="constrained")
+        self.fig.set_size_inches(16, 9)
+        self.fig.set_dpi(1920 / 16)
+        self._create_layout(self.fig)
+
+        self.time = start
+        self._timestamp_update()
+        writer = FFMpegWriter(fps=fps, bitrate=bitrate)
+        writer.setup(self.fig, filename, dpi=dpi)
+        for _ in range(end - start):
+            self.time += 1
+            if self.plot_config["slider"]:
+                self.slider.set_val(self.time)
+            else:
+                self._timestamp_update()
+            writer.grab_frame()
+
+            # Update the global progress bar.
+            with lock:
+                counter.value += 1
+
+        writer.finish()
+        plt.close(self.fig)
+
+        return True
+
+
+def id_to_color(i: int) -> tuple[int, int, int]:
+    """Maps the id to a color specified in the COLOR_MAPPING"""
+    COLOR_MAPPING = [
+        (0, 0, 255),
+        (0, 255, 0),
+        (0, 255, 255),
+        (255, 0, 0),
+        (255, 0, 255),
+        (255, 255, 0),
+    ]
+    return COLOR_MAPPING[i % len(COLOR_MAPPING)]
+
+
+@functools.lru_cache(128)
+def get_close_aspect(width: int, height: int, total_pixels: int) -> tuple[int, int]:
+    """Returns an aspect ratio, that is close to the provided width and height and is able to
+       display the pixels comfortably"""
+    target_aspect = width / height
+
+    # Calculate the ideal number of columns for the target aspect ratio.
+    cols = int(np.sqrt(total_pixels * target_aspect))
+
+    # Adjust columns to find the closest aspect ratio while using all pixels.
+    rows = total_pixels // cols
+    while rows * cols != total_pixels:
+        cols -= 1
+        rows = total_pixels // cols
+
+    return rows, cols
+
+
+def get_valid_backends():
+    def is_backend_module(fname):
+        """Identifies if a filename is a matplotlib backend module"""
+        return fname.startswith('backend_') and fname.endswith('.py')
+
+    def backend_fname_formatter(fname):
+        """Removes the extension of the given filename, then takes away the leading 'backend_'."""
+        return os.path.splitext(fname)[0][8:]
+
+    # get the directory where the backends live
+    backends_dir = os.path.dirname(matplotlib.backends.__file__)
+
+    # filter all files in that directory to identify all files which provide a backend
+    backend_fnames = filter(is_backend_module, os.listdir(backends_dir))
+
+    backends = [backend_fname_formatter(fname) for fname in backend_fnames]
+
+    # validate backends
+    backends_valid = []
+    for b in backends:
+        try:
+            plt.switch_backend(b)
+            backends_valid += [b]
+        except:
+            continue
+
+    return backends, backends_valid
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Visualize allocation log.")
+    parser.add_argument("input_file", help="Path to the allocation log file.")
+    parser.add_argument("-b", "--backend", type=str, default="TkAgg",
+                        help="Specify the backend for Matplotlib (default: TkAgg)")
+    parser.add_argument("-c", "--components", nargs="+", default=["slider", "bitmaps", "frag_local", "frag_global"],
+                        help="Specify the components that should be plotted (default: slider bitmaps frag_local frag_global)")
+    parser.add_argument("--available-components", default=False, action="store_true",
+                        help="Print the components available to be plotted.")
+    parser.add_argument("-d", "--disable-checkboxes", default=False, action="store_true",
+                        help="Disable the checkboxes (default: False)")
+    parser.add_argument("-e", "--export", metavar="output_file", nargs="?", const="output",
+                        help="Export the visualization to a video file (default: output.mp4)")
+    parser.add_argument("-l", "--layers", nargs="+", default=[i for i in range(4)],
+                        help="Specify the layers that should be plotted (default: 1 2 3 4)")
+    parser.add_argument("-p", "--processes", type=int, default=os.cpu_count(),
+                        help="Number of processes to use for video export (default: all CPU cores)")
+
+    args = parser.parse_args()
+
+    log_file = args.input_file
+
+    plotter = Plotter(args)
+
+    try:
+        matplotlib.pyplot.switch_backend(args.backend)
+    except ModuleNotFoundError as e:
+        print(f"\n\033[31mTrying to use invalid backend: {args.backend} ({e})\033[0m\n")
+        backends, backends_valid = get_valid_backends()
+        print(f"Available backends: \t{backends}")
+        print(f"Installed backends: \t{backends_valid}")
+        exit(1)
+    print(f"Using \033[1m{matplotlib.get_backend()}\033[0m as a backend for matplotlib.")
+
+    plotter.global_bitmap = GlobalBitMap(log_file)
+    if args.export:
+        plotter.export_to_video(args.export, nproc=args.processes)
+    else:
+        plotter.plot()

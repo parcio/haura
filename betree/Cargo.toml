@@ -83,4 +83,6 @@ figment_config = ["figment"]
 latency_metrics = []
 experimental-api = []
 nvm = ["pmdk"]
+# Log the allocations and deallocations done for later analysis
+allocation_log = []
 

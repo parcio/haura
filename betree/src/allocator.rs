@@ -1,9 +1,10 @@
 //! This module provides `SegmentAllocator` and `SegmentId` for bitmap
 //! allocation of 1GiB segments.
 
-use crate::{cow_bytes::CowBytes, storage_pool::DiskOffset, vdev::Block};
+use crate::{cow_bytes::CowBytes, storage_pool::DiskOffset, vdev::Block, Error};
 use bitvec::prelude::*;
 use byteorder::{BigEndian, ByteOrder};
+use std::io::Write;
 
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
@@ -55,7 +56,7 @@ impl SegmentAllocator {
             }
         };
         self.mark(offset, size, Action::Allocate);
-        Some(offset)
+        return Some(offset);
     }
 
     /// Allocates a block of the given `size` at `offset`.
