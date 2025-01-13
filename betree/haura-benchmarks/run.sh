@@ -208,9 +208,34 @@ function ci() {
   run "$RUN_IDENT" switchover_small switchover 4 "$((128 * 1024 * 1024))"
 }
 
-function ycsb() {
+function ycsb_a() {
+  run "$RUN_IDENT" ycsb_a_block ycsb-a "$((8 * 1024 * 1024 * 1024))" 0 8
+  run "$RUN_IDENT" ycsb_a_memory ycsb-a "$((8 * 1024 * 1024 * 1024))" 1 8
+}
+
+function ycsb_b() {
+  run "$RUN_IDENT" ycsb_b_block ycsb-b "$((8 * 1024 * 1024 * 1024))" 0 8
+  run "$RUN_IDENT" ycsb_b_memory ycsb-b "$((8 * 1024 * 1024 * 1024))" 1 8
+}
+
+function ycsb_c() {
   run "$RUN_IDENT" ycsb_c_block ycsb-c "$((8 * 1024 * 1024 * 1024))" 0 8
   run "$RUN_IDENT" ycsb_c_memory ycsb-c "$((8 * 1024 * 1024 * 1024))" 1 8
+}
+
+function ycsb_d() {
+  run "$RUN_IDENT" ycsb_d_block ycsb-d "$((8 * 1024 * 1024 * 1024))" 0 8
+  run "$RUN_IDENT" ycsb_d_memory ycsb-d "$((8 * 1024 * 1024 * 1024))" 1 8
+}
+
+function ycsb_e() {
+  run "$RUN_IDENT" ycsb_e_block ycsb-e "$((8 * 1024 * 1024 * 1024))" 0 8
+  run "$RUN_IDENT" ycsb_e_memory ycsb-e "$((8 * 1024 * 1024 * 1024))" 1 8
+}
+
+function ycsb_f() {
+  run "$RUN_IDENT" ycsb_f_block ycsb-f "$((8 * 1024 * 1024 * 1024))" 0 8
+  run "$RUN_IDENT" ycsb_f_memory ycsb-f "$((8 * 1024 * 1024 * 1024))" 1 8
 }
 
 cargo build --release
@@ -257,4 +282,9 @@ ensure_config
 #checkpoints
 #switchover
 #ingest
-#ycsb
+# ycsb_a
+# ycsb_b
+# ycsb_c
+# ycsb_d
+# ycsb_e
+# ycsb_f
