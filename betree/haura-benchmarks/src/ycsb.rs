@@ -89,6 +89,7 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                 )
             })
             .collect::<Vec<_>>();
+        client.db.read().drop_cache().unwrap();
         let start = std::time::Instant::now();
         for (_t, tx) in threads.iter() {
             tx.send(start).unwrap();
@@ -161,6 +162,7 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                 )
             })
             .collect::<Vec<_>>();
+        client.db.read().drop_cache().unwrap();
         let start = std::time::Instant::now();
         for (_t, tx) in threads.iter() {
             tx.send(start).unwrap();
@@ -226,6 +228,7 @@ pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                 )
             })
             .collect::<Vec<_>>();
+        client.db.read().drop_cache().unwrap();
         let start = std::time::Instant::now();
         for (_t, tx) in threads.iter() {
             tx.send(start).unwrap();
@@ -324,6 +327,7 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                 )
             })
             .collect::<Vec<_>>();
+        client.db.read().drop_cache().unwrap();
         let start = std::time::Instant::now();
         for (_t, tx) in threads.iter() {
             tx.send(start).unwrap();
@@ -409,7 +413,7 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                                         let start_key = &keys[start_idx][..];
                                         let end_key = &keys[end_idx][..];
                                         // Consume the iterator to actually perform the scan
-                                        for _entry in ds.range(start_key..end_key).unwrap(){ }
+                                        for _entry in ds.range(start_key..end_key).unwrap() {}
                                     } else {
                                         // 5% inserts of new records
                                         let current = current_size.load(AtomicOrdering::Relaxed);
@@ -428,7 +432,7 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                 )
             })
             .collect::<Vec<_>>();
-
+        client.db.read().drop_cache().unwrap();
         let start = std::time::Instant::now();
         for (_t, tx) in threads.iter() {
             tx.send(start).unwrap();
@@ -503,6 +507,7 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                 )
             })
             .collect::<Vec<_>>();
+        client.db.read().drop_cache().unwrap();
         let start = std::time::Instant::now();
         for (_t, tx) in threads.iter() {
             tx.send(start).unwrap();
