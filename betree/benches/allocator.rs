@@ -64,28 +64,27 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         ),
     ];
 
-    let mut group = c.benchmark_group("allocator");
-
     for (dist_name, dist) in distributions {
-        group.bench_function(&format!("first_fit_{}", dist_name), |b| {
+        let mut group = c.benchmark_group(dist_name);
+        group.bench_function("first_fit", |b| {
             bench_allocator::<FirstFit>(b, dist.clone(), 0.8, min_size, max_size)
         });
-        group.bench_function(&format!("next_fit_{}", dist_name), |b| {
+        group.bench_function("next_fit", |b| {
             bench_allocator::<NextFit>(b, dist.clone(), 0.8, min_size, max_size)
         });
-        group.bench_function(&format!("best_fit_{}", dist_name), |b| {
+        group.bench_function("best_fit", |b| {
             bench_allocator::<BestFitSimple>(b, dist.clone(), 0.8, min_size, max_size)
         });
-        group.bench_function(&format!("worst_fit_{}", dist_name), |b| {
+        group.bench_function("worst_fit", |b| {
             bench_allocator::<WorstFitSimple>(b, dist.clone(), 0.8, min_size, max_size)
         });
-        group.bench_function(&format!("segment_{}", dist_name), |b| {
+        group.bench_function("segment", |b| {
             bench_allocator::<SegmentAllocator>(b, dist.clone(), 0.8, min_size, max_size)
         });
+        group.finish();
     }
-
-    group.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
+
