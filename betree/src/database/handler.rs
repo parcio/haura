@@ -198,6 +198,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         let mut allocator: Box<dyn Allocator> = match self.allocator {
             AllocatorType::FirstFitScan => Box::new(FirstFitScan::new(bitmap)),
             AllocatorType::FirstFitList => Box::new(FirstFitList::new(bitmap)),
+            AllocatorType::FirstFitFSM => Box::new(FirstFitFSM::new(bitmap)),
             AllocatorType::NextFitScan => Box::new(NextFitScan::new(bitmap)),
             AllocatorType::NextFitList => Box::new(NextFitList::new(bitmap)),
             AllocatorType::BestFitScan => Box::new(BestFitScan::new(bitmap)),

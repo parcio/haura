@@ -30,6 +30,9 @@ pub use self::best_fit_list::BestFitList;
 mod worst_fit_list;
 pub use self::worst_fit_list::WorstFitList;
 
+mod first_fit_fsm;
+pub use self::first_fit_fsm::FirstFitFSM;
+
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
 /// Number of bytes required to store a segments allocation bitmap
@@ -52,6 +55,11 @@ pub enum AllocatorType {
     /// and then searches from the beginning in that list and allocates the
     /// first free block that is large enough to satisfy the request.
     FirstFitList,
+
+    /// **First Fit FSM:**
+    /// This allocator builds a binary tree of offsets and sizes, that has the
+    /// max-heap property on the sizes and uses it to find suitable free space.
+    FirstFitFSM,
 
     /// **Next Fit Scan:**
     /// This allocator starts searching from the last allocation and continues
@@ -339,6 +347,7 @@ mod tests {
     // Generate tests for each allocator
     generate_small_tests!(test_first_fit_scan, FirstFitScan);
     generate_small_tests!(test_first_fit_list, FirstFitList);
+    generate_small_tests!(test_first_fit_fsm, FirstFitFSM);
     generate_small_tests!(test_next_fit_scan, NextFitScan);
     generate_small_tests!(test_next_fit_list, NextFitList);
     generate_small_tests!(test_best_fit_scan, BestFitScan);
@@ -350,6 +359,7 @@ mod tests {
     // Generate fuzz tests for each allocator
     generate_fuzz_tests!(test_first_fit_scan_fuzz, FirstFitScan);
     generate_fuzz_tests!(test_first_fit_list_fuzz, FirstFitList);
+    generate_fuzz_tests!(test_first_fit_fsm_fuzz, FirstFitFSM);
     generate_fuzz_tests!(test_next_fit_scan_fuzz, NextFitScan);
     generate_fuzz_tests!(test_next_fit_list_fuzz, NextFitList);
     generate_fuzz_tests!(test_best_fit_scan_fuzz, BestFitScan);

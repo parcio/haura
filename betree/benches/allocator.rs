@@ -1,6 +1,6 @@
 use betree_storage_stack::allocator::{
-    self, Allocator, BestFitList, BestFitScan, FirstFitList, FirstFitScan, NextFitList,
-    NextFitScan, SegmentAllocator, WorstFitList, WorstFitScan, SEGMENT_SIZE_BYTES,
+    self, Allocator, BestFitList, BestFitScan, FirstFitFSM, FirstFitList, FirstFitScan,
+    NextFitList, NextFitScan, SegmentAllocator, WorstFitList, WorstFitScan, SEGMENT_SIZE_BYTES,
 };
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use rand::distributions::{Distribution, Uniform};
@@ -193,6 +193,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let allocator_benchmarks: Vec<Box<dyn GenericAllocatorBenchmark>> = vec![
         Box::new(AllocatorBenchmark::<FirstFitScan>::new("first_fit_scan")),
         Box::new(AllocatorBenchmark::<FirstFitList>::new("first_fit_list")),
+        Box::new(AllocatorBenchmark::<FirstFitFSM>::new("first_fit_fsm")),
         Box::new(AllocatorBenchmark::<NextFitScan>::new("next_fit_scan")),
         Box::new(AllocatorBenchmark::<NextFitList>::new("next_fit_list")),
         Box::new(AllocatorBenchmark::<BestFitScan>::new("best_fit_scan")),
