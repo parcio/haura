@@ -206,6 +206,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             AllocatorType::BestFitFSM => Box::new(BestFitFSM::new(bitmap)),
             AllocatorType::WorstFitScan => Box::new(WorstFitScan::new(bitmap)),
             AllocatorType::WorstFitList => Box::new(WorstFitList::new(bitmap)),
+            AllocatorType::WorstFitFSM => Box::new(WorstFitFSM::new(bitmap)),
             AllocatorType::SegmentAllocator => Box::new(SegmentAllocator::new(bitmap)),
         };
 
