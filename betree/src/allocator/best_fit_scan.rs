@@ -1,19 +1,19 @@
 use super::*;
 
-/// Simple worst-fit bitmap allocator
-pub struct WorstFitSimple {
+/// Simple best-fit bitmap allocator
+pub struct BestFitScan {
     data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
 }
 
-impl Allocator for WorstFitSimple {
+impl Allocator for BestFitScan {
     fn data(&mut self) -> &mut BitArr!(for SEGMENT_SIZE, in u8, Lsb0) {
         &mut self.data
     }
 
-    /// Constructs a new `WorstFitSimple` given the segment allocation bitmap.
+    /// Constructs a new `BestFitSimple` given the segment allocation bitmap.
     /// The `bitmap` must have a length of `SEGMENT_SIZE`.
     fn new(bitmap: [u8; SEGMENT_SIZE_BYTES]) -> Self {
-        WorstFitSimple {
+        BestFitScan {
             data: BitArray::new(bitmap),
         }
     }
@@ -25,10 +25,9 @@ impl Allocator for WorstFitSimple {
             return Some(0);
         }
 
-        let mut worst_fit_offset = None;
-        // Initialize with size, as we want the largest possible size and it has to be at least
-        // size large.
-        let mut worst_fit_size = size;
+        let mut best_fit_offset = None;
+        // Initialize with a value larger than any possible size
+        let mut best_fit_size = SEGMENT_SIZE as u32 + 1;
         let mut offset: u32 = 0;
 
         while offset + size <= SEGMENT_SIZE as u32 {
@@ -45,10 +44,14 @@ impl Allocator for WorstFitSimple {
                         Some(next_alloc_idx) => {
                             let free_block_size = next_alloc_idx as u32 + end_idx as u32 - offset;
 
-                            // Check if this free block is a worse fit (larger)
-                            if free_block_size > worst_fit_size {
-                                worst_fit_offset = Some(offset);
-                                worst_fit_size = free_block_size;
+                            // Check if this free block is a better fit
+                            if free_block_size >= size && free_block_size < best_fit_size {
+                                best_fit_offset = Some(offset);
+                                best_fit_size = free_block_size;
+                                // If this free block is optimal finish iterating
+                                if free_block_size == size {
+                                    break;
+                                }
                             }
 
                             offset = next_alloc_idx as u32 + end_idx as u32 + 1;
@@ -57,10 +60,10 @@ impl Allocator for WorstFitSimple {
                             // No more allocated blocks, we have scanned the whole segment.
                             let free_block_size = self.data[offset as usize..].len() as u32;
 
-                            // Check if this free block is a worse fit (larger)
-                            if free_block_size > worst_fit_size {
-                                worst_fit_offset = Some(offset);
-                                worst_fit_size = free_block_size;
+                            // Check if this free block is a better fit
+                            if free_block_size >= size && free_block_size < best_fit_size {
+                                best_fit_offset = Some(offset);
+                                best_fit_size = free_block_size;
                             }
 
                             break;
@@ -70,11 +73,11 @@ impl Allocator for WorstFitSimple {
             }
         }
 
-        if let Some(offset) = worst_fit_offset {
+        if let Some(offset) = best_fit_offset {
             self.mark(offset, size, Action::Allocate);
         }
 
-        worst_fit_offset
+        best_fit_offset
     }
 
     /// Allocates a block of the given `size` at `offset`.

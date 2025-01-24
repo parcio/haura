@@ -3,17 +3,17 @@ use bitvec::prelude::*;
 use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 
-mod first_fit;
-pub use self::first_fit::FirstFit;
+mod first_fit_scan;
+pub use self::first_fit_scan::FirstFitScan;
 
-mod next_fit;
-pub use self::next_fit::NextFit;
+mod next_fit_scan;
+pub use self::next_fit_scan::NextFitScan;
 
-mod best_fit_simple;
-pub use self::best_fit_simple::BestFitSimple;
+mod best_fit_scan;
+pub use self::best_fit_scan::BestFitScan;
 
-mod worst_fit_simple;
-pub use self::worst_fit_simple::WorstFitSimple;
+mod worst_fit_scan;
+pub use self::worst_fit_scan::WorstFitScan;
 
 mod segment_allocator;
 pub use self::segment_allocator::SegmentAllocator;
@@ -23,6 +23,12 @@ pub use self::first_fit_list::FirstFitList;
 
 mod next_fit_list;
 pub use self::next_fit_list::NextFitList;
+
+mod best_fit_list;
+pub use self::best_fit_list::BestFitList;
+
+mod worst_fit_list;
+pub use self::worst_fit_list::WorstFitList;
 
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
@@ -36,10 +42,10 @@ const SEGMENT_SIZE_MASK: usize = SEGMENT_SIZE - 1;
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")] // This will deserialize "firstfit" as FirstFit
 pub enum AllocatorType {
-    /// **First Fit:**
+    /// **First Fit Scan:**
     /// This allocator searches the segment from the beginning and allocates the
     /// first free block that is large enough to satisfy the request.
-    FirstFit,
+    FirstFitScan,
 
     /// **First Fit List:**
     /// This allocator builds an internal list of the free space in the segment
@@ -47,10 +53,10 @@ pub enum AllocatorType {
     /// first free block that is large enough to satisfy the request.
     FirstFitList,
 
-    /// **Next Fit:**
+    /// **Next Fit Scan:**
     /// This allocator starts searching from the last allocation and continues
     /// searching the segment for the next free block that is large enough.
-    NextFit,
+    NextFitScan,
 
     /// **Next Fit List:**
     /// This allocator builds an internal list of the free space in the segment
@@ -58,17 +64,27 @@ pub enum AllocatorType {
     /// next free block that is large enough to satisfy the request.
     NextFitList,
 
-    /// **Best Fit (Simple):**
+    /// **Best Fit Scan:**
     /// This allocator searches the entire segment and allocates the smallest
     /// free block that is large enough to satisfy the request. This simple
     /// version uses a linear search to find the best fit.
-    BestFitSimple,
+    BestFitScan,
 
-    /// **Worst Fit (Simple):**
+    /// **Best Fit List:**
+    /// This allocator maintains a list of free segments and chooses the best-fit
+    /// segment from this list to allocate memory.
+    BestFitList,
+
+    /// **Worst Fit Scan:**
     /// This allocator searches the entire segment and allocates the largest
     /// free block. This simple version uses a linear search to find the worst
     /// fit.
-    WorstFitSimple,
+    WorstFitScan,
+
+    /// **Worst Fit List:**
+    /// This allocator maintains a list of free segments and chooses the worst-fit
+    /// (largest) segment from this list to allocate memory.
+    WorstFitList,
 
     /// **Segment Allocator:**
     /// This is a first fit allocator that was used before making the allocators
@@ -321,20 +337,24 @@ mod tests {
     }
 
     // Generate tests for each allocator
-    generate_small_tests!(test_first_fit, FirstFit);
+    generate_small_tests!(test_first_fit_scan, FirstFitScan);
     generate_small_tests!(test_first_fit_list, FirstFitList);
-    generate_small_tests!(test_next_fit, NextFit);
+    generate_small_tests!(test_next_fit_scan, NextFitScan);
     generate_small_tests!(test_next_fit_list, NextFitList);
-    generate_small_tests!(test_best_fit_simple, BestFitSimple);
-    generate_small_tests!(test_worst_fit_simple, WorstFitSimple);
+    generate_small_tests!(test_best_fit_scan, BestFitScan);
+    generate_small_tests!(test_best_fit_list, BestFitList);
+    generate_small_tests!(test_worst_fit_scan, WorstFitScan);
+    generate_small_tests!(test_worst_fit_list, WorstFitList);
     generate_small_tests!(test_segment_allocator, SegmentAllocator);
 
     // Generate fuzz tests for each allocator
-    generate_fuzz_tests!(test_first_fit_fuzz, FirstFit);
+    generate_fuzz_tests!(test_first_fit_scan_fuzz, FirstFitScan);
     generate_fuzz_tests!(test_first_fit_list_fuzz, FirstFitList);
-    generate_fuzz_tests!(test_next_fit_fuzz, NextFit);
+    generate_fuzz_tests!(test_next_fit_scan_fuzz, NextFitScan);
     generate_fuzz_tests!(test_next_fit_list_fuzz, NextFitList);
-    generate_fuzz_tests!(test_best_fit_simple_fuzz, BestFitSimple);
-    generate_fuzz_tests!(test_worst_fit_simple_fuzz, WorstFitSimple);
+    generate_fuzz_tests!(test_best_fit_scan_fuzz, BestFitScan);
+    generate_fuzz_tests!(test_best_fit_list_fuzz, BestFitList);
+    generate_fuzz_tests!(test_worst_fit_scan_fuzz, WorstFitScan);
+    generate_fuzz_tests!(test_worst_fit_list_fuzz, WorstFitList);
     generate_fuzz_tests!(test_segment_allocator_fuzz, SegmentAllocator);
 }
