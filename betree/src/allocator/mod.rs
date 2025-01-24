@@ -48,6 +48,9 @@ pub use self::worst_fit_list::WorstFitList;
 mod first_fit_fsm;
 pub use self::first_fit_fsm::FirstFitFSM;
 
+mod best_fit_fsm;
+pub use self::best_fit_fsm::BestFitFSM;
+
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
 /// Number of bytes required to store a segments allocation bitmap
@@ -97,6 +100,11 @@ pub enum AllocatorType {
     /// This allocator maintains a list of free segments and chooses the best-fit
     /// segment from this list to allocate memory.
     BestFitList,
+
+    /// **Best Fit FSM:**
+    /// This allocator builds a binary tree of offsets and sizes, that has the
+    /// max-heap property on the sizes and uses it to find suitable free space.
+    BestFitFSM,
 
     /// **Worst Fit Scan:**
     /// This allocator searches the entire segment and allocates the largest
