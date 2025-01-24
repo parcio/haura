@@ -41,10 +41,22 @@ pub enum AllocatorType {
     /// first free block that is large enough to satisfy the request.
     FirstFit,
 
+    /// **First Fit List:**
+    /// This allocator builds an internal list of the free space in the segment
+    /// and then searches from the beginning in that list and allocates the
+    /// first free block that is large enough to satisfy the request.
+    FirstFitList,
+
     /// **Next Fit:**
     /// This allocator starts searching from the last allocation and continues
     /// searching the segment for the next free block that is large enough.
     NextFit,
+
+    /// **Next Fit List:**
+    /// This allocator builds an internal list of the free space in the segment
+    /// and then starts from the last allocation in that list and allocates the
+    /// next free block that is large enough to satisfy the request.
+    NextFitList,
 
     /// **Best Fit (Simple):**
     /// This allocator searches the entire segment and allocates the smallest
@@ -310,14 +322,18 @@ mod tests {
 
     // Generate tests for each allocator
     generate_small_tests!(test_first_fit, FirstFit);
+    generate_small_tests!(test_first_fit_list, FirstFitList);
     generate_small_tests!(test_next_fit, NextFit);
+    generate_small_tests!(test_next_fit_list, NextFitList);
     generate_small_tests!(test_best_fit_simple, BestFitSimple);
     generate_small_tests!(test_worst_fit_simple, WorstFitSimple);
     generate_small_tests!(test_segment_allocator, SegmentAllocator);
 
     // Generate fuzz tests for each allocator
     generate_fuzz_tests!(test_first_fit_fuzz, FirstFit);
+    generate_fuzz_tests!(test_first_fit_list_fuzz, FirstFitList);
     generate_fuzz_tests!(test_next_fit_fuzz, NextFit);
+    generate_fuzz_tests!(test_next_fit_list_fuzz, NextFitList);
     generate_fuzz_tests!(test_best_fit_simple_fuzz, BestFitSimple);
     generate_fuzz_tests!(test_worst_fit_simple_fuzz, WorstFitSimple);
     generate_fuzz_tests!(test_segment_allocator_fuzz, SegmentAllocator);

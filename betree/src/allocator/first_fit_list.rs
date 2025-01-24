@@ -32,20 +32,18 @@ impl Allocator for FirstFitList {
 
         for i in 0..self.free_segments.len() {
             let (offset, segment_size) = self.free_segments[i];
-            if segment_size >= size {
-                let alloc_offset = offset;
-                self.mark(alloc_offset, size, Action::Allocate);
 
-                if segment_size == size {
-                    // perfect fit, remove the segment
-                    // TODO: use swap remove
-                    self.free_segments.remove(i);
-                } else {
-                    // update the free segment with the remaining size and new offset
-                    self.free_segments[i].0 = alloc_offset + size;
-                    self.free_segments[i].1 = segment_size - size;
-                }
-                return Some(alloc_offset);
+            if segment_size >= size {
+                self.mark(offset, size, Action::Allocate);
+
+                // update the free segment with the remaining size and new offset
+                self.free_segments[i].0 = offset + size;
+                self.free_segments[i].1 = segment_size - size;
+                // NOTE: We do not handle the == case here. We could remove that entry from the
+                // list but we then would need to copy some things because the allocate_at (and
+                // deallocation) logic depends on a sorted list and also need have extra handling.
+                // The empty slots get garbage collected on the next sync anyway.
+                return Some(offset);
             }
         }
         None

@@ -38,28 +38,23 @@ impl Allocator for NextFitList {
                 self.last_offset_index = 0;
             }
 
-            let index = self.last_offset_index;
-            let (offset, segment_size) = self.free_segments[index];
-
-            self.last_offset_index += 1;
+            let (offset, segment_size) = self.free_segments[self.last_offset_index];
 
             if segment_size >= size {
-                let alloc_offset = offset;
-                self.mark(alloc_offset, size, Action::Allocate);
+                self.mark(offset, size, Action::Allocate);
 
-                if segment_size == size {
-                    // perfect fit, remove the segment
-                    self.free_segments.remove(index);
-                    if self.free_segments.is_empty() {
-                        self.last_offset_index = 0; // reset last_offset_index if free_segments becomes empty
-                    }
-                } else {
-                    // update the free segment with the remaining size and new offset
-                    self.free_segments[index].0 = alloc_offset + size;
-                    self.free_segments[index].1 = segment_size - size;
-                }
-                return Some(alloc_offset);
+                // update the free segment with the remaining size and new offset
+                self.free_segments[self.last_offset_index].0 = offset + size;
+                self.free_segments[self.last_offset_index].1 = segment_size - size;
+                // NOTE: We do not handle the == case here. We could remove that entry from the
+                // list but we then would need to copy some things because the allocate_at (and
+                // deallocation) logic depends on a sorted list and also need have extra handling.
+                // The empty slots get garbage collected on the next sync anyway.
+
+                self.last_offset_index += 1;
+                return Some(offset);
             }
+            self.last_offset_index += 1;
         }
         None
     }
