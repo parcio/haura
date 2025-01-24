@@ -86,12 +86,4 @@ impl Allocator for NextFitScan {
         self.last_offset = offset + size;
         true
     }
-
-    /// Deallocates the allocated block.
-    fn deallocate(&mut self, offset: u32, size: u32) {
-        if offset + size > SEGMENT_SIZE as u32 {
-            return;
-        }
-        self.mark(offset, size, Action::Deallocate);
-    }
 }

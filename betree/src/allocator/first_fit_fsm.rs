@@ -92,10 +92,6 @@ impl Allocator for FirstFitFSM {
         // hard to implement efficiently
         todo!()
     }
-
-    fn deallocate(&mut self, _offset: u32, _size: u32) {
-        unimplemented!("Not needed right now");
-    }
 }
 
 impl FirstFitFSM {

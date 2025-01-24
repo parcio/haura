@@ -3,6 +3,21 @@ use bitvec::prelude::*;
 use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 
+// OPTIM: For all the LIST variants of allocators: try to remove a free segment that can be created
+// on allocation. There are two ways:
+// 1. call remove on free_segments: this copies all the elements after the removed one, one place
+//    to the front. This keeps the sorting of the array
+// 2. swap remove the segment: swap the empty segment to the back and decrease the len by 1. This
+//    breaks the sorting but is probably much faster
+// The allocate_at function is called quite rarely (only on creation of the database and on loading
+// the allocator bitmap from disk) and it's the only reason, why the free_segments are kept sorted
+// anyway. So changing that function to respect this change could increase the performance.
+//
+// OPTIM: For all the SCAN variants of allocators: we could use assembly (and possibly SIMD) to
+// count the leading/trailing 0s/1s. This could be faster than relying on the compiler.
+//
+// OPTIM: For the FSM variants: we could when updating the internal nodes on insertion stop early,
+// when we notice, that the offset changes
 mod first_fit_scan;
 pub use self::first_fit_scan::FirstFitScan;
 
@@ -124,13 +139,8 @@ pub trait Allocator: Send + Sync {
     /// This method attempts to allocate a contiguous block of memory at the given offset.
     fn allocate_at(&mut self, size: u32, offset: u32) -> bool;
 
-    /// Deallocates a previously allocated block of memory.
-    ///
-    /// This method marks the specified block as free, making it available for
-    /// future allocations.
-    fn deallocate(&mut self, offset: u32, size: u32);
-
     /// Marks a range of bits in the bitmap with the given action.
+    #[inline]
     fn mark(&mut self, offset: u32, size: u32, action: Action) {
         let start_idx = offset as usize;
         let end_idx = (offset + size) as usize;
@@ -157,6 +167,7 @@ pub enum Action {
 
 impl Action {
     /// Returns 1 if allocation and 0 if deallocation.
+    #[inline]
     pub fn as_bool(self) -> bool {
         match self {
             Action::Deallocate => false,
@@ -228,9 +239,6 @@ impl SegmentId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{
-        distributions::WeightedIndex, prelude::Distribution, rngs::StdRng, Rng, SeedableRng,
-    };
 
     #[test]
     fn segment_id() {
@@ -245,126 +253,4 @@ mod tests {
         );
         assert_eq!(SegmentId::get_block_offset(offset), 1);
     }
-
-    fn run_fuzz_tests<T: Allocator>(allocator: &mut T) {
-        let mut rng = StdRng::seed_from_u64(0);
-
-        // Store allocation records (offset, size)
-        let mut allocations: Vec<(u32, u32)> = Vec::new();
-
-        // Define action weights (allocate: 60%, deallocate: 30%, allocate_at: 10%)
-        let weights = [60, 30, 10];
-        let dist = WeightedIndex::new(&weights).unwrap();
-
-        for _ in 0..100000 {
-            let action = dist.sample(&mut rng);
-            match action {
-                0 => {
-                    // Allocate
-                    let size = rng.gen_range(1..256);
-                    if let Some(offset) = allocator.allocate(size) {
-                        allocations.push((offset, size));
-                    }
-                }
-                1 => {
-                    // Deallocate
-                    if !allocations.is_empty() {
-                        let index = rng.gen_range(0..allocations.len());
-                        let (offset, size) = allocations.swap_remove(index); // Remove the chosen allocation
-                        allocator.deallocate(offset, size);
-                    }
-                }
-                2 => {
-                    // Allocate at
-                    let offset = rng.gen_range(0..(SEGMENT_SIZE * 2) as u32);
-                    let size = rng.gen_range(1..256);
-                    if allocator.allocate_at(offset, size) {
-                        allocations.push((offset, size)); // Store if successful
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        // TODO: find some generic assertions
-    }
-
-    macro_rules! generate_fuzz_tests {
-        ($test_name:ident, $allocator_type:ty) => {
-            #[test]
-            fn $test_name() {
-                let mut allocator = <$allocator_type>::new([0; SEGMENT_SIZE_BYTES]);
-                run_fuzz_tests(&mut allocator);
-            }
-        };
-    }
-
-    fn small_tests<T: Allocator>(allocator: &mut T) {
-        let offset = allocator.allocate(10);
-        assert!(offset.is_some());
-
-        let offset = offset.unwrap();
-        allocator.deallocate(offset, 10);
-
-        let success = allocator.allocate_at(5, 10);
-        assert!(success);
-
-        // Allocation Failure
-        let offset = allocator.allocate(SEGMENT_SIZE as u32); // Assuming the entire segment isn't free
-        assert!(offset.is_none());
-
-        // Out-of-bounds
-        let success = allocator.allocate_at(SEGMENT_SIZE as u32, 1);
-        assert!(!success);
-
-        // Zero-sized allocation
-        let offset = allocator.allocate(0);
-        assert!(offset.is_some());
-
-        // Repeated Allocation/Deallocation
-        for _ in 0..10 {
-            let offset = allocator.allocate(12).unwrap();
-            allocator.deallocate(offset, 12);
-        }
-
-        // Large Allocation Followed by Small Allocations
-        let large_offset = allocator.allocate(100).unwrap();
-        _ = allocator.allocate(4).unwrap();
-        _ = allocator.allocate(7).unwrap();
-        allocator.deallocate(large_offset, 100);
-    }
-
-    macro_rules! generate_small_tests {
-        ($test_name:ident, $allocator_type:ty) => {
-            #[test]
-            fn $test_name() {
-                let mut allocator = <$allocator_type>::new([0; SEGMENT_SIZE_BYTES]);
-                small_tests(&mut allocator);
-            }
-        };
-    }
-
-    // Generate tests for each allocator
-    generate_small_tests!(test_first_fit_scan, FirstFitScan);
-    generate_small_tests!(test_first_fit_list, FirstFitList);
-    generate_small_tests!(test_first_fit_fsm, FirstFitFSM);
-    generate_small_tests!(test_next_fit_scan, NextFitScan);
-    generate_small_tests!(test_next_fit_list, NextFitList);
-    generate_small_tests!(test_best_fit_scan, BestFitScan);
-    generate_small_tests!(test_best_fit_list, BestFitList);
-    generate_small_tests!(test_worst_fit_scan, WorstFitScan);
-    generate_small_tests!(test_worst_fit_list, WorstFitList);
-    generate_small_tests!(test_segment_allocator, SegmentAllocator);
-
-    // Generate fuzz tests for each allocator
-    generate_fuzz_tests!(test_first_fit_scan_fuzz, FirstFitScan);
-    generate_fuzz_tests!(test_first_fit_list_fuzz, FirstFitList);
-    generate_fuzz_tests!(test_first_fit_fsm_fuzz, FirstFitFSM);
-    generate_fuzz_tests!(test_next_fit_scan_fuzz, NextFitScan);
-    generate_fuzz_tests!(test_next_fit_list_fuzz, NextFitList);
-    generate_fuzz_tests!(test_best_fit_scan_fuzz, BestFitScan);
-    generate_fuzz_tests!(test_best_fit_list_fuzz, BestFitList);
-    generate_fuzz_tests!(test_worst_fit_scan_fuzz, WorstFitScan);
-    generate_fuzz_tests!(test_worst_fit_list_fuzz, WorstFitList);
-    generate_fuzz_tests!(test_segment_allocator_fuzz, SegmentAllocator);
 }

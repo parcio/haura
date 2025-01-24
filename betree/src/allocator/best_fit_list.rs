@@ -102,42 +102,6 @@ impl Allocator for BestFitList {
 
         false
     }
-
-    /// Deallocates the allocated block.
-    fn deallocate(&mut self, offset: u32, size: u32) {
-        if offset + size > SEGMENT_SIZE as u32 {
-            return;
-        }
-        self.mark(offset, size, Action::Deallocate);
-
-        let dealloc_end = offset + size;
-        let new_segment = (offset, size);
-        let mut insert_index = self.free_segments.len();
-
-        for i in 0..self.free_segments.len() {
-            let (seg_offset, seg_size) = self.free_segments[i];
-            let seg_end = seg_offset + seg_size;
-
-            if seg_end == offset {
-                // Merge with the preceding segment
-                self.free_segments[i].1 += size;
-                if i + 1 < self.free_segments.len() && self.free_segments[i + 1].0 == dealloc_end {
-                    self.free_segments[i].1 += self.free_segments[i + 1].1;
-                    self.free_segments.remove(i + 1);
-                }
-                return;
-            } else if dealloc_end == seg_offset {
-                // Merge with the following segment
-                self.free_segments[i].0 = offset;
-                self.free_segments[i].1 += size;
-                return;
-            } else if seg_offset > offset {
-                insert_index = i;
-                break;
-            }
-        }
-        self.free_segments.insert(insert_index, new_segment);
-    }
 }
 
 impl BestFitList {

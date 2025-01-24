@@ -17,14 +17,6 @@ enum SizeDistribution {
 // Define a trait for our benchmark struct to allow for trait objects
 trait GenericAllocatorBenchmark {
     fn benchmark_name(&self) -> &'static str;
-    fn bench_allocator(
-        &self,
-        b: &mut Bencher,
-        dist: SizeDistribution,
-        alloc_ratio: f64,
-        min_size: usize,
-        max_size: usize,
-    );
 
     fn bench_allocator_with_sync(
         &self,
@@ -56,17 +48,6 @@ impl<A: Allocator + 'static> GenericAllocatorBenchmark for AllocatorBenchmark<A>
         self.benchmark_name
     }
 
-    fn bench_allocator(
-        &self,
-        b: &mut Bencher,
-        dist: SizeDistribution,
-        alloc_ratio: f64,
-        min_size: usize,
-        max_size: usize,
-    ) {
-        bench_allocator::<A>(b, dist, alloc_ratio, min_size, max_size)
-    }
-
     fn bench_allocator_with_sync(
         &self,
         b: &mut Bencher,
@@ -78,42 +59,6 @@ impl<A: Allocator + 'static> GenericAllocatorBenchmark for AllocatorBenchmark<A>
     ) {
         bench_allocator_with_sync::<A>(b, dist, allocations, deallocations, min_size, max_size)
     }
-}
-
-fn bench_allocator<A: Allocator>(
-    b: &mut Bencher,
-    dist: SizeDistribution,
-    alloc_ratio: f64,
-    min_size: usize,
-    max_size: usize,
-) {
-    let mut allocator = A::new([0; SEGMENT_SIZE_BYTES]);
-    let mut allocated = Vec::new();
-
-    let mut rng = StdRng::seed_from_u64(42);
-    let mut sample_size = || -> u32 {
-        match &dist {
-            SizeDistribution::Uniform(u) => return black_box(u.sample(&mut rng)) as u32,
-            SizeDistribution::Zipfian(z) => {
-                return (black_box(z.sample(&mut rng)) as usize).clamp(min_size, max_size) as u32
-            }
-        }
-    };
-
-    b.iter(|| {
-        if rand::random::<f64>() < alloc_ratio {
-            // Allocation path
-            let size = sample_size();
-            if let Some(offset) = black_box(allocator.allocate(size)) {
-                allocated.push((offset, size));
-            }
-        } else if !allocated.is_empty() {
-            // Deallocation path
-            let idx = rand::random::<usize>() % allocated.len();
-            let (offset, size) = allocated.swap_remove(idx);
-            black_box(allocator.deallocate(offset, size));
-        }
-    });
 }
 
 // In Haura, allocators are not continuously active in memory. Instead, they are loaded from disk
@@ -202,16 +147,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         Box::new(AllocatorBenchmark::<WorstFitList>::new("worst_fit_list")),
         Box::new(AllocatorBenchmark::<SegmentAllocator>::new("segment")),
     ];
-
-    for (dist_name, dist) in distributions.clone() {
-        let mut group = c.benchmark_group(dist_name);
-        for allocator_bench in &allocator_benchmarks {
-            group.bench_function(allocator_bench.benchmark_name(), |b| {
-                allocator_bench.bench_allocator(b, dist.clone(), 0.8, min_size, max_size)
-            });
-        }
-        group.finish();
-    }
 
     let alloc_dealloc_ratios = [
         (100, 50),

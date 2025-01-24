@@ -68,12 +68,4 @@ impl Allocator for SegmentAllocator {
         self.mark(offset, size, Action::Allocate);
         true
     }
-
-    /// Deallocates the allocated block.
-    fn deallocate(&mut self, offset: u32, size: u32) {
-        if offset + size > SEGMENT_SIZE as u32 {
-            return;
-        }
-        self.mark(offset, size, Action::Deallocate);
-    }
 }

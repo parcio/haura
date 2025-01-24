@@ -102,47 +102,6 @@ impl Allocator for FirstFitList {
 
         false // No suitable free segment found in free_segments list
     }
-
-    /// Deallocates the allocated block.
-    fn deallocate(&mut self, offset: u32, size: u32) {
-        if offset + size > SEGMENT_SIZE as u32 {
-            return;
-        }
-        self.mark(offset, size, Action::Deallocate);
-
-        let dealloc_end = offset + size;
-        let new_segment = (offset, size);
-        let mut insert_index = self.free_segments.len(); // Default to append
-
-        // Find the correct insertion index to keep free_segments sorted and check for merging
-        for i in 0..self.free_segments.len() {
-            let (seg_offset, seg_size) = self.free_segments[i];
-            let seg_end = seg_offset + seg_size;
-
-            if seg_end == offset {
-                // Merge with the preceding segment
-                self.free_segments[i].1 += size;
-                // Check if we also need to merge with the following segment
-                if i + 1 < self.free_segments.len() && self.free_segments[i + 1].0 == dealloc_end {
-                    self.free_segments[i].1 += self.free_segments[i + 1].1;
-                    // TODO: use swap remove
-                    self.free_segments.remove(i + 1); // Remove the merged following segment
-                }
-                return;
-            } else if dealloc_end == seg_offset {
-                // Merge with the following segment
-                self.free_segments[i].0 = offset;
-                self.free_segments[i].1 += size;
-                return;
-            } else if seg_offset > offset {
-                // Insertion point found (segments are sorted by offset)
-                insert_index = i;
-                break;
-            }
-        }
-        // If no merge is possible, insert the new segment at the determined index
-        self.free_segments.insert(insert_index, new_segment);
-    }
 }
 
 impl FirstFitList {
