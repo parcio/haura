@@ -18,6 +18,9 @@ pub use self::worst_fit_simple::WorstFitSimple;
 mod segment_allocator;
 pub use self::segment_allocator::SegmentAllocator;
 
+mod first_fit_list;
+pub use self::first_fit_list::FirstFitList;
+
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
 /// Number of bytes required to store a segments allocation bitmap
