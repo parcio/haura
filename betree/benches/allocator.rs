@@ -1,6 +1,6 @@
 use betree_storage_stack::allocator::{
-    self, Allocator, BestFitSimple, FirstFit, FirstFitList, NextFit, NextFitList, SegmentAllocator,
-    WorstFitSimple, SEGMENT_SIZE_BYTES,
+    self, Allocator, BestFitList, BestFitScan, FirstFitList, FirstFitScan, NextFitList,
+    NextFitScan, SegmentAllocator, WorstFitList, WorstFitScan, SEGMENT_SIZE_BYTES,
 };
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use rand::distributions::{Distribution, Uniform};
@@ -12,6 +12,72 @@ use zipf::ZipfDistribution;
 enum SizeDistribution {
     Uniform(Uniform<usize>),
     Zipfian(ZipfDistribution),
+}
+
+// Define a trait for our benchmark struct to allow for trait objects
+trait GenericAllocatorBenchmark {
+    fn benchmark_name(&self) -> &'static str;
+    fn bench_allocator(
+        &self,
+        b: &mut Bencher,
+        dist: SizeDistribution,
+        alloc_ratio: f64,
+        min_size: usize,
+        max_size: usize,
+    );
+
+    fn bench_allocator_with_sync(
+        &self,
+        b: &mut Bencher,
+        dist: SizeDistribution,
+        allocations: u64,
+        deallocations: u64,
+        min_size: usize,
+        max_size: usize,
+    );
+}
+
+struct AllocatorBenchmark<A: Allocator> {
+    allocator_type: std::marker::PhantomData<A>,
+    benchmark_name: &'static str,
+}
+
+impl<A: Allocator + 'static> AllocatorBenchmark<A> {
+    fn new(benchmark_name: &'static str) -> Self {
+        AllocatorBenchmark {
+            allocator_type: std::marker::PhantomData,
+            benchmark_name,
+        }
+    }
+}
+
+impl<A: Allocator + 'static> GenericAllocatorBenchmark for AllocatorBenchmark<A> {
+    fn benchmark_name(&self) -> &'static str {
+        self.benchmark_name
+    }
+
+    fn bench_allocator(
+        &self,
+        b: &mut Bencher,
+        dist: SizeDistribution,
+        alloc_ratio: f64,
+        min_size: usize,
+        max_size: usize,
+    ) {
+        bench_allocator::<A>(b, dist, alloc_ratio, min_size, max_size)
+    }
+
+    fn bench_allocator_with_sync(
+        &self,
+        b: &mut Bencher,
+        dist: SizeDistribution,
+        allocations: u64,
+        deallocations: u64,
+        min_size: usize,
+        max_size: usize,
+    ) {
+        bench_allocator_with_sync::<A>(b, dist, allocations, deallocations, min_size, max_size)
+    }
 }
 
 fn bench_allocator<A: Allocator>(
@@ -123,29 +189,26 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         ),
     ];
 
+    // Define the allocators to benchmark
+    let allocator_benchmarks: Vec<Box<dyn GenericAllocatorBenchmark>> = vec![
+        Box::new(AllocatorBenchmark::<FirstFitScan>::new("first_fit_scan")),
+        Box::new(AllocatorBenchmark::<FirstFitList>::new("first_fit_list")),
+        Box::new(AllocatorBenchmark::<NextFitScan>::new("next_fit_scan")),
+        Box::new(AllocatorBenchmark::<NextFitList>::new("next_fit_list")),
+        Box::new(AllocatorBenchmark::<BestFitScan>::new("best_fit_scan")),
+        Box::new(AllocatorBenchmark::<BestFitList>::new("best_fit_list")),
+        Box::new(AllocatorBenchmark::<WorstFitScan>::new("worst_fit_scan")),
+        Box::new(AllocatorBenchmark::<WorstFitList>::new("worst_fit_list")),
+        Box::new(AllocatorBenchmark::<SegmentAllocator>::new("segment")),
+    ];
+
     for (dist_name, dist) in distributions.clone() {
         let mut group = c.benchmark_group(dist_name);
-        group.bench_function("first_fit", |b| {
-            bench_allocator::<FirstFit>(b, dist.clone(), 0.8, min_size, max_size)
-        });
-        group.bench_function("first_fit_list", |b| {
-            bench_allocator::<FirstFitList>(b, dist.clone(), 0.8, min_size, max_size)
-        });
-        group.bench_function("next_fit", |b| {
-            bench_allocator::<NextFit>(b, dist.clone(), 0.8, min_size, max_size)
-        });
-        group.bench_function("next_fit_list", |b| {
-            bench_allocator::<NextFitList>(b, dist.clone(), 0.8, min_size, max_size)
-        });
-        group.bench_function("best_fit", |b| {
-            bench_allocator::<BestFitSimple>(b, dist.clone(), 0.8, min_size, max_size)
-        });
-        group.bench_function("worst_fit", |b| {
-            bench_allocator::<WorstFitSimple>(b, dist.clone(), 0.8, min_size, max_size)
-        });
-        group.bench_function("segment", |b| {
-            bench_allocator::<SegmentAllocator>(b, dist.clone(), 0.8, min_size, max_size)
-        });
+        for allocator_bench in &allocator_benchmarks {
+            group.bench_function(allocator_bench.benchmark_name(), |b| {
+                allocator_bench.bench_allocator(b, dist.clone(), 0.8, min_size, max_size)
+            });
+        }
         group.finish();
     }
 
@@ -161,76 +224,18 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         for (allocations, deallocations) in alloc_dealloc_ratios {
             let group_name = format!("{}_sync_{}_{}", dist_name, allocations, deallocations);
             let mut group = c.benchmark_group(group_name);
-            group.bench_function("first_fit", |b| {
-                bench_allocator_with_sync::<FirstFit>(
-                    b,
-                    dist.clone(),
-                    allocations,
-                    deallocations,
-                    min_size,
-                    max_size,
-                )
-            });
-            group.bench_function("first_fit_list", |b| {
-                bench_allocator_with_sync::<FirstFitList>(
-                    b,
-                    dist.clone(),
-                    allocations,
-                    deallocations,
-                    min_size,
-                    max_size,
-                )
-            });
-            group.bench_function("next_fit", |b| {
-                bench_allocator_with_sync::<NextFit>(
-                    b,
-                    dist.clone(),
-                    allocations,
-                    deallocations,
-                    min_size,
-                    max_size,
-                )
-            });
-            group.bench_function("next_fit_list", |b| {
-                bench_allocator_with_sync::<NextFitList>(
-                    b,
-                    dist.clone(),
-                    allocations,
-                    deallocations,
-                    min_size,
-                    max_size,
-                )
-            });
-            group.bench_function("best_fit", |b| {
-                bench_allocator_with_sync::<BestFitSimple>(
-                    b,
-                    dist.clone(),
-                    allocations,
-                    deallocations,
-                    min_size,
-                    max_size,
-                )
-            });
-            group.bench_function("worst_fit", |b| {
-                bench_allocator_with_sync::<WorstFitSimple>(
-                    b,
-                    dist.clone(),
-                    allocations,
-                    deallocations,
-                    min_size,
-                    max_size,
-                )
-            });
-            group.bench_function("segment", |b| {
-                bench_allocator_with_sync::<SegmentAllocator>(
-                    b,
-                    dist.clone(),
-                    allocations,
-                    deallocations,
-                    min_size,
-                    max_size,
-                )
-            });
+            for allocator_bench in &allocator_benchmarks {
+                group.bench_function(allocator_bench.benchmark_name(), |b| {
+                    allocator_bench.bench_allocator_with_sync(
+                        b,
+                        dist.clone(),
+                        allocations,
+                        deallocations,
+                        min_size,
+                        max_size,
+                    )
+                });
+            }
             group.finish();
         }
     }
