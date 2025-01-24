@@ -45,14 +45,14 @@ pub use self::best_fit_list::BestFitList;
 mod worst_fit_list;
 pub use self::worst_fit_list::WorstFitList;
 
-mod first_fit_fsm;
-pub use self::first_fit_fsm::FirstFitFSM;
+mod first_fit_tree;
+pub use self::first_fit_tree::FirstFitTree;
 
-mod best_fit_fsm;
-pub use self::best_fit_fsm::BestFitFSM;
+mod best_fit_tree;
+pub use self::best_fit_tree::BestFitTree;
 
-mod worst_fit_fsm;
-pub use self::worst_fit_fsm::WorstFitFSM;
+mod worst_fit_tree;
+pub use self::worst_fit_tree::WorstFitTree;
 
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
@@ -153,6 +153,7 @@ pub trait Allocator: Send + Sync {
     /// Allocates a block of memory of the given `size` at the specified `offset`.
     ///
     /// This method attempts to allocate a contiguous block of memory at the given offset.
+    /// TODO: investigate if we need this method at all
     fn allocate_at(&mut self, size: u32, offset: u32) -> bool;
 
     /// Marks a range of bits in the bitmap with the given action.

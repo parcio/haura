@@ -4,13 +4,13 @@ use super::*;
 /// https://github.com/postgres/postgres/blob/02ed3c2bdcefab453b548bc9c7e0e8874a502790/src/backend/storage/freespace/README
 /// This is an approximate worst fit allocator. It will not always find the worst fit but it tries
 /// its best.
-pub struct WorstFitFSM {
+pub struct WorstFitTree {
     data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
     fsm_tree: Vec<(u32, u32)>, // Array to represent the FSM tree, storing max free space
     tree_height: u32,
 }
 
-impl Allocator for WorstFitFSM {
+impl Allocator for WorstFitTree {
     fn data(&mut self) -> &mut BitArr!(for SEGMENT_SIZE, in u8, Lsb0) {
         &mut self.data
     }
@@ -19,7 +19,7 @@ impl Allocator for WorstFitFSM {
     /// The `bitmap` must have a length of `SEGMENT_SIZE`.
     fn new(bitmap: [u8; SEGMENT_SIZE_BYTES]) -> Self {
         let data = BitArray::new(bitmap);
-        let mut allocator = WorstFitFSM {
+        let mut allocator = WorstFitTree {
             data,
             fsm_tree: Vec::new(),
             tree_height: 0,
@@ -101,7 +101,7 @@ impl Allocator for WorstFitFSM {
     }
 }
 
-impl WorstFitFSM {
+impl WorstFitTree {
     fn get_free_segments(&mut self) -> Vec<(u32, u32)> {
         let mut offset: u32 = 0;
         let mut free_segments = Vec::new();
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn build_empty() {
         let bitmap = [0u8; SEGMENT_SIZE_BYTES];
-        let allocator = WorstFitFSM::new(bitmap);
+        let allocator = WorstFitTree::new(bitmap);
 
         // In an empty bitmap, the root node should have a large free space
         assert_eq!(allocator.fsm_tree[0].0, 0 as u32);
@@ -186,14 +186,14 @@ mod tests {
     #[test]
     fn build_simple() {
         // Example bitmap: 3 segments allocated at the beginning, 2 free, 3 allocated, rest free
-        let mut allocator = WorstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = WorstFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
         let bitmap = allocator.data();
 
         // Manually allocate some segments
         bitmap[0..3].fill(true); // Allocate 3 blocks at the beginning
         bitmap[5..7].fill(true); // Allocate 2 blocks after the free ones
 
-        let mut allocator = WorstFitFSM::new(bitmap.into_inner());
+        let mut allocator = WorstFitTree::new(bitmap.into_inner());
 
         let fsm_tree = vec![
             (7, SEGMENT_SIZE as u32 - 7),
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn build_complex() {
-        let mut allocator = WorstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = WorstFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
         let bitmap = allocator.data();
 
         // Manually allocate some segments to create a non-trivial tree
@@ -217,7 +217,7 @@ mod tests {
         bitmap[35..36].fill(true);
         bitmap[42..53].fill(true);
 
-        let allocator = WorstFitFSM::new(bitmap.into_inner());
+        let allocator = WorstFitTree::new(bitmap.into_inner());
 
         // binary heap layout
         let fsm_tree = vec![
@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn allocate_empty_fsm_tree() {
         let bitmap = [0u8; SEGMENT_SIZE_BYTES];
-        let mut allocator = WorstFitFSM::new(bitmap);
+        let mut allocator = WorstFitTree::new(bitmap);
 
         let allocation = allocator.allocate(1024);
         assert!(allocation.is_some()); // Allocation should succeed
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn allocate_complex_fsm_tree() {
-        let mut allocator = WorstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = WorstFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
         let bitmap = allocator.data();
 
         // Manually allocate some segments to create a non-trivial tree
@@ -272,7 +272,7 @@ mod tests {
         bitmap[35..36].fill(true);
         bitmap[42..53].fill(true);
 
-        let mut allocator = WorstFitFSM::new(bitmap.into_inner());
+        let mut allocator = WorstFitTree::new(bitmap.into_inner());
 
         // Worst-fit should allocate from the segment at offset 3 with size 2
         let allocation = allocator.allocate(2); // Request allocation of size 2
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn allocate_fail_fsm_tree() {
-        let mut allocator = WorstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = WorstFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
         let root_free_space = allocator.fsm_tree[0].1;
 
         // Try to allocate more than available space
