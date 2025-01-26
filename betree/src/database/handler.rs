@@ -198,15 +198,16 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
         let mut allocator: Box<dyn Allocator> = match self.allocator {
             AllocatorType::FirstFitScan => Box::new(FirstFitScan::new(bitmap)),
             AllocatorType::FirstFitList => Box::new(FirstFitList::new(bitmap)),
-            AllocatorType::FirstFitFSM => Box::new(FirstFitTree::new(bitmap)),
+            AllocatorType::FirstFitTree => Box::new(FirstFitTree::new(bitmap)),
             AllocatorType::NextFitScan => Box::new(NextFitScan::new(bitmap)),
             AllocatorType::NextFitList => Box::new(NextFitList::new(bitmap)),
             AllocatorType::BestFitScan => Box::new(BestFitScan::new(bitmap)),
             AllocatorType::BestFitList => Box::new(BestFitList::new(bitmap)),
-            AllocatorType::BestFitFSM => Box::new(BestFitTree::new(bitmap)),
+            AllocatorType::BestFitTree => Box::new(BestFitTree::new(bitmap)),
+            AllocatorType::ApproximateBestFitTree => Box::new(ApproximateBestFitTree::new(bitmap)),
             AllocatorType::WorstFitScan => Box::new(WorstFitScan::new(bitmap)),
             AllocatorType::WorstFitList => Box::new(WorstFitList::new(bitmap)),
-            AllocatorType::WorstFitFSM => Box::new(WorstFitTree::new(bitmap)),
+            AllocatorType::WorstFitTree => Box::new(WorstFitTree::new(bitmap)),
             AllocatorType::SegmentAllocator => Box::new(SegmentAllocator::new(bitmap)),
         };
 

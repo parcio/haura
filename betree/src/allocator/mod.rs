@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 // the allocator bitmap from disk) and it's the only reason, why the free_segments are kept sorted
 // anyway. So changing that function to respect this change could increase the performance.
 //
+// OPTIM: For all the LIST variants of allocators: When building the bitmap we can save the size of
+// the largest free segment. This could save some entire list traversals but introduces one branch
+// per allocation.
+//
 // OPTIM: For all the SCAN variants of allocators: we could use assembly (and possibly SIMD) to
 // count the leading/trailing 0s/1s. This could be faster than relying on the compiler.
 //
@@ -51,6 +55,9 @@ pub use self::first_fit_tree::FirstFitTree;
 mod best_fit_tree;
 pub use self::best_fit_tree::BestFitTree;
 
+mod approximate_best_fit_tree;
+pub use self::approximate_best_fit_tree::ApproximateBestFitTree;
+
 mod worst_fit_tree;
 pub use self::worst_fit_tree::WorstFitTree;
 
@@ -77,10 +84,10 @@ pub enum AllocatorType {
     /// first free block that is large enough to satisfy the request.
     FirstFitList,
 
-    /// **First Fit FSM:**
+    /// **First Fit Tree:**
     /// This allocator builds a binary tree of offsets and sizes, that has the
     /// max-heap property on the sizes and uses it to find suitable free space.
-    FirstFitFSM,
+    FirstFitTree,
 
     /// **Next Fit Scan:**
     /// This allocator starts searching from the last allocation and continues
@@ -104,10 +111,15 @@ pub enum AllocatorType {
     /// segment from this list to allocate memory.
     BestFitList,
 
-    /// **Best Fit FSM:**
+    /// **Best Fit Tree:**
+    /// This allocator builds a btree of offsets and sizes, that is sorted by
+    /// the sizes and uses it to find suitable free space.
+    BestFitTree,
+
+    /// **Approximate Best Fit Tree:**
     /// This allocator builds a binary tree of offsets and sizes, that has the
     /// max-heap property on the sizes and uses it to find suitable free space.
-    BestFitFSM,
+    ApproximateBestFitTree,
 
     /// **Worst Fit Scan:**
     /// This allocator searches the entire segment and allocates the largest
@@ -120,10 +132,10 @@ pub enum AllocatorType {
     /// (largest) segment from this list to allocate memory.
     WorstFitList,
 
-    /// **Worst Fit FSM:**
+    /// **Worst Fit Tree:**
     /// This allocator builds a binary tree of offsets and sizes, that has the
     /// max-heap property on the sizes and uses it to find suitable free space.
-    WorstFitFSM,
+    WorstFitTree,
 
     /// **Segment Allocator:**
     /// This is a first fit allocator that was used before making the allocators
