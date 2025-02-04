@@ -637,6 +637,8 @@ where
         N: ObjectReference,
     {
         let child_idx = {
+            let total_size = self.size();
+            let buffer_size = self.meta_data.entries_size;
             let (child_idx, child) = self
                 .meta_data
                 .entries_sizes
@@ -648,7 +650,8 @@ where
 
             if *child >= min_flush_size
                 && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout)
-                && self.fanout() < (max_node_size as f32).sqrt() as usize
+                && dbg!(total_size - buffer_size)
+                    <= dbg!((max_node_size as f32).powf(0.5).ceil() as usize)
             {
                 Some(child_idx)
             } else if self.fanout() < 2 * min_fanout {

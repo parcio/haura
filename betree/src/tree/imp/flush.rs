@@ -55,7 +55,7 @@ where
         mut parent: Option<DerivateRefNVM<X::CacheValueRefMut, TakeChildBufferWrapper<'static, R>>>,
     ) -> Result<(), Error> {
         loop {
-            if !self.storage_map.node_is_too_large(&node) {
+            if !self.storage_map.node_is_too_large(&mut node) {
                 return Ok(());
             }
             debug!(
@@ -90,14 +90,14 @@ where
             let mut child = self.get_mut_node(child_buffer.child_pointer_mut())?;
 
             // 2. Iterate down to child if too large
-            if !child.is_leaf() && self.storage_map.node_is_too_large(&child) {
+            if !child.is_leaf() && self.storage_map.node_is_too_large(&mut child) {
                 warn!("Aborting flush, child is too large already");
                 parent = Some(child_buffer);
                 node = child;
                 continue;
             }
             // 3. If child is internal, small and has not many children -> merge the children of node.
-            if child.has_too_low_fanout() && !self.storage_map.node_is_too_large(&child) {
+            if child.has_too_low_fanout() && !self.storage_map.node_is_too_large(&mut child) {
                 let size_delta = {
                     let mut m = child_buffer.prepare_merge();
                     let mut sibling = self.get_mut_node(m.sibling_node_pointer())?;
@@ -175,7 +175,7 @@ where
                 child_buffer.add_size(size_delta);
             }
             // 7. If the child is too large, split until it is not.
-            while self.storage_map.leaf_is_too_large(&child) {
+            while self.storage_map.leaf_is_too_large(&mut child) {
                 let (next_node, size_delta) = self.split_node(child, &mut child_buffer)?;
                 child_buffer.add_size(size_delta);
                 child = next_node;
@@ -184,7 +184,7 @@ where
             // 8. After finishing all operations once, see if they have to be repeated.
             if child_buffer.size() > super::MAX_INTERNAL_NODE_SIZE {
                 warn!("Node is still too large");
-                if self.storage_map.node_is_too_large(&child) {
+                if self.storage_map.node_is_too_large(&mut child) {
                     warn!("... but child, too");
                 }
                 node = child_buffer.into_owner();

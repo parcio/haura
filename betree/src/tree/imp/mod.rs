@@ -440,9 +440,20 @@ where
             };
             node = next_node;
         };
-
         match data {
-            None => Ok(None),
+            None => {
+                let mut tmp = None;
+                let mut info = None;
+                for (keyinfo, msg) in msgs.into_iter().rev() {
+                    info = Some(keyinfo);
+                    self.msg_action().apply(key, &msg, &mut tmp);
+                }
+                drop(node);
+                if self.evict {
+                    self.dml.evict()?;
+                }
+                Ok(tmp.map(|data| (info.unwrap(), data)))
+            }
             Some((info, data)) => {
                 let mut tmp = Some(data);
                 for (_keyinfo, msg) in msgs.into_iter().rev() {
@@ -530,6 +541,9 @@ where
         let mut node = {
             let mut node = self.get_mut_root_node()?;
             loop {
+                if self.storage_map.node_is_too_large(&mut node) {
+                    break node;
+                }
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
                         let maybe_child = match &mut *child_buffer {
@@ -568,8 +582,6 @@ where
         self.rebalance_tree(node, parent)?;
 
         // All non-root trees will start the eviction process.
-        // TODO: Is the eviction on root trees harmful? Evictions started by
-        // other trees will evict root nodes anyway.
         if self.evict {
             self.dml.evict()?;
         }

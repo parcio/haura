@@ -64,13 +64,24 @@ macro_rules! mib {
 // change before it is actually written to the desired storage kind. So a block
 // leaf might be changed to a memory leaf when written to memory.
 impl StorageMap {
-    pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
+    pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(
+        &self,
+        node: &mut Node<N>,
+    ) -> bool {
+        // To get the proper max_size we need a writable version of the given
+        // node. In the state diagram of nodes we check the max size only when
+        // the nodes are modified, therefore this unpack should not be
+        // unnecesary.
+        node.ensure_unpacked();
         self.max_size(node)
-            .map(|max_size| node.inner_size() > max_size)
+            .map(|max_size| node.inner_size() > max_size || node.has_too_high_fanout(max_size))
             .unwrap_or(false)
     }
 
-    pub fn leaf_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
+    pub fn leaf_is_too_large<N: HasStoragePreference + StaticSize>(
+        &self,
+        node: &mut Node<N>,
+    ) -> bool {
         node.is_leaf() && self.node_is_too_large(node)
     }
 
@@ -408,6 +419,17 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             }
         }
     }
+
+    /// This method actually checks the size of the pivots compared to the
+    /// maximum size allowed. Pivots should always fill up less than B^epsilon
+    /// space.
+    fn has_too_high_fanout(&self, max_size: usize) -> bool {
+        match &self.0 {
+            Internal(internal_node) => internal_node.has_too_high_fanout(max_size),
+            CopylessInternal(copyless_internal_node) => todo!(),
+            _ => false,
+        }
+    }
 }
 
 impl<N: HasStoragePreference + StaticSize> Node<N> {
@@ -543,7 +565,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
         let mut left_sibling = self.take();
 
         let min_size = storage_map.min_size(&left_sibling);
-        let max_size = storage_map.min_size(&left_sibling);
+        let max_size = storage_map.max_size(&left_sibling);
         let (right_sibling, pivot_key, cur_level) = match left_sibling.0 {
             PackedLeaf(_) => unreachable!(),
             Leaf(ref mut leaf) => {

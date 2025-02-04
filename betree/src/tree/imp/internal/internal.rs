@@ -134,10 +134,7 @@ impl<N> InternalNode<N> {
     }
 
     /// Returns the number of children.
-    pub fn fanout(&self) -> usize
-    where
-        N: ObjectReference,
-    {
+    pub fn fanout(&self) -> usize {
         self.children.len()
     }
 
@@ -215,6 +212,10 @@ impl<N> InternalNode<N> {
             pivot: mem.meta_data.pivot,
             children: cbufs,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.children.len()
     }
 }
 
@@ -449,6 +450,14 @@ impl<N: StaticSize + HasStoragePreference> InternalNode<N> {
             right_child.map(|child| child.node_pointer.get_mut()),
         )
     }
+
+    pub fn has_too_high_fanout(&self, max_node_size: usize) -> bool {
+        let pivot_size = self.pivot.iter().map(|p| p.len()).sum::<usize>();
+        // Another way is too count all the metadata.
+        // let total_size = self.size();
+        // let buffer_size = self.meta_data.entries_size;
+        pivot_size > (max_node_size as f32).powf(0.5).ceil() as usize
+    }
 }
 
 impl<N: ObjectReference> InternalNode<N> {
@@ -557,6 +566,7 @@ where
             // NOTE: The max fanout has been changed here for random IO performance.
             if child.buffer_size() >= min_flush_size
                 && (size - child.buffer_size() <= max_node_size || fanout < 2 * min_fanout)
+                && !self.has_too_high_fanout(max_node_size)
             {
                 Some(child_idx)
             } else {
