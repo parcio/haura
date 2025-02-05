@@ -352,6 +352,7 @@ impl<N> CopylessInternalNode<N> {
         let ptrs_len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
         cursor += 4;
 
+        // NOTE: This section scales different from the time than the packed buffers unpack which is weird
         let mut ptrs: Vec<ChildLink<N>> = bincode::deserialize(&buf[cursor..cursor + ptrs_len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         cursor += ptrs_len;
@@ -387,6 +388,11 @@ impl<N> CopylessInternalNode<N> {
                 self.meta_data.entries_sizes[idx]
             );
         }
+    }
+
+    pub(crate) fn has_too_high_fanout(&self, max_size: usize) -> bool {
+        self.meta_data.pivot.iter().map(|p| p.len()).sum::<usize>()
+            > (max_size as f32).powf(0.5).ceil() as usize
     }
 }
 
@@ -637,8 +643,6 @@ where
         N: ObjectReference,
     {
         let child_idx = {
-            let total_size = self.size();
-            let buffer_size = self.meta_data.entries_size;
             let (child_idx, child) = self
                 .meta_data
                 .entries_sizes
@@ -650,8 +654,7 @@ where
 
             if *child >= min_flush_size
                 && ((self.size() - *child) <= max_node_size || self.fanout() < 2 * min_fanout)
-                && dbg!(total_size - buffer_size)
-                    <= dbg!((max_node_size as f32).powf(0.5).ceil() as usize)
+                && !self.has_too_high_fanout(max_node_size)
             {
                 Some(child_idx)
             } else if self.fanout() < 2 * min_fanout {

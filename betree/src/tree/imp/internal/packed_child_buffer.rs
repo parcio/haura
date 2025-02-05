@@ -563,7 +563,7 @@ impl PackedChildBuffer {
     {
         let key = key.into();
         let key_size = key.size();
-        let old_size = self.cache_size();
+        let old_size = self.size();
 
         self.messages_preference.upgrade(keyinfo.storage_preference);
 

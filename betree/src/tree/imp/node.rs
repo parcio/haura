@@ -426,7 +426,9 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
     fn has_too_high_fanout(&self, max_size: usize) -> bool {
         match &self.0 {
             Internal(internal_node) => internal_node.has_too_high_fanout(max_size),
-            CopylessInternal(copyless_internal_node) => todo!(),
+            CopylessInternal(copyless_internal_node) => {
+                copyless_internal_node.has_too_high_fanout(max_size)
+            }
             _ => false,
         }
     }
