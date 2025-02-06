@@ -116,8 +116,6 @@ impl StorageMap {
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
             | (MemLeaf(_), _) => mib!(1),
-            (Internal(_), StorageKind::Ssd) => mib!(1),
-            (Internal(_), StorageKind::Memory) => mib!(1),
             (Internal(_), _) => mib!(4),
             (CopylessInternal(_), _) => mib!(1),
         })
@@ -457,12 +455,12 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
     }
 
     fn ensure_unpacked(&mut self) -> isize {
-        let before = self.size();
+        let before = self.cache_size();
 
         match &mut self.0 {
             PackedLeaf(map) => {
                 self.0 = Leaf(map.unpack_leaf());
-                let after = self.size();
+                let after = self.cache_size();
                 after as isize - before as isize
             }
             MemLeaf(mleaf) => {
@@ -562,7 +560,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             _ => false,
         };
 
-        let size_before = self.size();
+        let size_before = self.cache_size();
         self.ensure_unpacked();
         let mut left_sibling = self.take();
 
@@ -638,7 +636,7 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
             )));
         }
 
-        let size_after = self.size();
+        let size_after = self.cache_size();
         size_after as isize - size_before as isize
     }
 }

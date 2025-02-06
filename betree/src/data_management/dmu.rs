@@ -1099,7 +1099,7 @@ where
             .filter(|&key| matches!(key, ObjectKey::Unmodified { .. }))
             .collect();
         for key in keys {
-            let _ = cache.remove(&key, |obj| obj.size());
+            let _ = cache.remove(&key, |obj| obj.cache_size());
         }
     }
 }
