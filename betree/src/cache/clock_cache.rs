@@ -384,7 +384,7 @@ impl<K: Clone + Eq + Hash + Sync + Send + 'static, V: Sync + Send + SizeMut + 's
                 .map(|(k, mut v): (_, &mut Arc<CacheEntry<_>>)| {
                     let p: *mut CacheEntry<_> = Arc::as_ptr(&v) as *mut CacheEntry<_>;
                     let v2: &mut CacheEntry<V> = unsafe { &mut *p };
-                    v2.value.size()
+                    v2.value.cache_size()
                 })
                 .sum::<usize>();
 

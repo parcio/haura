@@ -585,6 +585,7 @@ where
         if self.evict {
             self.dml.evict()?;
         }
+
         Ok(())
     }
 

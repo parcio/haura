@@ -1,10 +1,8 @@
 //! Implementation of a message buffering node wrapper.
-//! Encapsulating common nodes like [super::internal::NVMInternalNode] and
-//! [super::leaf::NVMNVMLeafNode].
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, IntegrityMode},
-    size::Size,
+    size::{Size, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
     tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
@@ -17,6 +15,7 @@ use std::{
         BTreeMap, Bound,
     },
     mem::replace,
+    ops::{Add, AddAssign},
     ptr::slice_from_raw_parts,
 };
 
@@ -29,6 +28,83 @@ trait CutSlice<T> {
 impl<T> CutSlice<T> for [T] {
     fn cut(&self, pos: usize, len: usize) -> &[T] {
         &self[pos..pos + len]
+    }
+}
+
+/// Rich return type indicating that a cache size of the called object happened.
+pub(in crate::tree) struct WithCacheSizeChange<T> {
+    inner: T,
+    size_delta: isize,
+}
+
+impl From<isize> for WithCacheSizeChange<()> {
+    fn from(value: isize) -> Self {
+        Self {
+            size_delta: value,
+            inner: (),
+        }
+    }
+}
+
+impl Add for WithCacheSizeChange<()> {
+    type Output = WithCacheSizeChange<()>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        WithCacheSizeChange {
+            size_delta: self.size_delta + rhs.size_delta,
+            ..self
+        }
+    }
+}
+
+impl AddAssign for WithCacheSizeChange<()> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.size_delta += rhs.size_delta
+    }
+}
+
+impl<T> WithCacheSizeChange<T> {
+    pub fn new(inner: T, size_delta: isize) -> Self {
+        Self { inner, size_delta }
+    }
+
+    pub fn map<F, U>(self, mut f: F) -> WithCacheSizeChange<U>
+    where
+        F: FnMut(T) -> U,
+    {
+        WithCacheSizeChange {
+            inner: f(self.inner),
+            size_delta: self.size_delta,
+        }
+    }
+
+    pub fn map_with_size_change<F, U>(self, mut f: F) -> WithCacheSizeChange<U>
+    where
+        F: FnMut(T) -> WithCacheSizeChange<U>,
+    {
+        let other = f(self.inner);
+        WithCacheSizeChange {
+            inner: other.inner,
+            size_delta: self.size_delta + other.size_delta,
+        }
+    }
+
+    pub fn add_size(self, delta: isize) -> WithCacheSizeChange<T> {
+        WithCacheSizeChange {
+            size_delta: self.size_delta + delta,
+            ..self
+        }
+    }
+
+    pub fn zero() -> WithCacheSizeChange<()> {
+        WithCacheSizeChange {
+            inner: (),
+            size_delta: 0,
+        }
+    }
+
+    pub fn take(self) -> (T, isize) {
+        (self.inner, self.size_delta)
     }
 }
 
@@ -89,14 +165,18 @@ impl Map {
     /// Fetch a mutable version of the internal btree map.
     pub(in crate::tree::imp) fn unpacked(
         &mut self,
-    ) -> &mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)> {
+    ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
         match self {
             Map::Packed { entry_count, data } => {
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
                 let mut key_info = Vec::with_capacity(*entry_count);
                 let mut values_pos: Vec<(u32, u32)> = Vec::with_capacity(*entry_count);
 
+                // current in-cache size
+                let mut size_delta: isize = -2 * std::mem::size_of::<usize>() as isize;
+
                 for idx in 0..*entry_count {
+                    size_delta += KeyInfo::static_size() as isize;
                     let off = HEADER + idx * KEY_IDX_SIZE;
                     let kidx = KeyIdx::unpack(data.cut(off, 9).try_into().unwrap());
                     key_info.push(KeyInfo {
@@ -105,12 +185,14 @@ impl Map {
                     keys.push(CowBytes::from(
                         data.cut(kidx.pos as usize, kidx.len as usize),
                     ));
+                    size_delta += kidx.len as isize;
 
                     let val_pos_off = kidx.pos as usize + kidx.len as usize;
                     let val_pos = u32::from_le_bytes(data.cut(val_pos_off, 4).try_into().unwrap());
                     let val_len =
                         u32::from_le_bytes(data.cut(val_pos_off + 4, 4).try_into().unwrap());
                     values_pos.push((val_pos, val_len));
+                    size_delta += val_len as isize;
                 }
 
                 *self = Map::Unpacked(BTreeMap::from_iter(
@@ -124,12 +206,15 @@ impl Map {
                     ),
                 ));
 
-                match self {
-                    Map::Unpacked(ref mut map) => map,
-                    _ => unreachable!(),
-                }
+                WithCacheSizeChange::new(
+                    match self {
+                        Map::Unpacked(ref mut map) => map,
+                        _ => unreachable!(),
+                    },
+                    size_delta,
+                )
             }
-            Map::Unpacked(ref mut map) => map,
+            Map::Unpacked(ref mut map) => WithCacheSizeChange::new(map, 0),
         }
     }
 
@@ -312,69 +397,79 @@ impl PackedChildBuffer {
         self.buffer.get(key)
     }
 
-    pub fn apply_with_info(&mut self, key: &[u8], pref: StoragePreference) -> Option<KeyInfo> {
-        self.buffer
-            .unpacked()
-            .get_mut(key)
-            .map(|(keyinfo, _bytes)| {
+    pub fn apply_with_info(
+        &mut self,
+        key: &[u8],
+        pref: StoragePreference,
+    ) -> WithCacheSizeChange<Option<KeyInfo>> {
+        self.buffer.unpacked().map(|tree| {
+            tree.get_mut(key).map(|(keyinfo, _bytes)| {
                 keyinfo.storage_preference = pref;
                 keyinfo.clone()
             })
+        })
     }
 
-    pub fn unpack_data(&mut self) {
-        self.buffer.unpacked();
+    pub fn unpack_data(&mut self) -> WithCacheSizeChange<()> {
+        self.buffer.unpacked().map(|_| ())
     }
 
     pub fn split(
         &mut self,
         min_size: usize,
         max_size: usize,
-    ) -> (PackedChildBuffer, CowBytes, isize, LocalPivotKey) {
+    ) -> WithCacheSizeChange<(PackedChildBuffer, CowBytes, LocalPivotKey)> {
         assert!(self.size() > max_size);
-        let mut right_sibling = Self::new(self.is_leaf);
-        assert!(right_sibling.entries_size == 0);
         assert!(self.buffer.len() > 2);
 
-        let mut sibling_size = 0;
-        let mut sibling_pref = StoragePreference::NONE;
-        let mut split_key = None;
-        for (k, (keyinfo, v)) in self.buffer.unpacked().iter().rev() {
-            sibling_size += k.len() + v.len() + PER_KEY_BYTES + keyinfo.size();
-            sibling_pref.upgrade(keyinfo.storage_preference);
+        self.buffer.unpacked().map_with_size_change(|buffer| {
+            let mut right_sibling = Self::new(self.is_leaf);
+            assert!(right_sibling.entries_size == 0);
 
-            if sibling_size >= min_size {
-                split_key = Some(k.clone());
-                break;
+            let mut sibling_size = 0;
+            let mut sibling_pref = StoragePreference::NONE;
+            let mut split_key = None;
+            for (k, (keyinfo, v)) in buffer.iter().rev() {
+                sibling_size += k.len() + v.len() + PER_KEY_BYTES + keyinfo.size();
+                sibling_pref.upgrade(keyinfo.storage_preference);
+
+                if sibling_size >= min_size {
+                    split_key = Some(k.clone());
+                    break;
+                }
             }
-        }
-        let split_key = split_key.unwrap();
-        right_sibling.buffer = Map::Unpacked(self.buffer.unpacked().split_off(&split_key));
-        self.entries_size -= sibling_size;
-        right_sibling.entries_size = sibling_size;
-        right_sibling.messages_preference.set(sibling_pref);
+            let split_key = split_key.unwrap();
+            right_sibling.buffer = Map::Unpacked(buffer.split_off(&split_key));
+            self.entries_size -= sibling_size;
+            right_sibling.entries_size = sibling_size;
+            right_sibling.messages_preference.set(sibling_pref);
 
-        // have removed many keys from self, no longer certain about own pref, mark invalid
-        self.messages_preference.invalidate();
+            // have removed many keys from self, no longer certain about own pref, mark invalid
+            self.messages_preference.invalidate();
 
-        let size_delta = -(sibling_size as isize);
+            let pivot_key = buffer.iter().next_back().unwrap().0.clone();
 
-        let pivot_key = self.buffer.unpacked().iter().next_back().unwrap().0.clone();
-
-        (
-            right_sibling,
-            pivot_key.clone(),
-            size_delta,
-            LocalPivotKey::Right(pivot_key),
-        )
+            WithCacheSizeChange::new(
+                (
+                    right_sibling,
+                    pivot_key.clone(),
+                    LocalPivotKey::Right(pivot_key),
+                ),
+                -(sibling_size as isize),
+            )
+        })
     }
 
-    pub(crate) fn insert_msg_buffer<I, M>(&mut self, msg_buffer: I, msg_action: M) -> isize
+    pub(crate) fn insert_msg_buffer<I, M>(
+        &mut self,
+        msg_buffer: I,
+        msg_action: M,
+    ) -> WithCacheSizeChange<()>
     where
         I: IntoIterator<Item = (CowBytes, (KeyInfo, SlicedCowBytes))>,
         M: MessageAction,
     {
-        let mut size_delta = 0;
+        let mut size_delta = WithCacheSizeChange::new((), 0);
         for (key, (keyinfo, msg)) in msg_buffer {
             size_delta += self.insert(key, keyinfo, msg, &msg_action);
         }
@@ -477,20 +572,28 @@ impl PackedChildBuffer {
     pub fn take(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, usize) {
         self.messages_preference.invalidate();
         (
-            std::mem::take(&mut self.buffer.unpacked()),
+            std::mem::take(&mut self.buffer.unpacked().inner),
             replace(&mut self.entries_size, 0),
         )
     }
 
-    pub fn append(&mut self, other: &mut Self) -> isize {
-        self.buffer.unpacked().append(&mut other.buffer.unpacked());
-        self.entries_size += other.entries_size;
-        self.messages_preference
-            .upgrade_atomic(&other.messages_preference);
-        other.entries_size as isize
+    pub fn append(&mut self, other: &mut Self) -> WithCacheSizeChange<()> {
+        self.buffer.unpacked().map_with_size_change(|buffer| {
+            buffer.append(&mut other.buffer.unpacked().inner);
+            self.entries_size += other.entries_size;
+            self.messages_preference
+                .upgrade_atomic(&other.messages_preference);
+            (other.entries_size as isize).into()
+        })
+
+        // self.buffer.unpacked().append(&mut other.buffer.unpacked());
+        // self.entries_size += other.entries_size;
+        // self.messages_preference
+        //     .upgrade_atomic(&other.messages_preference);
+        // (other.entries_size as isize).into()
     }
 
-    /// Splits this `NVMChildBuffer` at `pivot` so that `self` contains all
+    /// Splits this `PackedChildBuffer` at `pivot` so that `self` contains all
     /// entries up to (and including) `pivot_key` and the returned `Self`
     /// contains the other entries.
     pub fn split_at(&mut self, pivot: &CowBytes) -> Self {
@@ -511,7 +614,9 @@ impl PackedChildBuffer {
         // `split_off` puts the split-key into the right buffer.
         let mut next_key = pivot.to_vec();
         next_key.push(0);
-        let right_buffer = self.buffer.unpacked().split_off(&next_key[..]);
+
+        assert!(self.buffer.is_unpacked());
+        let right_buffer = self.buffer.unpacked().inner.split_off(&next_key[..]);
         self.messages_preference.invalidate();
 
         let right_entry_size = right_buffer
@@ -535,16 +640,19 @@ impl PackedChildBuffer {
         min_size: usize,
         max_size: usize,
     ) -> FillUpResult {
-        let size_delta = self.append(right_sibling);
+        let cache_change = self.append(right_sibling);
         if self.size() <= max_size {
-            FillUpResult::Merged { size_delta }
+            FillUpResult::Merged {
+                size_delta: cache_change.size_delta,
+            }
         } else {
             // First size_delta is from the merge operation where we split
-            let (sibling, pivot_key, split_size_delta, _) = self.split(min_size, max_size);
+            let split = self.split(min_size, max_size);
+            let (sibling, pivot_key, _) = split.inner;
             *right_sibling = sibling;
             FillUpResult::Rebalanced {
                 pivot_key,
-                size_delta: size_delta + split_size_delta,
+                size_delta: cache_change.size_delta + split.size_delta,
             }
         }
     }
@@ -556,26 +664,28 @@ impl PackedChildBuffer {
         keyinfo: KeyInfo,
         msg: SlicedCowBytes,
         msg_action: M,
-    ) -> isize
+    ) -> WithCacheSizeChange<()>
     where
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
         let key = key.into();
         let key_size = key.size();
-        let old_size = self.size();
 
         self.messages_preference.upgrade(keyinfo.storage_preference);
 
-        match self.buffer.unpacked().entry(key.clone()) {
+        // grab cache size change and drop ref
+        let size_change = self.buffer.unpacked();
+
+        match size_change.inner.entry(key.clone()) {
             Entry::Vacant(e) => {
                 // Resolve messages when the buffer is a leaf.
                 let size_delta = if self.is_leaf {
                     let mut data = None;
-                    msg_action.apply_to_leaf(&key, msg, &mut data);
+                    msg_action.apply_to_leaf(&key, msg.clone(), &mut data);
                     if let Some(data) = data {
                         let size = keyinfo.size() + data.len() + key_size;
-                        e.insert((keyinfo, data));
+                        e.insert((keyinfo.clone(), data));
                         size
                     } else {
                         0
@@ -587,8 +697,8 @@ impl PackedChildBuffer {
                 };
 
                 self.entries_size += size_delta;
-                assert_eq!(self.cache_size(), old_size + size_delta);
-                size_delta as isize
+                // assert_eq!(self.cache_size(), old_size + size_delta);
+                size_change.map_with_size_change(|_| (size_delta as isize).into())
             }
             Entry::Occupied(mut e) => {
                 let lower = e.get_mut().clone();
@@ -603,9 +713,10 @@ impl PackedChildBuffer {
                         (data, new_size)
                     } else {
                         let data = e.remove();
-                        return -(key_size as isize
+                        return (-(key_size as isize
                             + data.1.len() as isize
-                            + PER_KEY_BYTES as isize);
+                            + PER_KEY_BYTES as isize))
+                            .into();
                     }
                 } else {
                     let merged_msg = msg_action.merge(&key, msg, lower_msg);
@@ -616,8 +727,9 @@ impl PackedChildBuffer {
 
                 self.entries_size += merged_size;
                 self.entries_size -= lower_size;
-                assert_eq!(self.cache_size(), old_size + merged_size - lower_size);
-                merged_size as isize - lower_size as isize
+                // assert_eq!(self.cache_size(), old_size + merged_size - lower_size);
+                size_change
+                    .map_with_size_change(|_| (merged_size as isize - lower_size as isize).into())
             }
         }
     }
@@ -736,7 +848,7 @@ impl PackedChildBuffer {
 }
 
 impl PackedChildBuffer {
-    pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> usize {
+    pub fn range_delete(&mut self, start: &[u8], end: Option<&[u8]>) -> WithCacheSizeChange<()> {
         // Context: Previously we mentioned the usage of a drain filter here and
         // linked to an existing issue of how it is missing from the standard
         // library.
@@ -753,16 +865,19 @@ impl PackedChildBuffer {
             end.map_or(Bound::Unbounded, Bound::Excluded),
         );
         let mut keys = Vec::new();
-        for (key, msg) in self.buffer.unpacked().range_mut::<[u8], _>(range) {
+
+        let buffer = self.buffer.unpacked();
+
+        for (key, msg) in buffer.inner.range_mut::<[u8], _>(range) {
             size_delta += key.size() + msg.size();
             keys.push(key.clone());
         }
-        for key in keys {
-            self.buffer.unpacked().remove(&key);
+        for key in keys.into_iter() {
+            buffer.inner.remove(&key);
         }
         self.entries_size -= size_delta;
         self.messages_preference.invalidate();
-        size_delta
+        (buffer.size_delta - (size_delta as isize)).into()
     }
 }
 

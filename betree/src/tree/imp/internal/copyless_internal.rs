@@ -711,11 +711,12 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         // is added to self, the overall entries don't change, so this node doesn't need to be
         // invalidated
 
+        let before = self.cache_size();
         let sibling = self.node.children[self.child_idx]
             .buffer
             .split_at(&pivot_key);
         let sibling_size = sibling.size();
-        let size_delta = sibling_size + pivot_key.size();
+        // let size_delta = sibling_size + pivot_key.size();
         self.node.children.insert(
             self.child_idx + 1,
             ChildLink {
@@ -737,7 +738,11 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
         if select_right {
             self.child_idx += 1;
         }
-        size_delta as isize
+
+        // NOTE: recalculate, can be improved
+        self.cache_size() as isize - (before as isize)
+
+        // size_delta as isize
     }
 
     pub fn take_buffer(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, isize) {

@@ -103,7 +103,7 @@ impl StorageMap {
             | (MemLeaf(_), StorageKind::Ssd) => kib!(64),
             (PackedLeaf(_), StorageKind::Memory)
             | (Leaf(_), StorageKind::Memory)
-            | (MemLeaf(_), StorageKind::Memory) => kib!(256),
+            | (MemLeaf(_), StorageKind::Memory) => kib!(128),
             (Internal(_), _) => return None,
             (CopylessInternal(_), _) => return None,
         })
@@ -578,8 +578,8 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                 (Node(Internal(right_sibling)), pivot_key, internal.level())
             }
             MemLeaf(ref mut nvmleaf) => {
-                let (right_sibling, pivot_key, _, _pk) =
-                    nvmleaf.split(min_size.unwrap(), max_size.unwrap());
+                let (right_sibling, pivot_key, _pk) =
+                    nvmleaf.split(min_size.unwrap(), max_size.unwrap()).take().0;
                 (Node(MemLeaf(right_sibling)), pivot_key, 0)
             }
             CopylessInternal(ref mut nvminternal) => {
@@ -795,16 +795,14 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                 PackedLeaf(_) => unreachable!(),
                 Leaf(ref mut leaf) => leaf.insert(key, keyinfo, msg, msg_action),
                 Internal(ref mut internal) => internal.insert(key, keyinfo, msg, msg_action),
-                MemLeaf(ref mut nvmleaf) => nvmleaf.insert(key, keyinfo, msg, msg_action),
+                MemLeaf(ref mut nvmleaf) => nvmleaf.insert(key, keyinfo, msg, msg_action).take().1,
                 CopylessInternal(ref mut nvminternal) => {
-                    // FIXME: Treat this error, this may happen if the database
-                    // is in an invalid state for example when nodes are moved
-                    // around. It shouldn't happen in theory at this point, but
-                    // there is the possibility of bugs.
+                    // This is a remainder from the version in which we
+                    // wroteback child buffers separately.
                     let child_idx = nvminternal.idx(key.borrow());
                     let link = nvminternal.get_mut(key.borrow());
                     let buffer_node = link.buffer_mut();
-                    let size_delta = buffer_node.insert(key, keyinfo, msg, msg_action);
+                    let size_delta = buffer_node.insert(key, keyinfo, msg, msg_action).take().1;
                     nvminternal.after_insert_size_delta(child_idx, size_delta);
                     size_delta
                 }
@@ -823,15 +821,18 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
                 PackedLeaf(_) => unreachable!(),
                 Leaf(ref mut leaf) => leaf.insert_msg_buffer(msg_buffer, msg_action),
                 Internal(ref mut internal) => internal.insert_msg_buffer(msg_buffer, msg_action),
-                MemLeaf(ref mut nvmleaf) => nvmleaf.insert_msg_buffer(msg_buffer, msg_action),
+                MemLeaf(ref mut nvmleaf) => {
+                    nvmleaf.insert_msg_buffer(msg_buffer, msg_action).take().1
+                }
                 CopylessInternal(ref mut nvminternal) => {
-                    // This might take some time and fills the cache considerably.
+                    // This is a remainder from the version in which we
+                    // wroteback child buffers separately.
                     let mut size_delta = 0;
                     for (k, (kinfo, v)) in msg_buffer {
                         let idx = nvminternal.idx(&k);
                         let link = nvminternal.get_mut(&k);
                         let buffer_node = link.buffer_mut();
-                        let delta = buffer_node.insert(k, kinfo, v, msg_action.clone());
+                        let delta = buffer_node.insert(k, kinfo, v, msg_action.clone()).take().1;
                         nvminternal.after_insert_size_delta(idx, delta);
                         size_delta += delta;
                     }
@@ -849,7 +850,10 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         // PACKED leaf as is again. This violates the restriction that they may
         // never be written again, therefore we need a new interface preparing
         // packed leafs for this exact and only purpose.
-        self.ensure_unpacked();
+        //
+        // FIXME: When we unpack this the cache size changes, we need to update
+        // the cache entry.
+        let size_delta = self.ensure_unpacked();
         match self.0 {
             // FIXME: see above
             PackedLeaf(_) => unreachable!(),
@@ -857,7 +861,9 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
             Internal(ref mut internal) => {
                 ApplyResult::NextNode(internal.apply_with_info(key, pref))
             }
-            MemLeaf(ref mut nvmleaf) => ApplyResult::NVMLeaf(nvmleaf.apply_with_info(key, pref)),
+            MemLeaf(ref mut nvmleaf) => {
+                ApplyResult::NVMLeaf(nvmleaf.apply_with_info(key, pref).take().0)
+            }
             CopylessInternal(ref mut nvminternal) => {
                 ApplyResult::NextNode(nvminternal.apply_with_info(key, pref))
             }
@@ -949,8 +955,8 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                 (Node(Internal(node)), pivot_key, size_delta, pk)
             }
             MemLeaf(ref mut nvmleaf) => {
-                let (node, pivot_key, size_delta, pk) =
-                    nvmleaf.split(min_size.unwrap(), max_size.unwrap());
+                let ((node, pivot_key, pk), size_delta) =
+                    nvmleaf.split(min_size.unwrap(), max_size.unwrap()).take();
                 (Node(MemLeaf(node)), pivot_key, size_delta, pk)
             }
             CopylessInternal(ref mut nvminternal) => {
@@ -962,22 +968,23 @@ impl<N: ObjectReference + StaticSize + HasStoragePreference> Node<N> {
                     nvminternal.actual_size()
                 );
                 let (node, pivot_key, size_delta, pk) = nvminternal.split();
-                assert!(nvminternal.fanout() >= MIN_FANOUT);
-                assert!(node.fanout() >= MIN_FANOUT);
                 (Node(CopylessInternal(node)), pivot_key, size_delta, pk)
             }
         }
     }
 
     pub(super) fn merge(&mut self, right_sibling: &mut Self, pivot_key: CowBytes) -> isize {
-        self.ensure_unpacked();
-        right_sibling.ensure_unpacked();
-        match (&mut self.0, &mut right_sibling.0) {
+        // FIXME: Propagate isize change completely
+        let d0 = self.ensure_unpacked();
+        let _ = right_sibling.ensure_unpacked();
+        d0 + match (&mut self.0, &mut right_sibling.0) {
             (&mut Leaf(ref mut left), &mut Leaf(ref mut right)) => left.merge(right),
             (&mut Internal(ref mut left), &mut Internal(ref mut right)) => {
                 left.merge(right, pivot_key)
             }
-            (&mut MemLeaf(ref mut left), &mut MemLeaf(ref mut right)) => left.append(right),
+            (&mut MemLeaf(ref mut left), &mut MemLeaf(ref mut right)) => {
+                left.append(right).take().1
+            }
             (&mut CopylessInternal(ref mut left), &mut CopylessInternal(ref mut right)) => {
                 left.merge(right, pivot_key)
             }

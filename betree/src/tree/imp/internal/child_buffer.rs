@@ -134,15 +134,16 @@ impl<N> ChildBuffer<N> {
     }
 
     pub fn from_mem_child_buffer(mut other: PackedChildBuffer, np: N) -> Self {
-        let msgs = std::mem::replace(other.buffer.unpacked(), Default::default());
-        let buffer_entries_size = msgs.iter().map(|(k, v)| k.size() + v.size()).sum();
-        Self {
-            messages_preference: other.messages_preference,
-            system_storage_preference: other.system_storage_preference,
-            buffer_entries_size,
-            buffer: msgs,
-            node_pointer: RwLock::new(np),
-        }
+        todo!()
+        // let msgs = std::mem::replace(other.buffer.unpacked(), Default::default());
+        // let buffer_entries_size = msgs.iter().map(|(k, v)| k.size() + v.size()).sum();
+        // Self {
+        //     messages_preference: other.messages_preference,
+        //     system_storage_preference: other.system_storage_preference,
+        //     buffer_entries_size,
+        //     buffer: msgs,
+        //     node_pointer: RwLock::new(np),
+        // }
     }
 }
 
