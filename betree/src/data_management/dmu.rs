@@ -425,6 +425,7 @@ where
                 super::Size::size(&*object)
             }
         };
+        let cache_size = object.cache_size();
         log::trace!("Entering write back of {:?}", &mid);
 
         if object_size > 4 * 1024 * 1024 {
@@ -514,7 +515,7 @@ where
             // We can safely ignore pins.
             // If it's pinned, it must be a readonly request.
             was_present = if evict {
-                cache.force_remove(&ObjectKey::InWriteback(mid), object_size)
+                cache.force_remove(&ObjectKey::InWriteback(mid), cache_size)
             } else {
                 cache.force_change_key(
                     &ObjectKey::InWriteback(mid),
@@ -930,7 +931,11 @@ where
     }
 
     fn remove(&self, or: Self::ObjectRef) {
-        match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
+        match self
+            .cache
+            .write()
+            .remove(&or.as_key(), |obj| obj.cache_size())
+        {
             Ok(_) | Err(RemoveError::NotPresent) => {}
             // TODO
             Err(RemoveError::Pinned) => {
@@ -950,7 +955,11 @@ where
     ) -> Result<Node<ObjRef<ObjectPointer<SPL::Checksum>>>, Error> {
         let obj = loop {
             self.get(&mut or)?;
-            match self.cache.write().remove(&or.as_key(), |obj| obj.size()) {
+            match self
+                .cache
+                .write()
+                .remove(&or.as_key(), |obj| obj.cache_size())
+            {
                 Ok(obj) => break obj,
                 Err(RemoveError::NotPresent) => {}
                 // TODO

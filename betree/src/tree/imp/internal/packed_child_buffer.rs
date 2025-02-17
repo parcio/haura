@@ -713,10 +713,10 @@ impl PackedChildBuffer {
                         (data, new_size)
                     } else {
                         let data = e.remove();
-                        return (-(key_size as isize
-                            + data.1.len() as isize
-                            + PER_KEY_BYTES as isize))
-                            .into();
+                        return size_change.map_with_size_change(|_| {
+                            (-(key_size as isize + data.size() as isize + PER_KEY_BYTES as isize))
+                                .into()
+                        });
                     }
                 } else {
                     let merged_msg = msg_action.merge(&key, msg, lower_msg);

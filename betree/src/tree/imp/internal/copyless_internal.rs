@@ -525,11 +525,6 @@ impl<N: StaticSize> Size for Vec<N> {
 impl<N: ObjectReference> CopylessInternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
         self.meta_data.invalidate();
-
-        // println!("Disjoint node has {} children", self.children.len());
-
-        assert!(self.fanout() >= 2 * MIN_FANOUT);
-
         let split_off_idx = self.fanout() / 2;
         let pivot = self.meta_data.pivot.split_off(split_off_idx);
         let pivot_key = self.meta_data.pivot.pop().unwrap();
