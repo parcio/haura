@@ -16,12 +16,6 @@ use serde::{Deserialize, Serialize};
 // OPTIM: For all the LIST variants of allocators: When building the bitmap we can save the size of
 // the largest free segment. This could save some entire list traversals but introduces one branch
 // per allocation.
-//
-// OPTIM: For all the SCAN variants of allocators: we could use assembly (and possibly SIMD) to
-// count the leading/trailing 0s/1s. This could be faster than relying on the compiler.
-//
-// OPTIM: For the FSM variants: we could when updating the internal nodes on insertion stop early,
-// when we notice, that the offset changes
 mod first_fit_scan;
 pub use self::first_fit_scan::FirstFitScan;
 
