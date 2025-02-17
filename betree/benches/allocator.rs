@@ -4,9 +4,11 @@ use betree_storage_stack::allocator::{
     WorstFitScan, WorstFitTree, SEGMENT_SIZE_BYTES,
 };
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
-use rand::distributions::{Distribution, Uniform};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use rand::{
+    distributions::{Distribution, Uniform},
+    rngs::StdRng,
+    SeedableRng,
+};
 use zipf::ZipfDistribution;
 
 #[derive(Clone)]
