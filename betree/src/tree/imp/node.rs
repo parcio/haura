@@ -68,13 +68,6 @@ impl StorageMap {
         &self,
         node: &mut Node<N>,
     ) -> bool {
-        // To get the proper max_size we need a writable version of the given
-        // node. In the state diagram of nodes we check the max size only when
-        // the nodes are modified, therefore this unpack should not be
-        // unnecesary.
-        // FIXME: Dirty ensure unpacked which can change the size here preemptively either propagate or leave out if possible
-        // URGENT: FIXME
-        // node.ensure_unpacked();
         self.max_size(node)
             .map(|max_size| node.inner_size() > max_size || node.has_too_high_fanout(max_size))
             .unwrap_or(false)
@@ -96,14 +89,9 @@ impl StorageMap {
     }
 
     pub fn min_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
-        Some(
-            match (
-                &node.0,
-                self.get(
-                    node.current_preference()
-                        .unwrap_or(StoragePreference::SLOWEST),
-                ),
-            ) {
+        let pref = node.current_preference();
+        pref.and_then(|pref| {
+            Some(match (&node.0, self.get(pref)) {
                 (PackedLeaf(_), StorageKind::Hdd)
                 | (Leaf(_), StorageKind::Hdd)
                 | (MemLeaf(_), StorageKind::Hdd) => mib!(1),
@@ -115,19 +103,14 @@ impl StorageMap {
                 | (MemLeaf(_), StorageKind::Memory) => kib!(128),
                 (Internal(_), _) => return None,
                 (CopylessInternal(_), _) => return None,
-            },
-        )
+            })
+        })
     }
 
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
-        Some(
-            match (
-                &node.0,
-                self.get(
-                    node.current_preference()
-                        .unwrap_or(StoragePreference::SLOWEST),
-                ),
-            ) {
+        let pref = node.current_preference();
+        pref.and_then(|pref| {
+            Some(match (&node.0, self.get(pref)) {
                 (PackedLeaf(_), StorageKind::Hdd) | (Leaf(_), StorageKind::Hdd) => mib!(4),
                 (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => kib!(512),
                 (PackedLeaf(_), StorageKind::Memory)
@@ -135,8 +118,8 @@ impl StorageMap {
                 | (MemLeaf(_), _) => mib!(1),
                 (Internal(_), _) => mib!(4),
                 (CopylessInternal(_), _) => mib!(1),
-            },
-        )
+            })
+        })
     }
 }
 
