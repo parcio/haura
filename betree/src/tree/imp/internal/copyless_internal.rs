@@ -372,18 +372,25 @@ impl<N> CopylessInternalNode<N> {
     }
 
     pub fn after_insert_size_delta(&mut self, idx: usize, size_delta: isize) {
+        let old = self.meta_data.entries_sizes[idx];
+        let new = self.children[idx].buffer.size();
+
+        // FIXME: This is a small workaround to see if the sizes are recorded
+        // also somewhere else false.
+        let size_delta = new as isize - old as isize;
+
         // assert!(size_delta != 0);
         if size_delta > 0 {
             self.meta_data.entries_sizes[idx] += size_delta as usize;
             self.meta_data.entries_size += size_delta as usize;
-            debug_assert_eq!(
+            assert_eq!(
                 self.children[idx].buffer.size(),
                 self.meta_data.entries_sizes[idx]
             );
         } else {
             self.meta_data.entries_sizes[idx] -= -size_delta as usize;
             self.meta_data.entries_size -= -size_delta as usize;
-            debug_assert_eq!(
+            assert_eq!(
                 self.children[idx].buffer.size(),
                 self.meta_data.entries_sizes[idx]
             );
