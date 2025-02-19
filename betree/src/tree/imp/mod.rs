@@ -73,11 +73,8 @@ impl KeyInfo {
     }
 }
 
-pub(super) const MAX_INTERNAL_NODE_SIZE: usize = 4 * 1024 * 1024;
 const MIN_FLUSH_SIZE: usize = 256 * 1024;
 const MIN_FANOUT: usize = 2;
-const MIN_LEAF_NODE_SIZE: usize = 1024 * 1024;
-const MAX_LEAF_NODE_SIZE: usize = MAX_INTERNAL_NODE_SIZE;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
 /// The actual tree type.

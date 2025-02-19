@@ -48,6 +48,14 @@ impl<T: StableDeref + DerefMut, U> DerivateRefNVM<T, TakeChildBufferWrapper<'sta
     pub fn into_owner(self) -> T {
         self.owner
     }
+
+    /// Call a function on the owned owner.
+    pub fn call<F, X>(&self, f: F) -> X
+    where
+        F: FnOnce(&T) -> X,
+    {
+        f(&self.owner)
+    }
 }
 
 impl<T: AddSize, U> AddSize for DerivateRefNVM<T, U> {

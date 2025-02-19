@@ -64,10 +64,7 @@ macro_rules! mib {
 // change before it is actually written to the desired storage kind. So a block
 // leaf might be changed to a memory leaf when written to memory.
 impl StorageMap {
-    pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(
-        &self,
-        node: &mut Node<N>,
-    ) -> bool {
+    pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
         self.max_size(node)
             .map(|max_size| node.inner_size() > max_size || node.has_too_high_fanout(max_size))
             .unwrap_or(false)
