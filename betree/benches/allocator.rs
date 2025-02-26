@@ -1,7 +1,7 @@
 use betree_storage_stack::allocator::{
     self, Allocator, ApproximateBestFitTree, BestFitList, BestFitScan, BestFitTree, FirstFitList,
     FirstFitScan, FirstFitTree, NextFitList, NextFitScan, SegmentAllocator, WorstFitList,
-    WorstFitScan, WorstFitTree, SEGMENT_SIZE_BYTES,
+    WorstFitScan, WorstFitTree, HybridAllocator, SEGMENT_SIZE_BYTES,
 };
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use rand::{
@@ -120,8 +120,8 @@ fn bench_allocator_with_sync<A: Allocator>(
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    let min_size = 64;
-    let max_size = 4096;
+    let min_size = 128;
+    let max_size = 1024;
     let zipfian_exponent = 0.99;
 
     let distributions = [
@@ -154,6 +154,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         Box::new(AllocatorBenchmark::<WorstFitList>::new("worst_fit_list")),
         Box::new(AllocatorBenchmark::<WorstFitTree>::new("worst_fit_tree")),
         Box::new(AllocatorBenchmark::<SegmentAllocator>::new("segment")),
+        Box::new(AllocatorBenchmark::<HybridAllocator>::new("hybrid")),
     ];
 
     let alloc_dealloc_ratios = [

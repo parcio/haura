@@ -3,19 +3,6 @@ use bitvec::prelude::*;
 use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 
-// OPTIM: For all the LIST variants of allocators: try to remove a free segment that can be created
-// on allocation. There are two ways:
-// 1. call remove on free_segments: this copies all the elements after the removed one, one place
-//    to the front. This keeps the sorting of the array
-// 2. swap remove the segment: swap the empty segment to the back and decrease the len by 1. This
-//    breaks the sorting but is probably much faster
-// The allocate_at function is called quite rarely (only on creation of the database and on loading
-// the allocator bitmap from disk) and it's the only reason, why the free_segments are kept sorted
-// anyway. So changing that function to respect this change could increase the performance.
-//
-// OPTIM: For all the LIST variants of allocators: When building the bitmap we can save the size of
-// the largest free segment. This could save some entire list traversals but introduces one branch
-// per allocation.
 mod first_fit_scan;
 pub use self::first_fit_scan::FirstFitScan;
 
@@ -54,6 +41,9 @@ pub use self::approximate_best_fit_tree::ApproximateBestFitTree;
 
 mod worst_fit_tree;
 pub use self::worst_fit_tree::WorstFitTree;
+
+mod hybrid_allocator;
+pub use self::hybrid_allocator::HybridAllocator;
 
 /// 256KiB, so that `vdev::BLOCK_SIZE * SEGMENT_SIZE == 1GiB`
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
@@ -135,6 +125,9 @@ pub enum AllocatorType {
     /// This is a first fit allocator that was used before making the allocators
     /// generic. It is not efficient and mainly included for reference.
     SegmentAllocator,
+
+    /// **Hybrid Allocator:**
+    HybridAllocator,
 }
 
 /// The `Allocator` trait defines an interface for allocating and deallocating

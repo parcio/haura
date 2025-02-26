@@ -209,6 +209,7 @@ impl<OR: ObjectReference + HasStoragePreference> Handler<OR> {
             AllocatorType::WorstFitList => Box::new(WorstFitList::new(bitmap)),
             AllocatorType::WorstFitTree => Box::new(WorstFitTree::new(bitmap)),
             AllocatorType::SegmentAllocator => Box::new(SegmentAllocator::new(bitmap)),
+            AllocatorType::HybridAllocator => Box::new(HybridAllocator::new(bitmap)),
         };
 
         if let Some((offset, size)) = self.old_root_allocation.read() {
