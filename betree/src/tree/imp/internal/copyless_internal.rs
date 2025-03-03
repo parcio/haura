@@ -88,7 +88,6 @@ impl<N> std::fmt::Debug for CopylessInternalNode<N> {
 #[cfg_attr(test, derive(PartialEq))]
 pub(in crate::tree::imp) struct InternalNodeMetaData {
     pub level: u32,
-    pub entries_size: usize,
     pub system_storage_preference: AtomicSystemStoragePreference,
     pub pref: AtomicStoragePreference,
     pub(in crate::tree::imp) pivot: Vec<CowBytes>,
@@ -224,7 +223,6 @@ impl<N> CopylessInternalNode<N> {
         CopylessInternalNode {
             meta_data: InternalNodeMetaData {
                 level,
-                entries_size: pivot_key.size(),
                 entries_sizes: vec![left_child.buffer_size, right_child.buffer_size],
                 pivot: vec![pivot_key],
                 system_storage_preference: AtomicSystemStoragePreference::from(
@@ -382,14 +380,12 @@ impl<N> CopylessInternalNode<N> {
         // assert!(size_delta != 0);
         if size_delta > 0 {
             self.meta_data.entries_sizes[idx] += size_delta as usize;
-            self.meta_data.entries_size += size_delta as usize;
             assert_eq!(
                 self.children[idx].buffer.size(),
                 self.meta_data.entries_sizes[idx]
             );
         } else {
             self.meta_data.entries_sizes[idx] -= -size_delta as usize;
-            self.meta_data.entries_size -= -size_delta as usize;
             assert_eq!(
                 self.children[idx].buffer.size(),
                 self.meta_data.entries_sizes[idx]
@@ -518,7 +514,6 @@ impl<N> CopylessInternalNode<N> {
         N: ObjectReference,
     {
         self.meta_data.invalidate();
-        self.meta_data.entries_size = 0;
         self.children.drain(..)
     }
 }
@@ -547,12 +542,10 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
             + entries_sizes.iter().sum::<usize>();
 
         let size_delta = entries_size + pivot_key.size();
-        self.meta_data.entries_size -= size_delta;
 
         let right_sibling = CopylessInternalNode {
             meta_data: InternalNodeMetaData {
                 level: self.meta_data.level,
-                entries_size,
                 entries_sizes,
                 entries_prefs,
                 pivot,
@@ -576,9 +569,8 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
     }
 
     pub fn merge(&mut self, right_sibling: &mut Self, old_pivot_key: CowBytes) -> isize {
+        let old = self.size();
         self.meta_data.invalidate();
-        let size_delta = right_sibling.meta_data.entries_size + old_pivot_key.size();
-        self.meta_data.entries_size += size_delta;
         self.meta_data.pivot.push(old_pivot_key);
         self.meta_data
             .pivot
@@ -591,8 +583,9 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
             .append(&mut right_sibling.meta_data.entries_sizes);
 
         self.children.append(&mut right_sibling.children);
+        let new = self.size();
 
-        size_delta as isize
+        old as isize - new as isize
     }
 
     /// Translate any object ref in a `NVMChildBuffer` from `Incomplete` to `Unmodified` state.
@@ -827,7 +820,6 @@ where
             + N::static_size() * 2
             + std::mem::size_of::<u8>()
             + std::mem::size_of::<usize>();
-        self.node.meta_data.entries_size -= size_delta;
         left_buffer.append(&mut right_buffer);
         self.node.meta_data.entries_sizes[self.pivot_key_idx] = left_buffer.size();
         self.node.meta_data.invalidate();
@@ -955,7 +947,6 @@ mod tests {
             CopylessInternalNode {
                 meta_data: InternalNodeMetaData {
                     level: self.meta_data.level,
-                    entries_size: self.meta_data.entries_size,
                     pivot: self.meta_data.pivot.clone(),
                     system_storage_preference: self.meta_data.system_storage_preference.clone(),
                     pref: self.meta_data.pref.clone(),
@@ -972,7 +963,6 @@ mod tests {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
             let pivot_key_cnt = rng.gen_range(0..10);
-            let mut entries_size = 0;
 
             let mut pivot = Vec::with_capacity(pivot_key_cnt);
             for _ in 0..pivot_key_cnt {
@@ -980,7 +970,6 @@ mod tests {
                     let k = Key::arbitrary(g);
                     k.0
                 };
-                entries_size += pivot_key.size();
                 pivot.push(pivot_key);
             }
             pivot.sort();
@@ -988,19 +977,15 @@ mod tests {
             let mut children: Vec<ChildLink<T>> = Vec::with_capacity(pivot_key_cnt + 1);
             for _ in 0..pivot_key_cnt + 1 {
                 let buffer = PackedChildBuffer::arbitrary(g);
-                entries_size += T::static_size() + buffer.size();
                 children.push(ChildLink {
                     buffer,
                     ptr: RwLock::new(T::arbitrary(g)),
                 });
             }
 
-            entries_size += 4 + 8 + pivot_key_cnt * 8 + pivot_key_cnt * 1;
-
             CopylessInternalNode {
                 meta_data: InternalNodeMetaData {
                     pivot,
-                    entries_size,
                     level: 1,
                     system_storage_preference: AtomicSystemStoragePreference::from(
                         StoragePreference::NONE,
