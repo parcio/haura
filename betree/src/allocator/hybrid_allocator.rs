@@ -10,14 +10,59 @@ const POOL_ELEMENTS: usize = POOL_BLOCKS_TENTATIVE / SECTION_SIZE;
 const POOL_BITMAP_BYTES: usize = POOL_ELEMENTS / 8;
 const POOL_BLOCKS: usize = POOL_ELEMENTS * SECTION_SIZE;
 
+struct Pool<const SECTION_SIZE: usize, const ELEMENTS: usize, const BYTES: usize> {
+    bitmap: BitArray<[u8; BYTES], Lsb0>,
+    last_offset: usize,
+}
+
+impl<const SECTION_SIZE: usize, const ELEMENTS: usize, const BYTES: usize>
+    Pool<SECTION_SIZE, ELEMENTS, BYTES>
+{
+    fn new(bitmap: BitArr!(for SEGMENT_SIZE, in u8, Lsb0)) -> Self {
+        let mut pool = Pool {
+            bitmap: BitArray::new([0u8; BYTES]),
+            last_offset: 0,
+        };
+
+        // Initialize the pool bitmap
+        for i in 0..ELEMENTS {
+            let start = i * SECTION_SIZE;
+            let end = (i + 1) * SECTION_SIZE;
+            if bitmap[start..end].any() {
+                pool.bitmap.set(i, true);
+            }
+        }
+
+        pool
+    }
+
+    fn allocate_section(&mut self) -> Option<u32> {
+        // Next-Fit allocation within the pool
+        for _ in 0..ELEMENTS {
+            if self.last_offset >= ELEMENTS {
+                self.last_offset = 0; // Wrap around
+            }
+
+            let offset = self.last_offset;
+            self.last_offset += 1;
+
+            if !self.bitmap[offset] {
+                // Found free space.
+                self.bitmap.set(offset, true);
+                return Some(offset as u32);
+            }
+        }
+        None
+    }
+}
+
 /// Hybrid allocator with a pool for `SECTION_SIZE`d-block allocations and NextFitScan for the rest.
 pub struct HybridAllocator {
     // Underlying bitmap of the allocator. The NextFitScan allocator works directly on this bitmap.
     data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
-    // Bitmap for the pool, one bit manages one section
-    pool_bitmap: BitArr!(for POOL_ELEMENTS, in u8, Lsb0),
-    last_offset_pool: usize,
     last_offset: u32,
+    // Bitmap for the pool, one bit manages one section
+    pool: Pool<SECTION_SIZE, POOL_ELEMENTS, POOL_BITMAP_BYTES>,
 }
 
 impl Allocator for HybridAllocator {
@@ -29,13 +74,12 @@ impl Allocator for HybridAllocator {
     where
         Self: Sized,
     {
+        let data = BitArray::new(bitmap);
         let mut allocator = HybridAllocator {
-            data: BitArray::new(bitmap),
-            pool_bitmap: BitArray::new([0u8; POOL_BITMAP_BYTES]),
+            data,
             last_offset: POOL_BLOCKS as u32,
-            last_offset_pool: 0,
+            pool: Pool::new(data),
         };
-        allocator.initialize_pool();
         allocator
     }
 
@@ -45,24 +89,12 @@ impl Allocator for HybridAllocator {
         }
 
         if size == SECTION_SIZE as u32 {
-            // Try to allocate from the pool using Next-Fit within the pool.
-            for _ in 0..POOL_ELEMENTS {
-                // Iterate through all pool elements for Next-Fit
-                if self.last_offset_pool >= POOL_ELEMENTS {
-                    self.last_offset_pool = 0; // Wrap around
-                }
-
-                let pool_offset_index = self.last_offset_pool;
-
-                if !self.pool_bitmap[pool_offset_index] {
-                    self.pool_bitmap.set(pool_offset_index, true);
-                    let offset = (pool_offset_index * SECTION_SIZE) as u32;
-                    self.mark(offset, size, Action::Allocate);
-                    self.last_offset_pool += 1;
-                    return Some(offset);
-                }
-
-                self.last_offset_pool += 1;
+            // Try to allocate from the pool.
+            if let Some(pool_offset) = self.pool.allocate_section() {
+                // Found free space.
+                let offset = pool_offset * SEGMENT_SIZE as u32;
+                self.mark(offset, size, Action::Allocate);
+                return Some(offset);
             }
         }
 
@@ -125,20 +157,9 @@ impl Allocator for HybridAllocator {
 
         // Mark the correct bit in the pool as allocated if the offset is in the pool.
         if offset < POOL_BLOCKS as u32 {
-            self.pool_bitmap.set(offset as usize / SECTION_SIZE, true);
+            self.pool.bitmap.set(offset as usize / SECTION_SIZE, true);
         }
 
         true
-    }
-}
-
-impl HybridAllocator {
-    fn initialize_pool(&mut self) {
-        // Initialize the pool bitmap
-        for i in 0..POOL_ELEMENTS {
-            if self.data[i * SECTION_SIZE..(i + 1) * SECTION_SIZE].any() {
-                self.pool_bitmap.set(i, true);
-            }
-        }
     }
 }
