@@ -334,6 +334,7 @@ static int fio_haura_setup(struct thread_data *td) {
     */
     if ((global_data.db = betree_open_db(cfg, &error)) == NULL ||
         td_write(td)) {
+      error = NULL;
     new_db:
       if ((global_data.db = betree_create_db(cfg, &error)) == NULL) {
         return bail(error);
