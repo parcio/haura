@@ -1,4 +1,5 @@
 use super::*;
+use std::cmp::min;
 
 // Define pool configurations at compile time.
 // Each tuple represents a pool: (SECTION_SIZE, POOL_PERCENTAGE)
@@ -221,15 +222,20 @@ impl Allocator for HybridAllocator {
         }
         self.mark(offset, size, Action::Allocate);
 
-        // TODO: right now this isn't correct if the space lies in multiple sections of a pool.
+        // Find all pools and elements of these pools, that intersect the allocation in some way
+        // and mark them as allocated.
         for i in 0..NUM_POOLS {
-            let pool = &self.pools[i];
+            let pool = &mut self.pools[i];
             let pool_start = POOL_OFFSET_START[i] as u32;
             let pool_end = pool_start + POOL_BLOCKS_PER_POOL[i] as u32;
             if offset >= pool_start && offset < pool_end {
-                let pool_section_offset = (offset - pool_start) / pool.section_size as u32;
-                self.pools[i].bitmap.set(pool_section_offset as usize, true);
-                return true;
+                let pool_section_offset = (offset - pool_start) as usize / pool.section_size;
+                let pool_section_size = (size as usize / pool.section_size) + 1;
+
+                let pool_section_end =
+                    min(pool_section_size + pool_section_offset, pool.bitmap.len());
+
+                pool.bitmap[pool_section_offset..pool_section_size].fill(true);
             }
         }
 
