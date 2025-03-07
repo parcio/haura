@@ -87,3 +87,14 @@ nvm = ["pmdk"]
 # Log the allocations and deallocations done for later analysis
 allocation_log = []
 
+# Used for benchmarking the allocators on different segment sizes
+seg_log_2_14 = []
+seg_log_2_15 = []
+seg_log_2_16 = []
+seg_log_2_17 = []
+seg_log_2_18 = []
+seg_log_2_19 = []
+seg_log_2_20 = []
+seg_log_2_21 = []
+seg_log_2_22 = []
+seg_log_2_23 = []

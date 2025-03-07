@@ -49,7 +49,43 @@ pub use self::hybrid_allocator::HybridAllocator;
 pub const SEGMENT_SIZE: usize = 1 << SEGMENT_SIZE_LOG_2;
 /// Number of bytes required to store a segments allocation bitmap
 pub const SEGMENT_SIZE_BYTES: usize = SEGMENT_SIZE / 8;
-const SEGMENT_SIZE_LOG_2: usize = 18;
+
+#[cfg(feature = "seg_log_2_14")]
+pub const SEGMENT_SIZE_LOG_2: usize = 14;
+#[cfg(feature = "seg_log_2_15")]
+pub const SEGMENT_SIZE_LOG_2: usize = 15;
+#[cfg(feature = "seg_log_2_16")]
+pub const SEGMENT_SIZE_LOG_2: usize = 16;
+#[cfg(feature = "seg_log_2_17")]
+pub const SEGMENT_SIZE_LOG_2: usize = 17;
+#[cfg(feature = "seg_log_2_18")]
+pub const SEGMENT_SIZE_LOG_2: usize = 18;
+#[cfg(feature = "seg_log_2_19")]
+pub const SEGMENT_SIZE_LOG_2: usize = 19;
+#[cfg(feature = "seg_log_2_20")]
+pub const SEGMENT_SIZE_LOG_2: usize = 20;
+#[cfg(feature = "seg_log_2_21")]
+pub const SEGMENT_SIZE_LOG_2: usize = 21;
+#[cfg(feature = "seg_log_2_22")]
+pub const SEGMENT_SIZE_LOG_2: usize = 22;
+#[cfg(feature = "seg_log_2_23")]
+pub const SEGMENT_SIZE_LOG_2: usize = 23;
+#[cfg(not(any(
+    feature = "seg_log_2_14",
+    feature = "seg_log_2_15",
+    feature = "seg_log_2_16",
+    feature = "seg_log_2_17",
+    feature = "seg_log_2_18",
+    feature = "seg_log_2_19",
+    feature = "seg_log_2_20",
+    feature = "seg_log_2_21",
+    feature = "seg_log_2_22",
+    feature = "seg_log_2_23"
+)))]
+/// Define SEGMENT_SIZE_LOG_2 based on feature flags used for benchmarking allocators based on
+/// different segment sizes.
+pub const SEGMENT_SIZE_LOG_2: usize = 18;
+
 const SEGMENT_SIZE_MASK: usize = SEGMENT_SIZE - 1;
 
 /// The `AllocatorType` enum represents different strategies for allocating blocks
