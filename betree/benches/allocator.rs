@@ -181,10 +181,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let zipfian_exponent = 0.99;
 
     let distributions = [
-        (
-            "uniform",
-            SizeDistribution::Uniform(Uniform::new(min_size, max_size)),
-        ),
+        //(
+        //    "uniform",
+        //    SizeDistribution::Uniform(Uniform::new(min_size, max_size + 1)),
+        //),
         (
             "zipfian",
             SizeDistribution::Zipfian(
@@ -270,5 +270,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    // This can be any expression that returns a `Criterion` object.
+    config = Criterion::default().sample_size(500).measurement_time(Duration::new(120, 0)).warm_up_time(Duration::new(10, 0)).without_plots();
+    targets = criterion_benchmark
+}
 criterion_main!(benches);
