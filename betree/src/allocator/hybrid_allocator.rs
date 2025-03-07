@@ -64,7 +64,6 @@ struct Pool {
 
 impl Pool {
     fn new(section_size: usize, elements: usize) -> Self {
-        let bytes = (elements + 7) / 8;
         Pool {
             bitmap: BitVec::with_capacity(elements), // Initialize with capacity for performance
             last_offset: 0,
@@ -235,7 +234,7 @@ impl Allocator for HybridAllocator {
                 let pool_section_end =
                     min(pool_section_size + pool_section_offset, pool.bitmap.len());
 
-                pool.bitmap[pool_section_offset..pool_section_size].fill(true);
+                pool.bitmap[pool_section_offset..pool_section_end].fill(true);
             }
         }
 
