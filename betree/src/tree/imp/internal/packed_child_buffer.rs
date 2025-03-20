@@ -674,6 +674,13 @@ impl PackedChildBuffer {
 
         self.messages_preference.upgrade(keyinfo.storage_preference);
 
+        // if self.entries_size < 2 * 1024 * 1024 {
+        //     println!(
+        //         "too large; is leaf? {} size? {}",
+        //         self.is_leaf, self.entries_size,
+        //     );
+        // }
+
         // grab cache size change and drop ref
         let size_change = self.buffer.unpacked();
 

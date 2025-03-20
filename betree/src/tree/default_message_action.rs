@@ -237,7 +237,7 @@ impl DefaultMessageAction {
             }
         }
 
-        if n_upserts > 8 {
+        if n_upserts > 1024 {
             log::warn!("Applied {} upserts", n_upserts);
         }
         *msg_data = Some(data.into());

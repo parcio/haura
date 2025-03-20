@@ -112,7 +112,7 @@ impl<N: StaticSize> Size for CopylessInternalNode<N> {
             + std::mem::size_of::<u32>()
             + self.children.len() * N::static_size()
             + 8
-            + self.children.iter().map(|c| c.buffer.size()).sum::<usize>()
+            + self.meta_data.entries_sizes.iter().sum::<usize>()
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -174,7 +174,9 @@ impl<N: HasStoragePreference> HasStoragePreference for CopylessInternalNode<N> {
     }
 
     fn correct_preference(&self) -> StoragePreference {
-        let storagepref = self.recalculate();
+        let storagepref = self
+            .current_preference()
+            .unwrap_or_else(|| self.recalculate());
         self.meta_data
             .system_storage_preference
             .weak_bound(&storagepref)
@@ -370,27 +372,34 @@ impl<N> CopylessInternalNode<N> {
     }
 
     pub fn after_insert_size_delta(&mut self, idx: usize, size_delta: isize) {
-        let old = self.meta_data.entries_sizes[idx];
-        let new = self.children[idx].buffer.size();
+        self.meta_data.entries_sizes[idx] = self.children[idx].buffer.size();
 
-        // FIXME: This is a small workaround to see if the sizes are recorded
-        // also somewhere else false.
-        let size_delta = new as isize - old as isize;
+        assert!(
+            self.meta_data.entries_sizes[idx] < 4 * 1024 * 1024,
+            "child buffer got way too large: {:#?}",
+            std::backtrace::Backtrace::force_capture()
+        );
+        // let old = self.meta_data.entries_sizes[idx];
+        // let new = self.children[idx].buffer.size();
 
-        // assert!(size_delta != 0);
-        if size_delta > 0 {
-            self.meta_data.entries_sizes[idx] += size_delta as usize;
-            assert_eq!(
-                self.children[idx].buffer.size(),
-                self.meta_data.entries_sizes[idx]
-            );
-        } else {
-            self.meta_data.entries_sizes[idx] -= -size_delta as usize;
-            assert_eq!(
-                self.children[idx].buffer.size(),
-                self.meta_data.entries_sizes[idx]
-            );
-        }
+        // // FIXME: This is a small workaround to see if the sizes are recorded
+        // // also somewhere else false.
+        // let size_delta = new as isize - old as isize;
+
+        // // assert!(size_delta != 0);
+        // if size_delta > 0 {
+        //     self.meta_data.entries_sizes[idx] += size_delta as usize;
+        //     assert_eq!(
+        //         self.children[idx].buffer.size(),
+        //         self.meta_data.entries_sizes[idx]
+        //     );
+        // } else {
+        //     self.meta_data.entries_sizes[idx] -= -size_delta as usize;
+        //     assert_eq!(
+        //         self.children[idx].buffer.size(),
+        //         self.meta_data.entries_sizes[idx]
+        //     );
+        // }
     }
 
     pub(crate) fn has_too_high_fanout(&self, max_size: usize) -> bool {
@@ -659,14 +668,6 @@ where
             } else {
                 None
             }
-
-            // if *child >= min_flush_size
-            //     && (size - *child <= max_node_size || self.fanout() < 2 * min_fanout)
-            // {
-            //     Some(child_idx)
-            // } else {
-            //     None
-            // }
         };
         child_idx.map(move |child_idx| {
             TakeChildBufferWrapper::NVMTakeChildBuffer(NVMTakeChildBuffer {
