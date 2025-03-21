@@ -65,20 +65,23 @@ macro_rules! mib {
 // leaf might be changed to a memory leaf when written to memory.
 impl StorageMap {
     pub fn node_is_too_large<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
-        self.max_size(node)
-            .map(|max_size| node.inner_size() > max_size || node.has_too_high_fanout(max_size))
-            .unwrap_or(false)
+        !node.is_packed_leaf()
+            && self
+                .max_size(node)
+                .map(|max_size| node.inner_size() > max_size || node.has_too_high_fanout(max_size))
+                .unwrap_or(false)
     }
 
     pub fn leaf_is_too_large<N: HasStoragePreference + StaticSize>(
         &self,
         node: &mut Node<N>,
     ) -> bool {
-        node.is_leaf() && self.node_is_too_large(node)
+        !node.is_packed_leaf() && node.is_leaf() && self.node_is_too_large(node)
     }
 
     pub fn leaf_is_too_small<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> bool {
-        node.is_leaf()
+        !node.is_packed_leaf()
+            && node.is_leaf()
             && self
                 .min_size(node)
                 .map(|min_size| node.inner_size() < min_size)
@@ -423,6 +426,13 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
             CopylessInternal(copyless_internal_node) => {
                 copyless_internal_node.has_too_high_fanout(max_size)
             }
+            _ => false,
+        }
+    }
+
+    fn is_packed_leaf(&self) -> bool {
+        match &self.0 {
+            PackedLeaf(_) => true,
             _ => false,
         }
     }
