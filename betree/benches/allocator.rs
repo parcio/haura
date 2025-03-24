@@ -67,6 +67,7 @@ fn bench_alloc<A: Allocator>(
 ) {
     let data = [0; SEGMENT_SIZE_BYTES];
     let mut allocated = Vec::new();
+    allocated.reserve(allocations as usize);
 
     let mut rng = StdRng::seed_from_u64(42);
     let mut sample_size = || -> u32 {
@@ -83,6 +84,7 @@ fn bench_alloc<A: Allocator>(
         let mut total_allocation_time = Duration::new(0, 0);
 
         for _ in 0..iters {
+            allocated.clear();
             let mut allocator = A::new(data);
 
             let start = Instant::now();
@@ -126,6 +128,7 @@ fn bench_new<A: Allocator>(
 ) {
     let data = [0; SEGMENT_SIZE_BYTES];
     let mut allocated = Vec::new();
+    allocated.reserve(allocations as usize);
 
     let mut rng = StdRng::seed_from_u64(42);
     let mut sample_size = || -> u32 {
@@ -142,6 +145,7 @@ fn bench_new<A: Allocator>(
         let mut total_allocation_time = Duration::new(0, 0);
 
         for _ in 0..iters {
+            allocated.clear();
             let start = Instant::now();
             let mut allocator = A::new(data);
             total_allocation_time += start.elapsed();
