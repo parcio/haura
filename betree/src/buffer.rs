@@ -36,18 +36,6 @@ fn split_range_at(
     range: &Range<Block<u32>>,
     mid: Block<u32>,
 ) -> (Range<Block<u32>>, Range<Block<u32>>) {
-    // NOTE:
-    // jwuensche: I've changed the behavior off this function back to the
-    // original implementation whereas we take the relative mid from the current
-    // view.  In the redesign of some of the modules this was changed to relate
-    // to a total mid which we do not calculate in some of the vdev structs.
-    // This only became a problem when performing multiple splits as the buffer
-    // returned would contain the total position in the original buffer.
-    // To keep the performance advantage we simply offset the mid from the known
-    // total start.
-    //
-    // No further implications should be expected as the only sequentially use of
-    // this structure is in the [crate::vdev::Parity1] code.
     if range.start + mid < range.end {
         // mid is in range
         (range.start..range.start + mid, range.start + mid..range.end)
@@ -475,9 +463,7 @@ impl Buf {
     /// new [CowBytes] is created.
     pub fn into_sliced_cow_bytes(self) -> SlicedCowBytes {
         match self.buf {
-            BufSource::Allocated(_) => {
-                CowBytes::from(self.into_boxed_slice()).into()
-            },
+            BufSource::Allocated(_) => CowBytes::from(self.into_boxed_slice()).into(),
             BufSource::Foreign(stg, size) => {
                 let ptr = ManuallyDrop::new(
                     Arc::try_unwrap(stg)
@@ -486,7 +472,7 @@ impl Buf {
                 );
 
                 unsafe { SlicedCowBytes::from_raw(ptr.as_ptr(), size.to_bytes() as usize) }
-            },
+            }
         }
     }
 
