@@ -1,6 +1,7 @@
 //! Implementation of the [DisjointInternalNode] node type.
 use crate::{
     buffer::Buf,
+    checksum::Checksum,
     data_management::IntegrityMode,
     tree::imp::{
         node::{PivotGetMutResult, PivotGetResult},
@@ -302,9 +303,15 @@ impl<N> CopylessInternalNode<N> {
     /// - InternalNodeMetaData bytes
     /// - [child PTR; LEN]
     /// - [child BUFFER; LEN]
-    pub fn pack<W: std::io::Write>(&self, mut w: W) -> Result<IntegrityMode, std::io::Error>
+    pub fn pack<W: std::io::Write, C, F>(
+        &self,
+        mut w: W,
+        csum_builder: F,
+    ) -> Result<IntegrityMode, std::io::Error>
     where
         N: serde::Serialize + StaticSize,
+        F: Fn(&[u8]) -> C,
+        C: Checksum,
     {
         let bytes_meta_data_len = bincode::serialized_size(&self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -328,7 +335,7 @@ impl<N> CopylessInternalNode<N> {
         }
 
         for child in self.children.iter() {
-            child.buffer.pack(&mut w)?;
+            child.buffer.pack(&mut w, &csum_builder)?;
         }
 
         Ok(IntegrityMode::Internal)
@@ -379,27 +386,6 @@ impl<N> CopylessInternalNode<N> {
             "child buffer got way too large: {:#?}",
             std::backtrace::Backtrace::force_capture()
         );
-        // let old = self.meta_data.entries_sizes[idx];
-        // let new = self.children[idx].buffer.size();
-
-        // // FIXME: This is a small workaround to see if the sizes are recorded
-        // // also somewhere else false.
-        // let size_delta = new as isize - old as isize;
-
-        // // assert!(size_delta != 0);
-        // if size_delta > 0 {
-        //     self.meta_data.entries_sizes[idx] += size_delta as usize;
-        //     assert_eq!(
-        //         self.children[idx].buffer.size(),
-        //         self.meta_data.entries_sizes[idx]
-        //     );
-        // } else {
-        //     self.meta_data.entries_sizes[idx] -= -size_delta as usize;
-        //     assert_eq!(
-        //         self.children[idx].buffer.size(),
-        //         self.meta_data.entries_sizes[idx]
-        //     );
-        // }
     }
 
     pub(crate) fn has_too_high_fanout(&self, max_size: usize) -> bool {

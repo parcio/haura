@@ -13,7 +13,15 @@
 //! data blobs as in the [crate::object] module.
 
 use crate::{
-    buffer::Buf, cache::AddSize, database::DatasetId, migration::DmlMsg, size::{Size, StaticSize}, storage_pool::StoragePoolLayer, tree::{PivotKey, StorageKind}, StoragePreference
+    buffer::Buf,
+    cache::AddSize,
+    checksum::{Builder, Checksum},
+    database::DatasetId,
+    migration::DmlMsg,
+    size::{Size, StaticSize},
+    storage_pool::StoragePoolLayer,
+    tree::{PivotKey, StorageKind},
+    StoragePreference,
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -134,7 +142,12 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
 
     /// Packs the object into the given `writer`. Returns an option if the node
     /// can be read with a subset of data starting from the start of the range.
-    fn pack<W: Write>(&self, writer: W, pp: PreparePack) -> Result<IntegrityMode, io::Error>;
+    fn pack<W: Write, F: Fn(&[u8]) -> C, C: Checksum>(
+        &self,
+        writer: W,
+        pp: PreparePack,
+        csum_builder: F,
+    ) -> Result<IntegrityMode, io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at(d_id: DatasetId, data: Buf) -> Result<Self, io::Error>;
 

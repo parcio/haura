@@ -471,7 +471,11 @@ where
                     self.spl().storage_kind_map()[storage_class as usize],
                     &pivot_key,
                 )?;
-                let part = object.pack(&mut buf, pp)?;
+                let part = object.pack(&mut buf, pp, |bytes| {
+                    let mut builder = self.default_checksum_builder.build();
+                    builder.ingest(bytes);
+                    builder.finish()
+                })?;
                 drop(object);
                 part
             };

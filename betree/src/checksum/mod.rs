@@ -1,7 +1,7 @@
 //! This module provides a `Checksum` trait and implementors for verifying data
 //! integrity.
 
-use crate::size::Size;
+use crate::size::{Size, StaticSize};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{error::Error, fmt, iter::once};
 
@@ -15,7 +15,7 @@ pub use xxhash::{XxHash, XxHashBuilder};
 
 /// A checksum to verify data integrity.
 pub trait Checksum:
-    Serialize + DeserializeOwned + Size + Clone + Send + Sync + fmt::Debug + 'static
+    Serialize + DeserializeOwned + Size + StaticSize + Clone + Send + Sync + fmt::Debug + 'static
 {
     /// Builds a new `Checksum`.
     type Builder: Builder<Self>;

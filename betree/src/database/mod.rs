@@ -67,7 +67,7 @@ const DEFAULT_SYNC_INTERVAL_MS: u64 = 1000;
 
 // This is the hash used overall in the entire database. For reconfiguration
 // recompilation is necessary and this type changed.
-type Checksum = GxHash;
+pub(crate) type Checksum = GxHash;
 
 type ObjectPointer = data_management::ObjectPointer<Checksum>;
 pub(crate) type ObjectRef = data_management::impls::ObjRef<ObjectPointer>;

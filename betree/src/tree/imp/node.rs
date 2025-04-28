@@ -14,6 +14,7 @@ use super::{
 };
 use crate::{
     buffer::Buf,
+    checksum::{Builder, Checksum},
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
@@ -227,7 +228,12 @@ impl<R: HasStoragePreference + StaticSize> HasStoragePreference for Node<R> {
 }
 
 impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<R> {
-    fn pack<W: Write>(&self, mut writer: W, _: PreparePack) -> Result<IntegrityMode, io::Error> {
+    fn pack<W: Write, F: Fn(&[u8]) -> C, C: Checksum>(
+        &self,
+        mut writer: W,
+        _: PreparePack,
+        csum_builder: F,
+    ) -> Result<IntegrityMode, io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer
                 .write_all(map.inner())
@@ -244,7 +250,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             }
             MemLeaf(ref leaf) => {
                 writer.write_all((NodeInnerType::CopylessLeaf as u32).to_be_bytes().as_ref())?;
-                leaf.pack(writer)
+                leaf.pack(writer, csum_builder)
             }
             CopylessInternal(ref cpl_internal) => {
                 writer.write_all(
@@ -252,7 +258,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         .to_be_bytes()
                         .as_ref(),
                 )?;
-                cpl_internal.pack(writer)
+                cpl_internal.pack(writer, csum_builder)
             }
         }
     }
