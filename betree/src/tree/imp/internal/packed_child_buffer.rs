@@ -208,11 +208,12 @@ impl Map {
                             values_pos
                                 .into_iter()
                                 // NOTE: This copy is cheap as the data is behind an Arc.
-                                .map(|(pos, len, csum)|
-
-                                     // TODO: Verify checksum
-
-                                     data.clone().subslice(pos, len)),
+                                .map(|(pos, len, csum)| {
+                                    // TODO: Verify checksum
+                                    let buf = data.clone().subslice(pos, len);
+                                    csum.verify(&buf).unwrap();
+                                    buf
+                                }),
                         ),
                     ),
                 ));
@@ -709,14 +710,14 @@ impl PackedChildBuffer {
                     let mut data = None;
                     msg_action.apply_to_leaf(&key, msg.clone(), &mut data);
                     if let Some(data) = data {
-                        let size = keyinfo.size() + data.len() + key_size;
+                        let size = keyinfo.size() + data.len() + key_size + Checksum::static_size();
                         e.insert((keyinfo.clone(), data));
                         size
                     } else {
                         0
                     }
                 } else {
-                    let size = key_size + msg.size() + keyinfo.size();
+                    let size = key_size + msg.size() + keyinfo.size() + Checksum::static_size();
                     e.insert((keyinfo, msg));
                     size
                 };
