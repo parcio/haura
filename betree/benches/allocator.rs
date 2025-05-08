@@ -277,7 +277,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     // This can be any expression that returns a `Criterion` object.
-    config = Criterion::default().sample_size(500).measurement_time(Duration::new(120, 0)).warm_up_time(Duration::new(10, 0)).without_plots();
+    config = Criterion::default().sample_size(500).measurement_time(Duration::new(600, 0)).warm_up_time(Duration::new(10, 0));
     targets = criterion_benchmark
 }
 criterion_main!(benches);

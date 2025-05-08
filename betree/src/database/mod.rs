@@ -170,7 +170,7 @@ impl Default for DatabaseConfiguration {
             metrics: None,
             migration_policy: None,
             allocation_log_file_path: PathBuf::from("allocation_log.bin"),
-            allocator: AllocatorType::SegmentAllocator,
+            allocator: AllocatorType::NextFitScan,
         }
     }
 }

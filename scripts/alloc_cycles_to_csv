@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+
+import argparse
+import csv
+import struct
+import os
+from typing import Iterator, Any, IO
+
+# --- Constants and Classes Copied/Adapted from the Original Script ---
+
+# Constants to get relevant information from the disk_offset.
+MASK_LAYER_ID = ((1 << 2) - 1) << (10 + 52)
+MASK_DISK_ID = ((1 << 10) - 1) << 52
+MASK_OFFSET = (1 << 52) - 1
+SEGMENT_SIZE_LOG_2 = 18
+SEGMENT_SIZE = 1 << SEGMENT_SIZE_LOG_2
+SEGMENT_SIZE_MASK = SEGMENT_SIZE - 1
+# This is the amount of bytes one (de-)allocation has in the log.
+SIZE_PER_ALLOCATION = 29
+
+
+class StorageConfig:
+    """Represents the storage configuration of the system (needed for header parsing)."""
+
+    def __init__(self, num_layers: int, disks_per_layer: list[int],
+                 blocks_per_disk: list[list[int]], blocks_per_segment: int):
+        self.num_layers = num_layers
+        self.disks_per_layer = disks_per_layer
+        self.blocks_per_disk = blocks_per_disk
+        self.blocks_per_segment = blocks_per_segment
+    # We don't need the other methods for this script
+
+
+class Timestamp:
+    time: int
+    op_type: int
+    offset: int
+    num_blocks: int
+    cycles_alloc: int
+    cycles_total: int
+    layer_id: int
+    disk_id: int
+    block_offset: int
+    segment_id: int
+    segment_offset: int
+
+    def __init__(self, op_type: int, offset: int, num_blocks: int, cycles_alloc: int, cycles_total: int, time: int):
+        self.op_type = op_type
+        self.offset = offset
+        self.num_blocks = num_blocks
+        self.cycles_alloc = cycles_alloc
+        self.cycles_total = cycles_total
+        self.time = time
+        self._parse_offset()
+
+    def __str__(self) -> str:
+        return (f"Timestep(op_type: {self.op_type}, "
+                f"offset: {self.offset}, "
+                f"num_blocks: {self.num_blocks}, "
+                f"cycles_alloc: {self.cycles_alloc}, "
+                f"cycles_total: {self.cycles_total}, "
+                f"time: {self.time}, "
+                f"layer_id: {self.layer_id}, "
+                f"disk_id: {self.disk_id}, "
+                f"block_offset: {self.block_offset}, "
+                f"segment_id: {self.segment_id}, "
+                f"segment_offset: {self.segment_offset})")
+
+    def _parse_offset(self):
+        """Parses the offset into human readable values"""
+        self.layer_id = (self.offset & MASK_LAYER_ID) >> (52 + 10)
+        self.disk_id = (self.offset & MASK_DISK_ID) >> 52
+        self.block_offset = self.offset & MASK_OFFSET
+        # In haura the segment id is a multiple of the segment size. This is ugly for plotting.
+        self.segment_id = (self.block_offset & ~SEGMENT_SIZE_MASK) // SEGMENT_SIZE
+        self.segment_offset = self.block_offset % SEGMENT_SIZE
+
+
+class Parser:
+    """Parses the allocation log file."""
+    log_file: str
+    _file_handle: IO[Any]
+    timesteps: int
+    time: int
+
+    def __init__(self, log_file: str):
+        self.log_file = log_file
+        self._file_handle = open(log_file, "rb")  # Open the file in binary mode
+
+        # Precalculate the number of timesteps.
+        _ = self.parse_header()
+        self.timesteps = self._remaining_bytes() // SIZE_PER_ALLOCATION
+        self._file_handle.seek(0)
+
+    def __del__(self):
+        try:
+            self._file_handle.close()
+        except AttributeError:
+            # Happens when the file does not exist
+            pass
+
+    def __len__(self) -> int:
+        return self.timesteps
+
+    def parse_header(self) -> StorageConfig:
+        """Parses the header of the log file and returns a StorageConfig."""
+        f = self._file_handle
+        num_classes = struct.unpack("<B", f.read(1))[0]
+        disks_per_class = []
+        for _ in range(num_classes):
+            disks_per_class.append(struct.unpack("<H", f.read(2))[0])
+
+        blocks_per_disk = []
+        for i in range(num_classes):
+            blocks_per_disk.append([])
+            for _ in range(disks_per_class[i]):
+                blocks_per_disk[i].append(struct.unpack("<Q", f.read(8))[0])
+
+        blocks_per_segment = struct.unpack("<Q", f.read(8))[0]
+
+        return StorageConfig(num_classes, disks_per_class, blocks_per_disk, blocks_per_segment)
+
+    def __iter__(self) -> Iterator[Timestamp]:
+        """Prepares the iterator by skipping the header. Returns itself as the iterator."""
+        self._file_handle.seek(0)
+        _ = self.parse_header()
+        self.time = 0
+        return self
+
+    def __next__(self) -> Timestamp:
+        """Reads the next allocation from the log file and returns a timestamp."""
+        try:
+            op_type = struct.unpack("<B", self._file_handle.read(1))[0]
+            offset = struct.unpack("<Q", self._file_handle.read(8))[0]
+            num_blocks = struct.unpack("<L", self._file_handle.read(4))[0]
+            cycles_alloc = struct.unpack("<Q", self._file_handle.read(8))[0]
+            cycles_total = struct.unpack("<Q", self._file_handle.read(8))[0]
+        except struct.error:
+            raise StopIteration
+
+        self.time += 1
+
+        return Timestamp(op_type, offset, num_blocks, cycles_alloc, cycles_total, self.time)
+
+    def _remaining_bytes(self) -> int:
+        """Returns the remaining bytes in a file from the current position of the file pointer."""
+        f = self._file_handle
+        current_position = f.tell()
+        f.seek(0, os.SEEK_END)
+        end_position = f.tell()
+        # Return to the original position.
+        f.seek(current_position, os.SEEK_SET)
+        return end_position - current_position
+
+
+def main():
+    """
+    Parses the allocation log file, filters for allocation events up to an
+    optional maximum count, and writes the allocation count number and
+    local allocation cycles to a specified output CSV file.
+    """
+    parser = argparse.ArgumentParser(
+        description="Parse allocation log and output allocation count and cycles to a CSV file, with an optional limit."
+    )
+    parser.add_argument("input_log_file", help="Path to the input binary log file.")
+    parser.add_argument("output_csv_file", help="Path to the output CSV file.")
+    parser.add_argument(
+        "--max-allocations",
+        "-n",
+        type=int,
+        default=None,  # Default is None, meaning no limit unless specified
+        help="Maximum number of allocation entries to write to the output file. If not set, all allocations are written."
+    )
+    args = parser.parse_args()
+
+    max_alloc_limit = args.max_allocations
+
+    # Optional: Add a check for invalid limit values
+    if max_alloc_limit is not None and max_alloc_limit <= 0:
+        print("Error: --max-allocations must be a positive integer if specified.")
+        exit(1)
+
+    try:
+        log_parser = Parser(args.input_log_file)
+    except FileNotFoundError:
+        print(f"Error: Input file not found at {args.input_log_file}")
+        exit(1)  # Exit if input file is not found
+    except Exception as e:
+        print(f"Error initializing parser: {e}")
+        exit(1)  # Exit on other parser init errors
+
+    allocation_count = 0  # Initialize allocation counter
+    logged_allocations = 0  # Counter for allocations actually logged
+
+    try:
+        with open(args.output_csv_file, 'w', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            # Write the header row
+            csv_writer.writerow(['allocation_count', 'allocation_cycles_local'])
+
+            # Iterate through log entries generated by the parser
+            for timestamp_entry in log_parser:
+                # Filter for entries that represent an allocation.
+                # NOTE: Assuming op_type == 1 signifies an allocation.
+                # Please adjust this value if your log uses a different indicator.
+                if timestamp_entry.op_type == 1:
+                    allocation_count += 1  # Increment total allocation counter
+
+                    # Check if the limit has been reached *before* writing
+                    if max_alloc_limit is not None and logged_allocations >= max_alloc_limit:
+                        print(f"Reached specified maximum allocation limit ({max_alloc_limit}). Stopping log output.")
+                        break  # Exit the loop, no more entries will be processed or written
+
+                    # Write the relevant data: allocation count and cycles_alloc
+                    csv_writer.writerow([allocation_count, timestamp_entry.cycles_alloc])
+                    logged_allocations += 1  # Increment counter for logged allocations
+
+        print(f"Processed {allocation_count} total allocations.")
+        print(f"Successfully wrote {logged_allocations} allocation entries to {args.output_csv_file}")
+
+    except IOError as e:
+        print(f"Error writing to output file {args.output_csv_file}: {e}")
+        exit(1)  # Exit on file writing error
+    except Exception as e:
+        print(f"An unexpected error occurred during processing: {e}")
+        exit(1)  # Exit on other processing errors
+
+
+if __name__ == "__main__":
+    main()

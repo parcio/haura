@@ -32,7 +32,6 @@ ALLOCATORS=(
     "WorstFitScan"
     "WorstFitTree"
     "SegmentAllocator"
-    "HybridAllocator"
 )
 
 # Create CSV file headers

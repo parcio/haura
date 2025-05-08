@@ -88,9 +88,27 @@ impl Allocator for FirstFitTree {
     }
 
     fn allocate_at(&mut self, size: u32, offset: u32) -> bool {
-        // Because the tree is sorted by offset because of how it's build, this shouldn't be to
-        // hard to implement efficiently
-        todo!()
+        // NOTE: Because the tree is sorted by offset because of how it's build, this shouldn't be
+        // to hard to implement efficiently if needed.
+
+        if size == 0 {
+            return true;
+        }
+        if offset + size > SEGMENT_SIZE as u32 {
+            return false;
+        }
+
+        let start_idx = offset as usize;
+        let end_idx = (offset + size) as usize;
+        if self.data[start_idx..end_idx].any() {
+            return false;
+        }
+        self.mark(offset, size, Action::Allocate);
+
+        // Rebuild the tree to reflect changes. This is **not** efficient but the easiest solution,
+        // as the allocate_at is called only **once** on loading the bitmap from disk.
+        self.build_fsm_tree();
+        true
     }
 }
 

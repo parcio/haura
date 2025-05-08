@@ -282,7 +282,7 @@ ensure_config
 #checkpoints
 #switchover
 #ingest
-# ycsb_a
+ycsb_a
 # ycsb_b
 # ycsb_c
 # ycsb_d
