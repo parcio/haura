@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from collections import Counter
 import functools
 from multiprocessing import Pool, Value, Lock
 import os
@@ -503,6 +504,8 @@ class Plotter:
             "allocation_cycles_proportion_aligned": False,
             "allocation_sizes": False,
             "allocation_sizes_ecdf": False,  # empirical cumulative distribution function
+            "allocation_size_by_time": False,
+            "cycles_by_allocation_size": False,
             "slider": False,
             "checkboxes": not args.disable_checkboxes,
         }
@@ -549,8 +552,10 @@ class Plotter:
         self.vline_allocation_cycles_total_aligned = self._allocation_cycles_total_aligned()
         self.vline_allocation_cycles_proportion = self._allocation_cycles_proportion()
         self.vline_allocation_cycles_proportion_aligned = self._allocation_cycles_proportion_aligned()
-        _ = self._allocation_sizes()
-        _ = self._allocation_sizes_ecdf()
+        self._allocation_sizes()
+        self._allocation_sizes_ecdf()
+        self._allocation_size_by_time()
+        self._cycles_by_allocation_size()
         self.slider = self._setup_slider()
         self.checkboxes = self._setup_checkboxes()
 
@@ -666,6 +671,22 @@ class Plotter:
                 layout[-1].append("checkboxes")
             for layer in self.layers:
                 layout[-1].append("allocation_sizes_ecdf")
+
+        if self.plot_config["allocation_size_by_time"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("allocation_size_by_time")
+
+        if self.plot_config["cycles_by_allocation_size"]:
+            layout.append([])
+            gridspec["height_ratios"].append(1)
+            if self.plot_config["checkboxes"]:
+                layout[-1].append("checkboxes")
+            for layer in self.layers:
+                layout[-1].append("cycles_by_allocation_size")
 
         if self.plot_config["slider"]:
             layout.append([])
@@ -998,6 +1019,7 @@ class Plotter:
         failed_allocations_ax.set_title("Allocation sizes")
         failed_allocations_ax.set_xlim(0, max(self.global_bitmap.sizes))
         failed_allocations_ax.set_ylim(0)
+        failed_allocations_ax.set_yscale("symlog")
         failed_allocations_ax.set_xlabel("Sizes")
         failed_allocations_ax.set_ylabel("Amount")
 
@@ -1013,6 +1035,81 @@ class Plotter:
         failed_allocations_ax.set_ylim(0, 1)
         failed_allocations_ax.set_xlabel("Sizes")
         failed_allocations_ax.set_ylabel("Proportion")
+
+    def _allocation_size_by_time(self):
+        """Plots allocation size by timestamp."""
+        if not self.plot_config["allocation_size_by_time"]:
+            return
+
+        data = self.global_bitmap.sizes
+        x_values = np.arange(len(self.global_bitmap.sizes))
+
+        ax = self.axd["allocation_size_by_time"]
+        ax.scatter(x_values, data, s=5.0, linewidths=0)
+        ax.set_title("Allocation Size by Timestamp")
+        ax.set_xlabel("Timestamp")
+        ax.set_ylabel("Allocation Size (Blocks)")
+        ax.set_ylim(1)
+        ax.set_xlim(0, len(x_values))
+
+        window_sizes = [100, 500, 1000]
+        colors = ['red', 'orange', 'black', 'purple']
+        line_styles = ['-', '--', '-.', ':']
+        moving_average = np.zeros_like(data, dtype=float)
+
+        for i, window_size in enumerate(window_sizes):
+            moving_average = np.zeros_like(data, dtype=float)
+            for j in range(len(data)):
+                window_start = max(0, j - window_size + 1)
+                window_end = j + 1
+                moving_average[j] = np.mean(data[window_start:window_end])
+
+            # Plot with different colors and line styles
+            ax.plot(x_values, moving_average,
+                    linewidth=1.5,
+                    color=colors[i % len(colors)],
+                    linestyle=line_styles[i % len(line_styles)],
+                    label=f"Moving Average ({window_size})")
+
+        ax.legend(loc="upper left")
+
+    def _cycles_by_allocation_size(self):
+        """Plots cycles by allocation size using box plots, bucketed for legibility."""
+        if not self.plot_config["cycles_by_allocation_size"]:
+            return
+
+        ax = self.axd["cycles_by_allocation_size"]
+
+        # Define allocation size buckets
+        bucket_size = 16
+        max_size = max(self.global_bitmap.sizes)
+        buckets = range(0, max_size + bucket_size, bucket_size)
+        bucket_begins = [b for b in buckets] # begins of the buckets for boxplot positions
+
+        # Initialize data structures for bucketed cycles
+        bucketed_cycles = {begin: [] for begin in bucket_begins}
+
+        # Bucket cycles by allocation size
+        for size, cycles in zip(self.global_bitmap.sizes, self.global_bitmap.cycles_alloc[1]):
+            if size <= max_size:
+                for begin in bucket_begins:
+                    if buckets[bucket_begins.index(begin)] <= size < buckets[bucket_begins.index(begin)] + bucket_size:
+                        bucketed_cycles[begin].append(cycles)
+                        break
+
+        # Prepare data for boxplot: list of cycle lists for each bucket
+        boxplot_data = [bucketed_cycles[begin] for begin in bucket_begins if bucketed_cycles[begin]]
+        positions = [begin for begin in bucket_begins if bucketed_cycles[begin]] # Positions of the boxplots are bucket begins
+
+        # Plotting box plots
+        ax.boxplot(boxplot_data, positions=positions, widths=bucket_size*0.5, showfliers=True, manage_ticks=False)
+
+        ax.set_title("Cycles by Allocation Size (Box Plot, Bucketed)")
+        ax.set_xlabel("Allocation Size (Blocks)")
+        ax.set_ylabel("Allocation Cycles")
+        ax.set_xlim(0, max_size + bucket_size)
+        ax.set_xticks(range(0, max_size + bucket_size + 1, 64))
+        ax.set_ylim(0)
 
     def _setup_slider(self):
         """Helper method for setting up the slider for interactive plotting."""
