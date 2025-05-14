@@ -460,13 +460,13 @@ where
         // with writeback
 
         let compression = &self.default_compression;
-        let (partial_read, compressed_data) = {
+        let (integrity_mode, compressed_data) = {
             // FIXME: cache this
             let mut state = compression.new_compression()?;
             let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
                 object_size as u32,
             ));
-            let part = {
+            let integrity_mode = {
                 let pp = object.prepare_pack(
                     self.spl().storage_kind_map()[storage_class as usize],
                     &pivot_key,
@@ -479,7 +479,7 @@ where
                 drop(object);
                 part
             };
-            (part, state.finish(buf.into_buf())?)
+            (integrity_mode, state.finish(buf.into_buf())?)
         };
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
@@ -492,13 +492,13 @@ where
 
         let info = self.modified_info.lock().remove(&mid).unwrap();
 
-        let checksum = match partial_read {
+        let checksum = match integrity_mode {
             IntegrityMode::External => {
                 let mut state = self.default_checksum_builder.build();
                 state.ingest(compressed_data.as_ref());
                 state.finish()
             }
-            IntegrityMode::Internal => self.default_checksum_builder.empty(),
+            IntegrityMode::Internal(_) => self.default_checksum_builder.empty(),
         };
 
         self.pool.begin_write(compressed_data, offset)?;
@@ -510,7 +510,7 @@ where
             decompression_tag: compression.decompression_tag(),
             generation,
             info,
-            integrity_mode: partial_read,
+            integrity_mode,
         };
 
         let was_present;

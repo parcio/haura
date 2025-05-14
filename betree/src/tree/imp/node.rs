@@ -233,7 +233,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         mut writer: W,
         _: PreparePack,
         csum_builder: F,
-    ) -> Result<IntegrityMode, io::Error> {
+    ) -> Result<IntegrityMode<C>, io::Error> {
         match self.0 {
             PackedLeaf(ref map) => writer
                 .write_all(map.inner())

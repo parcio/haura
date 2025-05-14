@@ -9,17 +9,14 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
-)]
-#[archive(check_bytes)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 /// A pointer to an on-disk serialized object.
 pub struct ObjectPointer<D> {
     pub(super) decompression_tag: DecompressionTag,
     pub(super) checksum: D,
     pub(super) offset: DiskOffset,
     pub(super) size: Block<u32>,
-    pub(super) integrity_mode: IntegrityMode,
+    pub(super) integrity_mode: IntegrityMode<D>,
     pub(super) info: DatasetId,
     pub(super) generation: Generation,
 }
@@ -102,9 +99,6 @@ impl<D> ObjectPointer<D> {
         let mut decompression_state = self.decompression_tag().new_decompression()?;
         let compressed_data = pool.read(self.size(), self.offset(), self.checksum.clone())?;
         let data = decompression_state.decompress(compressed_data)?;
-        Ok(super::Object::unpack_at(
-            self.info(),
-            data,
-        )?)
+        Ok(super::Object::unpack_at(self.info(), data)?)
     }
 }

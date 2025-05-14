@@ -796,7 +796,11 @@ impl PackedChildBuffer {
     ///     bytes: val,
     ///   ]
     ///
-    pub fn pack<W, C, F>(&self, mut w: W, csum_builder: F) -> Result<IntegrityMode, std::io::Error>
+    pub fn pack<W, C, F>(
+        &self,
+        mut w: W,
+        csum_builder: F,
+    ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         W: std::io::Write,
         F: Fn(&[u8]) -> C,
@@ -805,17 +809,20 @@ impl PackedChildBuffer {
         if !self.buffer.is_unpacked() {
             // Copy the contents of the buffer to the new writer without unpacking.
             w.write_all(&self.buffer.assert_packed()[..self.size()])?;
-            return Ok(IntegrityMode::Internal);
+            return Ok(IntegrityMode::Internal(todo!()));
         }
 
+        use std::io::Write;
+        let mut tmp = vec![];
+
         if self.is_leaf {
-            w.write_all(&[1])?;
+            tmp.write_all(&[1])?;
         } else {
-            w.write_all(&[0])?;
+            tmp.write_all(&[0])?;
         }
-        w.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
-        w.write_all(&(self.entries_size as u32).to_le_bytes())?;
-        w.write_all(
+        tmp.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
+        tmp.write_all(&(self.entries_size as u32).to_le_bytes())?;
+        tmp.write_all(
             &self
                 .system_storage_preference
                 .strong_bound(&StoragePreference::NONE)
@@ -826,14 +833,16 @@ impl PackedChildBuffer {
         let mut free_after = HEADER + self.buffer.len() * KEY_IDX_SIZE;
         for (key, (info, _)) in self.buffer.assert_unpacked().iter() {
             let key_len = key.len();
-            w.write_all(&(free_after as u32).to_le_bytes())?;
-            w.write_all(&(key_len as u32).to_le_bytes())?;
-            w.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
+            tmp.write_all(&(free_after as u32).to_le_bytes())?;
+            tmp.write_all(&(key_len as u32).to_le_bytes())?;
+            tmp.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
             free_after += key_len
                 + std::mem::size_of::<u32>()
                 + std::mem::size_of::<u32>()
                 + Checksum::static_size()
         }
+        let head_csum = csum_builder(&tmp);
+        w.write_all(&tmp)?;
         for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
             w.write_all(&key)?;
 
@@ -848,7 +857,7 @@ impl PackedChildBuffer {
             w.write_all(&val)?;
         }
 
-        Ok(IntegrityMode::Internal)
+        Ok(IntegrityMode::Internal(head_csum))
     }
 
     pub fn unpack(buf: SlicedCowBytes) -> Result<Self, std::io::Error> {

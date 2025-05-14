@@ -116,15 +116,13 @@ pub struct PreparePack();
 /// Which integrity mode is used by the nodes. Can be used to skip the
 /// processing of an entire node if it is not required to ensure integrity of
 /// data.
-#[derive(
-    Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, Copy,
-)]
-pub enum IntegrityMode {
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum IntegrityMode<C> {
     /// The default mode. Checksums are stored with the object pointers. All
     /// data is processed initially.
     External,
     /// Integrity is ensured by the node implementation itself.
-    Internal,
+    Internal(C),
 }
 
 /// An object managed by a [Dml].
@@ -147,7 +145,7 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         writer: W,
         pp: PreparePack,
         csum_builder: F,
-    ) -> Result<IntegrityMode, io::Error>;
+    ) -> Result<IntegrityMode<C>, io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at(d_id: DatasetId, data: Buf) -> Result<Self, io::Error>;
 

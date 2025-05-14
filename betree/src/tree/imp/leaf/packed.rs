@@ -232,7 +232,7 @@ impl PackedMap {
         leaf
     }
 
-    pub fn pack<W: Write>(leaf: &LeafNode, mut writer: W) -> io::Result<IntegrityMode> {
+    pub fn pack<W: Write, C>(leaf: &LeafNode, mut writer: W) -> io::Result<IntegrityMode<C>> {
         let entries = leaf.entries();
         let entries_cnt = entries.len() as u32;
         writer.write_u32::<LittleEndian>(entries_cnt)?;
@@ -255,7 +255,7 @@ impl PackedMap {
             writer.write_all(key)?;
             writer.write_all(value)?;
         }
-        Ok(IntegrityMode::Internal)
+        Ok(IntegrityMode::Internal(todo!()))
     }
 
     pub(crate) fn inner(&self) -> &SlicedCowBytes {

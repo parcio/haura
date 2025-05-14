@@ -307,12 +307,13 @@ impl<N> CopylessInternalNode<N> {
         &self,
         mut w: W,
         csum_builder: F,
-    ) -> Result<IntegrityMode, std::io::Error>
+    ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         N: serde::Serialize + StaticSize,
         F: Fn(&[u8]) -> C,
         C: Checksum,
     {
+        let mut tmp = vec![];
         let bytes_meta_data_len = bincode::serialized_size(&self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         w.write_all(&(bytes_meta_data_len as u32).to_le_bytes())?;
@@ -324,6 +325,8 @@ impl<N> CopylessInternalNode<N> {
         w.write_all(&(bytes_child_len as u32).to_le_bytes())?;
         bincode::serialize_into(&mut w, &self.children)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let csum = csum_builder(&tmp);
 
         for (size, child) in self
             .meta_data
@@ -338,7 +341,7 @@ impl<N> CopylessInternalNode<N> {
             child.buffer.pack(&mut w, &csum_builder)?;
         }
 
-        Ok(IntegrityMode::Internal)
+        Ok(IntegrityMode::Internal(csum))
     }
 
     /// Read object from a byte buffer and instantiate it.
