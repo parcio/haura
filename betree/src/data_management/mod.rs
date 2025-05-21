@@ -125,6 +125,15 @@ pub enum IntegrityMode<C> {
     Internal(C),
 }
 
+impl<C> IntegrityMode<C> {
+    pub fn checksum(&self) -> Option<&C> {
+        match self {
+            IntegrityMode::Internal(csum) => Some(csum),
+            _ => None,
+        }
+    }
+}
+
 /// An object managed by a [Dml].
 pub trait Object<R>: Size + Sized + HasStoragePreference {
     /// Informs the object about the kind of storage it will be placed upon.
@@ -147,7 +156,11 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         csum_builder: F,
     ) -> Result<IntegrityMode<C>, io::Error>;
     /// Unpacks the object from the given `data`.
-    fn unpack_at(d_id: DatasetId, data: Buf) -> Result<Self, io::Error>;
+    fn unpack_at<C: Checksum>(
+        d_id: DatasetId,
+        data: Buf,
+        integrity_mode: IntegrityMode<C>,
+    ) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.
     fn debug_info(&self) -> String;

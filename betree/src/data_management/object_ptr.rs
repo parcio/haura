@@ -99,6 +99,10 @@ impl<D> ObjectPointer<D> {
         let mut decompression_state = self.decompression_tag().new_decompression()?;
         let compressed_data = pool.read(self.size(), self.offset(), self.checksum.clone())?;
         let data = decompression_state.decompress(compressed_data)?;
-        Ok(super::Object::unpack_at(self.info(), data)?)
+        Ok(super::Object::unpack_at(
+            self.info(),
+            data,
+            self.integrity_mode.clone(),
+        )?)
     }
 }

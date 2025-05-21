@@ -1,5 +1,6 @@
 //! Implementation of a message buffering node wrapper.
 use crate::{
+    buffer,
     checksum::{Builder, Checksum as ChecksumTrait, State},
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, IntegrityMode},
@@ -261,6 +262,19 @@ impl Map {
         match self {
             Map::Packed { .. } => self.find(key).is_none(),
             Map::Unpacked(btree) => !btree.contains_key(key),
+        }
+    }
+
+    /// Return the number of bytes at the start of map that is contained within
+    /// the general checksum of the node.
+    pub fn len_bytes_contained_in_checksum(&self) -> usize {
+        match self {
+            Map::Packed { entry_count, data } => {
+                let off = HEADER + (entry_count - 1) * KEY_IDX_SIZE;
+                let kidx = KeyIdx::unpack(data.cut(off, 9).try_into().unwrap());
+                kidx.pos as usize + kidx.len as usize
+            }
+            Map::Unpacked(_) => unreachable!("cannot get the number of bytes of unpacked maps"),
         }
     }
 
@@ -841,18 +855,18 @@ impl PackedChildBuffer {
                 + std::mem::size_of::<u32>()
                 + Checksum::static_size()
         }
-        let head_csum = csum_builder(&tmp);
-        w.write_all(&tmp)?;
         for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
-            w.write_all(&key)?;
+            tmp.write_all(&key)?;
 
             let checksum = csum_builder(val);
             // TODO: maybe size in unpacking this
-            w.write_all(&(free_after as u32).to_le_bytes())?;
-            w.write_all(&(val.len() as u32).to_le_bytes())?;
-            bincode::serialize_into(&mut w, &checksum).unwrap();
+            tmp.write_all(&(free_after as u32).to_le_bytes())?;
+            tmp.write_all(&(val.len() as u32).to_le_bytes())?;
+            bincode::serialize_into(&mut tmp, &checksum).unwrap();
             free_after += val.len();
         }
+        let head_csum = csum_builder(&tmp);
+        w.write_all(&tmp)?;
         for (_, (_, val)) in self.buffer.assert_unpacked().iter() {
             w.write_all(&val)?;
         }
@@ -860,7 +874,10 @@ impl PackedChildBuffer {
         Ok(IntegrityMode::Internal(head_csum))
     }
 
-    pub fn unpack(buf: SlicedCowBytes) -> Result<Self, std::io::Error> {
+    pub fn unpack<C>(buf: SlicedCowBytes, csum: C) -> Result<Self, std::io::Error>
+    where
+        C: ChecksumTrait,
+    {
         let is_leaf = buf[0] != 0;
         let entry_count =
             u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
@@ -868,16 +885,20 @@ impl PackedChildBuffer {
             u32::from_le_bytes(buf[NODE_ID + 4..NODE_ID + 4 + 4].try_into().unwrap()) as usize;
         assert!(entries_size < 8 * 1024 * 1024);
         let pref = u8::from_le_bytes(buf[NODE_ID + 8..NODE_ID + 9].try_into().unwrap());
+        let buffer = Map::Packed {
+            entry_count,
+            data: buf.clone(),
+        };
+        let csum_len = buffer.len_bytes_contained_in_checksum();
+        csum.verify(&buf[..csum_len])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         Ok(Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),
             system_storage_preference: AtomicSystemStoragePreference::from(
                 StoragePreference::from_u8(pref),
             ),
             entries_size,
-            buffer: Map::Packed {
-                entry_count,
-                data: buf,
-            },
+            buffer,
             is_leaf,
         })
     }
