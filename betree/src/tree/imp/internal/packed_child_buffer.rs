@@ -823,7 +823,9 @@ impl PackedChildBuffer {
         if !self.buffer.is_unpacked() {
             // Copy the contents of the buffer to the new writer without unpacking.
             w.write_all(&self.buffer.assert_packed()[..self.size()])?;
-            return Ok(IntegrityMode::Internal(todo!()));
+            return Ok(IntegrityMode::Internal(csum_builder(
+                &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
+            )));
         }
 
         use std::io::Write;
