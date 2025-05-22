@@ -131,9 +131,11 @@ impl Default for PackedChildBuffer {
 }
 
 pub const BUFFER_STATIC_SIZE: usize = HEADER;
-const NODE_ID: usize = 1;
-const HEADER: usize =
-    NODE_ID + std::mem::size_of::<u32>() + std::mem::size_of::<u32>() + std::mem::size_of::<u8>();
+const IS_LEAF_HEADER: usize = 1;
+const HEADER: usize = IS_LEAF_HEADER
+    + std::mem::size_of::<u32>()
+    + std::mem::size_of::<u32>()
+    + std::mem::size_of::<u8>();
 const KEY_IDX_SIZE: usize =
     std::mem::size_of::<u32>() + std::mem::size_of::<u8>() + std::mem::size_of::<u32>();
 const PER_KEY_BYTES: usize = 16;
@@ -270,9 +272,16 @@ impl Map {
     pub fn len_bytes_contained_in_checksum(&self) -> usize {
         match self {
             Map::Packed { entry_count, data } => {
-                let off = HEADER + (entry_count - 1) * KEY_IDX_SIZE;
+                if *entry_count < 1 {
+                    return HEADER;
+                }
+                let off = HEADER + entry_count.saturating_sub(1) * KEY_IDX_SIZE;
                 let kidx = KeyIdx::unpack(data.cut(off, 9).try_into().unwrap());
-                kidx.pos as usize + kidx.len as usize
+                kidx.pos as usize
+                    + kidx.len as usize
+                    + std::mem::size_of::<u32>()
+                    + std::mem::size_of::<u32>()
+                    + Checksum::static_size()
             }
             Map::Unpacked(_) => unreachable!("cannot get the number of bytes of unpacked maps"),
         }
@@ -882,18 +891,26 @@ impl PackedChildBuffer {
     {
         let is_leaf = buf[0] != 0;
         let entry_count =
-            u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
-        let entries_size =
-            u32::from_le_bytes(buf[NODE_ID + 4..NODE_ID + 4 + 4].try_into().unwrap()) as usize;
+            u32::from_le_bytes(buf[IS_LEAF_HEADER..IS_LEAF_HEADER + 4].try_into().unwrap())
+                as usize;
+        let entries_size = u32::from_le_bytes(
+            buf[IS_LEAF_HEADER + 4..IS_LEAF_HEADER + 4 + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
         assert!(entries_size < 8 * 1024 * 1024);
-        let pref = u8::from_le_bytes(buf[NODE_ID + 8..NODE_ID + 9].try_into().unwrap());
+        let pref = u8::from_le_bytes(
+            buf[IS_LEAF_HEADER + 8..IS_LEAF_HEADER + 9]
+                .try_into()
+                .unwrap(),
+        );
         let buffer = Map::Packed {
             entry_count,
             data: buf.clone(),
         };
         let csum_len = buffer.len_bytes_contained_in_checksum();
-        csum.verify(&buf[..csum_len])
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        csum.verify(&buf[..csum_len]).unwrap();
+        // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         Ok(Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),
             system_storage_preference: AtomicSystemStoragePreference::from(
