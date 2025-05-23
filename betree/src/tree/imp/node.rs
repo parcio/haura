@@ -9,8 +9,7 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
-    buffer::{self, Buf},
-    checksum::{Builder, Checksum},
+    buffer::Buf,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
@@ -19,6 +18,7 @@ use crate::{
     size::{Size, SizeMut, StaticSize},
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
     StoragePreference,
+    compression::CompressionBuilder,
 };
 use parking_lot::RwLock;
 use std::{
@@ -27,6 +27,8 @@ use std::{
     io::{self, Write},
     mem::replace,
 };
+
+use std::sync::{Arc, Mutex};
 
 /// The tree node type.
 #[derive(Debug)]
@@ -177,11 +179,12 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         mut writer: W,
         _: PreparePack,
         csum_builder: F,
+        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>
     ) -> Result<IntegrityMode<C>, io::Error> {
         match self.0 {
             MemLeaf(ref leaf) => {
                 writer.write_all((NodeInnerType::CopylessLeaf as u32).to_be_bytes().as_ref())?;
-                leaf.pack(writer, csum_builder)
+                leaf.pack(writer, csum_builder, compressor)
             }
             CopylessInternal(ref cpl_internal) => {
                 writer.write_all(
@@ -189,7 +192,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         .to_be_bytes()
                         .as_ref(),
                 )?;
-                cpl_internal.pack(writer, csum_builder)
+                cpl_internal.pack(writer, csum_builder, compressor)
             }
         }
     }

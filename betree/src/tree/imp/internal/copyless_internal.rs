@@ -19,12 +19,15 @@ use crate::{
     storage_pool::AtomicSystemStoragePreference,
     tree::{imp::MIN_FANOUT, pivot_key::LocalPivotKey, KeyInfo},
     AtomicStoragePreference, StoragePreference,
+    compression::CompressionBuilder,
 };
 use parking_lot::RwLock;
 use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 use super::serialize_nodepointer;
 use serde::{Deserialize, Serialize};
+
+use std::sync::{Arc, Mutex};
 
 pub(in crate::tree::imp) struct CopylessInternalNode<N> {
     // FIXME: This type can be used as zero-copy
@@ -336,12 +339,18 @@ impl<N> CopylessInternalNode<N> {
         &self,
         mut w: W,
         csum_builder: F,
+        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
     ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         N: serde::Serialize + StaticSize,
         F: Fn(&[u8]) -> C,
         C: Checksum,
+        F: Fn(&[u8]) -> C,
+        C: Checksum,
     {
+        use std::io::Write;
+
+        let mut tmp = vec![];
         use std::io::Write;
 
         let mut tmp = vec![];

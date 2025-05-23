@@ -1,13 +1,16 @@
 //! Implementation of a message buffering node wrapper.
 use crate::{
-    checksum::Checksum as ChecksumTrait,
+    buffer,
+    checksum::{Builder, Checksum as ChecksumTrait, State},
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, IntegrityMode},
+    database::Checksum,
     database::Checksum,
     size::{Size, StaticSize},
     storage_pool::AtomicSystemStoragePreference,
     tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
     AtomicStoragePreference, StoragePreference,
+    compression::CompressionBuilder,
 };
 use std::{
     borrow::Borrow,
@@ -20,6 +23,10 @@ use std::{
     ops::{Add, AddAssign},
     ptr::slice_from_raw_parts,
 };
+
+use std::sync::{Arc, Mutex};
+
+use super::child_buffer::ChildBuffer;
 
 trait CutSlice<T> {
     fn cut(&self, pos: usize, len: usize) -> &[T];
@@ -175,6 +182,7 @@ impl Map {
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
                 let mut key_info = Vec::with_capacity(*entry_count);
                 let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
+                let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
 
                 // current in-cache size
                 let mut size_delta: isize = -2 * std::mem::size_of::<usize>() as isize;
@@ -195,6 +203,12 @@ impl Map {
                     let val_pos = u32::from_le_bytes(data.cut(val_pos_off, 4).try_into().unwrap());
                     let val_len =
                         u32::from_le_bytes(data.cut(val_pos_off + 4, 4).try_into().unwrap());
+                    let val_csum: crate::database::Checksum = bincode::deserialize(data.cut(
+                        val_pos_off + 4 + 4,
+                        crate::database::Checksum::static_size(),
+                    ))
+                    .unwrap();
+                    values_pos.push((val_pos, val_len, val_csum));
                     let val_csum: crate::database::Checksum = bincode::deserialize(data.cut(
                         val_pos_off + 4 + 4,
                         crate::database::Checksum::static_size(),
@@ -296,6 +310,10 @@ impl Map {
                 let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
                 // TODO: Pass on result
                 csum.verify(&buf).unwrap();
+            Map::Packed { data, .. } => self.find(key).map(|(pref, pos, len, csum)| {
+                let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
+                // TODO: Pass on result
+                csum.verify(&buf).unwrap();
                 (
                     KeyInfo {
                         storage_preference: StoragePreference::from_u8(pref),
@@ -310,6 +328,7 @@ impl Map {
     }
 
     // Return the preference and location of the value within the boxed value.
+    fn find(&self, key: &[u8]) -> Option<(u8, usize, usize, Checksum)> {
     fn find(&self, key: &[u8]) -> Option<(u8, usize, usize, Checksum)> {
         match self {
             Map::Packed { entry_count, data } => {
@@ -344,6 +363,11 @@ impl Map {
                             let val_len = u32::from_le_bytes(
                                 data.cut(val_pos_off + 4, 4).try_into().unwrap(),
                             ) as usize;
+                            let val_csum: Checksum = bincode::deserialize(
+                                data.cut(val_pos_off + 4 + 4, Checksum::static_size()),
+                            )
+                            .unwrap();
+                            return Some((kidx.pref, val_pos, val_len, val_csum));
                             let val_csum: Checksum = bincode::deserialize(
                                 data.cut(val_pos_off + 4 + 4, Checksum::static_size()),
                             )
@@ -725,6 +749,7 @@ impl PackedChildBuffer {
                     }
                 } else {
                     let size = key_size + msg.size() + keyinfo.size() + Checksum::static_size();
+                    let size = key_size + msg.size() + keyinfo.size() + Checksum::static_size();
                     e.insert((keyinfo, msg));
                     size
                 };
@@ -801,6 +826,7 @@ impl PackedChildBuffer {
     ///     u32: pos val,
     ///     u32: len val,
     ///     Checksum: checksum,
+    ///     Checksum: checksum,
     ///   ]
     /// - [
     ///     bytes: val,
@@ -810,31 +836,39 @@ impl PackedChildBuffer {
         &self,
         mut w: W,
         csum_builder: F,
+        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
     ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         W: std::io::Write,
+        F: Fn(&[u8]) -> C,
+        C: ChecksumTrait,
         F: Fn(&[u8]) -> C,
         C: ChecksumTrait,
     {
         if !self.buffer.is_unpacked() {
             // Copy the contents of the buffer to the new writer without unpacking.
             w.write_all(&self.buffer.assert_packed()[..self.size()])?;
-            return Ok(IntegrityMode::Internal {
-                len: self.buffer.len_bytes_contained_in_checksum() as u32,
-                csum: csum_builder(
-                    &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
-                ),
-            });
+            return Ok(IntegrityMode::Internal(csum_builder(
+                &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
+            )));
         }
+
+        use std::io::Write;
+        let mut tmp = vec![];
 
         use std::io::Write;
         let mut tmp = vec![];
 
         if self.is_leaf {
             tmp.write_all(&[1])?;
+            tmp.write_all(&[1])?;
         } else {
             tmp.write_all(&[0])?;
+            tmp.write_all(&[0])?;
         }
+        tmp.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
+        tmp.write_all(&(self.entries_size as u32).to_le_bytes())?;
+        tmp.write_all(
         tmp.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
         tmp.write_all(&(self.entries_size as u32).to_le_bytes())?;
         tmp.write_all(
@@ -855,8 +889,22 @@ impl PackedChildBuffer {
                 + std::mem::size_of::<u32>()
                 + std::mem::size_of::<u32>()
                 + Checksum::static_size()
+            tmp.write_all(&(free_after as u32).to_le_bytes())?;
+            tmp.write_all(&(key_len as u32).to_le_bytes())?;
+            tmp.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
+            free_after += key_len
+                + std::mem::size_of::<u32>()
+                + std::mem::size_of::<u32>()
+                + Checksum::static_size()
         }
         for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
+            tmp.write_all(&key)?;
+
+            let checksum = csum_builder(val);
+            // TODO: maybe size in unpacking this
+            tmp.write_all(&(free_after as u32).to_le_bytes())?;
+            tmp.write_all(&(val.len() as u32).to_le_bytes())?;
+            bincode::serialize_into(&mut tmp, &checksum).unwrap();
             tmp.write_all(&key)?;
 
             let checksum = csum_builder(val);
@@ -868,22 +916,33 @@ impl PackedChildBuffer {
         }
         let head_csum = csum_builder(&tmp);
         w.write_all(&tmp)?;
+        let head_csum = csum_builder(&tmp);
+        w.write_all(&tmp)?;
         for (_, (_, val)) in self.buffer.assert_unpacked().iter() {
             w.write_all(&val)?;
         }
 
-        Ok(IntegrityMode::Internal {
-            csum: head_csum,
-            len: tmp.len() as u32,
-        })
+        Ok(IntegrityMode::Internal(head_csum))
     }
 
-    pub fn unpack<C>(buf: SlicedCowBytes, csum: IntegrityMode<C>) -> Result<Self, std::io::Error>
+    pub fn unpack<C>(buf: SlicedCowBytes, csum: C) -> Result<Self, std::io::Error>
     where
         C: ChecksumTrait,
     {
         let is_leaf = buf[0] != 0;
         let entry_count =
+            u32::from_le_bytes(buf[NODE_ID..NODE_ID + 4].try_into().unwrap()) as usize;
+        let entries_size =
+            u32::from_le_bytes(buf[NODE_ID + 4..NODE_ID + 4 + 4].try_into().unwrap()) as usize;
+        assert!(entries_size < 8 * 1024 * 1024);
+        let pref = u8::from_le_bytes(buf[NODE_ID + 8..NODE_ID + 9].try_into().unwrap());
+        let buffer = Map::Packed {
+            entry_count,
+            data: buf.clone(),
+        };
+        let csum_len = buffer.len_bytes_contained_in_checksum();
+        csum.verify(&buf[..csum_len])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             u32::from_le_bytes(buf[IS_LEAF_HEADER..IS_LEAF_HEADER + 4].try_into().unwrap())
                 as usize;
         let entries_size = u32::from_le_bytes(

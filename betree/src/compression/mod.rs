@@ -10,6 +10,8 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, mem};
 
+use std::sync::{Arc, Mutex};
+
 mod errors;
 pub use errors::*;
 
@@ -20,17 +22,17 @@ const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
 pub enum CompressionConfiguration {
     /// No-op.
     None,
-    // Lz4,
+    Lz4(Lz4),
     /// Configurable Zstd algorithm.
     Zstd(Zstd),
 }
 
 impl CompressionConfiguration {
-    ///
-    pub fn to_builder(&self) -> Box<dyn CompressionBuilder> {
+    pub fn to_builder(&self) -> Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>> {
         match self {
-            CompressionConfiguration::None => Box::new(None),
-            CompressionConfiguration::Zstd(zstd) => Box::new(*zstd),
+            CompressionConfiguration::None => Arc::new(std::sync::RwLock::new(Box::new(None))),
+            CompressionConfiguration::Zstd(zstd) => Arc::new(std::sync::RwLock::new(Box::new(*zstd))),
+            CompressionConfiguration::Lz4(lz4) => Arc::new(std::sync::RwLock::new(Box::new(*lz4))),
         }
     }
 }
@@ -69,7 +71,7 @@ impl DecompressionTag {
         use DecompressionTag as Tag;
         match self {
             Tag::None => Ok(None::new_decompression()?),
-            Tag::Lz4 => todo!(), //Ok(Lz4::new_decompression()?),
+            Tag::Lz4 => Ok(Lz4::new_decompression()?),
             Tag::Zstd => Ok(Zstd::new_decompression()?),
         }
     }
@@ -85,7 +87,7 @@ impl StaticSize for DecompressionTag {
 /// must be able to decompress anything ever compressed in any configuration.
 pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
     /// Returns an object for compressing data into a `Box<[u8]>`.
-    fn new_compression(&self) -> Result<Box<dyn CompressionState>>;
+    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>>;
     /// Which decompression algorithm needs to be used.
     fn decompression_tag(&self) -> DecompressionTag;
 }
@@ -106,8 +108,8 @@ pub trait DecompressionState {
 mod none;
 pub use self::none::None;
 
-//mod lz4;
-//pub use self::lz4::Lz4;
+mod lz4;
+pub use self::lz4::Lz4;
 
 mod zstd;
 pub use self::zstd::Zstd;

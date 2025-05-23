@@ -22,6 +22,7 @@ use crate::{
     storage_pool::StoragePoolLayer,
     tree::{PivotKey, StorageKind},
     StoragePreference,
+    compression::CompressionBuilder,
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -118,34 +119,13 @@ pub struct PreparePack();
 /// data.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum IntegrityMode<C> {
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum IntegrityMode<C> {
     /// The default mode. Checksums are stored with the object pointers. All
     /// data is processed initially.
     External,
     /// Integrity is ensured by the node implementation itself.
-    Internal { csum: C, len: u32 },
-}
-
-impl<C: StaticSize> StaticSize for IntegrityMode<C> {
-    fn static_size() -> usize {
-        // FIXME: this only works if we abandon the other the integrity mode
-        C::static_size() + std::mem::size_of::<u32>()
-    }
-}
-
-impl<C> IntegrityMode<C> {
-    pub fn checksum(&self) -> Option<&C> {
-        match self {
-            IntegrityMode::Internal { csum, .. } => Some(csum),
-            _ => None,
-        }
-    }
-
-    pub fn length(&self) -> Option<u32> {
-        match self {
-            IntegrityMode::Internal { len, .. } => Some(*len),
-            _ => None,
-        }
-    }
+    Internal,
 }
 
 /// An object managed by a [Dml].
@@ -168,8 +148,14 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         writer: W,
         pp: PreparePack,
         csum_builder: F,
+        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>
     ) -> Result<IntegrityMode<C>, io::Error>;
     /// Unpacks the object from the given `data`.
+    fn unpack_at<C: Checksum>(
+        d_id: DatasetId,
+        data: Buf,
+        integrity_mode: IntegrityMode<C>,
+    ) -> Result<Self, io::Error>;
     fn unpack_at<C: Checksum>(
         d_id: DatasetId,
         data: Buf,

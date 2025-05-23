@@ -268,7 +268,7 @@ ensure_config
 #zip_cache
 #zip_tiered
 #zip_mt
-#tiered
+tiered
 #scientific_evaluation
 #evaluation_rw
 #filesystem

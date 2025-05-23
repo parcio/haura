@@ -6,9 +6,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{io::Write, mem};
+use std::io::{self, Read};
 use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder};
 use zstd_safe::{FrameFormat, WriteBuf};
-
+use std::sync::{Arc, Mutex};
 // TODO: investigate pre-created dictionary payoff
 
 /// Zstd compression. (<https://github.com/facebook/zstd>)
@@ -18,7 +19,6 @@ pub struct Zstd {
     /// compression ratio and compression speed.
     pub level: u8,
 }
-
 struct ZstdCompression {
     writer: Encoder<'static>,
 }
@@ -35,7 +35,7 @@ impl StaticSize for Zstd {
 use zstd::stream::raw::Operation;
 
 impl CompressionBuilder for Zstd {
-    fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
+    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>> {
         // "The library supports regular compression levels from 1 up to ZSTD_maxCLevel(),
         // which is currently 22."
         let mut encoder = Encoder::new(self.level as i32)?;
@@ -45,7 +45,7 @@ impl CompressionBuilder for Zstd {
         // // Integrity is handled at a different layer
         encoder.set_parameter(CParameter::ChecksumFlag(false))?;
 
-        Ok(Box::new(ZstdCompression { writer: encoder }))
+        Ok(Arc::new(std::sync::RwLock::new(ZstdCompression { writer: encoder })))
     }
 
     fn decompression_tag(&self) -> DecompressionTag {
@@ -64,11 +64,27 @@ impl Zstd {
     }
 }
 
+impl io::Write for ZstdCompression {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        unimplemented!()
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        unimplemented!()
+    }
+}
+
+use std::time::Instant;
 use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
 
-impl CompressionState for ZstdCompression {
+impl CompressionState for ZstdCompression {    
     fn finish(&mut self, data: Buf) -> Result<Buf> {
+        let start = Instant::now();
         let size = zstd_safe::compress_bound(data.as_ref().len());
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
         buf.write_all(&[0u8; DATA_OFF])?;
@@ -91,9 +107,12 @@ impl CompressionState for ZstdCompression {
         og_len
             .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
             .unwrap();
+        let duration = start.elapsed();
+
         Ok(buf.into_buf())
     }
 }
+
 
 impl DecompressionState for ZstdDecompression {
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
