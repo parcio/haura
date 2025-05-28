@@ -142,6 +142,7 @@ impl<N: StaticSize> Size for CopylessInternalNode<N> {
 }
 
 const META_BINCODE_STATIC: usize = 33;
+const INTERNAL_INTEGRITY_CHECKSUM_SIZE: usize = 8 + 8;
 impl Size for InternalNodeMetaData {
     fn size(&self) -> usize {
         *self.actual_size().get_or_insert_with(|| {
@@ -153,7 +154,7 @@ impl Size for InternalNodeMetaData {
                 + self.pivot.len() * std::mem::size_of::<usize>()
                 + self.pivot.len() * std::mem::size_of::<u8>()
                 // TODO: these magic numbers are for checksums of childrens
-                + 8 + 4
+                + self.entries_sizes.len() * INTERNAL_INTEGRITY_CHECKSUM_SIZE
                 + META_BINCODE_STATIC
         })
     }
@@ -351,9 +352,12 @@ impl<N> CopylessInternalNode<N> {
 
         for child in self.children.iter() {
             let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder)?;
-            bincode::serialize_into(&mut tmp, integrity.checksum().unwrap())
+            assert_eq!(
+                bincode::serialized_size(&integrity).unwrap(),
+                INTERNAL_INTEGRITY_CHECKSUM_SIZE as u64
+            );
+            bincode::serialize_into(&mut tmp, &integrity)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            tmp.write_all(&integrity.length().unwrap().to_le_bytes())?;
         }
 
         let csum = csum_builder(&tmp);
@@ -396,16 +400,11 @@ impl<N> CopylessInternalNode<N> {
 
         let mut checksums: Vec<IntegrityMode<C>> = vec![];
         for _ in ptrs.iter() {
-            let buffer_csum = bincode::deserialize(&buf[cursor..cursor + C::static_size()])
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            cursor += C::static_size();
-            let buffer_meta_len: u32 =
-                u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap());
-            cursor += 4;
-            checksums.push(IntegrityMode::Internal {
-                csum: buffer_csum,
-                len: buffer_meta_len,
-            })
+            checksums.push(
+                bincode::deserialize(&buf[cursor..cursor + INTERNAL_INTEGRITY_CHECKSUM_SIZE])
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+            );
+            cursor += INTERNAL_INTEGRITY_CHECKSUM_SIZE;
         }
         for (idx, buffer_csum) in checksums.into_iter().enumerate() {
             let sub = buf.clone().slice_from(cursor as u32);
