@@ -282,13 +282,12 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             Ok(Node(PackedLeaf(PackedMap::new(data))))
         } else if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
             Ok(Node(CopylessInternal(
-                CopylessInternalNode::unpack(data, integrity_mode.checksum().unwrap().clone())?
-                    .complete_object_refs(d_id),
+                CopylessInternalNode::unpack(data, integrity_mode)?.complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
             Ok(Node(MemLeaf(PackedChildBuffer::unpack(
                 data.into_sliced_cow_bytes().slice_from(4),
-                integrity_mode.checksum().unwrap().clone(),
+                integrity_mode,
             )?)))
         } else {
             panic!(

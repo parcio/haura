@@ -498,7 +498,7 @@ where
                 state.ingest(compressed_data.as_ref());
                 state.finish()
             }
-            IntegrityMode::Internal(_) => self.default_checksum_builder.empty(),
+            IntegrityMode::Internal { .. } => self.default_checksum_builder.empty(),
         };
 
         self.pool.begin_write(compressed_data, offset)?;

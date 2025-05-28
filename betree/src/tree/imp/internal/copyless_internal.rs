@@ -1,7 +1,7 @@
 //! Implementation of the [DisjointInternalNode] node type.
 use crate::{
     buffer::Buf,
-    checksum::Checksum,
+    checksum::{Checksum, ChecksumError},
     data_management::IntegrityMode,
     tree::imp::{
         node::{PivotGetMutResult, PivotGetResult},
@@ -50,6 +50,12 @@ impl<N: PartialEq> PartialEq for ChildLink<N> {
     fn eq(&self, other: &Self) -> bool {
         // TODO: Needs buffer check?
         &*self.ptr.read() == &*other.ptr.read()
+    }
+}
+
+impl From<ChecksumError> for std::io::Error {
+    fn from(value: ChecksumError) -> Self {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, value)
     }
 }
 
@@ -146,6 +152,8 @@ impl Size for InternalNodeMetaData {
                 + self.pivot.iter().map(|p| p.size()).sum::<usize>()
                 + self.pivot.len() * std::mem::size_of::<usize>()
                 + self.pivot.len() * std::mem::size_of::<u8>()
+                // TODO: these magic numbers are for checksums of childrens
+                + 8 + 4
                 + META_BINCODE_STATIC
         })
     }
@@ -318,17 +326,17 @@ impl<N> CopylessInternalNode<N> {
         let mut tmp = vec![];
         let bytes_meta_data_len = bincode::serialized_size(&self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
         tmp.write_all(&(bytes_meta_data_len as u32).to_le_bytes())?;
-        bincode::serialize_into(&mut w, &self.meta_data)
+        bincode::serialize_into(&mut tmp, &self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let bytes_child_len = bincode::serialized_size(&self.children)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        tmp.write_all(&(bytes_child_len as u32).to_le_bytes())?;
-        bincode::serialize_into(&mut w, &self.children)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let csum = csum_builder(&tmp);
+        tmp.write_all(&(bytes_child_len as u32).to_le_bytes())?;
+        bincode::serialize_into(&mut tmp, &self.children)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let mut tmp_buffers = vec![];
 
@@ -343,28 +351,39 @@ impl<N> CopylessInternalNode<N> {
 
         for child in self.children.iter() {
             let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder)?;
-            bincode::serialize_into(&mut tmp, &integrity)
+            bincode::serialize_into(&mut tmp, integrity.checksum().unwrap())
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            tmp.write_all(&integrity.length().unwrap().to_le_bytes())?;
         }
 
+        let csum = csum_builder(&tmp);
         w.write_all(&tmp)?;
         w.write_all(&tmp_buffers)?;
-        Ok(IntegrityMode::Internal(csum))
+        Ok(IntegrityMode::Internal {
+            csum,
+            len: tmp.len() as u32,
+        })
     }
 
     /// Read object from a byte buffer and instantiate it.
-    pub fn unpack<C: Checksum>(buf: Buf, csum: C) -> Result<Self, std::io::Error>
+    pub fn unpack<C: Checksum>(buf: Buf, csum: IntegrityMode<C>) -> Result<Self, std::io::Error>
     where
         N: serde::de::DeserializeOwned + StaticSize,
     {
         let buf = buf.into_sliced_cow_bytes();
         const NODE_ID: usize = 4;
         let mut cursor = NODE_ID;
+
+        csum.checksum()
+            .unwrap()
+            .verify(&buf[cursor..cursor + csum.length().unwrap() as usize])?;
+
         let len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
         cursor += 4;
 
         let meta_data: InternalNodeMetaData = bincode::deserialize(&buf[cursor..cursor + len])
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            .unwrap();
         cursor += len;
 
         let ptrs_len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
@@ -374,17 +393,23 @@ impl<N> CopylessInternalNode<N> {
         let mut ptrs: Vec<ChildLink<N>> = bincode::deserialize(&buf[cursor..cursor + ptrs_len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         cursor += ptrs_len;
-        let mut checksums: Vec<C> = vec![];
+
+        let mut checksums: Vec<IntegrityMode<C>> = vec![];
         for _ in ptrs.iter() {
-            checksums.push(
-                bincode::deserialize(&buf[cursor..cursor + C::static_size()])
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-            );
+            let buffer_csum = bincode::deserialize(&buf[cursor..cursor + C::static_size()])
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             cursor += C::static_size();
+            let buffer_meta_len: u32 =
+                u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap());
+            cursor += 4;
+            checksums.push(IntegrityMode::Internal {
+                csum: buffer_csum,
+                len: buffer_meta_len,
+            })
         }
-        for idx in 0..meta_data.entries_sizes.len() {
+        for (idx, buffer_csum) in checksums.into_iter().enumerate() {
             let sub = buf.clone().slice_from(cursor as u32);
-            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, checksums[idx].clone())?;
+            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, buffer_csum)?;
             cursor += b.size();
             assert_eq!(meta_data.entries_sizes[idx], b.size());
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);

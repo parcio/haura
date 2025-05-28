@@ -832,9 +832,12 @@ impl PackedChildBuffer {
         if !self.buffer.is_unpacked() {
             // Copy the contents of the buffer to the new writer without unpacking.
             w.write_all(&self.buffer.assert_packed()[..self.size()])?;
-            return Ok(IntegrityMode::Internal(csum_builder(
-                &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
-            )));
+            return Ok(IntegrityMode::Internal {
+                len: self.buffer.len_bytes_contained_in_checksum() as u32,
+                csum: csum_builder(
+                    &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
+                ),
+            });
         }
 
         use std::io::Write;
@@ -882,10 +885,13 @@ impl PackedChildBuffer {
             w.write_all(&val)?;
         }
 
-        Ok(IntegrityMode::Internal(head_csum))
+        Ok(IntegrityMode::Internal {
+            csum: head_csum,
+            len: tmp.len() as u32,
+        })
     }
 
-    pub fn unpack<C>(buf: SlicedCowBytes, csum: C) -> Result<Self, std::io::Error>
+    pub fn unpack<C>(buf: SlicedCowBytes, csum: IntegrityMode<C>) -> Result<Self, std::io::Error>
     where
         C: ChecksumTrait,
     {
@@ -908,8 +914,10 @@ impl PackedChildBuffer {
             entry_count,
             data: buf.clone(),
         };
-        let csum_len = buffer.len_bytes_contained_in_checksum();
-        csum.verify(&buf[..csum_len]).unwrap();
+        csum.checksum()
+            .unwrap()
+            .verify(&buf[..csum.length().unwrap() as usize])
+            .unwrap();
         // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         Ok(Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),

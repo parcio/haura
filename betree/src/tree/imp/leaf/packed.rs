@@ -255,7 +255,7 @@ impl PackedMap {
             writer.write_all(key)?;
             writer.write_all(value)?;
         }
-        Ok(IntegrityMode::Internal(todo!()))
+        Ok(IntegrityMode::External)
     }
 
     pub(crate) fn inner(&self) -> &SlicedCowBytes {
