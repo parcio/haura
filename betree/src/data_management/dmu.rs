@@ -460,12 +460,11 @@ where
         // with writeback
 
         let compression = &*self.default_compression.read().unwrap();
+
         //let state = builder.new_compression().unwrap();
         //let compression = &self.default_compression;
-        let (integrity_mode, compressed_data) = {
+        let (integrity_mode, compressed_data_) = {
             // FIXME: cache this
-            let mut state_ref = compression.new_compression().unwrap();
-            let mut state =  state_ref.write().unwrap();
             let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
                 object_size as u32,
             ));
@@ -483,32 +482,59 @@ where
                 drop(object);
                 part
             };
-            (integrity_mode, state.finish(buf.into_buf())?)
-            (integrity_mode, state.finish(buf.into_buf())?)
+
+            match integrity_mode {
+                IntegrityMode::External => {
+                    let mut state_ref = compression.new_compression().unwrap();
+                    let mut state =  state_ref.write().unwrap();
+
+                    (integrity_mode, state.finish(buf.into_buf())?)
+                },
+                IntegrityMode::Internal(_) => {
+                    /*let mut state_ref = compression.new_compression().unwrap();
+                    let mut state =  state_ref.write().unwrap();
+
+                    (integrity_mode, state.finish(buf.into_buf())?)*/
+                    (integrity_mode, buf.into_buf())
+                },
+            }
         };
 
-        assert!(compressed_data.len() <= u32::max_value() as usize);
-        let size = compressed_data.len();
-        // FIXME
-        if size > Block::round_up_from_bytes(object_size).to_bytes() {
-            warn!("anticipated size deviated from actual size, realloc necessary in writes... (Expected {}, Actual {})", Block::round_up_from_bytes(object_size).to_bytes(), size);
-        }
+        assert!(compressed_data_.len() <= u32::max_value() as usize);
+        let size = compressed_data_.len();
         debug!("Compressed object size is {size} bytes");
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
-        assert!(size.to_bytes() as usize >= compressed_data.len());
+        assert!(size.to_bytes() as usize >= compressed_data_.len());
         let offset = self.allocate(storage_class, size)?;
-        assert_eq!(size.to_bytes() as usize, compressed_data.len());
+        assert_eq!(size.to_bytes() as usize, compressed_data_.len());
 
         let info = self.modified_info.lock().remove(&mid).unwrap();
 
-        let checksum = match integrity_mode {
-        let checksum = match integrity_mode {
+        let (checksum, compressed_data)  = match integrity_mode {
             IntegrityMode::External => {
+                // let compression = &*self.default_compression.read().unwrap();
+                // let mut compression_state_ref = compression.new_compression().unwrap();
+                // let mut compression_state =  compression_state_ref.write().unwrap();
+
+                // let compressed_data = compression_state.finish(compressed_data_)?;
+
                 let mut state = self.default_checksum_builder.build();
-                state.ingest(compressed_data.as_ref());
-                state.finish()
-            }
-            IntegrityMode::Internal(_) => self.default_checksum_builder.empty(),
+                state.ingest(compressed_data_.as_ref());
+
+                (state.finish(), compressed_data_)
+            },
+            IntegrityMode::Internal(_) => {
+                // let compression = &*self.default_compression.read().unwrap();
+                // let mut compression_state_ref = compression.new_compression().unwrap();
+                // let mut compression_state =  compression_state_ref.write().unwrap();
+
+                // let compressed_data = compression_state.finish(compressed_data_)?;
+
+                //let mut state = self.default_checksum_builder.build();
+                //state.ingest(compressed_data_.as_ref());
+
+                (self.default_checksum_builder.empty(), compressed_data_)
+            },
         };
 
         self.pool.begin_write(compressed_data, offset)?;
@@ -1088,12 +1114,28 @@ where
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<Self::CacheValueRef, Error> {
         let (ptr, compressed_data, pk) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = ptr
-                .decompression_tag()
-                .new_decompression()?
-                .decompress(compressed_data)?;
-            Object::unpack_at(ptr.info(), data, ptr.integrity_mode.clone())?
-            Object::unpack_at(ptr.info(), data, ptr.integrity_mode.clone())?
+            
+            let d = ptr.decompression_tag();
+
+            let data = match ptr.integrity_mode.clone() {
+                IntegrityMode::External => {
+                    ptr
+                    .decompression_tag()
+                    .new_decompression()?
+                    .decompress(compressed_data)?
+
+                },
+                IntegrityMode::Internal(_) => {
+                    compressed_data
+                },
+            };
+            
+            // let data = ptr
+            //     .decompression_tag()
+            //     .new_decompression()?
+            //     .decompress(compressed_data)?;
+
+            Object::unpack_at(ptr.info(), data, ptr.integrity_mode.clone(), ptr.decompression_tag())?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),

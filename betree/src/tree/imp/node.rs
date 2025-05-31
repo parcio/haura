@@ -9,16 +9,9 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
-    buffer::Buf,
-    cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{
+    buffer::Buf, checksum::{Builder, Checksum}, compression::{CompressionBuilder, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
-    },
-    database::DatasetId,
-    size::{Size, SizeMut, StaticSize},
-    tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
-    StoragePreference,
-    compression::CompressionBuilder,
+    }, database::DatasetId, size::{Size, SizeMut, StaticSize}, tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind}, StoragePreference
 };
 use parking_lot::RwLock;
 use std::{
@@ -201,15 +194,18 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         d_id: DatasetId,
         data: Buf,
         integrity_mode: IntegrityMode<C>,
+        decompressor: DecompressionTag
     ) -> Result<Self, io::Error> {
         if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
             Ok(Node(CopylessInternal(
-                CopylessInternalNode::unpack(data, integrity_mode)?.complete_object_refs(d_id),
+                CopylessInternalNode::unpack(data, integrity_mode.checksum().unwrap().clone(), decompressor)?
+                    .complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
             Ok(Node(MemLeaf(PackedChildBuffer::unpack(
                 data.into_sliced_cow_bytes().slice_from(4),
-                integrity_mode,
+                integrity_mode.checksum().unwrap().clone(),
+                decompressor,
             )?)))
         } else {
             panic!(

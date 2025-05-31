@@ -23,6 +23,7 @@ use crate::{
     tree::{PivotKey, StorageKind},
     StoragePreference,
     compression::CompressionBuilder,
+    compression::DecompressionTag,
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -155,6 +156,7 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         d_id: DatasetId,
         data: Buf,
         integrity_mode: IntegrityMode<C>,
+        decompressor: DecompressionTag,
     ) -> Result<Self, io::Error>;
     fn unpack_at<C: Checksum>(
         d_id: DatasetId,

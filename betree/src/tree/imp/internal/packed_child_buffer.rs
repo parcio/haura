@@ -1,16 +1,6 @@
 //! Implementation of a message buffering node wrapper.
 use crate::{
-    buffer,
-    checksum::{Builder, Checksum as ChecksumTrait, State},
-    cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{HasStoragePreference, IntegrityMode},
-    database::Checksum,
-    database::Checksum,
-    size::{Size, StaticSize},
-    storage_pool::AtomicSystemStoragePreference,
-    tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction},
-    AtomicStoragePreference, StoragePreference,
-    compression::CompressionBuilder,
+    buffer::{self, Buf}, checksum::{Builder, Checksum as ChecksumTrait, State}, compression::{CompressionBuilder, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{HasStoragePreference, IntegrityMode}, database::Checksum, size::{Size, StaticSize}, storage_pool::AtomicSystemStoragePreference, tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction}, AtomicStoragePreference, StoragePreference
 };
 use std::{
     borrow::Borrow,
@@ -880,6 +870,7 @@ impl PackedChildBuffer {
         )?;
 
         let mut free_after = HEADER + self.buffer.len() * KEY_IDX_SIZE;
+        
         for (key, (info, _)) in self.buffer.assert_unpacked().iter() {
             let key_len = key.len();
             tmp.write_all(&(free_after as u32).to_le_bytes())?;
@@ -897,35 +888,46 @@ impl PackedChildBuffer {
                 + std::mem::size_of::<u32>()
                 + Checksum::static_size()
         }
+
+        let mut val_buf: Vec<u8> = vec![];
+
+        let compression = compressor.read().unwrap();
+        let mut state_ref = compression.new_compression().unwrap();
+        let mut state =  state_ref.write().unwrap();
+
         for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
             tmp.write_all(&key)?;
 
-            let checksum = csum_builder(val);
-            // TODO: maybe size in unpacking this
-            tmp.write_all(&(free_after as u32).to_le_bytes())?;
-            tmp.write_all(&(val.len() as u32).to_le_bytes())?;
-            bincode::serialize_into(&mut tmp, &checksum).unwrap();
-            tmp.write_all(&key)?;
+            let compressed_val =  state.finish(Buf::from_zero_padded(val.to_vec()))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
-            let checksum = csum_builder(val);
+            val_buf.write_all(&(compressed_val.len() as u32).to_le_bytes())?;
+            val_buf.write_all(&compressed_val)?;
+
+
+            let checksum = csum_builder(&compressed_val);
             // TODO: maybe size in unpacking this
             tmp.write_all(&(free_after as u32).to_le_bytes())?;
-            tmp.write_all(&(val.len() as u32).to_le_bytes())?;
+            tmp.write_all(&(compressed_val.len() as u32).to_le_bytes())?;
             bincode::serialize_into(&mut tmp, &checksum).unwrap();
-            free_after += val.len();
+            free_after += compressed_val.len();
         }
-        let head_csum = csum_builder(&tmp);
-        w.write_all(&tmp)?;
-        let head_csum = csum_builder(&tmp);
-        w.write_all(&tmp)?;
-        for (_, (_, val)) in self.buffer.assert_unpacked().iter() {
+
+        let compressed_all =  state.finish(Buf::from_zero_padded(tmp))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+
+        let head_csum = csum_builder(&compressed_all);
+        w.write_all(&(compressed_all.len() as u32).to_le_bytes())?;
+        w.write_all(&compressed_all)?;
+        /*for (_, (_, val)) in self.buffer.assert_unpacked().iter() {
             w.write_all(&val)?;
-        }
+        }*/
+        w.write_all(&val_buf);
 
         Ok(IntegrityMode::Internal(head_csum))
     }
 
-    pub fn unpack<C>(buf: SlicedCowBytes, csum: C) -> Result<Self, std::io::Error>
+    pub fn unpack<C>(buf: SlicedCowBytes, csum: C, decompressor: DecompressionTag) -> Result<Self, std::io::Error>
     where
         C: ChecksumTrait,
     {
