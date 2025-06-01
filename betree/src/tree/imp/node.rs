@@ -196,15 +196,31 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         integrity_mode: IntegrityMode<C>,
         decompressor: DecompressionTag
     ) -> Result<Self, io::Error> {
-        if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
+        if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
+            println!("a..");
+            match deserialize::<InternalNode<_>>(&data[4..]) {
+                Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
+                Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+            }
+        } else if data[0..4] == (NodeInnerType::Leaf as u32).to_be_bytes() {
+            println!("b..");
+            // storage_preference is not preserved for packed leaves,
+            // because they will not be written back to disk until modified,
+            // and every modification requires them to be unpacked.
+            // The leaf contents are scanned cheaply during unpacking, which
+            // recalculates the correct storage_preference for the contained keys.
+            Ok(Node(PackedLeaf(PackedMap::new(data))))
+        } else if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
+            println!("c..");
             Ok(Node(CopylessInternal(
-                CopylessInternalNode::unpack(data, integrity_mode.checksum().unwrap().clone(), decompressor)?
+                CopylessInternalNode::unpack(data, integrity_mode, decompressor)?
                     .complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
+            println!("d..");
             Ok(Node(MemLeaf(PackedChildBuffer::unpack(
                 data.into_sliced_cow_bytes().slice_from(4),
-                integrity_mode.checksum().unwrap().clone(),
+                integrity_mode,
                 decompressor,
             )?)))
         } else {

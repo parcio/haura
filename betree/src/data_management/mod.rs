@@ -126,7 +126,23 @@ pub enum IntegrityMode<C> {
     /// data is processed initially.
     External,
     /// Integrity is ensured by the node implementation itself.
-    Internal,
+    Internal { csum: C, len: u32 },
+}
+
+impl<C> IntegrityMode<C> {
+    pub fn checksum(&self) -> Option<&C> {
+        match self {
+            IntegrityMode::Internal { csum, .. } => Some(csum),
+            _ => None,
+        }
+    }
+
+    pub fn length(&self) -> Option<u32> {
+        match self {
+            IntegrityMode::Internal { len, .. } => Some(*len),
+            _ => None,
+        }
+    }
 }
 
 /// An object managed by a [Dml].

@@ -490,7 +490,7 @@ where
 
                     (integrity_mode, state.finish(buf.into_buf())?)
                 },
-                IntegrityMode::Internal(_) => {
+                IntegrityMode::Internal {..} => {
                     /*let mut state_ref = compression.new_compression().unwrap();
                     let mut state =  state_ref.write().unwrap();
 
@@ -502,7 +502,7 @@ where
 
         assert!(compressed_data_.len() <= u32::max_value() as usize);
         let size = compressed_data_.len();
-        debug!("Compressed object size is {size} bytes");
+        println!("Compressed object size is {size} bytes");
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data_.len());
         let offset = self.allocate(storage_class, size)?;
@@ -510,7 +510,7 @@ where
 
         let info = self.modified_info.lock().remove(&mid).unwrap();
 
-        let (checksum, compressed_data)  = match integrity_mode {
+        let (checksum, compressed_data)  = match integrity_mode.clone() {
             IntegrityMode::External => {
                 // let compression = &*self.default_compression.read().unwrap();
                 // let mut compression_state_ref = compression.new_compression().unwrap();
@@ -523,7 +523,7 @@ where
 
                 (state.finish(), compressed_data_)
             },
-            IntegrityMode::Internal(_) => {
+            IntegrityMode::Internal { csum, len } => {
                 // let compression = &*self.default_compression.read().unwrap();
                 // let mut compression_state_ref = compression.new_compression().unwrap();
                 // let mut compression_state =  compression_state_ref.write().unwrap();
@@ -533,7 +533,7 @@ where
                 //let mut state = self.default_checksum_builder.build();
                 //state.ingest(compressed_data_.as_ref());
 
-                (self.default_checksum_builder.empty(), compressed_data_)
+                ( self.default_checksum_builder.empty(), compressed_data_)
             },
         };
 
@@ -1125,7 +1125,7 @@ where
                     .decompress(compressed_data)?
 
                 },
-                IntegrityMode::Internal(_) => {
+                IntegrityMode::Internal {..} => {
                     compressed_data
                 },
             };

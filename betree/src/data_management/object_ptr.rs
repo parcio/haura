@@ -103,7 +103,7 @@ impl<D> ObjectPointer<D> {
                 IntegrityMode::External => {
                     decompression_state.decompress(compressed_data)?
                 },
-                IntegrityMode::Internal(_) => {
+                IntegrityMode::Internal {..} => {
                     compressed_data
                 },
             };

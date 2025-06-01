@@ -164,15 +164,18 @@ const META_BINCODE_STATIC: usize = 33;
 const INTERNAL_INTEGRITY_CHECKSUM_SIZE: usize = 8 + 8;
 impl Size for InternalNodeMetaData {
     fn size(&self) -> usize {
-        self.current_size
-        // std::mem::size_of::<u32>()
-        //     + std::mem::size_of::<usize>()
-        //     + std::mem::size_of::<u8>()
-        //     + std::mem::size_of::<u8>()
-        //     + self.pivot.iter().map(|p| p.size()).sum::<usize>()
-        //     + self.pivot.len() * std::mem::size_of::<usize>()
-        //     + self.pivot.len() * std::mem::size_of::<u8>()
-        //     + META_BINCODE_STATIC
+        *self.actual_size().get_or_insert_with(|| {
+            std::mem::size_of::<u32>()
+                + std::mem::size_of::<usize>()
+                + std::mem::size_of::<u8>()
+                + std::mem::size_of::<u8>()
+                + self.pivot.iter().map(|p| p.size()).sum::<usize>()
+                + self.pivot.len() * std::mem::size_of::<usize>()
+                + self.pivot.len() * std::mem::size_of::<u8>()
+                // TODO: these magic numbers are for checksums of childrens
+                + self.entries_sizes.len() * INTERNAL_INTEGRITY_CHECKSUM_SIZE
+                + META_BINCODE_STATIC
+        })
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -381,7 +384,7 @@ impl<N> CopylessInternalNode<N> {
         }
 
         for child in self.children.iter() {
-            let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder)?;
+            let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder, compressor.clone())?;
             assert_eq!(
                 bincode::serialized_size(&integrity).unwrap(),
                 INTERNAL_INTEGRITY_CHECKSUM_SIZE as u64
@@ -400,7 +403,7 @@ impl<N> CopylessInternalNode<N> {
     }
 
     /// Read object from a byte buffer and instantiate it.
-    pub fn unpack<C: Checksum>(buf: Buf, csum: C, decompressor: DecompressionTag) -> Result<Self, std::io::Error>
+    pub fn unpack<C: Checksum>(buf: Buf, csum: IntegrityMode<C>, decompressor: DecompressionTag) -> Result<Self, std::io::Error>
     where
         N: serde::de::DeserializeOwned + StaticSize,
     {
@@ -438,7 +441,7 @@ impl<N> CopylessInternalNode<N> {
         }
         for (idx, buffer_csum) in checksums.into_iter().enumerate() {
             let sub = buf.clone().slice_from(cursor as u32);
-            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, checksums[idx].clone(), decompressor)?;
+            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
             cursor += b.size();
             assert_eq!(meta_data.entries_sizes[idx], b.size());
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
