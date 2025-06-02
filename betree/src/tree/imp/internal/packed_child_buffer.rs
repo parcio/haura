@@ -834,7 +834,7 @@ impl PackedChildBuffer {
         C: ChecksumTrait,
     {
         if !self.buffer.is_unpacked() {
-            println!("if !self.buffer.is_unpacked() .................");
+            //println!("if !self.buffer.is_unpacked() .................");
             // Copy the contents of the buffer to the new writer without unpacking.
             w.write_all(&self.buffer.assert_packed()[..self.size()])?;
             return Ok(IntegrityMode::Internal {
@@ -935,7 +935,7 @@ impl PackedChildBuffer {
         }*/
         w.write_all(&compressed_vals);
 
-        println!("pack:: .. {}", compressed_vals.len() + compressed_head.len() + 4);
+        //println!("pack:: .. {}", compressed_vals.len() + compressed_head.len() + 4);
 
 
         let dec = compression.decompression_tag();
@@ -1023,7 +1023,7 @@ impl PackedChildBuffer {
     where
         C: ChecksumTrait,
     {
-        println!("..1");
+        //println!("..1");
         let uncompressed_head_len = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
         let compressed_head_len = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
 
@@ -1050,7 +1050,7 @@ impl PackedChildBuffer {
                 .unwrap(),
         );
 
-        println!("..2");
+        //println!("..2");
         let mut full_msg: Vec<u8> = vec![];
         //let mut full_msg: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(uncompressed_buf.len() as u32 + (entry_count * 8 * 1024 * 1024) as u32));
         full_msg.write_all(&uncompressed_buf.to_vec()[..uncompressed_head_len]);
@@ -1075,11 +1075,11 @@ impl PackedChildBuffer {
             //println!("Iteration number: {}", val_idx);
         }
 
-        println!("..3");
+        //println!("..3");
         let mut temp: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(full_msg.len() as u32));
         temp.write_all(&full_msg);
 
-        println!("{} temp {} .... {}", entry_count, temp.len(), full_msg.len());
+        //println!("{} temp {} .... {}", entry_count, temp.len(), full_msg.len());
         let buffer = Map::Packed {
             entry_count,
             //data: uncompressed_buf.clone().into_sliced_cow_bytes(),
@@ -1092,7 +1092,7 @@ impl PackedChildBuffer {
             .verify(&compressed_head[..csum.length().unwrap() as usize])
             .unwrap();
         // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        println!("retuni..");
+        //println!("retuni..");
         Ok(Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),
             system_storage_preference: AtomicSystemStoragePreference::from(

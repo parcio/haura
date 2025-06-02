@@ -502,7 +502,7 @@ where
 
         assert!(compressed_data_.len() <= u32::max_value() as usize);
         let size = compressed_data_.len();
-        println!("Compressed object size is {size} bytes");
+        debug!("Compressed object size is {size} bytes");
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data_.len());
         let offset = self.allocate(storage_class, size)?;
