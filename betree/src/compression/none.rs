@@ -58,12 +58,20 @@ impl io::Write for NoneCompression {
 }
 
 impl CompressionState for NoneCompression {
+    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.clone().to_vec())
+    }
+
     fn finish(&mut self, buf: Buf) -> Result<Buf> {
         Ok(buf)
     }
 }
 
 impl DecompressionState for NoneDecompression {
+    fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.clone().to_vec())
+    }
+
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
         Ok(data)
     }

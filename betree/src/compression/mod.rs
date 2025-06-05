@@ -96,12 +96,14 @@ pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
 pub trait CompressionState {
     /// Finishes the compression stream and returns a buffer that contains the
     /// compressed data.
+    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
     fn finish(&mut self, data: Buf) -> Result<Buf>;
 }
 
 /// An implementation of consumption-based decompression.
 pub trait DecompressionState {
     /// Decompress the given [Buf]. On No-op this is a simple pass through, no memory is copied.
+    fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
     fn decompress(&mut self, data: Buf) -> Result<Buf>;
 }
 

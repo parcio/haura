@@ -111,10 +111,69 @@ impl CompressionState for ZstdCompression {
 
         Ok(buf.into_buf())
     }
+
+    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        let size = zstd_safe::compress_bound(data.len());
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
+        buf.write_all(&[0u8; DATA_OFF])?;
+
+        let mut input = zstd::stream::raw::InBuffer::around(&data);
+        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, DATA_OFF);
+        let mut finished_frame;
+        loop {
+            let remaining = self.writer.run(&mut input, &mut output)?;
+            finished_frame = remaining == 0;
+            if input.pos() > 0 || data.is_empty() {
+                break;
+            }
+        }
+
+        while self.writer.flush(&mut output)? > 0 {}
+        self.writer.finish(&mut output, finished_frame)?;
+
+        let og_len = data.len() as u32;
+        og_len
+            .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
+            .unwrap();
+
+        Ok(buf.as_slice().to_vec())
+    }
 }
 
 
 impl DecompressionState for ZstdDecompression {
+      fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+    {
+        let size = u32::read_from_buffer(data).unwrap();
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
+
+        let mut input = zstd::stream::raw::InBuffer::around(&data[DATA_OFF..]);
+        let mut output = zstd::stream::raw::OutBuffer::around(&mut buf);
+
+        let mut finished_frame;
+        loop {
+            let remaining = self.writer.run(&mut input, &mut output)?;
+            finished_frame = remaining == 0;
+            if remaining > 0 {
+                if output.dst.capacity() == output.dst.as_ref().len() {
+                    // append faux byte to extend in case that original was
+                    // wrong for some reason (this should not happen but is a
+                    // sanity guard)
+                    output.dst.write(&[0])?;
+                }
+                continue;
+            }
+            if input.pos() > 0 || data.is_empty() {
+                break;
+            }
+        }
+
+        while self.writer.flush(&mut output)? > 0 {}
+        self.writer.finish(&mut output, finished_frame)?;
+
+        Ok(buf.as_slice().to_vec())
+    }
+    
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
         let size = u32::read_from_buffer(data.as_ref()).unwrap();
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));

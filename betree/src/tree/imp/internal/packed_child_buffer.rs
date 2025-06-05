@@ -137,6 +137,7 @@ pub(in crate::tree::imp) enum Map {
     Packed {
         entry_count: usize,
         data: SlicedCowBytes,
+        decompression_tag: DecompressionTag,
     },
     Unpacked(BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>),
 }
@@ -164,9 +165,13 @@ impl Map {
         &mut self,
     ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
         match self {
+<<<<<<< HEAD
             Map::Packed { entry_count, data } => {
                 // NOTE: copy data before to avoid sync epoch shenanigans
                 // necesary as we might rewrite the original memory region once here
+=======
+            Map::Packed { entry_count, data, decompression_tag } => {
+>>>>>>> Add minor fixes regarding the compression logic.
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
                 let mut key_info = Vec::with_capacity(*entry_count);
                 let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
@@ -268,7 +273,7 @@ impl Map {
     /// the general checksum of the node.
     pub fn len_bytes_contained_in_checksum(&self) -> usize {
         match self {
-            Map::Packed { entry_count, data } => {
+            Map::Packed { entry_count, data, decompression_tag } => {
                 if *entry_count < 1 {
                     return HEADER;
                 }
@@ -319,7 +324,7 @@ impl Map {
     fn find(&self, key: &[u8]) -> Option<(u8, usize, usize, Checksum)> {
     fn find(&self, key: &[u8]) -> Option<(u8, usize, usize, Checksum)> {
         match self {
-            Map::Packed { entry_count, data } => {
+            Map::Packed { entry_count, data, decompression_tag } => {
                 // Perform binary search
                 let mut left = 0 as isize;
                 let mut right = (*entry_count as isize) - 1;
@@ -573,6 +578,7 @@ impl<'a> Iter<'a> {
             Map::Packed {
                 entry_count,
                 ref data,
+                decompression_tag,
             } => Iter::Packed(PackedBufferIterator {
                 keys: (0..entry_count)
                     .map(|idx| {
@@ -902,7 +908,7 @@ impl PackedChildBuffer {
         for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
             tmp.write_all(&key)?;
 
-            let compressed_val =  state.finish(Buf::from_zero_padded(val.to_vec()))
+            let compressed_val =  state.finish_ext(&val)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
             //println!("pack:: compressed_val.len() {}", compressed_val.len());
@@ -910,6 +916,17 @@ impl PackedChildBuffer {
             compressed_vals.write_all(&(compressed_val.len() as u32).to_le_bytes())?;
             compressed_vals.write_all(&compressed_val)?;
 
+            //assert!(val.len() <= compressed_val.len());
+
+
+            let _dec = compression.decompression_tag();
+            let uncompressed_val = _dec.new_decompression()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
+            .decompress_ext(&compressed_val.to_vec())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+
+            //println!("{} {}", uncompressed_val.len() , val.len());
+            assert!(uncompressed_val.len() == val.len());
 
             let checksum = csum_builder(&compressed_val);
             // TODO: maybe size in unpacking this
@@ -922,7 +939,7 @@ impl PackedChildBuffer {
         w.write_all(&(tmp.len() as u32).to_le_bytes())?;
 
         let tmp2 = tmp.clone();
-        let compressed_head =  state.finish(Buf::from_zero_padded(tmp))
+        let compressed_head =  state.finish_ext(&tmp)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         //let head_csum = csum_builder(&compressed_head);
@@ -935,17 +952,18 @@ impl PackedChildBuffer {
         }*/
         w.write_all(&compressed_vals);
 
-        //println!("pack:: .. {}", compressed_vals.len() + compressed_head.len() + 4);
+        //println!("pack:: .. {} {}", compressed_vals.len(), compressed_head.len());
 
 
         let dec = compression.decompression_tag();
         let uncompressed_head = dec.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress(Buf::from_zero_padded(compressed_head.to_vec()))
+            .decompress_ext(&compressed_head)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
         
         //println!("1..{:?}", tmp2);
-        //println!("2..{:?}", &uncompressed_head.to_vec()[..tmp2.len()]);
+        //println!("2..{:?}", compressed_head.to_vec());
+        assert!(tmp2.len() == uncompressed_head.len());
         assert!(tmp2 == &uncompressed_head.to_vec()[..tmp2.len()]);
 
         
@@ -1031,7 +1049,7 @@ impl PackedChildBuffer {
 
         let uncompressed_buf = decompressor.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress(Buf::from_zero_padded(buf[8..compressed_head_len + 8].to_vec()))
+            .decompress_ext(&buf[8..compressed_head_len + 8].to_vec())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         let is_leaf = uncompressed_buf[0] != 0;
@@ -1055,23 +1073,26 @@ impl PackedChildBuffer {
         //let mut full_msg: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(uncompressed_buf.len() as u32 + (entry_count * 8 * 1024 * 1024) as u32));
         full_msg.write_all(&uncompressed_buf.to_vec()[..uncompressed_head_len]);
 
+            //assert!(uncompressed_buf.len() == uncompressed_head_len);
+        
         let mut val_offset = 4 + 4 + compressed_head_len;
         for val_idx in 0..entry_count {
             let uncompressed_val_len = u32::from_le_bytes(buf[val_offset..val_offset + 4].try_into().unwrap()) as usize;
             let compressed_val_len = u32::from_le_bytes(buf[val_offset + 4..val_offset + 4 + 4].try_into().unwrap()) as usize;
 
-            //println!("unpack compressed_val_len {}", compressed_val_len);
+            //println!("unpack compressed_val_len {} {}",val_offset, compressed_val_len);
 
             val_offset = val_offset + 4 + 4;
 
             let uncompressed_val = decompressor.new_decompression()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-                .decompress(Buf::from_zero_padded(buf[val_offset..val_offset + compressed_val_len].to_vec()))
+                .decompress_ext(&buf[val_offset..val_offset + compressed_val_len].to_vec())
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
+            assert!(uncompressed_val.len() == uncompressed_val_len);
             full_msg.write_all(&uncompressed_val.to_vec()[..uncompressed_val_len]);
 
-            val_offset = compressed_val_len;
+            val_offset = val_offset + compressed_val_len;
             //println!("Iteration number: {}", val_idx);
         }
 
@@ -1084,6 +1105,7 @@ impl PackedChildBuffer {
             entry_count,
             //data: uncompressed_buf.clone().into_sliced_cow_bytes(),
             data: temp.into_buf().into_sliced_cow_bytes(),
+            decompression_tag: decompressor,
         };
         let compressed_head = &buf[4..compressed_head_len + 4];
         csum.checksum()
