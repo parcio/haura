@@ -165,13 +165,7 @@ impl Map {
         &mut self,
     ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
         match self {
-<<<<<<< HEAD
-            Map::Packed { entry_count, data } => {
-                // NOTE: copy data before to avoid sync epoch shenanigans
-                // necesary as we might rewrite the original memory region once here
-=======
             Map::Packed { entry_count, data, decompression_tag } => {
->>>>>>> Add minor fixes regarding the compression logic.
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
                 let mut key_info = Vec::with_capacity(*entry_count);
                 let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
@@ -211,17 +205,52 @@ impl Map {
                     size_delta += val_len as isize;
                 }
 
-                *self = Map::Unpacked(BTreeMap::from_iter(keys.into_iter().zip(
-                    key_info.into_iter().zip(values_pos.into_iter().map(
-                        move |(pos, len, csum)| {
-                            // NOTE: copies data to not be invalidated later on rewrites... could be solved differently
-                            let buf = CowBytes::from(&data[pos as usize..(pos + len) as usize])
-                                .slice_from(0);
-                            csum.verify(&buf).unwrap();
-                            buf
-                        },
-                    )),
-                )));
+println!("size_delta>>{} {}", size_delta, entry_count);
+                *self = Map::Unpacked(BTreeMap::from_iter(
+                    keys.into_iter().zip(
+                        key_info.into_iter().zip(
+                            values_pos
+                                .into_iter()
+                                // NOTE: This copy is cheap as the data is behind an Arc.
+                                .map(|(pos, len, csum)| {
+                                    // TODO: Verify checksum
+                                    let buf = data.clone().subslice(pos, len);
+
+                                    println!("---> unpacked.. {} {}", pos, len);
+
+                                    let mut val_offset = 0;
+
+                                    let uncompressed_val_len = u32::from_le_bytes(buf[val_offset..val_offset + 4].try_into().unwrap()) as usize;
+                                    let compressed_val_len = u32::from_le_bytes(buf[val_offset + 4..val_offset + 4 + 4].try_into().unwrap()) as usize;
+                                    println!("uncompressed_val_len  compressed_val_len {} {}", uncompressed_val_len, compressed_val_len);
+
+                                    val_offset = val_offset + 4 + 4;
+
+                                    let uncompressed_val = decompression_tag.new_decompression()
+                                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
+                                    .decompress_ext(&buf[val_offset..val_offset + compressed_val_len])
+                                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
+
+
+                                    println!("uncompressed_val {}", uncompressed_val.len());
+
+                                    println!("verifying csum");
+                                    csum.verify(&uncompressed_val).unwrap();
+                                    println!("verifyingd");
+
+                                     let mut temp: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(uncompressed_val.len() as u32));
+                                    temp.write_all(&uncompressed_val);
+        
+        let x = temp.into_buf().into_sliced_cow_bytes().subslice(0, uncompressed_val_len as u32);
+        println!(">>{}", (uncompressed_val_len as isize - compressed_val_len as isize));
+        size_delta   += (uncompressed_val_len as isize - compressed_val_len as isize);
+        println!("xx {}", x.len());
+                                    x
+                                }),
+                        ),
+                    ),
+                ));
+println!("size_delta>>{}", size_delta);
 
                 WithCacheSizeChange::new(
                     match self {
@@ -299,8 +328,29 @@ impl Map {
 
     pub fn get(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
         match self {
-            Map::Packed { data, .. } => self.find(key).map(|(pref, pos, len, csum)| {
+            Map::Packed { data, decompression_tag, .. } => self.find(key).map(|(pref, pos, len, csum)| {
                 let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
+
+                println!("---> get key..");
+
+                let mut val_offset = 0;
+
+                let uncompressed_val_len = u32::from_le_bytes(buf[val_offset..val_offset + 4].try_into().unwrap()) as usize;
+                let compressed_val_len = u32::from_le_bytes(buf[val_offset + 4..val_offset + 4 + 4].try_into().unwrap()) as usize;
+                println!("---> {} {}", uncompressed_val_len, compressed_val_len);
+
+                val_offset = val_offset + 4 + 4;
+
+                let uncompressed_val = decompression_tag.new_decompression()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
+                .decompress_ext(&buf[val_offset..val_offset+compressed_val_len])
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
+
+                let mut temp: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(uncompressed_val.len() as u32));
+                                    temp.write_all(&uncompressed_val);
+        
+                                    
+
                 // TODO: Pass on result
                 csum.verify(&buf).unwrap();
             Map::Packed { data, .. } => self.find(key).map(|(pref, pos, len, csum)| {
@@ -311,7 +361,7 @@ impl Map {
                     KeyInfo {
                         storage_preference: StoragePreference::from_u8(pref),
                     },
-                    buf.slice_from(0),
+                    temp.into_buf().into_sliced_cow_bytes(),
                 )
             }),
             // TODO: This should be a cheap copy (a few bytes for the pref and
@@ -325,6 +375,7 @@ impl Map {
     fn find(&self, key: &[u8]) -> Option<(u8, usize, usize, Checksum)> {
         match self {
             Map::Packed { entry_count, data, decompression_tag } => {
+                println!("find..");
                 // Perform binary search
                 let mut left = 0 as isize;
                 let mut right = (*entry_count as isize) - 1;
@@ -547,7 +598,7 @@ impl<'a> Iterator for PackedBufferIterator<'a> {
         if self.cur >= self.entry_count {
             return None;
         }
-
+        println!("next..");
         let kpos = &self.keys[self.cur];
 
         let vpos_off = (kpos.pos + kpos.len) as usize;
@@ -614,6 +665,7 @@ impl PackedChildBuffer {
     pub fn get_all_messages(
         &self,
     ) -> impl Iterator<Item = (&[u8], (KeyInfo, SlicedCowBytes))> + '_ {
+        println!("get all messages");
         Iter::new(self)
     }
 
@@ -645,6 +697,7 @@ impl PackedChildBuffer {
     /// entries up to (and including) `pivot_key` and the returned `Self`
     /// contains the other entries.
     pub fn split_at(&mut self, pivot: &CowBytes) -> Self {
+        //println!("split_at");
         let (buffer, buffer_entries_size) = self.split_off(pivot);
         PackedChildBuffer {
             messages_preference: AtomicStoragePreference::unknown(),
@@ -719,6 +772,7 @@ impl PackedChildBuffer {
         Q: Borrow<[u8]> + Into<CowBytes>,
         M: MessageAction,
     {
+        //println!("insert");
         let key = key.into();
         let key_size = key.size();
 
@@ -880,11 +934,13 @@ impl PackedChildBuffer {
         let mut free_after = HEADER + self.buffer.len() * KEY_IDX_SIZE;
         
         for (key, (info, _)) in self.buffer.assert_unpacked().iter() {
+            println!("..key {} {}", tmp.len(), free_after);
             let key_len = key.len();
             tmp.write_all(&(free_after as u32).to_le_bytes())?;
             tmp.write_all(&(key_len as u32).to_le_bytes())?;
-            tmp.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
-            free_after += key_len
+            let _l = info.storage_preference.as_u8().to_le_bytes();
+            tmp.write_all(&_l)?;
+          free_after += key_len
                 + std::mem::size_of::<u32>()
                 + std::mem::size_of::<u32>()
                 + Checksum::static_size()
@@ -896,6 +952,7 @@ impl PackedChildBuffer {
                 + std::mem::size_of::<u32>()
                 + Checksum::static_size()
         }
+        println!("key {} {}", tmp.len(), free_after);
 
         let mut compressed_vals: Vec<u8> = vec![];
 
@@ -906,7 +963,9 @@ impl PackedChildBuffer {
         assert!(self.buffer.len() == self.buffer.assert_unpacked().len());
 
         for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
+            println!("..key/val {} {}", tmp.len(), free_after);
             tmp.write_all(&key)?;
+            println!("..key/val key {}", tmp.len());
 
             let compressed_val =  state.finish_ext(&val)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
@@ -914,27 +973,35 @@ impl PackedChildBuffer {
             //println!("pack:: compressed_val.len() {}", compressed_val.len());
             compressed_vals.write_all(&(val.len() as u32).to_le_bytes())?;
             compressed_vals.write_all(&(compressed_val.len() as u32).to_le_bytes())?;
-            compressed_vals.write_all(&compressed_val)?;
+            compressed_vals.write(&compressed_val)?;
 
             //assert!(val.len() <= compressed_val.len());
 
 
-            let _dec = compression.decompression_tag();
-            let uncompressed_val = _dec.new_decompression()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress_ext(&compressed_val.to_vec())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+            // let _dec = compression.decompression_tag();
+            // let uncompressed_val = _dec.new_decompression()
+            // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
+            // .decompress_ext(&compressed_val.to_vec())
+            // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
-            //println!("{} {}", uncompressed_val.len() , val.len());
-            assert!(uncompressed_val.len() == val.len());
-
+            println!("compressed_vals val{} {}", compressed_val.len() , val.len());
+            // assert!(uncompressed_val.len() == val.len());
+            //println!("-->{} {} {} {}",key.len(), free_after, std::mem::size_of::<u32>(), compressed_vals.len());
             let checksum = csum_builder(&compressed_val);
             // TODO: maybe size in unpacking this
+            //println!("a>>>>>>>>>>>>>>>>> {}",tmp.len());
             tmp.write_all(&(free_after as u32).to_le_bytes())?;
-            tmp.write_all(&(val.len() as u32).to_le_bytes())?;
+            //println!("b>>>>>>>>>>>>>>>>> {}",tmp.len());
+            tmp.write_all(&(8 + compressed_val.len() as u32).to_le_bytes())?;
+            //println!("0 >>>>>>>>>>>>>>>>> {}",tmp.len());
             bincode::serialize_into(&mut tmp, &checksum).unwrap();
-            free_after += val.len();
+            //println!("1 >>>>>>>>>>>>>>>>> {} {}",tmp.len(), Checksum::static_size());
+            free_after += compressed_val.len()
+                + std::mem::size_of::<u32>()
+                + std::mem::size_of::<u32>();
+                //+ Checksum::static_size();
         }
+        println!("key/val {} {}", tmp.len(), free_after);
 
         w.write_all(&(tmp.len() as u32).to_le_bytes())?;
 
@@ -954,19 +1021,120 @@ impl PackedChildBuffer {
 
         //println!("pack:: .. {} {}", compressed_vals.len(), compressed_head.len());
 
+         let mut data = vec![];
+         data.write_all(&tmp);
+         data.write_all(&compressed_vals);
 
-        let dec = compression.decompression_tag();
-        let uncompressed_head = dec.new_decompression()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress_ext(&compressed_head)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+        // let dec = compression.decompression_tag();
+        // let uncompressed_head = dec.new_decompression()
+        //     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
+        //     .decompress_ext(&compressed_head)
+        //     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
         
-        //println!("1..{:?}", tmp2);
-        //println!("2..{:?}", compressed_head.to_vec());
-        assert!(tmp2.len() == uncompressed_head.len());
-        assert!(tmp2 == &uncompressed_head.to_vec()[..tmp2.len()]);
+        // //println!("1..{:?}", tmp2);
+        // //println!("2..{:?}", compressed_head.to_vec());
+        // assert!(tmp2.len() == uncompressed_head.len());
+        // assert!(tmp2 == &uncompressed_head.to_vec()[..tmp2.len()]);
 
+        let decompressor = compression.decompression_tag();
+
+let entry_count = self.buffer.len();
+        println!("entry_count...{}",entry_count);
+
+ let mut keys: Vec<CowBytes> = Vec::with_capacity(entry_count);
+                let mut key_info = Vec::with_capacity(entry_count);
+                let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(entry_count);
+
+                // current in-cache size
+                let mut size_delta: isize = -2 * std::mem::size_of::<usize>() as isize;
+
+                for idx in 0..entry_count {
+                    size_delta += KeyInfo::static_size() as isize;
+                    let off = HEADER + idx * KEY_IDX_SIZE;
+                    println!("off...{}", off);
+                    let kidx = KeyIdx::unpack(data.cut(off, 9).try_into().unwrap());
+                    key_info.push(KeyInfo {
+                        storage_preference: StoragePreference::from_u8(kidx.pref),
+                    });
+                    keys.push(CowBytes::from(
+                        data.cut(kidx.pos as usize, kidx.len as usize),
+                    ));
+                    size_delta += kidx.len as isize;
+
+                    let val_pos_off = kidx.pos as usize + kidx.len as usize;
+                    let val_pos = u32::from_le_bytes(data.cut(val_pos_off, 4).try_into().unwrap());
+                    let val_len =
+                        u32::from_le_bytes(data.cut(val_pos_off + 4, 4).try_into().unwrap());
+                    let val_csum: crate::database::Checksum = bincode::deserialize(data.cut(
+                        val_pos_off + 4 + 4,
+                        crate::database::Checksum::static_size(),
+                    ))
+                    .unwrap();
+                    println!("key...{} {} {}", val_pos_off, kidx.pos, kidx.len);
+                    println!("values_pos...{} {}", val_pos, val_len);
+                    values_pos.push((val_pos, val_len, val_csum));
+                    size_delta += val_len as isize;
+                }
+println!("00000000000000000size_delta>>{} {}", size_delta, entry_count);
+                let m = Map::Unpacked(BTreeMap::from_iter(
+                    keys.into_iter().zip(
+                        key_info.into_iter().zip(
+                            values_pos
+                                .into_iter()
+                                // NOTE: This copy is cheap as the data is behind an Arc.
+                                .map(|(pos, len, csum)| {
+                                    // TODO: Verify checksum
+                                    println!("---> unpacked.. {} {}", pos, len);
+                                    let buf = data.as_slice()[pos as usize .. pos as usize + len as usize].to_vec();
+
+
+                                    let mut val_offset = 0;
+
+                                    let uncompressed_val_len = u32::from_le_bytes(buf[val_offset..val_offset + 4].try_into().unwrap()) as usize;
+                                    let compressed_val_len = u32::from_le_bytes(buf[val_offset + 4..val_offset + 4 + 4].try_into().unwrap()) as usize;
+                                    println!("uncompressed_val_len  compressed_val_len {} {}", uncompressed_val_len, compressed_val_len);
+
+                                    val_offset = val_offset + 4 + 4;
+
+                                    let uncompressed_val = decompressor.new_decompression()
+                                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
+                                    .decompress_ext(&buf[val_offset..])
+                                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
+
+
+                                    println!("uncompressed_val {}", uncompressed_val.len());
+
+                                    println!("verifying csum");
+                                    csum.verify(&uncompressed_val).unwrap();
+                                    println!("verifyingd");
+
+                                     let mut temp: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(uncompressed_val.len() as u32));
+                                    temp.write_all(&uncompressed_val);
         
+        let x = temp.into_buf().into_sliced_cow_bytes().subslice(0, uncompressed_val_len as u32);
+        println!(">>{}", (uncompressed_val_len as isize - compressed_val_len as isize));
+        size_delta   += (uncompressed_val_len as isize - compressed_val_len as isize);
+        println!("xx {}", x.len());
+                                    x
+                                }),
+                        ),
+                    ),
+                ));
+println!("size_delta>>{}", size_delta);
+
+println!("\n\n\n....");
+
+
+
+
+
+
+
+
+
+
+
+
 
         Ok(IntegrityMode::Internal {
             csum: head_csum,
@@ -1072,15 +1240,16 @@ impl PackedChildBuffer {
         let mut full_msg: Vec<u8> = vec![];
         //let mut full_msg: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(uncompressed_buf.len() as u32 + (entry_count * 8 * 1024 * 1024) as u32));
         full_msg.write_all(&uncompressed_buf.to_vec()[..uncompressed_head_len]);
-
+        full_msg.write_all(&buf[compressed_head_len + 8..].to_vec());
             //assert!(uncompressed_buf.len() == uncompressed_head_len);
         
         let mut val_offset = 4 + 4 + compressed_head_len;
         for val_idx in 0..entry_count {
+            println!("val_offset uncompressed_val {}",val_offset - 8);
             let uncompressed_val_len = u32::from_le_bytes(buf[val_offset..val_offset + 4].try_into().unwrap()) as usize;
             let compressed_val_len = u32::from_le_bytes(buf[val_offset + 4..val_offset + 4 + 4].try_into().unwrap()) as usize;
 
-            //println!("unpack compressed_val_len {} {}",val_offset, compressed_val_len);
+            println!("uncompressed_val_len compressed_val_len {} {}",uncompressed_val_len, compressed_val_len);
 
             val_offset = val_offset + 4 + 4;
 
@@ -1089,25 +1258,33 @@ impl PackedChildBuffer {
                 .decompress_ext(&buf[val_offset..val_offset + compressed_val_len].to_vec())
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
-            assert!(uncompressed_val.len() == uncompressed_val_len);
-            full_msg.write_all(&uncompressed_val.to_vec()[..uncompressed_val_len]);
+
+            //assert!(uncompressed_val.len() == uncompressed_val_len);
+            //full_msg.write_all(&uncompressed_val.to_vec()[..uncompressed_val_len]);
 
             val_offset = val_offset + compressed_val_len;
             //println!("Iteration number: {}", val_idx);
         }
 
+        //assert_unp
+        //println!("val_offset {}== buf.len {} {}", val_offset, buf.len(), full_msg.len());
+        //assert!(val_offset == buf.len());
+
         //println!("..3");
         let mut temp: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(full_msg.len() as u32));
         temp.write_all(&full_msg);
 
-        //println!("{} temp {} .... {}", entry_count, temp.len(), full_msg.len());
+        let _x: SlicedCowBytes =  temp.into_buf().into_sliced_cow_bytes();
+        let data = _x.clone();
+        println!("{} temp {} .... {} {}", entry_count, full_msg.len(), buf.len(), _x.len());
         let buffer = Map::Packed {
             entry_count,
             //data: uncompressed_buf.clone().into_sliced_cow_bytes(),
-            data: temp.into_buf().into_sliced_cow_bytes(),
+            data:_x,
             decompression_tag: decompressor,
         };
-        let compressed_head = &buf[4..compressed_head_len + 4];
+        
+        let compressed_head = &buf[8..compressed_head_len + 8];
         csum.checksum()
             .unwrap()
             //.verify(&uncompressed_buf[..csum.length().unwrap() as usize])
@@ -1115,6 +1292,106 @@ impl PackedChildBuffer {
             .unwrap();
         // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         //println!("retuni..");
+
+
+ let mut keys: Vec<CowBytes> = Vec::with_capacity(entry_count);
+                let mut key_info = Vec::with_capacity(entry_count);
+                let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(entry_count);
+
+                // current in-cache size
+                let mut size_delta: isize = -2 * std::mem::size_of::<usize>() as isize;
+
+                for idx in 0..entry_count {
+                    size_delta += KeyInfo::static_size() as isize;
+                    let off = HEADER + idx * KEY_IDX_SIZE;
+                    let kidx = KeyIdx::unpack(data.cut(off, 9).try_into().unwrap());
+                    key_info.push(KeyInfo {
+                        storage_preference: StoragePreference::from_u8(kidx.pref),
+                    });
+                    keys.push(CowBytes::from(
+                        data.cut(kidx.pos as usize, kidx.len as usize),
+                    ));
+                    size_delta += kidx.len as isize;
+
+                    let val_pos_off = kidx.pos as usize + kidx.len as usize;
+                    let val_pos = u32::from_le_bytes(data.cut(val_pos_off, 4).try_into().unwrap());
+                    let val_len =
+                        u32::from_le_bytes(data.cut(val_pos_off + 4, 4).try_into().unwrap());
+                    let val_csum: crate::database::Checksum = bincode::deserialize(data.cut(
+                        val_pos_off + 4 + 4,
+                        crate::database::Checksum::static_size(),
+                    ))
+                    .unwrap();
+                println!("values_pos...{} {}", val_pos, val_len);
+                    values_pos.push((val_pos, val_len, val_csum));
+                    size_delta += val_len as isize;
+                }
+println!("00000000000000000size_delta>>{} {}", size_delta, entry_count);
+                let m = Map::Unpacked(BTreeMap::from_iter(
+                    keys.into_iter().zip(
+                        key_info.into_iter().zip(
+                            values_pos
+                                .into_iter()
+                                // NOTE: This copy is cheap as the data is behind an Arc.
+                                .map(|(pos, len, csum)| {
+                                    // TODO: Verify checksum
+                                    let buf = data.clone().subslice(pos, len);
+
+                                    println!("---> unpacked.. {} {}", pos, len);
+
+                                    let mut val_offset = 0;
+
+                                    let uncompressed_val_len = u32::from_le_bytes(buf[val_offset..val_offset + 4].try_into().unwrap()) as usize;
+                                    let compressed_val_len = u32::from_le_bytes(buf[val_offset + 4..val_offset + 4 + 4].try_into().unwrap()) as usize;
+                                    println!("uncompressed_val_len  compressed_val_len {} {}", uncompressed_val_len, compressed_val_len);
+
+                                    val_offset = val_offset + 4 + 4;
+
+                                    let uncompressed_val = decompressor.new_decompression()
+                                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
+                                    .decompress_ext(&buf[val_offset..val_offset + compressed_val_len])
+                                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
+
+
+                                    println!("uncompressed_val {}", uncompressed_val.len());
+
+                                    println!("verifying csum");
+                                    csum.verify(&uncompressed_val).unwrap();
+                                    println!("verifyingd");
+
+                                     let mut temp: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes(uncompressed_val.len() as u32));
+                                    temp.write_all(&uncompressed_val);
+        
+        let x = temp.into_buf().into_sliced_cow_bytes().subslice(0, uncompressed_val_len as u32);
+        println!(">>{}", (uncompressed_val_len as isize - compressed_val_len as isize));
+        //size_delta   += (uncompressed_val_len as isize - compressed_val_len as isize);
+        println!("xx {}", x.len());
+                                    x
+                                }),
+                        ),
+                    ),
+                ));
+println!("size_delta>>{}", size_delta);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         Ok(Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),
             system_storage_preference: AtomicSystemStoragePreference::from(
