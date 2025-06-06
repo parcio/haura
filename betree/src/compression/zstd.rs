@@ -11,7 +11,7 @@ use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder};
 use zstd_safe::{FrameFormat, WriteBuf};
 use std::sync::{Arc, Mutex};
 // TODO: investigate pre-created dictionary payoff
-
+use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 /// Zstd compression. (<https://github.com/facebook/zstd>)
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Zstd {
@@ -142,7 +142,7 @@ impl CompressionState for ZstdCompression {
 
 
 impl DecompressionState for ZstdDecompression {
-      fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>
+      fn decompress_ext(&mut self, data: &[u8]) -> Result<SlicedCowBytes>
     {
         let size = u32::read_from_buffer(data).unwrap();
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
@@ -171,7 +171,7 @@ impl DecompressionState for ZstdDecompression {
         while self.writer.flush(&mut output)? > 0 {}
         self.writer.finish(&mut output, finished_frame)?;
 
-        Ok(buf.as_slice().to_vec())
+        Ok(buf.as_sliced_cow_bytes())
     }
     
     fn decompress(&mut self, data: Buf) -> Result<Buf> {

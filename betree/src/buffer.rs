@@ -280,6 +280,13 @@ impl BufWrite {
         }
     }
 
+    pub fn as_sliced_cow_bytes(&self) -> SlicedCowBytes {
+        let slice = unsafe {
+            std::slice::from_raw_parts(self.buf.ptr.as_ptr(), self.size as usize)
+        };
+        SlicedCowBytes::from(CowBytes::from(slice))
+    }
+    
     /// Convert this to a read-only [Buf].
     /// This is always safe because [BufWrite] can't be split,
     /// and therefore no aliasing writable pieces can remain.

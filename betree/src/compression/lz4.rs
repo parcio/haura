@@ -1,6 +1,7 @@
 use super::{ CompressionBuilder, CompressionState, DecompressionState, DecompressionTag, DEFAULT_BUFFER_SIZE, Result };
 use crate::size::StaticSize;
 use crate::buffer::{Buf, BufWrite};
+use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
 use crate::{
     vdev::Block,
@@ -139,13 +140,14 @@ impl CompressionState for Lz4Compression {
 }
 
 impl DecompressionState for Lz4Decompression {
-    fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn decompress_ext(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
         let size = data.as_ref().len() as u32;
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
         let mut decoder = Decoder::new(data.as_ref())?;
 
         io::copy(&mut decoder, &mut buf)?;
-        Ok(buf.as_slice().to_vec())
+
+        Ok(buf.as_sliced_cow_bytes())
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {

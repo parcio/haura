@@ -9,6 +9,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::{Arc, Mutex};
+use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
 /// No-op compression.
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
@@ -68,8 +69,8 @@ impl CompressionState for NoneCompression {
 }
 
 impl DecompressionState for NoneDecompression {
-    fn decompress_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        Ok(data.clone().to_vec())
+    fn decompress_ext(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
+        panic!("..");//Ok(data..clone().to_vec())
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
