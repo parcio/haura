@@ -441,8 +441,10 @@ impl<N> CopylessInternalNode<N> {
         }
         for (idx, buffer_csum) in checksums.into_iter().enumerate() {
             let sub = buf.clone().slice_from(cursor as u32);
-            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
-            cursor += b.size();
+            //print!("before: {} {}, ", sub.size(), sub.len());
+            let (b, next_offset) = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
+            //println!("after: {} {}. ", b.size(), b.len());
+            cursor += next_offset;//b.size();
             assert_eq!(meta_data.entries_sizes[idx], b.size());
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
             assert_eq!(meta_data.entries_sizes[idx], ptrs[idx].buffer.size());

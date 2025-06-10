@@ -1,4 +1,6 @@
 //! Implementation of a message buffering node wrapper.
+use zstd_safe::WriteBuf;
+
 use crate::{
     buffer::{self, Buf, BufWrite}, checksum::{Builder, Checksum as ChecksumTrait, State}, compression::{CompressionBuilder, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{HasStoragePreference, IntegrityMode}, database::Checksum, size::{Size, StaticSize}, storage_pool::AtomicSystemStoragePreference, tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction}, AtomicStoragePreference, StoragePreference
 };
@@ -223,6 +225,12 @@ impl Map {
                                     size_delta   += (uncompressed_val.len() as isize - len as isize);
                                     
                                     uncompressed_val
+
+                                    /*
+                                    let buf = data.clone().subslice(pos, len);
+                                    csum.verify(&buf).unwrap();
+                                    buf
+                                    */
                                 }),
                         ),
                     ),
@@ -323,6 +331,15 @@ impl Map {
                     },
                     uncompressed_val
                 )
+                /*let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
+                // TODO: Pass on result
+                csum.verify(&buf).unwrap();
+                (
+                    KeyInfo {
+                        storage_preference: StoragePreference::from_u8(pref),
+                    },
+                    buf,
+                )*/
             }),
             // TODO: This should be a cheap copy (a few bytes for the pref and
             // the ptrs in slicedcowbytes) but please check this again.
@@ -558,7 +575,7 @@ impl<'a> Iterator for PackedBufferIterator<'a> {
         if self.cur >= self.entry_count {
             return None;
         }
-        println!("next..");
+        //println!("next..");
         let kpos = &self.keys[self.cur];
 
         let vpos_off = (kpos.pos + kpos.len) as usize;
@@ -625,7 +642,7 @@ impl PackedChildBuffer {
     pub fn get_all_messages(
         &self,
     ) -> impl Iterator<Item = (&[u8], (KeyInfo, SlicedCowBytes))> + '_ {
-        println!("get all messages");
+        //println!("get all messages");
         Iter::new(self)
     }
 
@@ -941,6 +958,7 @@ impl PackedChildBuffer {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         w.write_all(&(compressed_head.len() as u32).to_le_bytes())?;
+        w.write_all(&(compressed_head.len() as u32 + 12 + compressed_vals.len() as u32).to_le_bytes())?;
         w.write_all(&compressed_head)?;
 
         let head_csum = csum_builder(&compressed_head);
@@ -950,7 +968,6 @@ impl PackedChildBuffer {
             csum: head_csum,
             len: compressed_head.len() as u32,
         })
-
         /*
         if !self.buffer.is_unpacked() {
             // Copy the contents of the buffer to the new writer without unpacking.
@@ -1011,20 +1028,21 @@ impl PackedChildBuffer {
         Ok(IntegrityMode::Internal {
             csum: head_csum,
             len: tmp.len() as u32,
-        })
-        */
+        })*/
+        
     }
 
-    pub fn unpack<C>(buf: SlicedCowBytes, csum: IntegrityMode<C>, decompressor: DecompressionTag) -> Result<Self, std::io::Error>
+    pub fn unpack<C>(buf: SlicedCowBytes, csum: IntegrityMode<C>, decompressor: DecompressionTag) -> Result<(Self, usize), std::io::Error>
     where
         C: ChecksumTrait,
     {
         let uncompressed_head_len = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
         let compressed_head_len = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
+        let total_bytes = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
 
         let uncompressed_buf = decompressor.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress_ext(&buf[8..compressed_head_len + 8].to_vec())
+            .decompress_ext(&buf[12..compressed_head_len + 12].to_vec())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         let is_leaf = uncompressed_buf[0] != 0;
@@ -1046,7 +1064,7 @@ impl PackedChildBuffer {
         let mut full_msg: Vec<u8> = vec![];
 
         full_msg.write_all(&uncompressed_buf.to_vec()[..uncompressed_head_len]);
-        full_msg.write_all(&buf[compressed_head_len + 8..].to_vec());
+        full_msg.write_all(&buf[compressed_head_len + 12..].to_vec());
 
 
         let buffer = Map::Packed {
@@ -1055,7 +1073,7 @@ impl PackedChildBuffer {
             decompression_tag: decompressor,
         };
         
-        let compressed_head = &buf[8..compressed_head_len + 8];
+        let compressed_head = &buf[12..compressed_head_len + 12];
         csum.checksum()
             .unwrap()
             //.verify(&uncompressed_buf[..csum.length().unwrap() as usize])
@@ -1063,7 +1081,7 @@ impl PackedChildBuffer {
             .unwrap();
         // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        Ok(Self {
+        Ok((Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),
             system_storage_preference: AtomicSystemStoragePreference::from(
                 StoragePreference::from_u8(pref),
@@ -1071,7 +1089,7 @@ impl PackedChildBuffer {
             entries_size,
             buffer,
             is_leaf,
-        })
+        }, total_bytes))
 
         /*
         let is_leaf = buf[0] != 0;
@@ -1092,6 +1110,7 @@ impl PackedChildBuffer {
         let buffer = Map::Packed {
             entry_count,
             data: buf.clone(),
+            decompression_tag: decompressor,
         };
         csum.checksum()
             .unwrap()
