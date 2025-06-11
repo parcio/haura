@@ -268,7 +268,7 @@ ensure_config
 #zip_cache
 #zip_tiered
 #zip_mt
-tiered
+#tiered
 #scientific_evaluation
 #evaluation_rw
 #filesystem
@@ -276,8 +276,8 @@ tiered
 #checkpoints
 #switchover
 #ingest
-# ycsb_a
-# ycsb_b
+ycsb_a
+#ycsb_b
 # ycsb_c
 # ycsb_d
 # ycsb_e

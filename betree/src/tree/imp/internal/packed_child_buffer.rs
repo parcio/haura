@@ -113,7 +113,6 @@ pub(in crate::tree::imp) struct PackedChildBuffer {
     // memory or NVMe to be worth the additional queries.
     pub(in crate::tree::imp) system_storage_preference: AtomicSystemStoragePreference,
     pub(in crate::tree::imp) entries_size: usize,
-    pub(in crate::tree::imp) compressed_size: usize,
     pub(in crate::tree::imp) buffer: Map,
 
     pub(in crate::tree::imp) is_leaf: bool,
@@ -140,6 +139,8 @@ pub(in crate::tree::imp) enum Map {
     Packed {
         entry_count: usize,
         data: SlicedCowBytes,
+        packed_header_size: usize,
+        packed_vals_size: usize,
         decompression_tag: DecompressionTag,
     },
     Unpacked(BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>),
@@ -168,7 +169,7 @@ impl Map {
         &mut self,
     ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
         match self {
-            Map::Packed { entry_count, data, decompression_tag } => {
+            Map::Packed { entry_count, data, packed_header_size, packed_vals_size, decompression_tag } => {
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
                 let mut key_info = Vec::with_capacity(*entry_count);
                 let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
@@ -287,7 +288,7 @@ impl Map {
     /// the general checksum of the node.
     pub fn len_bytes_contained_in_checksum(&self) -> usize {
         match self {
-            Map::Packed { entry_count, data, decompression_tag } => {
+            Map::Packed { entry_count, data, packed_header_size, packed_vals_size,decompression_tag } => {
                 if *entry_count < 1 {
                     return HEADER;
                 }
@@ -308,6 +309,30 @@ impl Map {
         match self {
             Map::Packed { entry_count, .. } => *entry_count,
             Map::Unpacked(btree) => btree.len(),
+        }
+    }
+
+    /// Return the number of elements.
+    pub fn packed_header_len(&self) -> usize {
+        match self {
+            Map::Packed { packed_header_size, .. } => *packed_header_size,
+            Map::Unpacked(btree) => unreachable!(".."),
+        }
+    }
+
+    /// Return the number of elements.
+    pub fn packed_vals_len(&self) -> usize {
+        match self {
+            Map::Packed { packed_vals_size, .. } => *packed_vals_size,
+            Map::Unpacked(btree) => unreachable!(".."),
+        }
+    }
+
+        /// Return the number of elements.
+    pub fn packed_total_len(&self) -> usize {
+        match self {
+            Map::Packed { packed_header_size, packed_vals_size, .. } => *packed_header_size + *packed_vals_size,
+            Map::Unpacked(btree) => unreachable!(".."),
         }
     }
 
@@ -333,7 +358,7 @@ impl Map {
                     uncompressed_val
                 )
                 /*let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
-                // TODO: Pass Con result
+                // TODO: Pass on result
                 csum.verify(&buf).unwrap();
                 (
                     KeyInfo {
@@ -352,7 +377,7 @@ impl Map {
     fn find(&self, key: &[u8]) -> Option<(u8, usize, usize, Checksum)> {
     fn find(&self, key: &[u8]) -> Option<(u8, usize, usize, Checksum)> {
         match self {
-            Map::Packed { entry_count, data, decompression_tag } => {
+            Map::Packed { entry_count, data, packed_header_size, packed_vals_size,decompression_tag } => {
 
                 // Perform binary search
                 let mut left = 0 as isize;
@@ -607,6 +632,8 @@ impl<'a> Iter<'a> {
             Map::Packed {
                 entry_count,
                 ref data,
+                packed_header_size, 
+                packed_vals_size,
                 decompression_tag,
             } => Iter::Packed(PackedBufferIterator {
                 keys: (0..entry_count)
@@ -683,7 +710,6 @@ impl PackedChildBuffer {
             entries_size: buffer_entries_size,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             is_leaf: self.is_leaf,
-            compressed_size: 0,
         }
     }
 
@@ -830,7 +856,6 @@ impl PackedChildBuffer {
             entries_size: 0,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             is_leaf,
-            compressed_size: 0,
         }
     }
 
@@ -874,13 +899,33 @@ impl PackedChildBuffer {
         C: ChecksumTrait,
     {
         if !self.buffer.is_unpacked() {
-            //println!("if !self.buffer.is_unpacked() .................");
+            println!("if !self.buffer.is_unpacked() .................{} {} {}", self.buffer.packed_header_len(), self.buffer.packed_vals_len(), self.buffer.packed_total_len());
             // Copy the contents of the buffer to the new writer without unpacking.
-            w.write_all(&self.buffer.assert_packed()[..self.compressed_size])?;
+            
+            let slice = &self.buffer.assert_packed()[..];
+
+            let compression = compressor.read().unwrap();
+            let mut state_ref = compression.new_compression().unwrap();
+            let mut state =  state_ref.write().unwrap();
+
+            let compressed_head =  state.finish_ext(&slice[..self.buffer.packed_vals_len()])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+
+            let head_csum = csum_builder(&compressed_head);
+
+            w.write_all(&(compressed_head.len() as u32).to_le_bytes())?;
+            w.write_all(&(self.buffer.packed_vals_len() as u32).to_le_bytes())?;
+            w.write_all(&compressed_head)?;
+
+            
+            println!("Size of slice before writing: {} {}", slice.len(), self.buffer.len_bytes_contained_in_checksum());
+            w.write_all(&slice[self.buffer.packed_header_len()..self.buffer.packed_total_len()])?;
+
+            //w.write_all(&self.buffer.assert_packed()[..self.buffer.packed_total_len()])?;
             return Ok(IntegrityMode::Internal {
                 len: self.buffer.len_bytes_contained_in_checksum() as u32,
                 csum: csum_builder(
-                    &self.buffer.assert_packed()[12..self.buffer.len_bytes_contained_in_checksum()],
+                    &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
                 ),
             });
         }
@@ -954,17 +999,17 @@ impl PackedChildBuffer {
             free_after += compressed_val.len();
         }
 
-        w.write_all(&(tmp.len() as u32).to_le_bytes())?;
+        //w.write_all(&(tmp.len() as u32).to_le_bytes())?;
 
-        let tmp2 = tmp.clone();
+        //let tmp2 = tmp.clone();
         let compressed_head =  state.finish_ext(&tmp)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
-        w.write_all(&(compressed_head.len() as u32).to_le_bytes())?;
-        w.write_all(&(compressed_head.len() as u32 + 12 + compressed_vals.len() as u32).to_le_bytes())?;
-        w.write_all(&compressed_head)?;
-
         let head_csum = csum_builder(&compressed_head);
+
+        w.write_all(&(compressed_head.len() as u32).to_le_bytes())?;
+        w.write_all(&(compressed_vals.len() as u32).to_le_bytes())?;
+        w.write_all(&compressed_head)?;
         w.write_all(&compressed_vals);
 
         Ok(IntegrityMode::Internal {
@@ -1039,13 +1084,12 @@ impl PackedChildBuffer {
     where
         C: ChecksumTrait,
     {
-        let uncompressed_head_len = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
-        let compressed_head_len = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
-        let total_bytes = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
+        let compressed_head_len = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
+        let compressed_vals_len = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
 
         let uncompressed_buf = decompressor.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress_ext(&buf[12..compressed_head_len + 12].to_vec())
+            .decompress_ext(&buf[8..8 + compressed_head_len].to_vec())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         let is_leaf = uncompressed_buf[0] != 0;
@@ -1066,17 +1110,19 @@ impl PackedChildBuffer {
 
         let mut full_msg: Vec<u8> = vec![];
 
-        full_msg.write_all(&uncompressed_buf.to_vec()[..uncompressed_head_len]);
-        full_msg.write_all(&buf[compressed_head_len + 12..].to_vec());
+        full_msg.write_all(&uncompressed_buf);
+        full_msg.write_all(&buf[8 + compressed_head_len..]);
 
 
         let buffer = Map::Packed {
             entry_count,
+            packed_header_size: uncompressed_buf.len(),
+            packed_vals_size: full_msg.len() - uncompressed_buf.len(),
             data: SlicedCowBytes::from(full_msg),
             decompression_tag: decompressor,
         };
         
-        let compressed_head = &buf[12..compressed_head_len + 12];
+        let compressed_head = &buf[8..8 + compressed_head_len];
         csum.checksum()
             .unwrap()
             //.verify(&uncompressed_buf[..csum.length().unwrap() as usize])
@@ -1090,10 +1136,9 @@ impl PackedChildBuffer {
                 StoragePreference::from_u8(pref),
             ),
             entries_size,
-                        compressed_size: total_bytes,
             buffer,
             is_leaf,
-        }, total_bytes))
+        }, compressed_head_len + compressed_vals_len + 8))
 
         /*
         let is_leaf = buf[0] != 0;
