@@ -113,6 +113,7 @@ pub(in crate::tree::imp) struct PackedChildBuffer {
     // memory or NVMe to be worth the additional queries.
     pub(in crate::tree::imp) system_storage_preference: AtomicSystemStoragePreference,
     pub(in crate::tree::imp) entries_size: usize,
+    pub(in crate::tree::imp) compressed_size: usize,
     pub(in crate::tree::imp) buffer: Map,
 
     pub(in crate::tree::imp) is_leaf: bool,
@@ -332,7 +333,7 @@ impl Map {
                     uncompressed_val
                 )
                 /*let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
-                // TODO: Pass on result
+                // TODO: Pass Con result
                 csum.verify(&buf).unwrap();
                 (
                     KeyInfo {
@@ -682,6 +683,7 @@ impl PackedChildBuffer {
             entries_size: buffer_entries_size,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             is_leaf: self.is_leaf,
+            compressed_size: 0,
         }
     }
 
@@ -828,6 +830,7 @@ impl PackedChildBuffer {
             entries_size: 0,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             is_leaf,
+            compressed_size: 0,
         }
     }
 
@@ -873,11 +876,11 @@ impl PackedChildBuffer {
         if !self.buffer.is_unpacked() {
             //println!("if !self.buffer.is_unpacked() .................");
             // Copy the contents of the buffer to the new writer without unpacking.
-            w.write_all(&self.buffer.assert_packed()[..self.size()])?;
+            w.write_all(&self.buffer.assert_packed()[..self.compressed_size])?;
             return Ok(IntegrityMode::Internal {
                 len: self.buffer.len_bytes_contained_in_checksum() as u32,
                 csum: csum_builder(
-                    &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
+                    &self.buffer.assert_packed()[12..self.buffer.len_bytes_contained_in_checksum()],
                 ),
             });
         }
@@ -1087,6 +1090,7 @@ impl PackedChildBuffer {
                 StoragePreference::from_u8(pref),
             ),
             entries_size,
+                        compressed_size: total_bytes,
             buffer,
             is_leaf,
         }, total_bytes))
