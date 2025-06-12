@@ -362,6 +362,13 @@ impl Size for SlicedCowBytes {
     fn size(&self) -> usize {
         8 + self.len as usize
     }
+
+    fn cache_size(&self) -> usize {
+        match self.data {
+            ByteSource::Cow(ref cow_bytes) => cow_bytes.cache_size(),
+            ByteSource::Raw { .. } => std::mem::size_of::<usize>() + std::mem::size_of::<usize>(),
+        }
+    }
 }
 
 impl SlicedCowBytes {

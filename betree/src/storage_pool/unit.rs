@@ -3,7 +3,12 @@ use super::{
     NUM_STORAGE_CLASSES,
 };
 use crate::{
-    bounded_future_queue::BoundedFutureQueue, buffer::Buf, checksum::Checksum, tree::StorageKind, vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite}, PreferredAccessType, StoragePreference
+    bounded_future_queue::BoundedFutureQueue,
+    buffer::Buf,
+    checksum::Checksum,
+    tree::StorageKind,
+    vdev::{self, Block, Dev, Error as VdevError, Vdev, VdevRead, VdevWrite},
+    PreferredAccessType, StoragePreference,
 };
 use futures::{
     executor::{block_on, ThreadPool},
@@ -88,16 +93,18 @@ impl<C: Checksum> StoragePoolLayer for StoragePoolUnit<C> {
     type Configuration = StoragePoolConfiguration;
     type Metrics = StoragePoolMetrics;
 
-    fn new(configuration: &Self::Configuration, default_storage_class: u8) -> StoragePoolResult<Self> {
+    fn new(
+        configuration: &Self::Configuration,
+        default_storage_class: u8,
+    ) -> StoragePoolResult<Self> {
         let tiers: [StorageTier; NUM_STORAGE_CLASSES] = {
             let mut vec: Vec<StorageTier> = configuration
                 .tiers
                 .iter()
                 .map(|tier_cfg| {
-                    tier_cfg
-                        .build()
-                        .map(Vec::into_boxed_slice)
-                        .map(|tier| (tier, tier_cfg.preferred_access_type, tier_cfg.storage_kind).into())
+                    tier_cfg.build().map(Vec::into_boxed_slice).map(|tier| {
+                        (tier, tier_cfg.preferred_access_type, tier_cfg.storage_kind).into()
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 

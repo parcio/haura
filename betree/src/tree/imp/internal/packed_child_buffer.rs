@@ -417,7 +417,9 @@ impl Size for PackedChildBuffer {
 
     fn cache_size(&self) -> usize {
         match &self.buffer {
-            Map::Packed { .. } => HEADER + std::mem::size_of::<usize>() * 2,
+            Map::Packed { data, .. } => {
+                HEADER + std::mem::size_of::<usize>() * 2 + data.cache_size()
+            }
             Map::Unpacked(_) => self.size(),
         }
     }
