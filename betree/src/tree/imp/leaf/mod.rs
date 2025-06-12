@@ -13,9 +13,3 @@ pub(super) enum FillUpResult {
         size_delta: isize,
     },
 }
-
-pub(crate) mod leaf;
-pub(crate) mod packed;
-
-pub(super) use leaf::LeafNode;
-pub(super) use packed::PackedMap;

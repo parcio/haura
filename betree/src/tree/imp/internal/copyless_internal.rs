@@ -9,10 +9,7 @@ use crate::{
     },
 };
 
-use super::{
-    packed_child_buffer::PackedChildBuffer,
-    take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
-};
+use super::{packed_child_buffer::PackedChildBuffer, take_child_buffer::MergeChildResult};
 
 use crate::{
     cow_bytes::{CowBytes, SlicedCowBytes},
@@ -657,10 +654,10 @@ where
     N: StaticSize,
     N: ObjectReference,
 {
-    pub fn try_walk(&mut self, key: &[u8]) -> NVMTakeChildBuffer<N> {
+    pub fn try_walk(&mut self, key: &[u8]) -> TakeChildBuffer<N> {
         let child_idx = self.idx(key);
 
-        NVMTakeChildBuffer {
+        TakeChildBuffer {
             node: self,
             child_idx,
         }
@@ -671,7 +668,7 @@ where
         min_flush_size: usize,
         max_node_size: usize,
         min_fanout: usize,
-    ) -> Option<TakeChildBufferWrapper<N>>
+    ) -> Option<TakeChildBuffer<N>>
     where
         N: ObjectReference,
     {
@@ -698,21 +695,19 @@ where
                 None
             }
         };
-        child_idx.map(move |child_idx| {
-            TakeChildBufferWrapper::NVMTakeChildBuffer(NVMTakeChildBuffer {
-                node: self,
-                child_idx,
-            })
+        child_idx.map(move |child_idx| TakeChildBuffer {
+            node: self,
+            child_idx,
         })
     }
 }
 
-pub(in crate::tree::imp) struct NVMTakeChildBuffer<'a, N: 'a + 'static> {
+pub(in crate::tree::imp) struct TakeChildBuffer<'a, N: 'a + 'static> {
     node: &'a mut CopylessInternalNode<N>,
     child_idx: usize,
 }
 
-impl<'a, N: StaticSize> Size for NVMTakeChildBuffer<'a, N> {
+impl<'a, N: StaticSize> Size for TakeChildBuffer<'a, N> {
     fn size(&self) -> usize {
         self.node.size()
     }
@@ -722,7 +717,7 @@ impl<'a, N: StaticSize> Size for NVMTakeChildBuffer<'a, N> {
     }
 }
 
-impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
+impl<'a, N: StaticSize + HasStoragePreference> TakeChildBuffer<'a, N> {
     pub(in crate::tree::imp) fn split_child(
         &mut self,
         sibling_np: N,
@@ -778,7 +773,7 @@ impl<'a, N: StaticSize + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
     }
 }
 
-impl<'a, N> NVMTakeChildBuffer<'a, N>
+impl<'a, N> TakeChildBuffer<'a, N>
 where
     N: StaticSize,
 {
@@ -887,7 +882,7 @@ where
     }
 }
 
-impl<'a, N: Size + HasStoragePreference> NVMTakeChildBuffer<'a, N> {
+impl<'a, N: Size + HasStoragePreference> TakeChildBuffer<'a, N> {
     pub fn child_pointer_mut(&mut self) -> &mut RwLock<N>
     where
         N: ObjectReference,

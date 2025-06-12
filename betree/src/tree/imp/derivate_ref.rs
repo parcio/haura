@@ -8,7 +8,7 @@ use std::{
 
 use crate::{cache::AddSize, size::Size};
 
-use super::internal::take_child_buffer::TakeChildBufferWrapper;
+use super::internal::copyless_internal::TakeChildBuffer;
 
 /// A reference allowing for a derivative of the original structure to be stored
 /// alongside the original. Helpful if a derivative of the original is dependent
@@ -32,12 +32,12 @@ pub struct DerivateRefNVM<T, U> {
     owner: T,
 }
 
-impl<T: StableDeref + DerefMut, U> DerivateRefNVM<T, TakeChildBufferWrapper<'static, U>> {
+impl<T: StableDeref + DerefMut, U> DerivateRefNVM<T, TakeChildBuffer<'static, U>> {
     /// Unsafe conversions of a limited life-time reference in [TakeChildBuffer]
     /// to a static one. This is only ever safe in the internal context of [DerivateRefNVM].
     pub fn try_new<F>(mut owner: T, f: F) -> Result<Self, T>
     where
-        F: for<'a> FnOnce(&'a mut T::Target) -> Option<TakeChildBufferWrapper<'a, U>>,
+        F: for<'a> FnOnce(&'a mut T::Target) -> Option<TakeChildBuffer<'a, U>>,
     {
         match unsafe { transmute(f(&mut owner)) } {
             None => Err(owner),

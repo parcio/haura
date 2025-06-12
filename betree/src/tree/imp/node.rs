@@ -2,14 +2,10 @@
 use self::Inner::*;
 use super::{
     internal::{
-        child_buffer::ChildBuffer,
         copyless_internal::{ChildLink, CopylessInternalNode, InternalNodeLink},
-        internal::InternalNode,
         packed_child_buffer::PackedChildBuffer,
-        take_child_buffer::TakeChildBufferWrapper,
+        TakeChildBuffer,
     },
-    leaf::LeafNode,
-    leaf::PackedMap,
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
@@ -24,7 +20,6 @@ use crate::{
     tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
     StoragePreference,
 };
-use bincode::{deserialize, serialize_into};
 use parking_lot::RwLock;
 use std::{
     borrow::Borrow,
@@ -110,20 +105,6 @@ trait ChildBufferIteratorTrait<'a, N> {
     fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut N> + 'a>;
     fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a N> + 'a>;
     fn cb_iter(self) -> Box<dyn Iterator<Item = N> + 'a>;
-}
-
-impl<'a, N> ChildBufferIteratorTrait<'a, ChildBuffer<N>> for Vec<ChildBuffer<N>> {
-    fn cb_iter_mut(&'a mut self) -> Box<dyn Iterator<Item = &'a mut ChildBuffer<N>> + 'a> {
-        Box::new(self.iter_mut())
-    }
-
-    fn cb_iter_ref(&'a self) -> Box<dyn Iterator<Item = &'a ChildBuffer<N>> + 'a> {
-        Box::new(self.iter())
-    }
-
-    fn cb_iter(self) -> Box<dyn Iterator<Item = ChildBuffer<N>> + 'a> {
-        Box::new(self.into_iter())
-    }
 }
 
 impl<'a> ChildBufferIteratorTrait<'a, Option<PackedChildBuffer>>
@@ -324,22 +305,20 @@ impl<N: StaticSize> Size for Node<N> {
 }
 
 impl<N: StaticSize + HasStoragePreference> Node<N> {
-    pub(super) fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBufferWrapper<N>>
+    pub(super) fn try_walk(&mut self, key: &[u8]) -> Option<TakeChildBuffer<N>>
     where
         N: ObjectReference,
     {
         match self.0 {
             MemLeaf(_) => None,
-            CopylessInternal(ref mut nvminternal) => Some(
-                TakeChildBufferWrapper::NVMTakeChildBuffer(nvminternal.try_walk(key)),
-            ),
+            CopylessInternal(ref mut nvminternal) => Some(nvminternal.try_walk(key)),
         }
     }
 
     pub(super) fn try_find_flush_candidate(
         &mut self,
         storage_map: &StorageMap,
-    ) -> Option<TakeChildBufferWrapper<N>>
+    ) -> Option<TakeChildBuffer<N>>
     where
         N: ObjectReference,
     {

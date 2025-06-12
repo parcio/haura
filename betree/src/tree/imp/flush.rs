@@ -1,20 +1,18 @@
 //! Implementation of the tree-wide rebalancing and flushing logic.
-//!
+//g
 //! Calling [Tree::rebalance_tree] is not only possible with the root node but may be
 //! applied to a variety of nodes given that their parent node is correctly
 //! given. Use with caution.
 use std::borrow::Borrow;
 
 use super::{
-    derivate_ref::DerivateRefNVM,
-    internal::take_child_buffer::{MergeChildResult, TakeChildBufferWrapper},
-    FillUpResult, Inner, Node, Tree,
+    derivate_ref::DerivateRefNVM, internal::TakeChildBuffer, FillUpResult, Inner, Node, Tree,
 };
 use crate::{
     cache::AddSize,
     data_management::{Dml, HasStoragePreference, ObjectReference},
     size::Size,
-    tree::{errors::*, MessageAction},
+    tree::{errors::*, imp::internal::MergeChildResult, MessageAction},
 };
 
 impl<X, R, M, I> Tree<X, M, I>
@@ -52,7 +50,7 @@ where
     pub(super) fn rebalance_tree(
         &self,
         mut node: X::CacheValueRefMut,
-        mut parent: Option<DerivateRefNVM<X::CacheValueRefMut, TakeChildBufferWrapper<'static, R>>>,
+        mut parent: Option<DerivateRefNVM<X::CacheValueRefMut, TakeChildBuffer<'static, R>>>,
     ) -> Result<(), Error> {
         loop {
             if !self.storage_map.node_is_too_large(&node) {
@@ -126,10 +124,7 @@ where
                 continue;
             }
             // 4. Remove messages from the child buffer.
-            let (buffer, size_delta) = match &mut *child_buffer {
-                TakeChildBufferWrapper::TakeChildBuffer(obj) => obj.take_buffer(),
-                TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => obj.take_buffer(),
-            };
+            let (buffer, size_delta) = child_buffer.take_buffer();
             child_buffer.add_size(size_delta);
             self.dml.verify_cache();
             // 5. Insert messages from the child buffer into the child.

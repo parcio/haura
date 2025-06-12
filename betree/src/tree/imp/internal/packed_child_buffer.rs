@@ -22,8 +22,6 @@ use std::{
     ptr::slice_from_raw_parts,
 };
 
-use super::child_buffer::ChildBuffer;
-
 trait CutSlice<T> {
     fn cut(&self, pos: usize, len: usize) -> &[T];
 }
@@ -663,7 +661,7 @@ impl PackedChildBuffer {
 
         let right_entry_size = right_buffer
             .iter()
-            .map(|(key, value)| key.size() + value.size())
+            .map(|(key, value)| key.size() + value.1.size())
             .sum();
         self.entries_size -= right_entry_size;
         (right_buffer, right_entry_size)
@@ -763,7 +761,7 @@ impl PackedChildBuffer {
                     } else {
                         let data = e.remove();
                         return size_change.map_with_size_change(|_| {
-                            (-(key_size as isize + data.size() as isize + PER_KEY_BYTES as isize))
+                            (-(key_size as isize + data.1.size() as isize + PER_KEY_BYTES as isize))
                                 .into()
                         });
                     }
@@ -929,10 +927,6 @@ impl PackedChildBuffer {
             is_leaf,
         })
     }
-
-    pub fn from_block_child_buffer<N>(_other: ChildBuffer<N>) -> (Self, N) {
-        todo!()
-    }
 }
 
 impl PackedChildBuffer {
@@ -957,7 +951,7 @@ impl PackedChildBuffer {
         let buffer = self.buffer.unpacked();
 
         for (key, msg) in buffer.inner.range_mut::<[u8], _>(range) {
-            size_delta += key.size() + msg.size();
+            size_delta += key.size() + msg.1.size();
             keys.push(key.clone());
         }
         for key in keys.into_iter() {

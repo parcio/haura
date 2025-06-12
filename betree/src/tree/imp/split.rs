@@ -1,10 +1,10 @@
 //! Encapsulating logic for splitting of normal and root nodes.
 use super::{Inner, Node, Tree};
-use crate::tree::imp::internal::take_child_buffer::TakeChildBufferWrapper;
 use crate::{
     cache::AddSize,
     data_management::{Dml, HasStoragePreference, ObjectReference},
     size::Size,
+    tree::imp::internal::TakeChildBuffer,
     tree::{errors::*, MessageAction},
 };
 use std::borrow::Borrow;
@@ -46,7 +46,7 @@ where
     pub(super) fn split_node(
         &self,
         mut node: X::CacheValueRefMut,
-        parent: &mut TakeChildBufferWrapper<R>,
+        parent: &mut TakeChildBuffer<R>,
     ) -> Result<(X::CacheValueRefMut, isize), Error> {
         self.dml.verify_cache();
 
@@ -71,14 +71,7 @@ where
             self.dml.insert(sibling, self.tree_id(), pk)
         };
 
-        let size_delta = match parent {
-            TakeChildBufferWrapper::TakeChildBuffer(ref mut parent) => {
-                parent.split_child(sibling_np, pivot_key, select_right)
-            }
-            TakeChildBufferWrapper::NVMTakeChildBuffer(ref mut parent) => {
-                parent.split_child(sibling_np, pivot_key, select_right)
-            }
-        };
+        let size_delta = parent.split_child(sibling_np, pivot_key, select_right);
 
         Ok((node, size_delta))
     }

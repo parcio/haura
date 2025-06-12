@@ -24,7 +24,7 @@ use owning_ref::OwningRef;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use std::{borrow::Borrow, marker::PhantomData, mem, ops::RangeBounds};
 
-use internal::take_child_buffer::TakeChildBufferWrapper;
+use internal::TakeChildBuffer;
 
 /// Additional information for a single entry. Concerns meta information like
 /// the desired storage level of a key.
@@ -533,14 +533,7 @@ where
                 }
                 match DerivateRefNVM::try_new(node, |node| node.try_walk(key.borrow())) {
                     Ok(mut child_buffer) => {
-                        let maybe_child = match &mut *child_buffer {
-                            TakeChildBufferWrapper::TakeChildBuffer(obj) => {
-                                self.try_get_mut_node(obj.node_pointer_mut())
-                            }
-                            TakeChildBufferWrapper::NVMTakeChildBuffer(obj) => {
-                                self.try_get_mut_node(obj.child_pointer_mut())
-                            }
-                        };
+                        let maybe_child = self.try_get_mut_node(child_buffer.child_pointer_mut());
                         if let Some(child) = maybe_child {
                             node = child;
                             parent = Some(child_buffer);

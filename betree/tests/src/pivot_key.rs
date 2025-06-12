@@ -19,7 +19,7 @@ fn get() {
 
 fn random_pivot_key(ni: &NodeInfo) -> Option<&PivotKey> {
     match ni {
-        NodeInfo::Internal { children, .. } => {
+        NodeInfo::NVMInternal { children, .. } => {
             let mut rng = rand::thread_rng();
             Some(
                 children
@@ -36,7 +36,7 @@ fn random_pivot_key(ni: &NodeInfo) -> Option<&PivotKey> {
 }
 
 fn internal_node_check(ni: &NodeInfo) {
-    if let NodeInfo::Internal { children, .. } = ni {
+    if let NodeInfo::NVMInternal { children, .. } = ni {
         for (idx, c_buf) in children.iter().enumerate() {
             assert!(!c_buf.pivot_key.is_root());
             if idx == 0 {
