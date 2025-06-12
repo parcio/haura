@@ -161,17 +161,7 @@ where
         dml: X,
         storage_preference: StoragePreference,
     ) -> Self {
-        let sto_map = dml.spl().storage_kind_map();
-        let default_class = dml.spl().default_storage_class();
-        let root_node = dml.insert(
-            Node::empty_leaf(
-                sto_map[storage_preference
-                    .or(StoragePreference::from_u8(default_class))
-                    .as_u8() as usize],
-            ),
-            tree_id,
-            PivotKey::Root(tree_id),
-        );
+        let root_node = dml.insert(Node::empty_leaf(), tree_id, PivotKey::Root(tree_id));
         Tree::new(root_node, tree_id, msg_action, dml, storage_preference)
     }
 
