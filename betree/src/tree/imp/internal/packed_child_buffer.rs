@@ -899,7 +899,7 @@ impl PackedChildBuffer {
         C: ChecksumTrait,
     {
         if !self.buffer.is_unpacked() {
-            println!("if !self.buffer.is_unpacked() .................{} {} {}", self.buffer.packed_header_len(), self.buffer.packed_vals_len(), self.buffer.packed_total_len());
+            //println!("if !self.buffer.is_unpacked() .................{} {} {}", self.buffer.packed_header_len(), self.buffer.packed_vals_len(), self.buffer.packed_total_len());
             // Copy the contents of the buffer to the new writer without unpacking.
             
             let slice = &self.buffer.assert_packed()[..];
@@ -918,7 +918,7 @@ impl PackedChildBuffer {
             w.write_all(&compressed_head)?;
 
             
-            println!("Size of slice before writing: {} {}", slice.len(), self.buffer.len_bytes_contained_in_checksum());
+            //println!("Size of slice before writing: {} {}", slice.len(), self.buffer.len_bytes_contained_in_checksum());
             w.write_all(&slice[self.buffer.packed_header_len()..self.buffer.packed_total_len()])?;
 
             //w.write_all(&self.buffer.assert_packed()[..self.buffer.packed_total_len()])?;
