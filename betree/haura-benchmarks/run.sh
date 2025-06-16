@@ -235,6 +235,21 @@ function ycsb_f() {
     run "$RUN_IDENT" ycsb_f_memory ycsb-f "$((8 * 1024 * 1024 * 1024))" 1 8
 }
 
+function ycsb_g() {
+    run "$RUN_IDENT" ycsb_g_block ycsb-g "$((768 * 1024 * 1024))" 0 8
+    run "$RUN_IDENT" ycsb_g_memory ycsb-g "$((768 * 1024 * 1024))" 1 8
+}
+
+function ycsb_h() {
+    run "$RUN_IDENT" ycsb_h_block ycsb-h "$((768 * 1024 * 1024))" 0 8
+    run "$RUN_IDENT" ycsb_h_memory ycsb-h "$((768 * 1024 * 1024))" 1 8
+}
+
+function ycsb_i() {
+    run "$RUN_IDENT" ycsb_i_block ycsb-i "$((768 * 1024 * 1024))" 0 8
+    run "$RUN_IDENT" ycsb_i_memory ycsb-i "$((768 * 1024 * 1024))" 1 8
+}
+
 cargo build --release
 
 if [ -z "$BETREE_CONFIG" ]; then
@@ -276,9 +291,12 @@ ensure_config
 #checkpoints
 #switchover
 #ingest
-ycsb_a
+#ycsb_a
 #ycsb_b
 # ycsb_c
 # ycsb_d
 # ycsb_e
 # ycsb_f
+ycsb_g
+ycsb_h
+ycsb_i
