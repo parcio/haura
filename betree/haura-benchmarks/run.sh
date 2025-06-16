@@ -206,33 +206,33 @@ function ci() {
 }
 
 function ycsb_a() {
-    run "$RUN_IDENT" ycsb_a_block ycsb-a "$((8 * 1024 * 1024 * 1024))" 0 8
-    run "$RUN_IDENT" ycsb_a_memory ycsb-a "$((8 * 1024 * 1024 * 1024))" 1 8
+    run "$RUN_IDENT" ycsb_a_block ycsb-a "$((4 * 1024 * 1024 * 1024))" 0 6
+    run "$RUN_IDENT" ycsb_a_memory ycsb-a "$((4 * 1024 * 1024 * 1024))" 1 6
 }
 
 function ycsb_b() {
-    run "$RUN_IDENT" ycsb_b_block ycsb-b "$((8 * 1024 * 1024 * 1024))" 0 8
-    run "$RUN_IDENT" ycsb_b_memory ycsb-b "$((8 * 1024 * 1024 * 1024))" 1 8
+    run "$RUN_IDENT" ycsb_b_block ycsb-b "$((4 * 1024 * 1024 * 1024))" 0 6
+    run "$RUN_IDENT" ycsb_b_memory ycsb-b "$((4 * 1024 * 1024 * 1024))" 1 6
 }
 
 function ycsb_c() {
-    run "$RUN_IDENT" ycsb_c_block ycsb-c "$((8 * 1024 * 1024 * 1024))" 0 8
-    run "$RUN_IDENT" ycsb_c_memory ycsb-c "$((8 * 1024 * 1024 * 1024))" 1 8
+    run "$RUN_IDENT" ycsb_c_block ycsb-c "$((4 * 1024 * 1024 * 1024))" 0 6
+    run "$RUN_IDENT" ycsb_c_memory ycsb-c "$((4 * 1024 * 1024 * 1024))" 1 6
 }
 
 function ycsb_d() {
-    run "$RUN_IDENT" ycsb_d_block ycsb-d "$((8 * 1024 * 1024 * 1024))" 0 8
-    run "$RUN_IDENT" ycsb_d_memory ycsb-d "$((8 * 1024 * 1024 * 1024))" 1 8
+    run "$RUN_IDENT" ycsb_d_block ycsb-d "$((4 * 1024 * 1024 * 1024))" 0 6
+    run "$RUN_IDENT" ycsb_d_memory ycsb-d "$((4 * 1024 * 1024 * 1024))" 1 6
 }
 
 function ycsb_e() {
-    run "$RUN_IDENT" ycsb_e_block ycsb-e "$((8 * 1024 * 1024 * 1024))" 0 8
-    run "$RUN_IDENT" ycsb_e_memory ycsb-e "$((8 * 1024 * 1024 * 1024))" 1 8
+    run "$RUN_IDENT" ycsb_e_block ycsb-e "$((4 * 1024 * 1024 * 1024))" 0 6
+    run "$RUN_IDENT" ycsb_e_memory ycsb-e "$((4 * 1024 * 1024 * 1024))" 1 6
 }
 
 function ycsb_f() {
-    run "$RUN_IDENT" ycsb_f_block ycsb-f "$((8 * 1024 * 1024 * 1024))" 0 8
-    run "$RUN_IDENT" ycsb_f_memory ycsb-f "$((8 * 1024 * 1024 * 1024))" 1 8
+    run "$RUN_IDENT" ycsb_f_block ycsb-f "$((4 * 1024 * 1024 * 1024))" 0 6
+    run "$RUN_IDENT" ycsb_f_memory ycsb-f "$((4 * 1024 * 1024 * 1024))" 1 6
 }
 
 function ycsb_g() {
