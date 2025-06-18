@@ -553,20 +553,23 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         use rand::seq::SliceRandom; // Add this if it's not already imported
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
 
-                        //let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
-                        //let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
+                        let mut shuffled_keys = keys.clone(); // Clone to keep original list intact
+                        shuffled_keys.shuffle(&mut rng);
                         let mut total = 0;
+                        
+                        let mut idx = 0;
 
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
-                                let mut shuffled_keys = keys.clone(); // Clone to keep original list intact
-                                shuffled_keys.shuffle(&mut rng);
-
-                                for k in &shuffled_keys {
-                                    let k = &k[..];
-                                    ds.get(k).unwrap().unwrap();  // **Only Read**
+                                for jdx in 0..1000 {
+                                    let k = &shuffled_keys[jdx + idx];
+                                    ds.get(*k).unwrap().unwrap();  // **Only Read**
                                     total += 1;
                                 }
+                            }
+
+                            if idx + 1000 >= shuffled_keys.len(){
+                                idx = 0;
                             }
                         }
                         total
@@ -617,26 +620,29 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
             .map(|(id, (tx, rx))| {
                 let keys = keys.clone();
                 let ds = client.ds.clone();
-                let value = vec![0u8; 8];
+                let value = vec![0u8; 1024];
                 (
                     std::thread::spawn(move || {
                         use rand::seq::SliceRandom; // Add this if it's not already imported
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
 
-                        //let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
-                        //let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
+                        let mut shuffled_keys = keys.clone(); // Clone to keep original list intact
+                        shuffled_keys.shuffle(&mut rng);
                         let mut total = 0;
+                        
+                        let mut idx = 0;
 
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
-                                let mut shuffled_keys = keys.clone(); // Clone to keep original list intact
-                                shuffled_keys.shuffle(&mut rng);
-
-                                for k in &shuffled_keys {
-                                    let k = &k[..];
+                                for jdx in 0..1000 {
+                                    let k = &shuffled_keys[jdx + idx];
                                     ds.upsert(k.to_vec(), &value, 0).unwrap();  // **Only Write**
                                     total += 1;
                                 }
+                            }
+
+                            if idx + 1000 >= shuffled_keys.len(){
+                                idx = 0;
                             }
                         }
                         total
@@ -694,20 +700,23 @@ pub fn i(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         use rand::seq::SliceRandom; // Add this if it's not already imported
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
 
-                        //let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
-                        //let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
+                        let mut shuffled_keys = keys.clone(); // Clone to keep original list intact
+                        shuffled_keys.shuffle(&mut rng);
                         let mut total = 0;
+                        
+                        let mut idx = 0;
 
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
-                                let mut shuffled_keys = keys.clone(); // Clone to keep original list intact
-                                shuffled_keys.shuffle(&mut rng);
-
-                                for k in &shuffled_keys {
-                                    let k = &k[..];
+                                for jdx in 0..1000 {
+                                    let k = &shuffled_keys[jdx + idx];
                                     ds.delete(k.to_vec()).unwrap();  // **Only Write**
                                     total += 1;
                                 }
+                            }
+
+                            if idx + 1000 >= shuffled_keys.len(){
+                                idx = 0;
                             }
                         }
                         total
