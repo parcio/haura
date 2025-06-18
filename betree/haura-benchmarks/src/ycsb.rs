@@ -527,9 +527,11 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 }
 
 pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
-    println!("Running 100% Read Workload");
-    let mut keys = client.fill_entries(size / 8 as u64, 8 as u32);
+    println!("Running YCSB Workload G");
+    println!("Filling KV store...");
+    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
+    println!("Creating distribution...");
     
     let f = std::fs::OpenOptions::new()
         .write(true)
@@ -588,9 +590,11 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 }
 
 pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
-    println!("Running 100% Write Workload");
-    let mut keys = client.fill_entries(size / 8 as u64, 8 as u32);
+    println!("Running YCSB Workload H");
+    println!("Filling KV store...");
+    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
+    println!("Creating distribution...");
 
     let f = std::fs::OpenOptions::new()
         .write(true)
@@ -651,9 +655,11 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 
 
 pub fn i(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
-    println!("Running 100% Write Workload");
-    let mut keys = client.fill_entries(size / 8 as u64, 8 as u32);
+   println!("Running YCSB Workload I");
+    println!("Filling KV store...");
+    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
+    println!("Creating distribution...");
 
     let f = std::fs::OpenOptions::new()
         .write(true)
