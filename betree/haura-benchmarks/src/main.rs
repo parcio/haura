@@ -65,63 +65,63 @@ enum Mode {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbB {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbC {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbD {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbE {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbF {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbG {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbH {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
     YcsbI {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "60")]
         runtime: u64,
     },
 }
