@@ -48,7 +48,7 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload A {} {} {}",size, threads, runtime);
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -120,7 +120,7 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload B");
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -193,7 +193,7 @@ pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload C");
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -263,7 +263,7 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     
     // Only fill initial portion
     //let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
 
     let initial_size =  (keys.len() as f64 * 0.05) as usize;
     let total_size = keys.len();
@@ -372,7 +372,7 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 
     // Only fill initial portion
     //let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
   let initial_size =  keys.len();
     // let total_size = initial_size + (keys.len() as f64 * 0.05) as usize;
     // println!("{} {}", initial_size, total_size);
@@ -481,7 +481,7 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload F");
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -552,7 +552,7 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload G");
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     
@@ -657,7 +657,7 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload H");
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
 
     keys.shuffle(client.rng());
     println!("Creating distribution...");
@@ -670,7 +670,7 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
-    let corpus_chunks = read_folder_chunks("/home/skarim/Downloads/silesia_corpus/", 1024);
+    let corpus_chunks = read_folder_chunks("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", 1024);
     let chunk_data = std::sync::Arc::new(corpus_chunks); // Share across threads
 
 
@@ -739,7 +739,7 @@ pub fn i(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
    println!("Running YCSB Workload I");
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
 
     keys.shuffle(client.rng());
     println!("Creating distribution...");
