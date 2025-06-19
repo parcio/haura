@@ -33,6 +33,8 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
+
+
 // Default in YCSB, 10 x 100 bytes field in one struct.
 const ENTRY_SIZE: usize = 1000;
 // Default of YCSB
@@ -45,7 +47,8 @@ const ZIPF_EXP: f64 = 0.99;
 pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload A {} {} {}",size, threads, runtime);
     println!("Filling KV store...");
-    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -69,13 +72,13 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
-                        let value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; ENTRY_SIZE];
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
                                     let k = &keys[dist.sample(&mut rng) - 1][..];
                                     if rng.gen_bool(0.5) {
-                                        ds.get(k).unwrap().unwrap();
+                                        value = ds.get(k).unwrap().unwrap().to_vec();
                                     } else {
                                         ds.upsert(k.to_vec(), &value, 0).unwrap();
                                     }
@@ -116,7 +119,8 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload B");
     println!("Filling KV store...");
-    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -140,14 +144,14 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
-                        let value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; ENTRY_SIZE];
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
                                     let k = &keys[dist.sample(&mut rng) - 1][..];
                                     if rng.gen_bool(0.95) {
                                         // 95% reads
-                                        ds.get(k).unwrap().unwrap();
+                                        value = ds.get(k).unwrap().unwrap().to_vec();
                                     } else {
                                         // 5% updates
                                         ds.upsert(k.to_vec(), &value, 0).unwrap();
@@ -188,7 +192,8 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload C");
     println!("Filling KV store...");
-    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -255,12 +260,14 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload D");
     println!("Filling KV store...");
     // Reserve 20% extra space for new insertions
-    let initial_size = size / ENTRY_SIZE as u64;
-    let total_size = initial_size + (initial_size / 5);
-
+    
     // Only fill initial portion
-    let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
 
+    let initial_size =  (keys.len() as f64 * 0.05) as usize;
+    let total_size = keys.len();
+    println!("{} {}", initial_size, total_size);
     // Fill rest of keys
     for idx in initial_size..total_size {
         let k = (idx as u64).to_be_bytes();
@@ -295,7 +302,7 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                     std::thread::spawn(move || {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let mut total = 0;
-                        let value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; ENTRY_SIZE];
 
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
@@ -308,7 +315,12 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                                             zipf::ZipfDistribution::new(max, ZIPF_EXP).unwrap();
                                         let offset = dist.sample(&mut rng);
                                         let idx = max.saturating_sub(offset);
-                                        ds.get(&keys[idx][..]).unwrap();
+                                        //value = ds.get(&keys[idx][..]).unwrap();
+                                        if let Some(bytes) = ds.get(&keys[idx][..]).unwrap() {
+                                            value = bytes.to_vec();
+                                        } else {
+                                            // Handle the case where the key isn't found, maybe assign a default or log an error
+                                        }
                                     } else {
                                         // 5% inserts of new records
                                         let current = current_size.load(AtomicOrdering::Relaxed);
@@ -355,17 +367,20 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload E");
     println!("Filling KV store...");
     // Reserve 20% extra space for new insertions
-    let initial_size = size / ENTRY_SIZE as u64;
-    let total_size = initial_size + (initial_size / 5);
+    //let initial_size = size / ENTRY_SIZE as u64;
+    //let total_size = initial_size + (initial_size / 5);
 
     // Only fill initial portion
-    let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
-
-    // Fill rest of keys for potential inserts
-    for idx in initial_size..total_size {
-        let k = (idx as u64).to_be_bytes();
-        keys.push(k);
-    }
+    //let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+  let initial_size =  keys.len();
+    // let total_size = initial_size + (keys.len() as f64 * 0.05) as usize;
+    // println!("{} {}", initial_size, total_size);
+    // // Fill rest of keys for potential inserts
+    // for idx in initial_size..total_size {
+    //     let k = keys[idx - initial_size];
+    //     keys.push(k);
+    // }
 
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -392,7 +407,7 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                     std::thread::spawn(move || {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let mut total = 0;
-                        let value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; ENTRY_SIZE];
 
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
@@ -400,20 +415,26 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                                     if rng.gen_bool(0.95) {
                                         // 95% scans
                                         let max = current_size.load(AtomicOrdering::Relaxed);
-                                        // Get start key using zipfian
-                                        let dist =
-                                            zipf::ZipfDistribution::new(max, ZIPF_EXP).unwrap();
-                                        let start_idx = dist.sample(&mut rng) - 1;
+let dist = zipf::ZipfDistribution::new(max, ZIPF_EXP).unwrap();
+let mut start_idx = dist.sample(&mut rng).saturating_sub(1);
 
-                                        // Uniform random scan length between 1 and 100
-                                        let scan_length = rng.gen_range(1..=100);
-                                        let end_idx = (start_idx + scan_length).min(max - 1);
+let scan_length = rng.gen_range(1..=100);
+let mut end_idx = (start_idx + scan_length).min(max.saturating_sub(1));
 
-                                        // Perform the range scan
-                                        let start_key = &keys[start_idx][..];
-                                        let end_key = &keys[end_idx][..];
+// Ensure valid bounds
+if start_idx >= keys.len() || end_idx >= keys.len() || start_idx >= end_idx {
+    continue; // skip invalid range
+}
+
+let start_key = &keys[start_idx][..];
+let end_key = &keys[end_idx][..];
                                         // Consume the iterator to actually perform the scan
-                                        for _entry in ds.range(start_key..end_key).unwrap() {}
+                                        for _entry in ds.range(start_key..end_key).unwrap() {
+                                            if let Ok((_k, _v)) = _entry {
+                                                value = _v.to_vec();
+                                                break; // exit after the first one
+                                            }
+                                        }
                                     } else {
                                         // 5% inserts of new records
                                         let current = current_size.load(AtomicOrdering::Relaxed);
@@ -459,7 +480,8 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload F");
     println!("Filling KV store...");
-    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -483,14 +505,14 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
-                        let value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; ENTRY_SIZE];
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
                                     let k = &keys[dist.sample(&mut rng) - 1][..];
                                     if rng.gen_bool(0.5) {
                                         // 50% reads
-                                        ds.get(k).unwrap().unwrap();
+                                        value = ds.get(k).unwrap().unwrap().to_vec();
                                     } else {
                                         // 50% read-modify-write
                                         let _existing = ds.get(k).unwrap().unwrap();
@@ -529,7 +551,8 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload G");
     println!("Filling KV store...");
-    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     
@@ -598,10 +621,44 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     }
 }
 
+use std::fs::{self, File};
+use std::io::{BufReader, Read};
+use std::path::Path;
+
+pub fn read_folder_chunks<P: AsRef<Path>>(folder_path: P, chunk_size: usize) -> Vec<Vec<u8>> {
+    let mut all_chunks = Vec::new();
+
+    for entry in fs::read_dir(folder_path).expect("Failed to read folder") {
+        let entry = entry.expect("Invalid entry");
+        let path = entry.path();
+
+        if path.is_file() {
+            let file = File::open(&path).expect("Unable to open file");
+            let mut reader = BufReader::new(file);
+
+            loop {
+                let mut buffer = vec![0u8; chunk_size];
+                let bytes_read = reader.read(&mut buffer).expect("Read error");
+                if bytes_read == 0 {
+                    break;
+                }
+
+                buffer.truncate(bytes_read);
+                all_chunks.push(buffer);
+            }
+        }
+    }
+
+    all_chunks
+}
+
+
 pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload H");
     println!("Filling KV store...");
-    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+
     keys.shuffle(client.rng());
     println!("Creating distribution...");
 
@@ -613,6 +670,10 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
+    let corpus_chunks = read_folder_chunks("/home/skarim/Downloads/silesia_corpus/", 1024);
+    let chunk_data = std::sync::Arc::new(corpus_chunks); // Share across threads
+
+
     for workers in 1..=threads {
         let threads = (0..workers)
             .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
@@ -620,7 +681,7 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
             .map(|(id, (tx, rx))| {
                 let keys = keys.clone();
                 let ds = client.ds.clone();
-                let value = vec![0u8; 1024];
+                 let chunks = chunk_data.clone(); // shared chunk vector
                 (
                     std::thread::spawn(move || {
                         use rand::seq::SliceRandom; // Add this if it's not already imported
@@ -636,6 +697,8 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                             while start.elapsed().as_secs() < runtime {
                                 for jdx in 0..1000 {
                                     let k = &shuffled_keys[jdx + idx];
+                                    let chunk_idx = (jdx + idx) % chunks.len();
+                                let value = &chunks[chunk_idx];
                                     ds.upsert(k.to_vec(), &value, 0).unwrap();  // **Only Write**
                                     total += 1;
                                 }
@@ -675,7 +738,9 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 pub fn i(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
    println!("Running YCSB Workload I");
     println!("Filling KV store...");
-    let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/Downloads/silesia_corpus/", ENTRY_SIZE as u32);
+
     keys.shuffle(client.rng());
     println!("Creating distribution...");
 
