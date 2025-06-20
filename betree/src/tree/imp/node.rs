@@ -9,7 +9,7 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
-    buffer::Buf,
+    buffer::{self, Buf},
     checksum::{Builder, Checksum},
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{
@@ -83,20 +83,17 @@ impl StorageMap {
         Some(match (&node.0, self.get(pref)) {
             (CopylessInternal(_), _) => return None,
             (_, StorageKind::Hdd) => mib!(1),
-            (_, StorageKind::Memory) => kib!(128),
-            (_, StorageKind::Ssd) => kib!(64),
+            (_, StorageKind::Ssd) => kib!(4),
+            (_, StorageKind::Memory) => kib!(256),
         })
     }
 
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         let pref = node.correct_preference();
         Some(match (&node.0, self.get(pref)) {
-            (MemLeaf(_), StorageKind::Hdd) => mib!(4),
-            (MemLeaf(_), StorageKind::Ssd) => kib!(512),
-            (MemLeaf(_), StorageKind::Memory) => mib!(1),
-            (CopylessInternal(_), StorageKind::Hdd) => mib!(4),
-            (CopylessInternal(_), StorageKind::Ssd) => mib!(1),
-            (CopylessInternal(_), StorageKind::Memory) => mib!(1),
+            (_, StorageKind::Hdd) => mib!(4),
+            (_, StorageKind::Ssd) => kib!(16),
+            (_, StorageKind::Memory) => mib!(1),
         })
     }
 }
@@ -556,9 +553,7 @@ impl<N: HasStoragePreference> Node<N> {
         N: ObjectReference,
     {
         match self.0 {
-            MemLeaf(ref nvmleaf) => {
-                GetRangeResult::Data(Box::new(nvmleaf.get_all_messages().map(|(k, v)| (k, v))))
-            }
+            MemLeaf(ref nvmleaf) => GetRangeResult::Data(Box::new(nvmleaf.get_all_messages())),
             CopylessInternal(ref nvminternal) => {
                 let prefetch_option = if nvminternal.level() == 1 {
                     nvminternal.get_next_node(key)
@@ -567,6 +562,14 @@ impl<N: HasStoragePreference> Node<N> {
                 };
 
                 let cl = nvminternal.get_range(key, left_pivot_key, right_pivot_key, all_msgs);
+
+                for (key, msg) in cl.buffer().get_all_messages() {
+                    all_msgs
+                        .entry(CowBytes::from(key))
+                        .or_insert_with(Vec::new)
+                        .push(msg.clone());
+                }
+
                 GetRangeResult::NextNode {
                     np: cl.ptr(),
                     prefetch_option_node: prefetch_option.map(|l| l.ptr()),

@@ -205,20 +205,19 @@ fn insert_single_key(#[case] kind: StorageKind) {
 #[case(StorageKind::Memory)]
 #[case(StorageKind::Hdd)]
 fn insert_random_keys(#[case] kind: StorageKind) {
-    let (db, ds, ks) = random_db(1, 512, kind);
-    for (idx, r) in ds.range::<RangeFull, &[u8]>(..).unwrap().enumerate() {
-        let (key, val) = r.unwrap();
-        let k = (idx as u64 + 1).to_be_bytes();
-        println!("{:?} {}/{ks}", k, idx + 1);
-        println!("{:?} {}/{ks}", &key[..], idx + 1);
-        assert_eq!(&k[..], &key[..]);
-        assert_eq!(val.len(), 1024);
-    }
+    let (db, ds, ks) = random_db(1, 1024, kind);
     db.drop_cache().unwrap();
     for idx in 1..ks {
         let k = (idx as u64).to_be_bytes();
         // println!("{:?} {}/{ks}", k.as_bytes(), idx);
         assert_eq!(ds.get(&k[..]).unwrap().unwrap().len(), 1024);
+    }
+    // FIXME: Iterator is still broken...
+    for (idx, r) in ds.range::<RangeFull, &[u8]>(..).unwrap().enumerate() {
+        let (key, val) = r.unwrap();
+        let k = (idx as u64 + 1).to_be_bytes();
+        assert_eq!(&k[..], &key[..]);
+        assert_eq!(val.len(), 1024);
     }
 }
 

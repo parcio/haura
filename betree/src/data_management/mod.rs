@@ -125,6 +125,13 @@ pub enum IntegrityMode<C> {
     Internal { csum: C, len: u32 },
 }
 
+impl<C: StaticSize> StaticSize for IntegrityMode<C> {
+    fn static_size() -> usize {
+        // FIXME: this only works if we abandon the other the integrity mode
+        C::static_size() + std::mem::size_of::<u32>()
+    }
+}
+
 impl<C> IntegrityMode<C> {
     pub fn checksum(&self) -> Option<&C> {
         match self {

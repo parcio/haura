@@ -191,7 +191,8 @@ where
                         np,
                         prefetch_option_node,
                     } => {
-                        let previous_prefetch_node = if let Some(prefetch_np) = prefetch_option_node {
+                        let previous_prefetch_node = if let Some(prefetch_np) = prefetch_option_node
+                        {
                             let f = self.dml.prefetch(&prefetch_np.read())?;
                             replace(prefetch_node, f)
                         } else {

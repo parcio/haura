@@ -1,7 +1,6 @@
 //! Implementation of a message buffering node wrapper.
 use crate::{
-    buffer,
-    checksum::{Builder, Checksum as ChecksumTrait, State},
+    checksum::Checksum as ChecksumTrait,
     cow_bytes::{CowBytes, SlicedCowBytes},
     data_management::{HasStoragePreference, IntegrityMode},
     database::Checksum,
@@ -119,7 +118,7 @@ pub(in crate::tree::imp) struct PackedChildBuffer {
     pub(in crate::tree::imp) entries_size: usize,
     pub(in crate::tree::imp) buffer: Map,
 
-    is_leaf: bool,
+    pub(in crate::tree::imp) is_leaf: bool,
 }
 
 impl Default for PackedChildBuffer {
@@ -171,6 +170,12 @@ impl Map {
     ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
         match self {
             Map::Packed { entry_count, data } => {
+                // NOTE: copy data before to avoid sync epoch shenanigans
+                // necesary as we might rewrite the original memory region once here
+                let mut other = CowBytes::with_capacity(data.len());
+                other.extend(data.iter());
+                let _ = std::mem::replace(data, other.slice_from(0));
+
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
                 let mut key_info = Vec::with_capacity(*entry_count);
                 let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
@@ -210,7 +215,6 @@ impl Map {
                                 .into_iter()
                                 // NOTE: This copy is cheap as the data is behind an Arc.
                                 .map(|(pos, len, csum)| {
-                                    // TODO: Verify checksum
                                     let buf = data.clone().subslice(pos, len);
                                     csum.verify(&buf).unwrap();
                                     buf
@@ -455,7 +459,6 @@ impl PackedChildBuffer {
     pub fn unpack_data(&mut self) -> WithCacheSizeChange<()> {
         self.buffer.unpacked().map(|_| ())
     }
-
     pub fn split(
         &mut self,
         min_size: usize,
@@ -627,12 +630,6 @@ impl PackedChildBuffer {
                 .upgrade_atomic(&other.messages_preference);
             (other.entries_size as isize).into()
         })
-
-        // self.buffer.unpacked().append(&mut other.buffer.unpacked());
-        // self.entries_size += other.entries_size;
-        // self.messages_preference
-        //     .upgrade_atomic(&other.messages_preference);
-        // (other.entries_size as isize).into()
     }
 
     /// Splits this `PackedChildBuffer` at `pivot` so that `self` contains all
@@ -663,7 +660,9 @@ impl PackedChildBuffer {
 
         let right_entry_size = right_buffer
             .iter()
-            .map(|(key, value)| key.size() + value.1.size())
+            .map(|(key, value)| {
+                key.size() + value.1.size() + value.0.size() + Checksum::static_size()
+            })
             .sum();
         self.entries_size -= right_entry_size;
         (right_buffer, right_entry_size)
@@ -740,6 +739,7 @@ impl PackedChildBuffer {
                         0
                     }
                 } else {
+                    assert!(msg[0] <= 2);
                     let size = key_size + msg.size() + keyinfo.size() + Checksum::static_size();
                     e.insert((keyinfo, msg));
                     size
@@ -904,7 +904,7 @@ impl PackedChildBuffer {
                 .try_into()
                 .unwrap(),
         ) as usize;
-        assert!(entries_size < 8 * 1024 * 1024);
+        assert!(entries_size < 8 * 1024 * 1024, "size was {}", entries_size);
         let pref = u8::from_le_bytes(
             buf[IS_LEAF_HEADER + 8..IS_LEAF_HEADER + 9]
                 .try_into()
@@ -917,8 +917,7 @@ impl PackedChildBuffer {
         csum.checksum()
             .unwrap()
             .verify(&buf[..csum.length().unwrap() as usize])
-            .unwrap();
-        // .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         Ok(Self {
             messages_preference: AtomicStoragePreference::known(StoragePreference::from_u8(pref)),
             system_storage_preference: AtomicSystemStoragePreference::from(
@@ -968,7 +967,13 @@ impl PackedChildBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{arbitrary::GenExt, tree::default_message_action::DefaultMessageActionMsg};
+    use crate::{
+        arbitrary::GenExt,
+        tree::{
+            default_message_action::DefaultMessageActionMsg,
+            imp::internal::copyless_internal::tests::quick_csum,
+        },
+    };
     use quickcheck::{Arbitrary, Gen, TestResult};
     use rand::Rng;
 
@@ -991,6 +996,16 @@ mod tests {
         }
     }
 
+    impl Arbitrary for KeyInfo {
+        fn arbitrary(g: &mut Gen) -> Self {
+            KeyInfo {
+                storage_preference: StoragePreference::from_u8(
+                    g.rng().gen::<u8>() % StoragePreference::SLOWEST.as_u8(),
+                ),
+            }
+        }
+    }
+
     impl Arbitrary for PackedChildBuffer {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
@@ -1010,7 +1025,9 @@ mod tests {
                 messages_preference: AtomicStoragePreference::unknown(),
                 entries_size: buffer
                     .iter()
-                    .map(|(key, value)| key.size() + value.size())
+                    .map(|(key, value)| {
+                        key.size() + value.0.size() + value.1.size() + Checksum::static_size()
+                    })
                     .sum::<usize>(),
                 buffer: Map::Unpacked(buffer),
                 system_storage_preference: AtomicSystemStoragePreference::from(
@@ -1023,7 +1040,12 @@ mod tests {
 
     fn check_size(child_buffer: &PackedChildBuffer) {
         let mut buf = Vec::new();
-        child_buffer.pack(&mut buf).unwrap();
+        child_buffer
+            .pack(
+                &mut buf,
+                crate::tree::imp::internal::copyless_internal::tests::quick_csum,
+            )
+            .unwrap();
         assert_eq!(buf.len(), child_buffer.size())
     }
 
@@ -1085,9 +1107,9 @@ mod tests {
     fn unpack_equality(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        child_buffer.pack(&mut buf).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
 
-        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
         other.buffer.unpacked();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
@@ -1100,9 +1122,9 @@ mod tests {
     fn unpackless_access(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        child_buffer.pack(&mut buf).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
 
-        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
             let res = other.get(key).unwrap();
@@ -1114,9 +1136,9 @@ mod tests {
     fn unpackless_iter(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        child_buffer.pack(&mut buf).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
 
-        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
 
         for (idx, (key, tup)) in child_buffer.get_all_messages().enumerate() {
             let res = other.get_all_messages().nth(idx).unwrap();
@@ -1128,8 +1150,8 @@ mod tests {
     fn serialize_deserialize_idempotent(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        child_buffer.pack(&mut buf).unwrap();
-        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into()).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
+        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
         other.buffer.unpacked();
         assert_eq!(other, child_buffer);
     }

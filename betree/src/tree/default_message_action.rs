@@ -53,7 +53,7 @@ impl MsgType {
             0 => Self::OverwriteNone,
             1 => Self::OverwriteSome,
             2 => Self::Upsert,
-            _ => unreachable!(),
+            _ => panic!("discriminant was {} which is not possible", discriminant),
         }
     }
 }
