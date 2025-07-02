@@ -172,10 +172,6 @@ impl Map {
             Map::Packed { entry_count, data } => {
                 // NOTE: copy data before to avoid sync epoch shenanigans
                 // necesary as we might rewrite the original memory region once here
-                let mut other = CowBytes::with_capacity(data.len());
-                other.extend(data.iter());
-                let _ = std::mem::replace(data, other.slice_from(0));
-
                 let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
                 let mut key_info = Vec::with_capacity(*entry_count);
                 let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
@@ -208,20 +204,16 @@ impl Map {
                     size_delta += val_len as isize;
                 }
 
-                *self = Map::Unpacked(BTreeMap::from_iter(
-                    keys.into_iter().zip(
-                        key_info.into_iter().zip(
-                            values_pos
-                                .into_iter()
-                                // NOTE: This copy is cheap as the data is behind an Arc.
-                                .map(|(pos, len, csum)| {
-                                    let buf = data.clone().subslice(pos, len);
-                                    csum.verify(&buf).unwrap();
-                                    buf
-                                }),
-                        ),
-                    ),
-                ));
+                *self = Map::Unpacked(BTreeMap::from_iter(keys.into_iter().zip(
+                    key_info.into_iter().zip(values_pos.into_iter().map(
+                        move |(pos, len, csum)| {
+                            // NOTE: copies data to not be invalidated later on rewrites... could be solved differently
+                            let buf = data.clone().subslice(pos, len);
+                            csum.verify(&buf).unwrap();
+                            buf
+                        },
+                    )),
+                )));
 
                 WithCacheSizeChange::new(
                     match self {
@@ -307,7 +299,7 @@ impl Map {
                     KeyInfo {
                         storage_preference: StoragePreference::from_u8(pref),
                     },
-                    buf,
+                    buf.slice_from(0),
                 )
             }),
             // TODO: This should be a cheap copy (a few bytes for the pref and
@@ -715,13 +707,6 @@ impl PackedChildBuffer {
 
         self.messages_preference.upgrade(keyinfo.storage_preference);
 
-        // if self.entries_size < 2 * 1024 * 1024 {
-        //     println!(
-        //         "too large; is leaf? {} size? {}",
-        //         self.is_leaf, self.entries_size,
-        //     );
-        // }
-
         // grab cache size change and drop ref
         let size_change = self.buffer.unpacked();
 
@@ -730,16 +715,16 @@ impl PackedChildBuffer {
                 // Resolve messages when the buffer is a leaf.
                 let size_delta = if self.is_leaf {
                     let mut data = None;
-                    msg_action.apply_to_leaf(&key, msg.clone(), &mut data);
+                    msg_action.apply_to_leaf(&key, msg, &mut data);
                     if let Some(data) = data {
-                        let size = keyinfo.size() + data.len() + key_size + Checksum::static_size();
-                        e.insert((keyinfo.clone(), data));
+                        let size =
+                            keyinfo.size() + data.size() + key_size + Checksum::static_size();
+                        e.insert((keyinfo, data));
                         size
                     } else {
                         0
                     }
                 } else {
-                    assert!(msg[0] <= 2);
                     let size = key_size + msg.size() + keyinfo.size() + Checksum::static_size();
                     e.insert((keyinfo, msg));
                     size
@@ -1157,9 +1142,42 @@ mod tests {
     }
 
     #[quickcheck]
-    fn insert(mut child_buffer: PackedChildBuffer, key: CowBytes, info: KeyInfo, msg: CowBytes) {
+    fn insert_internal(
+        mut child_buffer: PackedChildBuffer,
+        key: CowBytes,
+        info: KeyInfo,
+        msg: CowBytes,
+    ) {
         check_size(&child_buffer);
-        child_buffer.insert(key, info, msg.into(), crate::tree::DefaultMessageAction);
+        child_buffer.insert(
+            key.clone(),
+            info.clone(),
+            msg.clone().into(),
+            crate::tree::DefaultMessageAction,
+        );
         check_size(&child_buffer);
+    }
+
+    #[quickcheck]
+    fn insert_leaf(
+        mut child_buffer: PackedChildBuffer,
+        key: CowBytes,
+        info: KeyInfo,
+        mut msg: CowBytes,
+    ) -> quickcheck::TestResult {
+        child_buffer.is_leaf = true;
+        if msg.len() < 3 {
+            return TestResult::discard();
+        }
+        msg[0] = 1;
+        check_size(&child_buffer);
+        child_buffer.insert(
+            key.clone(),
+            info.clone(),
+            msg.clone().into(),
+            crate::tree::DefaultMessageAction,
+        );
+        check_size(&child_buffer);
+        TestResult::passed()
     }
 }

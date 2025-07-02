@@ -197,6 +197,7 @@ impl DefaultMessageAction {
 
         let mut data = msg_data
             .as_ref()
+            // FIXME: This line takes alot of time in profiles.
             .map(|b| CowBytes::from(&b[..]))
             .unwrap_or_default();
 
@@ -212,6 +213,7 @@ impl DefaultMessageAction {
 
                     if data.len() <= offset_bytes as usize {
                         data.fill_zeros_up_to(offset_bytes as usize);
+                        // FIXME: This line takes alot of time in profiles.
                         data.push_slice(new_data);
                     } else {
                         data.fill_zeros_up_to(end_offset);

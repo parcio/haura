@@ -84,7 +84,7 @@ impl StorageMap {
             (CopylessInternal(_), _) => return None,
             (_, StorageKind::Hdd) => mib!(1),
             (_, StorageKind::Ssd) => kib!(4),
-            (_, StorageKind::Memory) => kib!(256),
+            (_, StorageKind::Memory) => mib!(1),
         })
     }
 
@@ -93,7 +93,7 @@ impl StorageMap {
         Some(match (&node.0, self.get(pref)) {
             (_, StorageKind::Hdd) => mib!(4),
             (_, StorageKind::Ssd) => kib!(16),
-            (_, StorageKind::Memory) => mib!(1),
+            (_, StorageKind::Memory) => mib!(4),
         })
     }
 }
@@ -555,7 +555,7 @@ impl<N: HasStoragePreference> Node<N> {
         match self.0 {
             MemLeaf(ref nvmleaf) => GetRangeResult::Data(Box::new(nvmleaf.get_all_messages())),
             CopylessInternal(ref nvminternal) => {
-                let prefetch_option = if nvminternal.level() == 1 {
+                let prefetch_option = if nvminternal.level() == 1 && false {
                     nvminternal.get_next_node(key)
                 } else {
                     None

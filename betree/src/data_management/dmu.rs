@@ -444,21 +444,6 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
-        // TODO: Transitions between the storage layouts *need* to happen here
-        // because of this pesky lazy promotion present in the DMU. This might
-        // require us to side-step and writeback just created buffer objects
-        // from here on.
-        //
-        // Mem -> Block: Fetch children, Create InternalNode, Continue with
-        // writeback (If the sum of buffers are ever >4MiB in size this violates
-        // the size restriction put in place by rebalance.) There might be
-        // useless writes when we writeback the children buffers of nodes first
-        // and then read them and write them out with the parent as a normal
-        // internal node here. FIXME
-        //
-        // Block -> Mem: Writeback new children, Create InternalNode, Continue
-        // with writeback
-
         let compression = &self.default_compression;
         let (integrity_mode, compressed_data) = {
             // FIXME: cache this
@@ -484,6 +469,10 @@ where
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
         let size = compressed_data.len();
+        // FIXME
+        if size > Block::round_up_from_bytes(object_size).to_bytes() {
+            warn!("anticipated size deviated from actual size, realloc necessary in writes... (Expected {}, Actual {})", Block::round_up_from_bytes(object_size).to_bytes(), size);
+        }
         debug!("Compressed object size is {size} bytes");
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
         assert!(size.to_bytes() as usize >= compressed_data.len());

@@ -284,24 +284,25 @@ impl BufWrite {
     /// Convert this to a read-only [Buf].
     /// This is always safe because [BufWrite] can't be split,
     /// and therefore no aliasing writable pieces can remain.
-    /// Buffers are shrunk to fit.
-    pub fn into_buf(mut self) -> Buf {
-        let curr_layout = unsafe {
-            Layout::from_size_align_unchecked(self.buf.capacity.to_bytes() as usize, BLOCK_SIZE)
-        };
-        let new_cap = Block::round_up_from_bytes(self.size);
-        self.buf.capacity = new_cap;
-        let new_ptr = unsafe {
-            alloc::realloc(
-                self.buf.ptr.as_ptr(),
-                curr_layout,
-                new_cap.to_bytes() as usize,
-            )
-        };
-        // If return value is null, old value remains valid.
-        if let Some(new_ptr) = NonNull::new(new_ptr) {
-            self.buf.ptr = new_ptr;
-        }
+    pub fn into_buf(self) -> Buf {
+        // NOTE: This entire section has been commented out bc it is detrimental to performance as these operations can happen on the hotpath during evictions. What is really changed by this is the total memory footprint which can be hold as *technically* we might hold unused memory, though this should not happen with accurate size reports as the
+
+        // let curr_layout = unsafe {
+        //     Layout::from_size_align_unchecked(self.buf.capacity.to_bytes() as usize, BLOCK_SIZE)
+        // };
+        // let new_cap = Block::round_up_from_bytes(self.size);
+        // self.buf.capacity = new_cap;
+        // let new_ptr = unsafe {
+        //     alloc::realloc(
+        //         self.buf.ptr.as_ptr(),
+        //         curr_layout,
+        //         new_cap.to_bytes() as usize,
+        //     )
+        // };
+        // // If return value is null, old value remains valid.
+        // if let Some(new_ptr) = NonNull::new(new_ptr) {
+        //     self.buf.ptr = new_ptr;
+        // }
         Buf::from_aligned(AlignedBuf {
             buf: Arc::new(UnsafeCell::new(self.buf)),
         })

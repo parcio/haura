@@ -87,24 +87,33 @@ impl<N> std::fmt::Debug for CopylessInternalNode<N> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
+#[derive(Serialize, Deserialize, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(in crate::tree::imp) struct InternalNodeMetaData {
+    pub current_size: usize,
     pub level: u32,
     pub system_storage_preference: AtomicSystemStoragePreference,
     pub pref: AtomicStoragePreference,
     pub(in crate::tree::imp) pivot: Vec<CowBytes>,
     pub entries_sizes: Vec<usize>,
     pub entries_prefs: Vec<StoragePreference>,
-    #[serde(skip)]
-    pub current_size: Option<usize>,
 }
 
 impl InternalNodeMetaData {
     fn invalidate(&mut self) {
         self.pref.invalidate();
-        self.current_size = None;
+        self.current_size = self.recalc_size();
+    }
+
+    fn recalc_size(&self) -> usize {
+        std::mem::size_of::<u32>()
+            + std::mem::size_of::<usize>()
+            + std::mem::size_of::<u8>()
+            + std::mem::size_of::<u8>()
+            + self.pivot.iter().map(|p| p.size()).sum::<usize>()
+            + self.pivot.len() * std::mem::size_of::<usize>()
+            + self.pivot.len() * std::mem::size_of::<u8>()
+            + META_BINCODE_STATIC
     }
 }
 
@@ -150,20 +159,19 @@ const META_BINCODE_STATIC: usize = 33;
 const INTERNAL_INTEGRITY_CHECKSUM_SIZE: usize = 8 + 8;
 impl Size for InternalNodeMetaData {
     fn size(&self) -> usize {
-        *self.actual_size().get_or_insert_with(|| {
-            std::mem::size_of::<u32>()
-                + std::mem::size_of::<usize>()
-                + std::mem::size_of::<u8>()
-                + std::mem::size_of::<u8>()
-                + self.pivot.iter().map(|p| p.size()).sum::<usize>()
-                + self.pivot.len() * std::mem::size_of::<usize>()
-                + self.pivot.len() * std::mem::size_of::<u8>()
-                + META_BINCODE_STATIC
-        })
+        self.current_size
+        // std::mem::size_of::<u32>()
+        //     + std::mem::size_of::<usize>()
+        //     + std::mem::size_of::<u8>()
+        //     + std::mem::size_of::<u8>()
+        //     + self.pivot.iter().map(|p| p.size()).sum::<usize>()
+        //     + self.pivot.len() * std::mem::size_of::<usize>()
+        //     + self.pivot.len() * std::mem::size_of::<u8>()
+        //     + META_BINCODE_STATIC
     }
 
     fn actual_size(&self) -> Option<usize> {
-        self.current_size
+        None
     }
 }
 
@@ -237,6 +245,14 @@ impl<N> CopylessInternalNode<N> {
     {
         CopylessInternalNode {
             meta_data: InternalNodeMetaData {
+                current_size: std::mem::size_of::<u32>()
+                    + std::mem::size_of::<usize>()
+                    + std::mem::size_of::<u8>()
+                    + std::mem::size_of::<u8>()
+                    + pivot_key.size()
+                    + 1 * std::mem::size_of::<usize>()
+                    + 1 * std::mem::size_of::<u8>()
+                    + META_BINCODE_STATIC,
                 level,
                 entries_sizes: vec![left_child.buffer_size, right_child.buffer_size],
                 pivot: vec![pivot_key],
@@ -245,7 +261,6 @@ impl<N> CopylessInternalNode<N> {
                 ),
                 pref: AtomicStoragePreference::unknown(),
                 entries_prefs: vec![StoragePreference::NONE, StoragePreference::NONE],
-                current_size: None,
             },
             children: vec![left_child.into(), right_child.into()],
         }
@@ -585,7 +600,7 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
 
         let size_delta = entries_size + pivot_key.size();
 
-        let right_sibling = CopylessInternalNode {
+        let mut right_sibling = CopylessInternalNode {
             meta_data: InternalNodeMetaData {
                 level: self.meta_data.level,
                 entries_sizes,
@@ -595,10 +610,12 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
                 // be sure which key was targeted by recorded accesses.
                 system_storage_preference: self.meta_data.system_storage_preference.clone(),
                 pref: AtomicStoragePreference::unknown(),
-                current_size: None,
+                current_size: 0,
             },
             children,
         };
+        let right_sibling_size = right_sibling.meta_data.recalc_size();
+        right_sibling.meta_data.current_size = right_sibling_size;
 
         assert!(self.fanout() >= MIN_FANOUT);
         assert!(right_sibling.fanout() >= MIN_FANOUT);
@@ -989,7 +1006,7 @@ pub(super) mod tests {
                     pref: self.meta_data.pref.clone(),
                     entries_prefs: self.meta_data.entries_prefs.clone(),
                     entries_sizes: self.meta_data.entries_sizes.clone(),
-                    current_size: None,
+                    current_size: 0,
                 },
                 children: self.children.clone(),
             }
@@ -1030,7 +1047,7 @@ pub(super) mod tests {
                     pref: AtomicStoragePreference::unknown(),
                     entries_prefs: vec![StoragePreference::NONE; pivot_key_cnt + 1],
                     entries_sizes: children.iter().map(|c| c.buffer.size()).collect::<Vec<_>>(),
-                    current_size: None,
+                    current_size: 0,
                 },
                 children,
             }
