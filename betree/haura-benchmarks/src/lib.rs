@@ -158,6 +158,7 @@ impl KvClient {
         }
 
         self.db.write().sync().unwrap();
+        self.db.write().flush_().unwrap();
         keys
     }
 

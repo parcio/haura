@@ -553,6 +553,12 @@ impl Database {
         Ok(())
     }
 
+    pub fn flush_(&mut self) -> Result<()> {
+        let pool = self.root_tree.dmu().spl();
+        pool.flush()?;
+        Ok(())
+    }
+
     /// Synchronizes the database.
     pub fn sync(&mut self) -> Result<()> {
         let mut ds_locks = Vec::with_capacity(self.open_datasets.len());

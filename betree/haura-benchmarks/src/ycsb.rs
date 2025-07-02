@@ -24,6 +24,18 @@
 //! | F        | Read-modify- | Varies           | Read a record, modify it, and write it back     |
 //! |          | write        |                  |                                                 |
 //! +----------+--------------+------------------+-------------------------------------------------+
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | G        | Read         | Uniform          |                                                 |
+//! |          |              |                  |                                                 |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | H        | Update       | Uniform          |                                                 |
+//! |          |              |                  |                                                 |
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! +----------+--------------+------------------+-------------------------------------------------+
+//! | I        | Delete       | Uniform          |                                                 |
+//! |          |              |                  |                                                 |
+//! +----------+--------------+------------------+-------------------------------------------------+
 
 use betree_perf::KvClient;
 use rand::distributions::Distribution;
@@ -36,7 +48,7 @@ use std::sync::Arc;
 
 
 // Default in YCSB, 10 x 100 bytes field in one struct.
-const ENTRY_SIZE: usize = 1000;
+const ENTRY_SIZE: usize = 1*1000;
 // Default of YCSB
 const ZIPF_EXP: f64 = 0.99;
 
@@ -552,8 +564,26 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     println!("Running YCSB Workload G");
     println!("Filling KV store...");
     //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    let mut keys = client.fill_entries_from_path("/home/skarim/workspace/code/smash/fia0/haura/betree/haura-benchmarks/silesia_corpus/", ENTRY_SIZE as u32);
     keys.shuffle(client.rng());
+
+// Estimate entries per 128KB leaf: value(1000B) + key(8B) + overhead(~8B)
+    let approx_entry_size = ENTRY_SIZE + 8 + 8;
+    let entries_per_leaf = (1024*1024) / approx_entry_size; // ≈ 128 entries
+    println!("Estimated entries per leaf: {entries_per_leaf}");
+
+    // Pick one key per estimated leaf node
+    let mut leaf_sampled_keys = Vec::new();
+    for i in (0..keys.len()).step_by(entries_per_leaf) {
+        leaf_sampled_keys.push(keys[i]);
+    }
+
+    //client.ds.flush().unwrap();
+
+    // Shuffle the reduced key set
+    //leaf_sampled_keys.shuffle(client.rng());
+    println!("Sampled {} keys from {} total keys", leaf_sampled_keys.len(), keys.len());
+
     println!("Creating distribution...");
     
     let f = std::fs::OpenOptions::new()
@@ -564,36 +594,41 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
-    for workers in 1..=threads {
+    for workers in [1, 5, 10, 15, 20, 25] {
         let threads = (0..workers)
             .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
             .enumerate()
             .map(|(id, (tx, rx))| {
-                let keys = keys.clone();
+                let _keys = leaf_sampled_keys.clone();
                 let ds = client.ds.clone();
                 (
                     std::thread::spawn(move || {
-                        use rand::seq::SliceRandom; // Add this if it's not already imported
-                        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
+                        //use rand::seq::SliceRandom; // Add this if it's not already imported
+                        //let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
 
-                        let mut shuffled_keys = keys.clone(); // Clone to keep original list intact
-                        shuffled_keys.shuffle(&mut rng);
+                        //let mut shuffled_keys = _keys.clone(); // Clone to keep original list intact
+                        //shuffled_keys.shuffle(&mut rng);
                         let mut total = 0;
                         
                         let mut idx = 0;
+                            let chunk_size = _keys.len() / workers;
+                            let _start = id * chunk_size;
+                            let end = usize::min(_start + chunk_size, _keys.len());
+                            //println!("Thread {} processing keys from {} to {}", id, _start, end);
 
                         while let Ok(start) = rx.recv() {
-                            while start.elapsed().as_secs() < runtime {
-                                for jdx in 0..1000 {
-                                    let k = &shuffled_keys[jdx + idx];
-                                    ds.get(*k).unwrap().unwrap();  // **Only Read**
-                                    total += 1;
+                             while start.elapsed().as_secs() < 30 {
+                                for jdx in _start..end {
+                                    if let Some(k) = _keys.get(jdx) {
+                                        if let Some(value) = ds.get(*k).unwrap() {
+                                            total += 1;
+                                        }
+                                    }
                                 }
                             }
-
-                            if idx + 1000 >= shuffled_keys.len(){
-                                idx = 0;
-                            }
+                            //if idx + 1000 >= shuffled_keys.len(){
+                            //    idx = 0;
+                            //}
                         }
                         total
                     }),
