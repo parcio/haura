@@ -555,7 +555,7 @@ impl<N: HasStoragePreference> Node<N> {
         match self.0 {
             MemLeaf(ref nvmleaf) => GetRangeResult::Data(Box::new(nvmleaf.get_all_messages())),
             CopylessInternal(ref nvminternal) => {
-                let prefetch_option = if nvminternal.level() == 1 && false {
+                let prefetch_option = if nvminternal.level() == 1 {
                     nvminternal.get_next_node(key)
                 } else {
                     None

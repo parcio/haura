@@ -66,7 +66,7 @@ impl AlignedStorage {
             ptr: unsafe {
                 let new_layout =
                     Layout::from_size_align_unchecked(capacity.to_bytes() as usize, BLOCK_SIZE);
-                NonNull::new(alloc::alloc_zeroed(new_layout)).expect("Allocation failed.")
+                NonNull::new(alloc::alloc(new_layout)).expect("Allocation failed.")
             },
             capacity,
         }
@@ -106,8 +106,7 @@ impl AlignedStorage {
             );
 
             self.ptr = NonNull::new(realloc_ptr).unwrap_or_else(|| {
-                let new_ptr =
-                    NonNull::new(alloc::alloc_zeroed(new_layout)).expect("Allocation failed.");
+                let new_ptr = NonNull::new(alloc::alloc(new_layout)).expect("Allocation failed.");
                 self.ptr
                     .as_ptr()
                     .copy_to_nonoverlapping(new_ptr.as_ptr(), self.capacity.to_bytes() as usize);

@@ -196,9 +196,12 @@ impl DefaultMessageAction {
         let mut n_upserts = 0;
 
         let mut data = msg_data
-            .as_ref()
-            // FIXME: This line takes alot of time in profiles.
-            .map(|b| CowBytes::from(&b[..]))
+            .take()
+            // NOTE: Check if we can extract a direct copy from a sliced cowbytes directly iff the starting offset is 0. This can happen on repeated insertions in objects for message sizes <128K
+            .map(|b| {
+                b.into_cow_bytes()
+                    .unwrap_or_else(|b| CowBytes::from(&b[..]))
+            })
             .unwrap_or_default();
 
         for upsert in upserts {

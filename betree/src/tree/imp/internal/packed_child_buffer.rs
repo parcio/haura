@@ -584,9 +584,6 @@ impl<'a> Iterator for Iter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Iter::Packed(i) => i.next(),
-            // FIXME: Is this a good way to do this now? We exploit interior
-            // somewhat cheap copies to unify the return type, but it's not so
-            // nice.
             Iter::Unpacked(i) => i.next().map(|(a, b)| (&a[..], b.clone())),
         }
     }
@@ -735,12 +732,15 @@ impl PackedChildBuffer {
                 size_change.map_with_size_change(|_| (size_delta as isize).into())
             }
             Entry::Occupied(mut e) => {
-                let lower = e.get_mut().clone();
-                let (_, lower_msg) = lower;
+                let lower = e.get_mut();
+                // NOTE: We move values out of the entry temporarily and replace it with a bogus value which cannnot be accessed in the mean time.
+                let lower_msg = unsafe {
+                    std::mem::replace(&mut lower.1, SlicedCowBytes::from_raw(std::ptr::null(), 0))
+                };
                 let lower_size = lower_msg.size();
 
                 let (merged, merged_size) = if self.is_leaf {
-                    let mut new = Some(lower_msg.clone());
+                    let mut new = Some(lower_msg);
                     msg_action.apply_to_leaf(&key, msg, &mut new);
                     if let Some(data) = new {
                         let new_size = data.size();

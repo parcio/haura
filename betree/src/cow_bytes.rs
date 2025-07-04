@@ -338,6 +338,13 @@ impl SlicedCowBytes {
             len: len.try_into().expect("Capacity to large."),
         }
     }
+
+    pub(crate) fn into_cow_bytes(self) -> Result<CowBytes, SlicedCowBytes> {
+        match self.data {
+            ByteSource::Cow(cow_bytes) if self.pos == 0 => Ok(cow_bytes),
+            _ => Err(self),
+        }
+    }
 }
 
 impl From<CowBytes> for SlicedCowBytes {
