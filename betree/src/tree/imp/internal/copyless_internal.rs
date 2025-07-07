@@ -135,6 +135,7 @@ impl<N: StaticSize> Size for CopylessInternalNode<N> {
             + self.children.len() * N::static_size()
             + self.children.len() * INTERNAL_INTEGRITY_CHECKSUM_SIZE
             + self.meta_data.entries_sizes.iter().sum::<usize>()
+            + 8
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -583,7 +584,6 @@ impl<N: StaticSize> Size for Vec<N> {
 
 impl<N: ObjectReference> CopylessInternalNode<N> {
     pub fn split(&mut self) -> (Self, CowBytes, isize, LocalPivotKey) {
-        self.meta_data.invalidate();
         let split_off_idx = self.fanout() / 2;
         let pivot = self.meta_data.pivot.split_off(split_off_idx);
         let pivot_key = self.meta_data.pivot.pop().unwrap();
@@ -614,8 +614,8 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
             },
             children,
         };
-        let right_sibling_size = right_sibling.meta_data.recalc_size();
-        right_sibling.meta_data.current_size = right_sibling_size;
+        self.meta_data.invalidate();
+        right_sibling.meta_data.invalidate();
 
         assert!(self.fanout() >= MIN_FANOUT);
         assert!(right_sibling.fanout() >= MIN_FANOUT);
@@ -629,7 +629,6 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
 
     pub fn merge(&mut self, right_sibling: &mut Self, old_pivot_key: CowBytes) -> isize {
         let old = self.size();
-        self.meta_data.invalidate();
         self.meta_data.pivot.push(old_pivot_key);
         self.meta_data
             .pivot
@@ -640,6 +639,7 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
         self.meta_data
             .entries_sizes
             .append(&mut right_sibling.meta_data.entries_sizes);
+        self.meta_data.invalidate();
 
         self.children.append(&mut right_sibling.children);
         let new = self.size();
@@ -1006,7 +1006,7 @@ pub(super) mod tests {
                     pref: self.meta_data.pref.clone(),
                     entries_prefs: self.meta_data.entries_prefs.clone(),
                     entries_sizes: self.meta_data.entries_sizes.clone(),
-                    current_size: 0,
+                    current_size: self.meta_data.current_size,
                 },
                 children: self.children.clone(),
             }
@@ -1016,7 +1016,7 @@ pub(super) mod tests {
     impl<T: Arbitrary + StaticSize> Arbitrary for CopylessInternalNode<T> {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut rng = g.rng();
-            let pivot_key_cnt = rng.gen_range(0..10);
+            let pivot_key_cnt = rng.gen_range(0..100);
 
             let mut pivot = Vec::with_capacity(pivot_key_cnt);
             for _ in 0..pivot_key_cnt {
@@ -1037,7 +1037,7 @@ pub(super) mod tests {
                 });
             }
 
-            CopylessInternalNode {
+            let mut node = CopylessInternalNode {
                 meta_data: InternalNodeMetaData {
                     pivot,
                     level: 1,
@@ -1050,7 +1050,9 @@ pub(super) mod tests {
                     current_size: 0,
                 },
                 children,
-            }
+            };
+            node.meta_data.invalidate();
+            node
         }
     }
 
@@ -1153,6 +1155,8 @@ pub(super) mod tests {
         let twin = node.clone();
         let (mut right_node, pivot, ..) = node.split();
         node.merge(&mut right_node, pivot);
+        check_size(&node);
+        check_size(&twin);
         assert_eq!(node.meta_data, twin.meta_data);
         assert_eq!(node.children, twin.children);
         TestResult::passed()
