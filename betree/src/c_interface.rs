@@ -4,6 +4,7 @@ use std::{
     env::SplitPaths,
     ffi::{CStr, OsStr},
     io::{stderr, BufReader, Write},
+    ops::RangeFull,
     os::{
         raw::{c_char, c_int, c_uint, c_ulong},
         unix::prelude::OsStrExt,
@@ -24,6 +25,9 @@ use crate::{
     tree::DefaultMessageAction,
     DatabaseConfiguration, StoragePreference,
 };
+
+use crate::object::ObjectInfo;
+use std::time::UNIX_EPOCH;
 
 /// The type for a database configuration
 pub struct cfg_t(DatabaseConfiguration);
@@ -160,6 +164,16 @@ impl HandleResult for Box<dyn Iterator<Item = Result<(CowBytes, SlicedCowBytes),
         b(range_iter_t(self))
     }
     fn fail() -> *mut range_iter_t {
+        null_mut()
+    }
+}
+
+impl HandleResult for Box<dyn Iterator<Item = Result<(CowBytes, ObjectInfo), Error>>> {
+    type Result = *mut obj_iter_t;
+    fn success(self) -> *mut obj_iter_t {
+        b(obj_iter_t(self))
+    }
+    fn fail() -> *mut obj_iter_t {
         null_mut()
     }
 }
@@ -505,6 +519,7 @@ pub unsafe extern "C" fn betree_iter_datasets(
     err: *mut *mut err_t,
 ) -> *mut name_iter_t {
     let db = &mut (*db).0;
+    // Result<impl Iterator<Item = Result<SlicedCowBytes>>>
     db.iter_datasets()
         .map(|it| Box::new(it) as Box<dyn Iterator<Item = Result<SlicedCowBytes, Error>>>)
         .handle_result(err)
@@ -961,23 +976,142 @@ pub unsafe extern "C" fn betree_object_write_at(
         .handle_result(err)
 }
 
-/*
-/// Return the objects size in bytes.
-#[no_mangle]
-pub unsafe extern "C" fn betree_object_status(obj: *const obj_t, err: *mut *mut err_t) -> c_ulong {
-    let obj = &(*obj).0;
-    let info = obj.info();
-    obj.
-    obj.size()
+/// Holds status information for an object.
+#[repr(C)]
+pub struct betree_object_info_t {
+    /// Size of the object in bytes.
+    pub size: u64,
+    /// Last modification time in microseconds since the UNIX epoch.
+    pub mtime_us: u64,
 }
 
-/// Returns the last modification timestamp in microseconds since the Unix epoch.
+/// Frees the memory allocated for betree_object_info_t.
 #[no_mangle]
-pub unsafe extern "C" fn betree_object_mtime_us(obj: *const obj_t) -> c_ulong {
-    let obj = &(*obj).0;
-    obj.modification_time()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_micros() as u64)
-        .unwrap_or(0)
+pub unsafe extern "C" fn betree_free_object_info(info: *mut betree_object_info_t) {
+    let _ = Box::from_raw(info);
 }
-*/
+
+/// Retrieve status information about an object.
+///
+/// On success, returns a pointer to a `betree_object_info_t` struct, which
+/// must be freed with `betree_free_object_info`.
+/// On error, returns null. If `err` is not null, it will be populated.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_info<'os>(
+    obj: *mut obj_t<'os>,
+    err: *mut *mut err_t,
+) -> *mut betree_object_info_t {
+    let obj = &(*obj).0;
+    match obj.info() {
+        Ok(Some(info)) => {
+            let mtime_us = info
+                .mtime
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_micros() as u64)
+                .unwrap_or(0);
+
+            let result_info = betree_object_info_t {
+                size: info.size,
+                mtime_us,
+            };
+            Box::into_raw(Box::new(result_info))
+        }
+        Ok(None) => {
+            // Object does not exist or has no metadata
+            handle_err(Error::DoesNotExist, err);
+            null_mut()
+        }
+        Err(e) => {
+            handle_err(e, err);
+            null_mut()
+        }
+    }
+}
+
+/// Opaque struct for an iterator over objects.
+pub struct obj_iter_t(Box<dyn Iterator<Item = Result<(CowBytes, ObjectInfo), Error>>>);
+
+/// Create an iterator over all objects in the object store.
+/// On success, returns a pointer to the iterator which must be freed with `betree_free_obj_iter`.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_iter_all(
+    os: *mut obj_store_t,
+    err: *mut *mut err_t,
+) -> *mut obj_iter_t {
+    let os = &mut (*os).0;
+    os.list_objects::<_, &[u8]>(..)
+        .map(|iter| {
+            let new_iter: Box<dyn Iterator<Item = Result<_, _>>> = Box::new(
+                iter.map(|(handle, info)| Ok((CowBytes::from(handle.object.key()), info))),
+            );
+            new_iter
+        })
+        .handle_result(err)
+}
+
+/// Create an iterator over objects with a given prefix in the object store.
+/// On success, returns a pointer to the iterator which must be freed with `betree_free_obj_iter`.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_store_list_prefix(
+    os: *mut obj_store_t,
+    prefix: *const c_char,
+    prefix_len: c_uint,
+    err: *mut *mut err_t,
+) -> *mut obj_iter_t {
+    let os = &mut (*os).0;
+    let prefix_slice = from_raw_parts(prefix as *const u8, prefix_len as usize);
+
+    let mut end_key = prefix_slice.to_vec();
+    // A simple way to create an end bound for a prefix search is to find the
+    // "next" key in byte-order. For this we find the last byte which is not
+    // 0xFF, increment it, and truncate the rest.
+    if let Some(pos) = end_key.iter().rposition(|&b| b != 0xFF) {
+        end_key[pos] += 1;
+        end_key.truncate(pos + 1);
+    } else {
+        // The prefix is all 0xFF, there's no byte-larger key with this prefix
+        // so we return an empty iterator.
+        return b(obj_iter_t(Box::new(std::iter::empty())));
+    }
+
+    os.list_objects(prefix_slice..&*end_key)
+        .map(|iter| {
+            let new_iter: Box<dyn Iterator<Item = Result<_, _>>> = Box::new(
+                iter.map(|(handle, info)| Ok((CowBytes::from(handle.object.key()), info))),
+            );
+            new_iter
+        })
+        .handle_result(err)
+}
+
+/// Advance the iterator and get the next object's key.
+/// On success (an item was found), returns 0 and populates `key`. `key` must be freed with `betree_free_byte_slice`.
+/// When the iterator is exhausted, returns -1.
+/// On error, returns -1 and sets `err`.
+#[no_mangle]
+pub unsafe extern "C" fn betree_object_iter_next(
+    iter: *mut obj_iter_t,
+    key: *mut byte_slice_t,
+    err: *mut *mut err_t,
+) -> c_int {
+    let iter = &mut (*iter).0;
+    match iter.next() {
+        None => -1, // End of iterator
+        Some(Ok((k, _info))) => {
+            write(key, k.into());
+            0
+        }
+        Some(Err(e)) => {
+            handle_err(e, err);
+            -1
+        }
+    }
+}
+
+/// Free the object iterator.
+#[no_mangle]
+pub unsafe extern "C" fn betree_free_obj_iter(iter: *mut obj_iter_t) {
+    if !iter.is_null() {
+        let _ = Box::from_raw(iter);
+    }
+}
