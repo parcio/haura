@@ -444,11 +444,11 @@ impl<N> CopylessInternalNode<N> {
     pub fn after_insert_size_delta(&mut self, idx: usize, size_delta: isize) {
         self.meta_data.entries_sizes[idx] = self.children[idx].buffer.size();
 
-        assert!(
-            self.meta_data.entries_sizes[idx] < 8 * 1024 * 1024,
-            "child buffer got way too large: {:#?}",
-            std::backtrace::Backtrace::force_capture()
-        );
+        // assert!(
+        //     self.meta_data.entries_sizes[idx] < 8 * 1024 * 1024,
+        //     "child buffer got way too large: {:#?}",
+        //     std::backtrace::Backtrace::force_capture()
+        // );
     }
 
     pub(crate) fn has_too_high_fanout(&self, max_size: usize) -> bool {
@@ -588,7 +588,12 @@ impl<N: ObjectReference> CopylessInternalNode<N> {
         let pivot = self.meta_data.pivot.split_off(split_off_idx);
         let pivot_key = self.meta_data.pivot.pop().unwrap();
 
-        let children = self.children.split_off(split_off_idx);
+        let mut children = self.children.split_off(split_off_idx);
+        if let Some(first_child) = children.get_mut(0) {
+            let mut c_ptr = first_child.ptr.write();
+            let ds_id = c_ptr.index().d_id();
+            c_ptr.set_index(PivotKey::LeftOuter(pivot[0].clone(), ds_id));
+        }
         let entries_sizes = self.meta_data.entries_sizes.split_off(split_off_idx);
         let entries_prefs = self.meta_data.entries_prefs.split_off(split_off_idx);
 

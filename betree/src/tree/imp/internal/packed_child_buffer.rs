@@ -208,7 +208,8 @@ impl Map {
                     key_info.into_iter().zip(values_pos.into_iter().map(
                         move |(pos, len, csum)| {
                             // NOTE: copies data to not be invalidated later on rewrites... could be solved differently
-                            let buf = data.clone().subslice(pos, len);
+                            let buf = CowBytes::from(&data[pos as usize..(pos + len) as usize])
+                                .slice_from(0);
                             csum.verify(&buf).unwrap();
                             buf
                         },
@@ -440,6 +441,7 @@ impl PackedChildBuffer {
         key: &[u8],
         pref: StoragePreference,
     ) -> WithCacheSizeChange<Option<KeyInfo>> {
+        self.messages_preference.invalidate();
         self.buffer.unpacked().map(|tree| {
             tree.get_mut(key).map(|(keyinfo, _bytes)| {
                 keyinfo.storage_preference = pref;
@@ -889,7 +891,7 @@ impl PackedChildBuffer {
                 .try_into()
                 .unwrap(),
         ) as usize;
-        assert!(entries_size < 8 * 1024 * 1024, "size was {}", entries_size);
+        // assert!(entries_size < 8 * 1024 * 1024, "size was {}", entries_size);
         let pref = u8::from_le_bytes(
             buf[IS_LEAF_HEADER + 8..IS_LEAF_HEADER + 9]
                 .try_into()

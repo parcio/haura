@@ -83,8 +83,8 @@ impl StorageMap {
         Some(match (&node.0, self.get(pref)) {
             (CopylessInternal(_), _) => return None,
             (_, StorageKind::Hdd) => mib!(1),
-            (_, StorageKind::Ssd) => kib!(4),
-            (_, StorageKind::Memory) => mib!(1),
+            (_, StorageKind::Ssd) => kib!(512),
+            (_, StorageKind::Memory) => kib!(512),
         })
     }
 
@@ -92,8 +92,8 @@ impl StorageMap {
         let pref = node.correct_preference();
         Some(match (&node.0, self.get(pref)) {
             (_, StorageKind::Hdd) => mib!(4),
-            (_, StorageKind::Ssd) => kib!(16),
-            (_, StorageKind::Memory) => mib!(4),
+            (_, StorageKind::Ssd) => mib!(2),
+            (_, StorageKind::Memory) => mib!(2),
         })
     }
 }
@@ -502,8 +502,6 @@ pub(super) enum GetResult<'a, N: 'a + 'static> {
 pub(super) enum ApplyResult<'a, N: 'a + 'static> {
     Leaf(Option<KeyInfo>),
     NextNode(&'a mut N),
-    NVMNextNode { child: &'a mut N, buffer: &'a mut N },
-    NVMLeaf(Option<KeyInfo>),
 }
 
 pub(super) enum PivotGetResult<'a, N: 'a + 'static> {
@@ -555,7 +553,7 @@ impl<N: HasStoragePreference> Node<N> {
         match self.0 {
             MemLeaf(ref nvmleaf) => GetRangeResult::Data(Box::new(nvmleaf.get_all_messages())),
             CopylessInternal(ref nvminternal) => {
-                let prefetch_option = if nvminternal.level() == 1 {
+                let prefetch_option = if nvminternal.level() == 1 && false {
                     nvminternal.get_next_node(key)
                 } else {
                     None
@@ -681,7 +679,7 @@ impl<N: HasStoragePreference + StaticSize> Node<N> {
         match self.0 {
             // FIXME: see above
             MemLeaf(ref mut nvmleaf) => {
-                ApplyResult::NVMLeaf(nvmleaf.apply_with_info(key, pref).take().0)
+                ApplyResult::Leaf(nvmleaf.apply_with_info(key, pref).take().0)
             }
             CopylessInternal(ref mut nvminternal) => {
                 ApplyResult::NextNode(nvminternal.apply_with_info(key, pref))
@@ -837,13 +835,13 @@ pub struct ChildInfo {
 #[serde(tag = "type", rename_all = "lowercase")]
 #[allow(missing_docs)]
 pub enum NodeInfo {
-    NVMLeaf {
+    Leaf {
         level: u32,
         storage: StoragePreference,
         system_storage: StoragePreference,
         entry_count: usize,
     },
-    NVMInternal {
+    Internal {
         level: u32,
         storage: StoragePreference,
         system_storage: StoragePreference,
@@ -880,13 +878,13 @@ impl<N: HasStoragePreference + ObjectReference> Node<N> {
         N: ObjectReference<ObjectPointer = D::ObjectPointer>,
     {
         match &self.0 {
-            Inner::MemLeaf(ref nvmleaf) => NodeInfo::NVMLeaf {
+            Inner::MemLeaf(ref nvmleaf) => NodeInfo::Leaf {
                 storage: self.correct_preference(),
                 system_storage: self.system_storage_preference(),
                 level: self.level(),
                 entry_count: nvmleaf.len(),
             },
-            Inner::CopylessInternal(ref nvminternal) => NodeInfo::NVMInternal {
+            Inner::CopylessInternal(ref nvminternal) => NodeInfo::Internal {
                 storage: self.correct_preference(),
                 system_storage: self.system_storage_preference(),
                 level: self.level(),

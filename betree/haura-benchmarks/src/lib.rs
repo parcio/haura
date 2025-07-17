@@ -55,8 +55,6 @@ impl Control {
 
         cfg.access_mode = AccessMode::AlwaysCreateNew;
 
-        cfg.sync_interval_ms = None;
-
         cfg.metrics = Some(metrics::MetricsConfiguration {
             enabled: true,
             interval_ms: 500,
