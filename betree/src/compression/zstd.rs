@@ -7,12 +7,11 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{io::Write, mem};
 use std::io::{self, Read};
-use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder};
-use zstd_safe::{FrameFormat, WriteBuf};
-use std::sync::{Arc, Mutex};
+use zstd::stream::raw::{DParameter, Decoder};
+use zstd_safe::FrameFormat;
 use zstd::block;
 // TODO: investigate pre-created dictionary payoff
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
+use crate::cow_bytes::SlicedCowBytes;
 /// Zstd compression. (<https://github.com/facebook/zstd>)
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Zstd {
@@ -21,7 +20,7 @@ pub struct Zstd {
     pub level: u8,
 }
 struct ZstdCompression {
-    writer: Encoder<'static>,
+    level: u8,
 }
 struct ZstdDecompression {
     writer: Decoder<'static>,
@@ -37,14 +36,8 @@ use zstd::stream::raw::Operation;
 
 impl CompressionBuilder for Zstd {
     fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
-        let mut encoder = Encoder::new(self.level as i32)?;
-        
-        // Compression format is stored externally, don't need to duplicate it
-        encoder.set_parameter(CParameter::Format(FrameFormat::Magicless))?;
-        // Integrity is handled at a different layer
-        encoder.set_parameter(CParameter::ChecksumFlag(false))?;
-        
-        Ok(Box::new(ZstdCompression { writer: encoder }))
+        // No need to create encoder here - block compression is more efficient
+        Ok(Box::new(ZstdCompression { level: self.level }))
     }
 
     fn decompression_tag(&self) -> DecompressionTag {
@@ -83,7 +76,7 @@ const DATA_OFF: usize = mem::size_of::<u32>();
 
 impl CompressionState for ZstdCompression {    
     fn finish(&mut self, data: Buf) -> Result<Buf> {
-        let compressed_data = block::compress(&data, 1)
+        let compressed_data = block::compress(&data, self.level as i32)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         let size = data.as_ref().len() as u32;
@@ -101,7 +94,7 @@ impl CompressionState for ZstdCompression {
     }
 
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-         match block::compress(data, 1) {
+         match block::compress(data, self.level as i32) {
             Ok(data) => Ok(data),
             Err(e) => bail!(std::io::Error::new(std::io::ErrorKind::Other, format!("Compression error: {:?}", e))),
         }

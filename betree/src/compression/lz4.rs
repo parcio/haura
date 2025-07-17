@@ -1,24 +1,20 @@
-use super::{ CompressionBuilder, CompressionState, DecompressionState, DecompressionTag, DEFAULT_BUFFER_SIZE, Result };
+use super::{ CompressionBuilder, CompressionState, DecompressionState, DecompressionTag, Result };
 use crate::size::StaticSize;
-use crate::buffer::{Buf, BufWrite};
-use crate::cow_bytes::{CowBytes, SlicedCowBytes};
+use crate::buffer::Buf;
+use crate::cow_bytes::SlicedCowBytes;
 
-use crate::{
-    vdev::Block,
-};
-use std::io::Write;
+
+
 
 use serde::{Deserialize, Serialize};
-use zstd_safe::WriteBuf;
-use std::io::{self, BufReader, Read};
 
-use std::{
-    mem,
-};
-use std::sync::{Arc, Mutex};
 
-use lz4::{Encoder, Decoder, EncoderBuilder, ContentChecksum, BlockSize, BlockMode};
 
+
+
+
+use lz4::block;
+use lz4::block::CompressionMode;
 /// LZ4 compression. (<https://github.com/lz4/lz4>)
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Lz4 {
@@ -30,8 +26,7 @@ pub struct Lz4 {
 }
 
 pub struct Lz4Compression {
-    config: Lz4,
-    encoder: Encoder<BufWrite>,
+    level: u8,
 }
 
 pub struct Lz4Decompression;
@@ -44,14 +39,8 @@ impl StaticSize for Lz4 {
 
 impl CompressionBuilder for Lz4 {
     fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
-        let encoder = EncoderBuilder::new()
-            .level(u32::from(self.level))
-            .checksum(ContentChecksum::NoChecksum)
-            .block_size(BlockSize::Max4MB)
-            .block_mode(BlockMode::Linked)
-            .build(BufWrite::with_capacity(DEFAULT_BUFFER_SIZE))?;
-
-        Ok(Box::new(Lz4Compression { config: self.clone(), encoder }))
+        // Just store the level, create encoder only when needed
+        Ok(Box::new(Lz4Compression { level: self.level }))
     }
 
     fn decompression_tag(&self) -> DecompressionTag {
@@ -65,85 +54,46 @@ impl Lz4 {
     }
 }
 
-impl io::Write for Lz4Compression {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unimplemented!()
-    }
 
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        unimplemented!()
-    }
 
-    fn flush(&mut self) -> io::Result<()> {
-        unimplemented!()
-    }
-}
 
-use std::time::Instant;
-use speedy::{Readable, Writable};
-const DATA_OFF: usize = mem::size_of::<u32>();
 
-use lz4_sys::{LZ4F_compressBound, LZ4FPreferences, LZ4FCompressionContext, LZ4F_createCompressionContext};
-use std::ptr;
-use lz4_sys::LZ4FFrameInfo;
+
 
 impl CompressionState for Lz4Compression {
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(data.len() as u32));
-
-        let mut encoder = EncoderBuilder::new()
-            .level(u32::from(self.config.level))
-            .checksum(ContentChecksum::NoChecksum)
-            .block_size(BlockSize::Max4MB)
-            .block_mode(BlockMode::Linked)
-            .build(buf)?;
-
-        encoder.write_all(data)?;
-        let (compressed_data, result) = encoder.finish();
-
-        //result.map_err(|e| format!("Compression failed: {:?}", e).into())?;
-
-        Ok(compressed_data.as_slice().to_vec())
+        let mode = CompressionMode::HIGHCOMPRESSION(self.level as i32);
+        // Use block-level compression - much more efficient than creating encoder each time
+        block::compress(data, Some(mode), false)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 compression failed: {:?}", e)).into())
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(data.as_ref().len() as u32));
-
-        let mut encoder = EncoderBuilder::new()
-            .level(u32::from(self.config.level))
-            .checksum(ContentChecksum::NoChecksum)
-            .block_size(BlockSize::Max4MB)
-            .block_mode(BlockMode::Linked)
-            .build(buf)?;
-
-        encoder.write_all(data.as_ref())?;
-        let (compressed_data, result) = encoder.finish();
-
-        //result.map_err(|e| format!("Compression failed: {:?}", e).into())?;
-
-        Ok(compressed_data.into_buf())
+        // Use block-level compression - much more efficient than creating encoder each time
+        let mode = CompressionMode::HIGHCOMPRESSION(self.level as i32);
+        let compressed_data = block::compress(data.as_ref(), Some(mode), false)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 compression failed: {:?}", e)))?;
+        
+        Ok(Buf::from_zero_padded(compressed_data))
     }
 }
 
 
 impl DecompressionState for Lz4Decompression {
     fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes> {
-        let size = data.as_ref().len() as u32;
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
-        let mut decoder = Decoder::new(data.as_ref())?;
-
-        io::copy(&mut decoder, &mut buf)?;
-
-        Ok(buf.as_sliced_cow_bytes())
+        // Use block-level decompression to match block-level compression
+        let decompressed = block::decompress(data, Some(len as i32))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 decompression failed: {:?}", e)))?;
+        
+        Ok(SlicedCowBytes::from(decompressed))
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        let size = data.as_ref().len() as u32;
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
-        let mut decoder = Decoder::new(data.as_ref())?;
-
-        io::copy(&mut decoder, &mut buf)?;
-        Ok(buf.into_buf())
+        // Use block-level decompression to match block-level compression
+        let decompressed = block::decompress(data.as_ref(), None)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 decompression failed: {:?}", e)))?;
+        
+        Ok(Buf::from_zero_padded(decompressed))
     }
 }
 
