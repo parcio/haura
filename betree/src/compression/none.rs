@@ -61,7 +61,7 @@ impl io::Write for NoneCompression {
 
 impl CompressionState for NoneCompression {
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        Ok(data.clone().to_vec())
+        Ok(data.to_vec())
     }
 
     fn finish(&mut self, buf: Buf) -> Result<Buf> {
@@ -70,7 +70,7 @@ impl CompressionState for NoneCompression {
 }
 
 impl DecompressionState for NoneDecompression {
-    fn decompress_ext(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
+    fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes> {
         Ok(SlicedCowBytes::from(data.to_vec()))
     }
 

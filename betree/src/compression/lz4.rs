@@ -90,57 +90,45 @@ use lz4_sys::LZ4FFrameInfo;
 
 impl CompressionState for Lz4Compression {
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        let size = data.len();
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(data.len() as u32));
 
         let mut encoder = EncoderBuilder::new()
-        .level(u32::from(self.config.level))
-        .checksum(ContentChecksum::NoChecksum)
-        .block_size(BlockSize::Max4MB)
-        .block_mode(BlockMode::Linked)
-        .build(buf)?;
+            .level(u32::from(self.config.level))
+            .checksum(ContentChecksum::NoChecksum)
+            .block_size(BlockSize::Max4MB)
+            .block_mode(BlockMode::Linked)
+            .build(buf)?;
 
-        encoder.write_all(data.as_ref())?;
+        encoder.write_all(data)?;
         let (compressed_data, result) = encoder.finish();
-    
-        if let Err(e) = result {
-            panic!("Compression failed: {:?}", e);
-        }
 
-        let mut buf_opt = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
-        buf_opt.write_all(compressed_data.as_slice());
+        //result.map_err(|e| format!("Compression failed: {:?}", e).into())?;
 
-        Ok(buf_opt.as_slice().to_vec())
+        Ok(compressed_data.as_slice().to_vec())
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
-        let size = data.as_ref().len();
-
-        let mut buf: BufWrite = BufWrite::with_capacity(Block::round_up_from_bytes( (size as u32)));
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(data.as_ref().len() as u32));
 
         let mut encoder = EncoderBuilder::new()
-        .level(u32::from(self.config.level))
-        .checksum(ContentChecksum::NoChecksum)
-        .block_size(BlockSize::Max4MB)
-        .block_mode(BlockMode::Linked)
-        .build(buf)?;
+            .level(u32::from(self.config.level))
+            .checksum(ContentChecksum::NoChecksum)
+            .block_size(BlockSize::Max4MB)
+            .block_mode(BlockMode::Linked)
+            .build(buf)?;
 
         encoder.write_all(data.as_ref())?;
         let (compressed_data, result) = encoder.finish();
 
-        if let Err(e) = result {
-            panic!("Compression failed: {:?}", e);
-        }
+        //result.map_err(|e| format!("Compression failed: {:?}", e).into())?;
 
-        let mut buf_opt = BufWrite::with_capacity(Block::round_up_from_bytes(compressed_data.as_slice().len() as u32));
-        buf_opt.write_all(compressed_data.as_slice());
-
-        Ok(buf_opt.into_buf())
+        Ok(compressed_data.into_buf())
     }
 }
 
+
 impl DecompressionState for Lz4Decompression {
-    fn decompress_ext(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
+    fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes> {
         let size = data.as_ref().len() as u32;
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
         let mut decoder = Decoder::new(data.as_ref())?;
@@ -159,3 +147,22 @@ impl DecompressionState for Lz4Decompression {
         Ok(buf.into_buf())
     }
 }
+
+
+// impl DecompressionState for Lz4Decompression {
+//     fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+//         let mut buf = BufWrite::default(); // Let it grow as needed
+//         let mut decoder = Decoder::new(data)?;
+
+//         io::copy(&mut decoder, &mut buf)?;
+//         Ok(buf.as_sliced_cow_bytes())
+//     }
+
+//     fn decompress(&mut self, data: Buf) -> Result<Buf> {
+//         let mut buf = BufWrite::default(); // Let it grow as needed
+//         let mut decoder = Decoder::new(data.as_ref())?;
+
+//         io::copy(&mut decoder, &mut buf)?;
+//         Ok(buf.into_buf())
+//     }
+// }

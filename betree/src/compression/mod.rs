@@ -104,7 +104,7 @@ pub trait CompressionState {
 /// An implementation of consumption-based decompression.
 pub trait DecompressionState {
     /// Decompress the given [Buf]. On No-op this is a simple pass through, no memory is copied.
-    fn decompress_ext(&mut self, data: &[u8]) -> Result<SlicedCowBytes>;
+    fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes>;
     fn decompress(&mut self, data: Buf) -> Result<Buf>;
 }
 

@@ -10,6 +10,7 @@ use std::io::{self, Read};
 use zstd::stream::raw::{CParameter, DParameter, Decoder, Encoder};
 use zstd_safe::{FrameFormat, WriteBuf};
 use std::sync::{Arc, Mutex};
+use zstd::block;
 // TODO: investigate pre-created dictionary payoff
 use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 /// Zstd compression. (<https://github.com/facebook/zstd>)
@@ -84,124 +85,59 @@ const DATA_OFF: usize = mem::size_of::<u32>();
 
 impl CompressionState for ZstdCompression {    
     fn finish(&mut self, data: Buf) -> Result<Buf> {
-        let start = Instant::now();
-        let size = zstd_safe::compress_bound(data.as_ref().len());
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
-        buf.write_all(&[0u8; DATA_OFF])?;
+        let compressed_data = block::compress(&data, 1)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
-        let mut input = zstd::stream::raw::InBuffer::around(&data);
-        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, DATA_OFF);
-        let mut finished_frame;
-        loop {
-            let remaining = self.writer.run(&mut input, &mut output)?;
-            finished_frame = remaining == 0;
-            if input.pos() > 0 || data.is_empty() {
-                break;
-            }
-        }
+        let size = data.as_ref().len() as u32;
+        let comlen = compressed_data.len() as u32;
 
-        while self.writer.flush(&mut output)? > 0 {}
-        self.writer.finish(&mut output, finished_frame)?;
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(
+            4 + 4 + comlen, // total metadata and compressed payload
+        ));
 
-        let og_len = data.len() as u32;
-        og_len
-            .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
-            .unwrap();
-        let duration = start.elapsed();
+        buf.write_all(&size.to_le_bytes())?;
+        buf.write_all(&comlen.to_le_bytes())?;
+        buf.write_all(&compressed_data)?;
 
         Ok(buf.into_buf())
     }
 
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        let size = zstd_safe::compress_bound(data.len());
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size as u32));
-        buf.write_all(&[0u8; DATA_OFF])?;
-
-        let mut input = zstd::stream::raw::InBuffer::around(&data);
-        let mut output = zstd::stream::raw::OutBuffer::around_pos(&mut buf, DATA_OFF);
-        let mut finished_frame;
-        loop {
-            let remaining = self.writer.run(&mut input, &mut output)?;
-            finished_frame = remaining == 0;
-            if input.pos() > 0 || data.is_empty() {
-                break;
-            }
+         match block::compress(data, 1) {
+            Ok(data) => Ok(data),
+            Err(e) => bail!(std::io::Error::new(std::io::ErrorKind::Other, format!("Compression error: {:?}", e))),
         }
-
-        while self.writer.flush(&mut output)? > 0 {}
-        self.writer.finish(&mut output, finished_frame)?;
-
-        let og_len = data.len() as u32;
-        og_len
-            .write_to_buffer(&mut buf.as_mut()[..DATA_OFF])
-            .unwrap();
-
-        Ok(buf.as_slice().to_vec())
     }
 }
 
-
 impl DecompressionState for ZstdDecompression {
-      fn decompress_ext(&mut self, data: &[u8]) -> Result<SlicedCowBytes>
+    fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes>
     {
-        let size = u32::read_from_buffer(data).unwrap();
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
-
-        let mut input = zstd::stream::raw::InBuffer::around(&data[DATA_OFF..]);
-        let mut output = zstd::stream::raw::OutBuffer::around(&mut buf);
-
-        let mut finished_frame;
-        loop {
-            let remaining = self.writer.run(&mut input, &mut output)?;
-            finished_frame = remaining == 0;
-            if remaining > 0 {
-                if output.dst.capacity() == output.dst.as_ref().len() {
-                    // append faux byte to extend in case that original was
-                    // wrong for some reason (this should not happen but is a
-                    // sanity guard)
-                    output.dst.write(&[0])?;
-                }
-                continue;
-            }
-            if input.pos() > 0 || data.is_empty() {
-                break;
-            }
+        match block::decompress(data, len) {
+            Ok(data) => Ok(SlicedCowBytes::from(data)),
+            Err(e) => bail!(std::io::Error::new(std::io::ErrorKind::Other, format!("Decompression error: {:?}", e))),
         }
-
-        while self.writer.flush(&mut output)? > 0 {}
-        self.writer.finish(&mut output, finished_frame)?;
-
-        Ok(buf.as_sliced_cow_bytes())
     }
     
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        let size = u32::read_from_buffer(data.as_ref()).unwrap();
-        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(size));
-
-        let mut input = zstd::stream::raw::InBuffer::around(&data[DATA_OFF..]);
-        let mut output = zstd::stream::raw::OutBuffer::around(&mut buf);
-
-        let mut finished_frame;
-        loop {
-            let remaining = self.writer.run(&mut input, &mut output)?;
-            finished_frame = remaining == 0;
-            if remaining > 0 {
-                if output.dst.capacity() == output.dst.as_ref().len() {
-                    // append faux byte to extend in case that original was
-                    // wrong for some reason (this should not happen but is a
-                    // sanity guard)
-                    output.dst.write(&[0])?;
-                }
-                continue;
-            }
-            if input.pos() > 0 || data.is_empty() {
-                break;
-            }
+        if data.len() < 8 {
+            bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
         }
 
-        while self.writer.flush(&mut output)? > 0 {}
-        self.writer.finish(&mut output, finished_frame)?;
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
 
+        if data.len() < 8 + comp_len {
+            bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated"));
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
+        let uncompressed_data = block::decompress(compressed, uncomp_size)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
+        buf.write_all(&uncompressed_data)?;
         Ok(buf.into_buf())
     }
 }
