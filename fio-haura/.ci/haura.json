@@ -3,7 +3,8 @@
     "tiers": [
       {
         "top_level_vdevs": [],
-        "preferred_access_type": "Unknown"
+        "preferred_access_type": "Unknown",
+        "storage_kind": "Ssd"
       }
     ],
     "queue_depth_factor": 20,
@@ -32,4 +33,3 @@
   "migration_policy": null,
   "metrics": null
 }
-
