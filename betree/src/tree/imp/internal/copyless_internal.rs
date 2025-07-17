@@ -19,7 +19,7 @@ use crate::{
     storage_pool::AtomicSystemStoragePreference,
     tree::{imp::MIN_FANOUT, pivot_key::LocalPivotKey, KeyInfo},
     AtomicStoragePreference, StoragePreference,
-    compression::CompressionBuilder,
+    compression::CompressionConfiguration,
     compression::DecompressionTag,
 };
 use parking_lot::RwLock;
@@ -343,7 +343,7 @@ impl<N> CopylessInternalNode<N> {
         &self,
         mut w: W,
         csum_builder: F,
-        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
+        compressor: &CompressionConfiguration,
     ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         N: serde::Serialize + StaticSize,
@@ -384,7 +384,7 @@ impl<N> CopylessInternalNode<N> {
         }
 
         for child in self.children.iter() {
-            let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder, compressor.clone())?;
+            let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder, compressor)?;
             assert_eq!(
                 bincode::serialized_size(&integrity).unwrap(),
                 INTERNAL_INTEGRITY_CHECKSUM_SIZE as u64

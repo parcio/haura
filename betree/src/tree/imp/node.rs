@@ -9,7 +9,7 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
-    buffer::Buf, checksum::{Builder, Checksum}, compression::{CompressionBuilder, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{
+    buffer::Buf, checksum::{Builder, Checksum}, compression::{CompressionConfiguration, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
     }, database::DatasetId, size::{Size, SizeMut, StaticSize}, tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind}, StoragePreference
 };
@@ -187,8 +187,8 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         &self,
         mut writer: W,
         _: PreparePack,
-        csum_builder: F,
-        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>
+        csum_builder: F, 
+        compressor: &CompressionConfiguration
     ) -> Result<IntegrityMode<C>, io::Error> {
         match self.0 {
             MemLeaf(ref leaf) => {

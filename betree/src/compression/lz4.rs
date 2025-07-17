@@ -43,16 +43,15 @@ impl StaticSize for Lz4 {
 }
 
 impl CompressionBuilder for Lz4 {
-    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>> {
-        let mut encoder = EncoderBuilder::new()
+    fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
+        let encoder = EncoderBuilder::new()
             .level(u32::from(self.level))
             .checksum(ContentChecksum::NoChecksum)
             .block_size(BlockSize::Max4MB)
             .block_mode(BlockMode::Linked)
             .build(BufWrite::with_capacity(DEFAULT_BUFFER_SIZE))?;
 
-        Ok(Arc::new(std::sync::RwLock::new(Lz4Compression { config: self.clone(), encoder })))
-
+        Ok(Box::new(Lz4Compression { config: self.clone(), encoder }))
     }
 
     fn decompression_tag(&self) -> DecompressionTag {

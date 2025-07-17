@@ -11,7 +11,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, mem};
 
-use std::sync::{Arc, Mutex};
+
 
 mod errors;
 pub use errors::*;
@@ -29,13 +29,31 @@ pub enum CompressionConfiguration {
 }
 
 impl CompressionConfiguration {
-    pub fn to_builder(&self) -> Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>> {
+    /// Create a compression state directly (high performance)
+    pub fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
         match self {
-            CompressionConfiguration::None => Arc::new(std::sync::RwLock::new(Box::new(None))),
-            CompressionConfiguration::Zstd(zstd) => Arc::new(std::sync::RwLock::new(Box::new(*zstd))),
-            CompressionConfiguration::Lz4(lz4) => Arc::new(std::sync::RwLock::new(Box::new(*lz4))),
+            CompressionConfiguration::None => {
+                None.create_compressor()
+            }
+            CompressionConfiguration::Lz4(lz4) => {
+                lz4.create_compressor()
+            }
+            CompressionConfiguration::Zstd(zstd) => {
+                zstd.create_compressor()
+            }
         }
     }
+
+    /// Get decompression tag for storage
+    pub fn decompression_tag(&self) -> DecompressionTag {
+        match self {
+            CompressionConfiguration::None => DecompressionTag::None,
+            CompressionConfiguration::Lz4(_) => DecompressionTag::Lz4,
+            CompressionConfiguration::Zstd(_) => DecompressionTag::Zstd,
+        }
+    }
+
+
 }
 
 /// This tag is stored alongside compressed blobs, to select the appropriate decompression
@@ -84,11 +102,10 @@ impl StaticSize for DecompressionTag {
     }
 }
 
-/// Trait for compressing and decompressing data. Only compression is configurable, decompression
-/// must be able to decompress anything ever compressed in any configuration.
+/// High-performance compression interface - no locks, no shared state
 pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
-    /// Returns an object for compressing data into a `Box<[u8]>`.
-    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>>;
+    /// Create a lightweight compression state without shared locking (high performance)
+    fn create_compressor(&self) -> Result<Box<dyn CompressionState>>;
     /// Which decompression algorithm needs to be used.
     fn decompression_tag(&self) -> DecompressionTag;
 }

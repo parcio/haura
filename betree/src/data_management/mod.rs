@@ -22,7 +22,7 @@ use crate::{
     storage_pool::StoragePoolLayer,
     tree::{PivotKey, StorageKind},
     StoragePreference,
-    compression::CompressionBuilder,
+    compression::CompressionConfiguration,
     compression::DecompressionTag,
 };
 use parking_lot::Mutex;
@@ -165,7 +165,7 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         writer: W,
         pp: PreparePack,
         csum_builder: F,
-        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>
+        compressor: &CompressionConfiguration
     ) -> Result<IntegrityMode<C>, io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at<C: Checksum>(

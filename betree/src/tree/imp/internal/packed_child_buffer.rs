@@ -2,7 +2,7 @@
 use zstd_safe::WriteBuf;
 
 use crate::{
-    buffer::{self, Buf, BufWrite}, checksum::{Builder, Checksum as ChecksumTrait, State}, compression::{CompressionBuilder, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{HasStoragePreference, IntegrityMode}, database::Checksum, size::{Size, StaticSize}, storage_pool::AtomicSystemStoragePreference, tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction}, AtomicStoragePreference, StoragePreference
+    buffer::{self, Buf, BufWrite}, checksum::{Builder, Checksum as ChecksumTrait, State}, compression::{CompressionConfiguration, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{HasStoragePreference, IntegrityMode}, database::Checksum, size::{Size, StaticSize}, storage_pool::AtomicSystemStoragePreference, tree::{imp::leaf::FillUpResult, pivot_key::LocalPivotKey, KeyInfo, MessageAction}, AtomicStoragePreference, StoragePreference
 };
 use crate::{
     vdev::Block,
@@ -881,7 +881,7 @@ impl PackedChildBuffer {
         &self,
         mut w: W,
         csum_builder: F,
-        compressor: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
+        compressor: &CompressionConfiguration,
     ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         W: std::io::Write,
@@ -896,11 +896,10 @@ impl PackedChildBuffer {
             panic!("PackedChildBuffer::pack called on a packed buffer, this should never happen.");
             let slice = &self.buffer.assert_packed()[..];
 
-            let compression = compressor.read().unwrap();
-            let mut state_ref = compression.new_compression().unwrap();
-            let mut state =  state_ref.write().unwrap();
+            let mut state = compressor.create_compressor()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
-            let compressed_head =  state.finish_ext(&slice[..self.buffer.packed_vals_len()])
+            let compressed_head = state.finish_ext(&slice[..self.buffer.packed_vals_len()])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
             let head_csum = csum_builder(&compressed_head);
@@ -972,9 +971,8 @@ impl PackedChildBuffer {
 
         let mut compressed_vals: Vec<u8> = vec![];
 
-        let compression = compressor.read().unwrap();
-        let mut state_ref = compression.new_compression().unwrap();
-        let mut state =  state_ref.write().unwrap();
+        let mut state = compressor.create_compressor()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         assert!(self.buffer.len() == self.buffer.assert_unpacked().len());
 

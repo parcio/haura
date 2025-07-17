@@ -10,7 +10,7 @@ use crate::{
     buffer::Buf,
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
-    compression::CompressionBuilder,
+    compression::CompressionConfiguration,
     data_management::{CopyOnWriteReason, IntegrityMode},
     database::{DatasetId, Generation, Handler},
     migration::DmlMsg,
@@ -45,7 +45,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
 where
     SPL::Checksum: StaticSize,
 {
-    default_compression: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
+    default_compression: CompressionConfiguration,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
@@ -76,7 +76,7 @@ where
 {
     /// Returns a new `Dmu`.
     pub fn new(
-        default_compression: Arc<std::sync::RwLock<Box<dyn CompressionBuilder>>>,
+        default_compression: CompressionConfiguration,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
         default_storage_class: u8,
         pool: SPL,
@@ -134,6 +134,11 @@ where
     /// Returns the underlying cache.
     pub fn cache(&self) -> &RwLock<E> {
         &self.cache
+    }
+
+    /// Create a compression state with minimal overhead (high performance)
+    fn create_compressor(&self) -> Result<Box<dyn crate::compression::CompressionState>, crate::compression::Error> {
+        self.default_compression.create_compressor()
     }
 
     /// Returns the underlying storage pool.
@@ -459,10 +464,6 @@ where
         // Block -> Mem: Writeback new children, Create InternalNode, Continue
         // with writeback
 
-        let compression = &*self.default_compression.read().unwrap();
-
-        //let state = builder.new_compression().unwrap();
-        //let compression = &self.default_compression;
         let (integrity_mode, compressed_data_) = {
             // FIXME: cache this
             let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
@@ -478,15 +479,15 @@ where
                     let mut builder = self.default_checksum_builder.build();
                     builder.ingest(bytes);
                     builder.finish()
-                }, self.default_compression.clone())?;
+                }, &self.default_compression)?;
                 drop(object);
                 part
             };
 
             match integrity_mode {
                 IntegrityMode::External => {
-                    let mut state_ref = compression.new_compression().unwrap();
-                    let mut state =  state_ref.write().unwrap();
+                    let mut state = self.default_compression.create_compressor()
+                        .map_err(|e| crate::data_management::Error::CompressionError { source: e })?;
 
                     (integrity_mode, state.finish(buf.into_buf())?)
                 },
@@ -543,7 +544,7 @@ where
             offset,
             size,
             checksum,
-            decompression_tag: compression.decompression_tag(),
+            decompression_tag: self.default_compression.decompression_tag(),
             generation,
             info,
             integrity_mode,

@@ -36,17 +36,15 @@ impl StaticSize for Zstd {
 use zstd::stream::raw::Operation;
 
 impl CompressionBuilder for Zstd {
-    fn new_compression(&self) -> Result<Arc<std::sync::RwLock<dyn CompressionState>>> {
-        // "The library supports regular compression levels from 1 up to ZSTD_maxCLevel(),
-        // which is currently 22."
+    fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
         let mut encoder = Encoder::new(self.level as i32)?;
-
+        
         // Compression format is stored externally, don't need to duplicate it
         encoder.set_parameter(CParameter::Format(FrameFormat::Magicless))?;
-        // // Integrity is handled at a different layer
+        // Integrity is handled at a different layer
         encoder.set_parameter(CParameter::ChecksumFlag(false))?;
-
-        Ok(Arc::new(std::sync::RwLock::new(ZstdCompression { writer: encoder })))
+        
+        Ok(Box::new(ZstdCompression { writer: encoder }))
     }
 
     fn decompression_tag(&self) -> DecompressionTag {
@@ -155,7 +153,7 @@ mod tests {
         rng.fill_bytes(buf.as_mut());
         let buf = Buf::from_zero_padded(buf);
         let zstd = Zstd { level: 1 };
-        let mut comp = zstd.new_compression().unwrap();
+        let mut comp = zstd.create_compressor().unwrap();
         let c_buf = comp.finish(buf.clone()).unwrap();
         let mut decomp = zstd.decompression_tag().new_decompression().unwrap();
         let d_buf = decomp.decompress(c_buf).unwrap();
