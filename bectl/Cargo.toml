@@ -3,7 +3,7 @@ name = "bectl"
 version = "0.1.0"
 authors = ["tilpner <betree@tilpner.com>", "Johannes Wünsche <johannes@spacesnek.rocks>"]
 edition = "2021"
-rust-version = "1.66.1"
+rust-version = "1.82.0"
 
 [dependencies]
 betree_storage_stack = { path = "../betree", features = [ "internal-api" ] }
