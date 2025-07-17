@@ -679,6 +679,10 @@ fn dataset_migrate_down(#[case] tier_size_mb: u32) {
     let space = db.free_space_tier();
     assert!(space[0].free < space[1].free);
     ds.migrate(key, StoragePreference::FAST).unwrap();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&ds.tree_dump().unwrap()).unwrap()
+    );
     db.sync().unwrap();
     let space = db.free_space_tier();
     assert!(space[0].free > space[1].free);
