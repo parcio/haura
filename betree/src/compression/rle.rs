@@ -1,0 +1,253 @@
+//! Run-Length Encoding implementation
+//! Ideal for: Data with many consecutive repeated values (sorted columns, sparse data)
+
+use super::{CompressionBuilder, CompressionState, DecompressionState, DecompressionTag, Result};
+use crate::{
+    buffer::Buf,
+    cow_bytes::SlicedCowBytes,
+    size::StaticSize,
+};
+use serde::{Deserialize, Serialize};
+
+/// RLE configuration
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct Rle {
+    /// Minimum run length to compress (shorter runs are stored uncompressed)
+    pub min_run_length: u8,
+    /// Value size in bytes (1, 2, 4, or 8)
+    pub value_size: u8,
+}
+
+impl Default for Rle {
+    fn default() -> Self {
+        Self {
+            min_run_length: 3, // Compress runs of 3+ identical values
+            value_size: 8,     // Default to 8-byte values
+        }
+    }
+}
+
+impl StaticSize for Rle {
+    fn static_size() -> usize {
+        std::mem::size_of::<Rle>()
+    }
+}
+
+/// RLE compression state
+#[derive(Debug)]
+pub struct RleCompression {
+    config: Rle,
+}
+
+/// RLE decompression state
+#[derive(Debug)]
+pub struct RleDecompression;
+
+impl CompressionBuilder for Rle {
+    fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
+        Ok(Box::new(RleCompression { config: *self }))
+    }
+
+    fn decompression_tag(&self) -> DecompressionTag {
+        DecompressionTag::Rle
+    }
+}
+
+impl Rle {
+    /// Create a new RLE decompression state
+    pub fn new_decompression() -> Result<Box<dyn DecompressionState>> {
+        Ok(Box::new(RleDecompression))
+    }
+}
+
+/// RLE format:
+/// [value_size: u8][run_count: u32][runs...]
+/// Each run: [type: u8][data...]
+/// type=0: literal run [count: u16][values...]
+/// type=1: repeated run [count: u32][value]
+impl CompressionState for RleCompression {
+    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        let value_size = self.config.value_size as usize;
+        if data.len() % value_size != 0 {
+            // Fall back to no compression if data doesn't fit value size
+            return Ok(data.to_vec());
+        }
+
+        let value_count = data.len() / value_size;
+        if value_count == 0 {
+            return Ok(data.to_vec());
+        }
+
+        let mut result = Vec::new();
+        result.push(value_size as u8); // Store value size
+        
+        let run_count_pos = result.len();
+        result.extend_from_slice(&0u32.to_le_bytes()); // Placeholder for run count
+        
+        let mut run_count = 0u32;
+        let mut pos = 0;
+
+        while pos < value_count {
+            let current_value = &data[pos * value_size..(pos + 1) * value_size];
+            let mut run_length = 1;
+
+            // Count consecutive identical values
+            while pos + run_length < value_count {
+                let next_value = &data[(pos + run_length) * value_size..(pos + run_length + 1) * value_size];
+                if current_value == next_value {
+                    run_length += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if run_length >= self.config.min_run_length as usize {
+                // Repeated run
+                result.push(1u8); // Type: repeated
+                result.extend_from_slice(&(run_length as u32).to_le_bytes());
+                result.extend_from_slice(current_value);
+            } else {
+                // Literal run - find end of non-repeating sequence
+                let mut literal_length = run_length;
+                while pos + literal_length < value_count {
+                    let start_check = pos + literal_length;
+                    let check_value = &data[start_check * value_size..(start_check + 1) * value_size];
+                    
+                    // Check if we're starting a new repeating sequence
+                    let mut check_run = 1;
+                    while start_check + check_run < value_count {
+                        let next_check = &data[(start_check + check_run) * value_size..(start_check + check_run + 1) * value_size];
+                        if check_value == next_check {
+                            check_run += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if check_run >= self.config.min_run_length as usize {
+                        // Found a repeating sequence, end literal run here
+                        break;
+                    } else {
+                        literal_length += check_run;
+                    }
+                }
+
+                // Literal run
+                result.push(0u8); // Type: literal
+                result.extend_from_slice(&(literal_length as u16).to_le_bytes());
+                for i in 0..literal_length {
+                    let value = &data[(pos + i) * value_size..(pos + i + 1) * value_size];
+                    result.extend_from_slice(value);
+                }
+                run_length = literal_length;
+            }
+
+            pos += run_length;
+            run_count += 1;
+        }
+
+        // Update run count
+        result[run_count_pos..run_count_pos + 4].copy_from_slice(&run_count.to_le_bytes());
+
+        Ok(result)
+    }
+
+    fn finish(&mut self, data: Buf) -> Result<Buf> {
+        let compressed_data = self.finish_ext(data.as_ref())?;
+        Ok(Buf::from_zero_padded(compressed_data))
+    }
+}
+
+impl DecompressionState for RleDecompression {
+    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+        if data.len() < 5 {
+            return Ok(SlicedCowBytes::from(data.to_vec()));
+        }
+
+        let mut pos = 0;
+        let value_size = data[pos] as usize;
+        pos += 1;
+
+        let run_count = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        pos += 4;
+
+        let mut result = Vec::new();
+
+        for _ in 0..run_count {
+            if pos >= data.len() { break; }
+            
+            let run_type = data[pos];
+            pos += 1;
+
+            match run_type {
+                0 => {
+                    // Literal run
+                    if pos + 2 > data.len() { break; }
+                    let count = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
+                    pos += 2;
+
+                    if pos + count * value_size > data.len() { break; }
+                    result.extend_from_slice(&data[pos..pos + count * value_size]);
+                    pos += count * value_size;
+                }
+                1 => {
+                    // Repeated run
+                    if pos + 4 > data.len() { break; }
+                    let count = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+                    pos += 4;
+
+                    if pos + value_size > data.len() { break; }
+                    let value = &data[pos..pos + value_size];
+                    for _ in 0..count {
+                        result.extend_from_slice(value);
+                    }
+                    pos += value_size;
+                }
+                _ => {
+                    // Unknown run type
+                    break;
+                }
+            }
+        }
+
+        Ok(SlicedCowBytes::from(result))
+    }
+
+    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+        let decompressed = self.decompress_ext(data.as_ref(), 0)?;
+        Ok(Buf::from_zero_padded(decompressed.as_ref().to_vec()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rle_compression() {
+        // Create test data with runs of repeated values
+        let mut data = Vec::new();
+        
+        // Add some repeated 8-byte values
+        let value1 = b"aaaaaaaa";
+        let value2 = b"bbbbbbbb";
+        let value3 = b"cccccccc";
+        
+        // Pattern: 5 a's, 1 b, 3 c's, 1 a, 4 b's
+        for _ in 0..5 { data.extend_from_slice(value1); }
+        data.extend_from_slice(value2);
+        for _ in 0..3 { data.extend_from_slice(value3); }
+        data.extend_from_slice(value1);
+        for _ in 0..4 { data.extend_from_slice(value2); }
+
+        let rle = Rle::default();
+        let mut compressor = rle.create_compressor().unwrap();
+        let compressed = compressor.finish_ext(&data).unwrap();
+        
+        let mut decompressor = Rle::new_decompression().unwrap();
+        let decompressed = decompressor.decompress_ext(&compressed, data.len()).unwrap();
+        
+        assert_eq!(data, decompressed.as_ref());
+        println!("Original size: {}, Compressed size: {}", data.len(), compressed.len());
+    }
+}

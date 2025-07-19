@@ -486,10 +486,16 @@ where
 
             match integrity_mode {
                 IntegrityMode::External => {
-                    let mut state = self.default_compression.create_compressor()
-                        .map_err(|e| crate::data_management::Error::CompressionError { source: e })?;
+                    // Skip compression entirely when NONE is configured
+                    if self.default_compression.is_compression_enabled() {
+                        let mut state = self.default_compression.create_compressor()
+                            .map_err(|e| crate::data_management::Error::CompressionError { source: e })?;
 
-                    (integrity_mode, state.finish(buf.into_buf())?)
+                        (integrity_mode, state.finish(buf.into_buf())?)
+                    } else {
+                        // No compression - direct pass-through
+                        (integrity_mode, buf.into_buf())
+                    }
                 },
                 IntegrityMode::Internal {..} => {
                     /*let mut state_ref = compression.new_compression().unwrap();
@@ -1120,10 +1126,16 @@ where
 
             let data = match ptr.integrity_mode.clone() {
                 IntegrityMode::External => {
-                    ptr
-                    .decompression_tag()
-                    .new_decompression()?
-                    .decompress(compressed_data)?
+                    // Skip decompression entirely when NONE is configured
+                    if ptr.decompression_tag().is_decompression_needed() {
+                        ptr
+                        .decompression_tag()
+                        .new_decompression()?
+                        .decompress(compressed_data)?
+                    } else {
+                        // No decompression needed - direct return
+                        compressed_data
+                    }
 
                 },
                 IntegrityMode::Internal {..} => {

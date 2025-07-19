@@ -16,6 +16,21 @@ use std::{fmt::Debug, mem};
 mod errors;
 pub use errors::*;
 
+// Database-specific compression modules
+mod snappy;
+mod dictionary;
+mod rle;
+mod delta;
+mod gorilla;
+mod toast;
+
+pub use snappy::Snappy;
+pub use dictionary::Dictionary;
+pub use rle::Rle;
+pub use delta::Delta;
+pub use gorilla::Gorilla;
+pub use toast::Toast;
+
 const DEFAULT_BUFFER_SIZE: Block<u32> = Block(1);
 
 /// Determine the used compression algorithm.
@@ -26,9 +41,26 @@ pub enum CompressionConfiguration {
     Lz4(Lz4),
     /// Configurable Zstd algorithm.
     Zstd(Zstd),
+    /// Google's Snappy compression - very fast with decent ratios.
+    Snappy(Snappy),
+    /// Dictionary encoding - replace frequent values with indices.
+    Dictionary(Dictionary),
+    /// Run-Length Encoding - compress runs of identical values.
+    Rle(Rle),
+    /// Delta encoding - store differences between consecutive values.
+    Delta(Delta),
+    /// Gorilla compression - specialized for time series data.
+    Gorilla(Gorilla),
+    /// PostgreSQL TOAST with pglz compression.
+    Toast(Toast),
 }
 
 impl CompressionConfiguration {
+    /// Check if compression is enabled (avoids compression overhead when disabled)
+    pub fn is_compression_enabled(&self) -> bool {
+        !matches!(self, CompressionConfiguration::None)
+    }
+
     /// Create a compression state directly (high performance)
     pub fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
         match self {
@@ -41,6 +73,24 @@ impl CompressionConfiguration {
             CompressionConfiguration::Zstd(zstd) => {
                 zstd.create_compressor()
             }
+            CompressionConfiguration::Snappy(snappy) => {
+                snappy.create_compressor()
+            }
+            CompressionConfiguration::Dictionary(dict) => {
+                dict.create_compressor()
+            }
+            CompressionConfiguration::Rle(rle) => {
+                rle.create_compressor()
+            }
+            CompressionConfiguration::Delta(delta) => {
+                delta.create_compressor()
+            }
+            CompressionConfiguration::Gorilla(gorilla) => {
+                gorilla.create_compressor()
+            }
+            CompressionConfiguration::Toast(toast) => {
+                toast.create_compressor()
+            }
         }
     }
 
@@ -50,6 +100,12 @@ impl CompressionConfiguration {
             CompressionConfiguration::None => DecompressionTag::None,
             CompressionConfiguration::Lz4(_) => DecompressionTag::Lz4,
             CompressionConfiguration::Zstd(_) => DecompressionTag::Zstd,
+            CompressionConfiguration::Snappy(_) => DecompressionTag::Snappy,
+            CompressionConfiguration::Dictionary(_) => DecompressionTag::Dictionary,
+            CompressionConfiguration::Rle(_) => DecompressionTag::Rle,
+            CompressionConfiguration::Delta(_) => DecompressionTag::Delta,
+            CompressionConfiguration::Gorilla(_) => DecompressionTag::Gorilla,
+            CompressionConfiguration::Toast(_) => DecompressionTag::Toast,
         }
     }
 
@@ -82,9 +138,26 @@ pub enum DecompressionTag {
     Lz4,
     /// Decompress using Zstd.
     Zstd,
+    /// Decompress using Snappy.
+    Snappy,
+    /// Decompress using Dictionary encoding.
+    Dictionary,
+    /// Decompress using RLE.
+    Rle,
+    /// Decompress using Delta encoding.
+    Delta,
+    /// Decompress using Gorilla.
+    Gorilla,
+    /// Decompress using Toast/pglz.
+    Toast,
 }
 
 impl DecompressionTag {
+    /// Check if decompression is needed
+    pub fn is_decompression_needed(&self) -> bool {
+        !matches!(self, DecompressionTag::None)
+    }
+
     /// Start a new decompression. The resulting structure consumes a buffer to decompress the data.
     pub fn new_decompression(&self) -> Result<Box<dyn DecompressionState>> {
         use DecompressionTag as Tag;
@@ -92,6 +165,12 @@ impl DecompressionTag {
             Tag::None => Ok(None::new_decompression()?),
             Tag::Lz4 => Ok(Lz4::new_decompression()?),
             Tag::Zstd => Ok(Zstd::new_decompression()?),
+            Tag::Snappy => Ok(Snappy::new_decompression()?),
+            Tag::Dictionary => Ok(Dictionary::new_decompression()?),
+            Tag::Rle => Ok(Rle::new_decompression()?),
+            Tag::Delta => Ok(Delta::new_decompression()?),
+            Tag::Gorilla => Ok(Gorilla::new_decompression()?),
+            Tag::Toast => Ok(Toast::new_decompression()?),
         }
     }
 }

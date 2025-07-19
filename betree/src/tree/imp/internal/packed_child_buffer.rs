@@ -971,16 +971,21 @@ impl PackedChildBuffer {
 
         let mut compressed_vals: Vec<u8> = vec![];
 
-        let mut state = compressor.create_compressor()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
-
         assert!(self.buffer.len() == self.buffer.assert_unpacked().len());
 
         for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
             tmp.write_all(&key)?;
 
-            let compressed_val =  state.finish_ext(&val)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+            let compressed_val = if compressor.is_compression_enabled() {
+                // Use compression
+                let mut state = compressor.create_compressor()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+                state.finish_ext(&val)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
+            } else {
+                // No compression - direct copy
+                val.as_ref().to_vec()
+            };
 
             compressed_vals.write(&compressed_val)?;
 
@@ -995,11 +1000,19 @@ impl PackedChildBuffer {
         //w.write_all(&(tmp.len() as u32).to_le_bytes())?;
 
         //let tmp2 = tmp.clone();
-        let compressed_head =  state.finish_ext(&tmp)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+        let compressed_head = if compressor.is_compression_enabled() {
+            // Use compression for header
+            let mut state = compressor.create_compressor()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+            state.finish_ext(&tmp)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
+        } else {
+            // No compression - direct copy
+            tmp.clone()
+        };
 
         let head_csum = csum_builder(&compressed_head);
-        //println!("compressed_head.len() {} tmp.len() {} compressed_vals.len() {}", compressed_head.len(), tmp.len(), compressed_vals.len());
+        println!("compressed_head.len() {} tmp.len() {} compressed_vals.len() {}", compressed_head.len(), tmp.len(), compressed_vals.len());
         w.write_all(&(compressed_head.len() as u32).to_le_bytes())?;
         w.write_all(&(tmp.len() as u32).to_le_bytes())?;
         w.write_all(&(compressed_vals.len() as u32).to_le_bytes())?;
@@ -1081,7 +1094,7 @@ impl PackedChildBuffer {
         let compressed_head_len = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
         let uncompressed_head_len = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
         let compressed_vals_len = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
-        //println!("compressed_head_len {} uncompressed_head_len {} compressed_vals_len {}", compressed_head_len, uncompressed_head_len, compressed_vals_len);
+        println!("compressed_head_len {} uncompressed_head_len {} compressed_vals_len {}", compressed_head_len, uncompressed_head_len, compressed_vals_len);
 
         let uncompressed_buf = decompressor.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
