@@ -1012,7 +1012,7 @@ impl PackedChildBuffer {
         };
 
         let head_csum = csum_builder(&compressed_head);
-        println!("compressed_head.len() {} tmp.len() {} compressed_vals.len() {}", compressed_head.len(), tmp.len(), compressed_vals.len());
+        //println!("compressed_head.len() {} tmp.len() {} compressed_vals.len() {}", compressed_head.len(), tmp.len(), compressed_vals.len());
         w.write_all(&(compressed_head.len() as u32).to_le_bytes())?;
         w.write_all(&(tmp.len() as u32).to_le_bytes())?;
         w.write_all(&(compressed_vals.len() as u32).to_le_bytes())?;
@@ -1094,7 +1094,7 @@ impl PackedChildBuffer {
         let compressed_head_len = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
         let uncompressed_head_len = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
         let compressed_vals_len = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
-        println!("compressed_head_len {} uncompressed_head_len {} compressed_vals_len {}", compressed_head_len, uncompressed_head_len, compressed_vals_len);
+        //println!("compressed_head_len {} uncompressed_head_len {} compressed_vals_len {}", compressed_head_len, uncompressed_head_len, compressed_vals_len);
 
         let uncompressed_buf = decompressor.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?

@@ -48,7 +48,7 @@ use std::sync::Arc;
 
 
 // Default in YCSB, 10 x 100 bytes field in one struct.
-const ENTRY_SIZE: usize = 1*1000;
+// const ENTRY_SIZE: usize = 30*1000; // Now passed as parameter
 // Default of YCSB
 const ZIPF_EXP: f64 = 0.99;
 
@@ -56,11 +56,20 @@ const ZIPF_EXP: f64 = 0.99;
 /// Operations: Read 50%, Update 50%
 /// Distribution: Zipfian
 /// Application example: Session store recording recent actions in a user session
-pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload A {} {} {}",size, threads, runtime);
     println!("Filling KV store...");
-    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
+    
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -84,7 +93,7 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
-                        let mut value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; entry_size];
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
@@ -128,11 +137,20 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 /// Distribution: Zipfian
 /// Application example: Photo tagging; add a tag is an update, but most operations are to read
 /// tags
-pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload B");
     println!("Filling KV store...");
-    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
+    
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -156,7 +174,7 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
-                        let mut value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; entry_size];
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
@@ -201,11 +219,20 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 /// Operations: Read 100%
 /// Distribution: Zipfian
 /// Access Size: 1000 bytes
-pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload C");
     println!("Filling KV store...");
-    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
+    
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -268,14 +295,21 @@ pub fn c(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 /// Operations: Read 95%, Insert 5%
 /// Distribution: Latest
 /// Application example: User status updates; people want to read the latest statuses
-pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload D");
     println!("Filling KV store...");
     // Reserve 20% extra space for new insertions
     
     // Only fill initial portion
-    //let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
 
     let initial_size =  (keys.len() as f64 * 0.05) as usize;
     let total_size = keys.len();
@@ -314,7 +348,7 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                     std::thread::spawn(move || {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let mut total = 0;
-                        let mut value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; entry_size];
 
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
@@ -375,16 +409,23 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 /// Distribution: Zipfian for first key, Uniform for length
 /// Application example: Threaded conversations, where each scan is for the posts in a given thread
 /// (assumed to be clustered by thread id)
-pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload E");
     println!("Filling KV store...");
     // Reserve 20% extra space for new insertions
-    //let initial_size = size / ENTRY_SIZE as u64;
+    //let initial_size = size / entry_size as u64;
     //let total_size = initial_size + (initial_size / 5);
 
     // Only fill initial portion
-    //let mut keys = client.fill_entries(initial_size, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
   let initial_size =  keys.len();
     // let total_size = initial_size + (keys.len() as f64 * 0.05) as usize;
     // println!("{} {}", initial_size, total_size);
@@ -419,7 +460,7 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                     std::thread::spawn(move || {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let mut total = 0;
-                        let mut value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; entry_size];
 
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
@@ -489,11 +530,20 @@ let end_key = &keys[end_idx][..];
 /// Distribution: Zipfian
 /// Application example: user database, where user records are read and modified by the user or to
 /// record user activity
-pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload F");
     println!("Filling KV store...");
-    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
+    
     keys.shuffle(client.rng());
     println!("Creating distribution...");
     let f = std::fs::OpenOptions::new()
@@ -517,7 +567,7 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
-                        let mut value = vec![0u8; ENTRY_SIZE];
+                        let mut value = vec![0u8; entry_size];
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
@@ -560,15 +610,26 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     }
 }
 
-pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+use rand_xoshiro::Xoshiro256Plus;
+
+pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload G");
     println!("Filling KV store...");
-    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/workspace/code/smash/fia0/haura/betree/haura-benchmarks/silesia_corpus/", ENTRY_SIZE as u32);
+    
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
+    
     keys.shuffle(client.rng());
 
-// Estimate entries per 128KB leaf: value(1000B) + key(8B) + overhead(~8B)
-    let approx_entry_size = ENTRY_SIZE + 8 + 8;
+    // Estimate entries per 128KB leaf: value(1000B) + key(8B) + overhead(~8B)
+    let approx_entry_size = entry_size + 8 + 8;
     let entries_per_leaf = (1024*1024) / approx_entry_size; // ≈ 128 entries
     println!("Estimated entries per leaf: {entries_per_leaf}");
 
@@ -594,41 +655,28 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
-    for workers in [1, 5, 10, 15, 20, 25] {
+
+    //for workers in [1, 5, 10, 15, 20, 25] {
         let threads = (0..workers)
             .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
             .enumerate()
             .map(|(id, (tx, rx))| {
-                let _keys = leaf_sampled_keys.clone();
+                let _keys = keys.clone();
                 let ds = client.ds.clone();
                 (
                     std::thread::spawn(move || {
-                        //use rand::seq::SliceRandom; // Add this if it's not already imported
-                        //let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
-
-                        //let mut shuffled_keys = _keys.clone(); // Clone to keep original list intact
-                        //shuffled_keys.shuffle(&mut rng);
+                        let mut rng = Xoshiro256Plus::seed_from_u64(id as u64);
                         let mut total = 0;
-                        
-                        let mut idx = 0;
-                            let chunk_size = _keys.len() / workers;
-                            let _start = id * chunk_size;
-                            let end = usize::min(_start + chunk_size, _keys.len());
-                            //println!("Thread {} processing keys from {} to {}", id, _start, end);
-
                         while let Ok(start) = rx.recv() {
-                             while start.elapsed().as_secs() < 30 {
-                                for jdx in _start..end {
-                                    if let Some(k) = _keys.get(jdx) {
+                            while start.elapsed().as_secs() < 20 {
+                                for _ in 0..500 {
+                                    if let Some(k) = _keys.choose(&mut rng) {
                                         if let Some(value) = ds.get(*k).unwrap() {
                                             total += 1;
                                         }
                                     }
                                 }
                             }
-                            //if idx + 1000 >= shuffled_keys.len(){
-                            //    idx = 0;
-                            //}
                         }
                         total
                     }),
@@ -653,7 +701,7 @@ pub fn g(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
         w.flush().unwrap();
         println!("Achieved: {} ops/sec", total as f32 / end.as_secs_f32());
         println!("          {} ns avg", end.as_nanos() / total);
-    }
+    //}
 }
 
 use std::fs::{self, File};
@@ -688,11 +736,19 @@ pub fn read_folder_chunks<P: AsRef<Path>>(folder_path: P, chunk_size: usize) -> 
 }
 
 
-pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload H");
     println!("Filling KV store...");
-    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
 
     keys.shuffle(client.rng());
     println!("Creating distribution...");
@@ -770,11 +826,19 @@ pub fn h(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
 }
 
 
-pub fn i(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
+pub fn i(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
    println!("Running YCSB Workload I");
     println!("Filling KV store...");
-    //let mut keys = client.fill_entries(size / ENTRY_SIZE as u64, ENTRY_SIZE as u32);
-    let mut keys = client.fill_entries_from_path("/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus", ENTRY_SIZE as u32);
+    
+    let mut keys = match data_source {
+        "file" => {
+            client.fill_entries_from_path(data_path, entry_size as u32)
+        }
+        _ => {
+            // Default to generated data
+            client.fill_entries_with_data_type(size / entry_size as u64, entry_size as u32, data_type)
+        }
+    };
 
     keys.shuffle(client.rng());
     println!("Creating distribution...");
@@ -794,7 +858,7 @@ pub fn i(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
             .map(|(id, (tx, rx))| {
                 let keys = keys.clone();
                 let ds = client.ds.clone();
-                //let value = vec![0u8; ENTRY_SIZE];
+                //let value = vec![0u8; entry_size];
                 (
                     std::thread::spawn(move || {
                         use rand::seq::SliceRandom; // Add this if it's not already imported

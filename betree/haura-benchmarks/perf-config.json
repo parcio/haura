@@ -4,21 +4,12 @@
       {
         "top_level_vdevs": [
           {
-            "mem": 4294967296
+            "path": "/mnt/tmpfs/hauradb",
+            "len": 68719476736
           }
         ],
         "preferred_access_type": "Unknown",
         "storage_kind": "Memory"
-      },
-      {
-        "top_level_vdevs": [
-	  {
-            "path": "/home/skarim/workspace/datafile0",
-            "direct": true
-	  }
-        ],
-        "preferred_access_type": "Unknown",
-        "storage_kind": "Ssd"
       }
     ],
     "queue_depth_factor": 20,
@@ -40,8 +31,12 @@
     ]
   ],
   "default_storage_class": 0,
-  "compression": { "Lz4": { "level": 1} },
-  "cache_size": 268435456,
+  "compression": {
+    "Lz4": {
+      "level": 10
+    }
+  },
+  "cache_size": 33554432,
   "access_mode": "AlwaysCreateNew",
   "sync_interval_ms": null,
   "migration_policy": null,
