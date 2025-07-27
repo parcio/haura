@@ -69,12 +69,26 @@ impl CompressionState for Lz4Compression {
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
-        // Use block-level compression - much more efficient than creating encoder each time
+        use crate::buffer::BufWrite;
+        use crate::vdev::Block;
+        use std::io::Write;
+        
         let mode = CompressionMode::HIGHCOMPRESSION(self.level as i32);
         let compressed_data = block::compress(data.as_ref(), Some(mode), false)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 compression failed: {:?}", e)))?;
-        
-        Ok(Buf::from_zero_padded(compressed_data))
+
+        let size = data.as_ref().len() as u32;
+        let comlen = compressed_data.len() as u32;
+
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(
+            4 + 4 + comlen, // total metadata and compressed payload
+        ));
+
+        buf.write_all(&size.to_le_bytes())?;
+        buf.write_all(&comlen.to_le_bytes())?;
+        buf.write_all(&compressed_data)?;
+
+        Ok(buf.into_buf())
     }
 }
 
@@ -89,11 +103,29 @@ impl DecompressionState for Lz4Decompression {
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        // Use block-level decompression to match block-level compression
-        let decompressed = block::decompress(data.as_ref(), None)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 decompression failed: {:?}", e)))?;
+        use crate::buffer::BufWrite;
+        use crate::vdev::Block;
+        use std::io::Write;
         
-        Ok(Buf::from_zero_padded(decompressed))
+        if data.len() < 8 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short").into());
+        }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated").into());
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
+        let uncompressed_data = block::decompress(compressed, Some(uncomp_size as i32))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 decompression failed: {:?}", e)))?;
+
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
+        buf.write_all(&uncompressed_data)?;
+        Ok(buf.into_buf())
     }
 }
 

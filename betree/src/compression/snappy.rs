@@ -8,6 +8,7 @@ use crate::{
     size::StaticSize,
 };
 use serde::{Deserialize, Serialize};
+use snap::raw::{Encoder, Decoder};
 
 /// Snappy compression configuration
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -54,103 +55,66 @@ impl Snappy {
 
 impl CompressionState for SnappyCompression {
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        // For now, use a simple LZ77-style compression as a Snappy placeholder
-        // In production, you would use the actual Snappy algorithm
-        Ok(simple_lz_compress(data))
+        let mut encoder = Encoder::new();
+        encoder.compress_vec(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy compression failed: {}", e)).into())
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
-        let compressed_data = simple_lz_compress(data.as_ref());
-        Ok(Buf::from_zero_padded(compressed_data))
+        use crate::buffer::BufWrite;
+        use crate::vdev::Block;
+        use std::io::Write;
+        
+        let compressed_data = self.finish_ext(data.as_ref())?;
+
+        let size = data.as_ref().len() as u32;
+        let comlen = compressed_data.len() as u32;
+
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(
+            4 + 4 + comlen, // total metadata and compressed payload
+        ));
+
+        buf.write_all(&size.to_le_bytes())?;
+        buf.write_all(&comlen.to_le_bytes())?;
+        buf.write_all(&compressed_data)?;
+
+        Ok(buf.into_buf())
     }
 }
 
 impl DecompressionState for SnappyDecompression {
     fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
-        let decompressed = simple_lz_decompress(data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy decompression failed: {:?}", e)))?;
+        let mut decoder = Decoder::new();
+        let decompressed = decoder.decompress_vec(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy decompression failed: {}", e)))?;
         
         Ok(SlicedCowBytes::from(decompressed))
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        let decompressed = simple_lz_decompress(data.as_ref())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy decompression failed: {:?}", e)))?;
+        use crate::buffer::BufWrite;
+        use crate::vdev::Block;
+        use std::io::Write;
         
-        Ok(Buf::from_zero_padded(decompressed))
-    }
-}
+        if data.len() < 8 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short").into());
+        }
 
-// Simple LZ77-style compression (placeholder for actual Snappy)
-fn simple_lz_compress(data: &[u8]) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut pos = 0;
-    
-    while pos < data.len() {
-        let window_start = if pos >= 256 { pos - 256 } else { 0 };
-        let mut best_match_len = 0;
-        let mut best_match_dist = 0;
-        
-        // Find longest match in sliding window
-        for start in window_start..pos {
-            let mut match_len = 0;
-            while pos + match_len < data.len() 
-                && start + match_len < pos 
-                && data[start + match_len] == data[pos + match_len] 
-                && match_len < 63 {
-                match_len += 1;
-            }
-            
-            if match_len > best_match_len && match_len >= 3 {
-                best_match_len = match_len;
-                best_match_dist = pos - start;
-            }
-        }
-        
-        if best_match_len >= 3 {
-            // Encode match: [length_dist_flag][length][distance]
-            result.push(0x80 | (best_match_len as u8));
-            result.push(best_match_dist as u8);
-            pos += best_match_len;
-        } else {
-            // Encode literal
-            result.push(data[pos]);
-            pos += 1;
-        }
-    }
-    
-    result
-}
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
 
-fn simple_lz_decompress(data: &[u8]) -> std::result::Result<Vec<u8>, &'static str> {
-    let mut result = Vec::new();
-    let mut pos = 0;
-    
-    while pos < data.len() {
-        let byte = data[pos];
-        pos += 1;
-        
-        if byte & 0x80 != 0 {
-            // Match
-            let length = (byte & 0x7F) as usize;
-            if pos >= data.len() { return Err("Truncated match distance"); }
-            let distance = data[pos] as usize;
-            pos += 1;
-            
-            if distance > result.len() { return Err("Invalid match distance"); }
-            
-            let start = result.len() - distance;
-            for i in 0..length {
-                let byte = result[start + i];
-                result.push(byte);
-            }
-        } else {
-            // Literal
-            result.push(byte);
+        if data.len() < 8 + comp_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated").into());
         }
+
+        let compressed = &data[8..8 + comp_len];
+
+        let decompressed = self.decompress_ext(compressed, uncomp_size)?;
+
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
+        buf.write_all(decompressed.as_ref())?;
+        Ok(buf.into_buf())
     }
-    
-    Ok(result)
 }
 
 #[cfg(test)]
@@ -173,10 +137,15 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_lz_round_trip() {
+    fn test_real_snappy_round_trip() {
         let data = b"Test data with some repeated patterns. Test data again.";
-        let compressed = simple_lz_compress(data);
-        let decompressed = simple_lz_decompress(&compressed).unwrap();
+        let mut encoder = Encoder::new();
+        let compressed = encoder.compress_vec(data).unwrap();
+        
+        let mut decoder = Decoder::new();
+        let decompressed = decoder.decompress_vec(&compressed).unwrap();
+        
         assert_eq!(data, decompressed.as_slice());
+        println!("Original size: {}, Compressed size: {}", data.len(), compressed.len());
     }
 }

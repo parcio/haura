@@ -272,15 +272,15 @@ function ycsb_g() {
     local data_path="${YCSB_DATA_PATH:-/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus}"
     
     run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_h() {
@@ -334,14 +334,15 @@ function run_all_ycsb_compressions() {
     
     # Define compression configurations
     local compressions=(
-        'None|none'
-        '{"Zstd": {"level": 1}}|zstd1'
-        '{"Zstd": {"level": 5}}|zstd5'
-        '{"Zstd": {"level": 10}}|zstd10'
-        '{"Lz4": {"level": 1}}|lz4_1'
-        '{"Lz4": {"level": 5}}|lz4_5'
-        '{"Lz4": {"level": 10}}|lz4_10'
+        #'None|none'
+        #'{"Zstd": {"level": 1}}|zstd1'
+        #'{"Zstd": {"level": 5}}|zstd5'
+        #'{"Zstd": {"level": 10}}|zstd10'
+        #'{"Lz4": {"level": 1}}|lz4_1'
+        #'{"Lz4": {"level": 5}}|lz4_5'
+        #'{"Lz4": {"level": 10}}|lz4_10'
         #'{"Snappy": {}}|snappy'
+        '{"Dictionary": {"max_dict_size": 4096, "min_frequency": 2}}|dict4k_min2'
         # Add any other compression types...
     )
     

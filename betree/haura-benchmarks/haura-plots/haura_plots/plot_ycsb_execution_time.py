@@ -23,18 +23,42 @@ def extract_compression_value(config_path):
         return "Unknown"
     with open(config_path, "r", encoding="utf-8-sig") as f:
         config_text = f.read()
-    pattern = re.compile(
+    
+    # Pattern for compression with level (Zstd, Lz4)
+    pattern_with_level = re.compile(
         r'compression\s*:\s*(\w+)\s*\(\s*\1\s*{\s*level\s*:\s*(\d+)\s*,?',
         re.DOTALL
     )
-    match = pattern.search(config_text)
+    match = pattern_with_level.search(config_text)
     if match:
         comp_type, level = match.groups()
         return f"{comp_type}({level})"
+    
+    # Pattern for Snappy (no level parameter)
+    pattern_snappy = re.compile(
+        r'compression\s*:\s*Snappy\s*\(\s*Snappy\s*,?\s*\)',
+        re.DOTALL
+    )
+    if pattern_snappy.search(config_text):
+        return "Snappy"
+    
+    # Pattern for None/null
     match_flat = re.search(r'compression\s*:\s*(None|null|nullptr)', config_text, re.IGNORECASE)
     if match_flat:
         return match_flat.group(1)
+    
     return "Unknown"
+
+def debug_compression_parsing(main_dir, target_char):
+    """Debug function to show what compression values are being parsed"""
+    print("=== DEBUG: Compression parsing ===")
+    for folder in os.listdir(main_dir):
+        if folder.startswith(f"ycsb_{target_char}"):
+            config_path = os.path.join(main_dir, folder, "config")
+            if os.path.exists(config_path):
+                label = extract_compression_value(config_path)
+                print(f"Folder: {folder} -> Compression: {label}")
+    print("=== END DEBUG ===\n")
 
 def extract_entry_size(folder_name):
     """Extract entry size from folder name like 'ycsb_g_entry512_none_1753381182'"""
@@ -42,6 +66,9 @@ def extract_entry_size(folder_name):
     if match:
         return match.group(1)
     return None
+
+# Debug: Show what compression values are being parsed
+debug_compression_parsing(main_dir, target_char)
 
 # Step 1: Collect all folders and group by entry size
 compression_labels = set()
@@ -90,11 +117,12 @@ entry_size_positions = {
 }
 
 # Step 1: Define label order and fixed colors
-preferred_order = ["None", "Zstd(1)", "Zstd(5)", "Zstd(10)", "Lz4(1)", "Lz4(5)", "Lz4(10)"]
+preferred_order = ["None", "Snappy", "Zstd(1)", "Zstd(5)", "Zstd(10)", "Lz4(1)", "Lz4(5)", "Lz4(10)"]
 label_list = preferred_order  # For legend consistency
 
 label_colors = {
     "None": "#333333",       # Dark gray
+    "Snappy": "#2ca02c",     # Green
     "Zstd(1)": "#1f77b4",     # Deep blue
     "Zstd(5)": "#5fa2dc",     # Medium blue
     "Zstd(10)": "#a6c8ed",    # Light blue

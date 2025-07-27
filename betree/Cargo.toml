@@ -45,6 +45,7 @@ lz4-sys = "1.9"
 lz4 = "1.23.1"
 zstd = { version = "0.9", default-features = false }
 zstd-safe = { version = "4.0", default-features = false, features = ["experimental"] }
+snap = "1.1"
 
 speedy = "0.7"
 enum_dispatch = "0.3"
