@@ -211,8 +211,17 @@ function ycsb_a() {
     local data_type="${YCSB_DATA_TYPE:-int}"
     local data_path="${YCSB_DATA_PATH:-/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus}"
     
-    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-#    run "$RUN_IDENT" ycsb_a_memory ycsb-a "$((4 * 1024 * 1024 * 1024))" 1 6 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_b() {
@@ -221,8 +230,17 @@ function ycsb_b() {
     local data_type="${YCSB_DATA_TYPE:-int}"
     local data_path="${YCSB_DATA_PATH:-/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus}"
     
-    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-#    run "$RUN_IDENT" ycsb_b_memory ycsb-b "$((4 * 1024 * 1024 * 1024))" 1 6 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_c() {
@@ -231,8 +249,17 @@ function ycsb_c() {
     local data_type="${YCSB_DATA_TYPE:-int}"
     local data_path="${YCSB_DATA_PATH:-/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus}"
     
-    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-#    run "$RUN_IDENT" ycsb_c_memory ycsb-c "$((4 * 1024 * 1024 * 1024))" 1 6 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_c_${YCSB_SUFFIX:-unnamed}" ycsb-c "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_d() {
@@ -251,8 +278,17 @@ function ycsb_e() {
     local data_type="${YCSB_DATA_TYPE:-int}"
     local data_path="${YCSB_DATA_PATH:-/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus}"
     
-    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-#    run "$RUN_IDENT" ycsb_e_memory ycsb-e "$((4 * 1024 * 1024 * 1024))" 1 6 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_f() {
@@ -273,14 +309,14 @@ function ycsb_g() {
     
     run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_h() {
@@ -326,7 +362,7 @@ function set_compression() {
 function run_all_ycsb_compressions() {
     # Define entry size configurations
     local entry_sizes=(
-        '512|entry512'
+        #'512|entry512'
         '4096|entry4096'
         '16384|entry16384'
         '30000|entry30000'
@@ -334,15 +370,19 @@ function run_all_ycsb_compressions() {
     
     # Define compression configurations
     local compressions=(
-        #'None|none'
-        #'{"Zstd": {"level": 1}}|zstd1'
-        #'{"Zstd": {"level": 5}}|zstd5'
-        #'{"Zstd": {"level": 10}}|zstd10'
-        #'{"Lz4": {"level": 1}}|lz4_1'
-        #'{"Lz4": {"level": 5}}|lz4_5'
-        #'{"Lz4": {"level": 10}}|lz4_10'
-        #'{"Snappy": {}}|snappy'
-        '{"Dictionary": {"max_dict_size": 4096, "min_frequency": 2}}|dict4k_min2'
+        'None|none'
+        '{"Zstd": {"level": 1}}|zstd1'
+        '{"Zstd": {"level": 5}}|zstd5'
+        '{"Zstd": {"level": 10}}|zstd10'
+        '{"Lz4": {"level": 1}}|lz4_1'
+        '{"Lz4": {"level": 5}}|lz4_5'
+        '{"Lz4": {"level": 10}}|lz4_10'
+        '{"Snappy": {}}|snappy'
+        #'{"Dictionary": {"max_dict_size": 128, "min_frequency": 1}}|dict'
+        #'{"Delta": {"value_size" : 1, "signed": false}}|delta'
+        #'{"Gorilla": {"use_f64" : false}}|gorilla'
+        #'{"Rle": {"min_run_length" : 2, "value_size": 1}}|rle'
+        #'{"Toast": {"min_compress_size" : 32, "max_ratio_percent": 90}}|toast'
         # Add any other compression types...
     )
     
@@ -369,13 +409,13 @@ function run_all_ycsb_compressions() {
             export YCSB_SUFFIX="${entry_suffix}_${compression_suffix}"
             
             # Run all YCSB tests
-            #ycsb_a
-            #ycsb_b
+            ycsb_a
+            ycsb_b
             #ycsb_c
             #ycsb_d
-            #ycsb_e
+            ycsb_e
             #ycsb_f
-            ycsb_g
+            #ycsb_g
             #ycsb_h
             #ycsb_i
             

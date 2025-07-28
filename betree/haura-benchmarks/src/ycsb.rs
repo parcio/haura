@@ -56,8 +56,8 @@ const ZIPF_EXP: f64 = 0.99;
 /// Operations: Read 50%, Update 50%
 /// Distribution: Zipfian
 /// Application example: Session store recording recent actions in a user session
-pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
-    println!("Running YCSB Workload A {} {} {}",size, threads, runtime);
+pub fn a(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
+    println!("Running YCSB Workload A {} {} {}",size, workers, runtime);
     println!("Filling KV store...");
     
     let mut keys = match data_source {
@@ -80,7 +80,7 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
-    for workers in 1..=threads {
+    //for workers in 1..=threads {
         println!("Running benchmark with {workers} threads...");
         let threads = (0..workers)
             .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
@@ -129,7 +129,7 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
         w.flush().unwrap();
         println!("Achieved: {} ops/sec", total as f32 / end.as_secs_f32());
         println!("          {} ns avg", end.as_nanos() / total);
-    }
+    //}
 }
 
 /// B - Read heavy
@@ -137,7 +137,7 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
 /// Distribution: Zipfian
 /// Application example: Photo tagging; add a tag is an update, but most operations are to read
 /// tags
-pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
+pub fn b(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload B");
     println!("Filling KV store...");
     
@@ -161,7 +161,7 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
-    for workers in 1..=threads {
+    //for workers in 1..=threads {
         println!("Running benchmark with {workers} threads...");
         let threads = (0..workers)
             .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
@@ -212,7 +212,7 @@ pub fn b(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
         w.flush().unwrap();
         println!("Achieved: {} ops/sec", total as f32 / end.as_secs_f32());
         println!("          {} ns avg", end.as_nanos() / total);
-    }
+    //}
 }
 
 /// C - Read heavy
@@ -409,7 +409,7 @@ pub fn d(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
 /// Distribution: Zipfian for first key, Uniform for length
 /// Application example: Threaded conversations, where each scan is for the posts in a given thread
 /// (assumed to be clustered by thread id)
-pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
+pub fn e(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload E");
     println!("Filling KV store...");
     // Reserve 20% extra space for new insertions
@@ -447,7 +447,7 @@ pub fn e(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
     // Thread-safe current size tracking
     let current_size = Arc::new(AtomicUsize::new(initial_size as usize));
 
-    for workers in 1..=threads {
+    //for workers in 1..=threads {
         println!("Running benchmark with {workers} threads...");
         let threads = (0..workers)
             .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
@@ -522,7 +522,7 @@ let end_key = &keys[end_idx][..];
         w.flush().unwrap();
         println!("Achieved: {} ops/sec", total as f32 / end.as_secs_f32());
         println!("          {} ns avg", end.as_nanos() / total);
-    }
+    //}
 }
 
 /// F - Read-modify-write

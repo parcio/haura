@@ -100,8 +100,24 @@ impl CompressionState for DeltaCompression {
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
+        use crate::buffer::BufWrite;
+        use crate::vdev::Block;
+        use std::io::Write;
+        
         let compressed_data = self.finish_ext(data.as_ref())?;
-        Ok(Buf::from_zero_padded(compressed_data))
+
+        let size = data.as_ref().len() as u32;
+        let comlen = compressed_data.len() as u32;
+
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(
+            4 + 4 + comlen, // total metadata and compressed payload
+        ));
+
+        buf.write_all(&size.to_le_bytes())?;
+        buf.write_all(&comlen.to_le_bytes())?;
+        buf.write_all(&compressed_data)?;
+
+        Ok(buf.into_buf())
     }
 }
 
@@ -153,8 +169,28 @@ impl DecompressionState for DeltaDecompression {
     }
 
     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        let decompressed = self.decompress_ext(data.as_ref(), 0)?;
-        Ok(Buf::from_zero_padded(decompressed.as_ref().to_vec()))
+        use crate::buffer::BufWrite;
+        use crate::vdev::Block;
+        use std::io::Write;
+        
+        if data.len() < 8 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short").into());
+        }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated").into());
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
+        let decompressed = self.decompress_ext(compressed, uncomp_size)?;
+
+        let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
+        buf.write_all(decompressed.as_ref())?;
+        Ok(buf.into_buf())
     }
 }
 
