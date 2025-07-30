@@ -173,7 +173,7 @@ impl CompressionState for DictionaryCompression {
 }
 
 impl DecompressionState for DictionaryDecompression {
-    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
         if data.len() < 4 {
             return Ok(SlicedCowBytes::from(data.to_vec()));
         }
@@ -251,7 +251,7 @@ impl DecompressionState for DictionaryDecompression {
 
         let compressed = &data[8..8 + comp_len];
 
-        let decompressed = self.decompress_val(compressed, uncomp_size)?;
+        let decompressed = self.decompress_val(compressed)?;
 
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
         buf.write_all(decompressed.as_ref())?;
@@ -281,7 +281,7 @@ mod tests {
         let compressed = compressor.compress_val(&data).unwrap();
         
         let mut decompressor = Dictionary::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
         println!("Dictionary val compression - Original: {}, Compressed: {}", data.len(), compressed.len());

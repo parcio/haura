@@ -200,7 +200,7 @@ pub trait CompressionState {
 /// An implementation of consumption-based decompression.
 pub trait DecompressionState {
     /// Decompress data from slice and return the decompressed data as SlicedCowBytes
-    fn decompress_val(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes>;
+    fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes>;
     /// Decompress data from Buf and return the decompressed data as a Buf
     fn decompress_buf(&mut self, data: Buf) -> Result<Buf>;
 }

@@ -104,7 +104,7 @@ impl CompressionState for Lz4Compression {
 
 
 impl DecompressionState for Lz4Decompression {
-    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
         if data.len() < 8 {
             bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
         }
@@ -166,7 +166,7 @@ mod tests {
         let compressed = compressor.compress_val(&data).unwrap();
         
         let mut decompressor = Lz4::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
         println!("LZ4 val compression - Original: {}, Compressed: {}", data.len(), compressed.len());
@@ -199,7 +199,7 @@ mod tests {
             let compressed = compressor.compress_val(&data).unwrap();
             
             let mut decompressor = Lz4::new_decompression().unwrap();
-            let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+            let decompressed = decompressor.decompress_val(&compressed).unwrap();
             
             assert_eq!(data, decompressed.as_ref());
             println!("LZ4 level {} - Original: {}, Compressed: {}", level, data.len(), compressed.len());

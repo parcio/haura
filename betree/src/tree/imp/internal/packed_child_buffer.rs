@@ -215,7 +215,7 @@ impl Map {
 
                                     let uncompressed_val = decompression_tag.new_decompression()
                                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
-                                        .decompress_val(&buf, uncomp_len as usize)
+                                        .decompress_val(&buf)
                                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
 
                                     csum.verify(&uncompressed_val).unwrap();
@@ -333,12 +333,12 @@ impl Map {
 
     pub fn get(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
         match self {
-            Map::Packed { data, decompression_tag, .. } => self.find(key).map(|(pref, pos, len, uncomp_len, csum)| {
+            Map::Packed { data, packed_header_size, decompression_tag, .. } => self.find(key).map(|(pref, pos, len, uncomp_len, csum)| {
                 let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
 
                 let uncompressed_val = decompression_tag.new_decompression()
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
-                    .decompress_val(&buf, uncomp_len)
+                    .decompress_val(&buf)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
 
                 csum.verify(&buf).unwrap();
@@ -1068,7 +1068,7 @@ impl PackedChildBuffer {
 
         let uncompressed_buf = decompressor.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress_val(&buf[12..12 + compressed_head_len].to_vec(), uncompressed_head_len)
+            .decompress_val(&buf[12..12 + compressed_head_len].to_vec())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         let is_leaf = uncompressed_buf[0] != 0;

@@ -70,7 +70,7 @@ impl CompressionState for NoneCompression {
 }
 
 impl DecompressionState for NoneDecompression {
-    fn decompress_val(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
         Ok(SlicedCowBytes::from(data.to_vec()))
     }
 
@@ -92,7 +92,7 @@ mod tests {
         let compressed = compressor.compress_val(data).unwrap();
         
         let mut decompressor = None::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
         assert_eq!(data.len(), compressed.len()); // No compression should mean same size
@@ -124,7 +124,7 @@ mod tests {
         let compressed = compressor.compress_val(data).unwrap();
         
         let mut decompressor = None::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
         assert_eq!(0, compressed.len());
