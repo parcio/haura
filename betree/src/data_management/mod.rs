@@ -120,8 +120,6 @@ pub struct PreparePack();
 /// data.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum IntegrityMode<C> {
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum IntegrityMode<C> {
     /// The default mode. Checksums are stored with the object pointers. All
     /// data is processed initially.
     External,
@@ -173,11 +171,6 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         data: Buf,
         integrity_mode: IntegrityMode<C>,
         decompressor: DecompressionTag,
-    ) -> Result<Self, io::Error>;
-    fn unpack_at<C: Checksum>(
-        d_id: DatasetId,
-        data: Buf,
-        integrity_mode: IntegrityMode<C>,
     ) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.

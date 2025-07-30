@@ -16,7 +16,7 @@ use std::{
 
 use std::sync::{Arc, Mutex};
 
-use super::child_buffer::ChildBuffer;
+// use super::child_buffer::ChildBuffer;
 
 trait CutSlice<T> {
     fn cut(&self, pos: usize, len: usize) -> &[T];
@@ -337,14 +337,10 @@ impl Map {
                 let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
 
                 let uncompressed_val = decompression_tag.new_decompression()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
-                .decompress_ext(&buf, uncomp_len)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
+                    .decompress_ext(&buf, uncomp_len)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
 
-                csum.verify(&buf).unwrap();
-            Map::Packed { data, .. } => self.find(key).map(|(pref, pos, len, csum)| {
-                let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
-                // TODO: Pass on result
                 csum.verify(&buf).unwrap();
                 (
                     KeyInfo {
@@ -352,15 +348,6 @@ impl Map {
                     },
                     uncompressed_val
                 )
-                /*let buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
-                // TODO: Pass on result
-                csum.verify(&buf).unwrap();
-                (
-                    KeyInfo {
-                        storage_preference: StoragePreference::from_u8(pref),
-                    },
-                    buf,
-                )*/
             }),
             // TODO: This should be a cheap copy (a few bytes for the pref and
             // the ptrs in slicedcowbytes) but please check this again.
@@ -923,19 +910,11 @@ impl PackedChildBuffer {
         use std::io::Write;
         let mut tmp = vec![];
 
-        use std::io::Write;
-        let mut tmp = vec![];
-
         if self.is_leaf {
-            tmp.write_all(&[1])?;
             tmp.write_all(&[1])?;
         } else {
             tmp.write_all(&[0])?;
-            tmp.write_all(&[0])?;
         }
-        tmp.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
-        tmp.write_all(&(self.entries_size as u32).to_le_bytes())?;
-        tmp.write_all(
         tmp.write_all(&(self.buffer.len() as u32).to_le_bytes())?;
         tmp.write_all(&(self.entries_size as u32).to_le_bytes())?;
         tmp.write_all(
@@ -953,18 +932,11 @@ impl PackedChildBuffer {
             tmp.write_all(&(free_after as u32).to_le_bytes())?;
             tmp.write_all(&(key_len as u32).to_le_bytes())?;
             tmp.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
-          free_after += key_len
-                + std::mem::size_of::<u32>()
-                + std::mem::size_of::<u32>()
-                + std::mem::size_of::<u32>()
-                + Checksum::static_size()
-            tmp.write_all(&(free_after as u32).to_le_bytes())?;
-            tmp.write_all(&(key_len as u32).to_le_bytes())?;
-            tmp.write_all(&info.storage_preference.as_u8().to_le_bytes())?;
             free_after += key_len
                 + std::mem::size_of::<u32>()
                 + std::mem::size_of::<u32>()
-                + Checksum::static_size()
+                + std::mem::size_of::<u32>()
+                + Checksum::static_size();
         }
 
         let mut compressed_vals: Vec<u8> = vec![];

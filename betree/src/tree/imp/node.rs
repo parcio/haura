@@ -20,6 +20,7 @@ use std::{
     io::{self, Write},
     mem::replace,
 };
+use bincode::deserialize;
 
 use std::sync::{Arc, Mutex};
 
@@ -76,16 +77,9 @@ impl StorageMap {
     pub fn min_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         let pref = node.correct_preference();
         Some(match (&node.0, self.get(pref)) {
-            (PackedLeaf(_), StorageKind::Hdd)
-            | (Leaf(_), StorageKind::Hdd)
-            | (MemLeaf(_), StorageKind::Hdd) => mib!(1),
-            (PackedLeaf(_), StorageKind::Ssd)
-            | (Leaf(_), StorageKind::Ssd)
-            | (MemLeaf(_), StorageKind::Ssd) => mib!(1),
-            (PackedLeaf(_), StorageKind::Memory)
-            | (Leaf(_), StorageKind::Memory)
-            | (MemLeaf(_), StorageKind::Memory) => mib!(1),
-            (Internal(_), _) => return None,
+            (MemLeaf(_), StorageKind::Hdd) => mib!(1),
+            (MemLeaf(_), StorageKind::Ssd) => mib!(1),
+            (MemLeaf(_), StorageKind::Memory) => mib!(1),
             (CopylessInternal(_), _) => return None,
             (_, StorageKind::Hdd) => mib!(1),
             (_, StorageKind::Ssd) => kib!(512),
@@ -96,12 +90,7 @@ impl StorageMap {
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         let pref = node.correct_preference();
         Some(match (&node.0, self.get(pref)) {
-            (PackedLeaf(_), StorageKind::Hdd) | (Leaf(_), StorageKind::Hdd) => mib!(2),
-            (PackedLeaf(_), StorageKind::Ssd) | (Leaf(_), StorageKind::Ssd) => mib!(2),
-            (PackedLeaf(_), StorageKind::Memory)
-            | (Leaf(_), StorageKind::Memory)
-            | (MemLeaf(_), _) => mib!(2),
-            (Internal(_), _) => mib!(2),
+            (MemLeaf(_), _) => mib!(2),
             (CopylessInternal(_), _) => {
                 mib!(2)
             }
@@ -212,28 +201,14 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         integrity_mode: IntegrityMode<C>,
         decompressor: DecompressionTag
     ) -> Result<Self, io::Error> {
-        if data[0..4] == (NodeInnerType::Internal as u32).to_be_bytes() {
+        if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
             //println!("a..");
-            match deserialize::<InternalNode<_>>(&data[4..]) {
-                Ok(internal) => Ok(Node(Internal(internal.complete_object_refs(d_id)))),
-                Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
-            }
-        } else if data[0..4] == (NodeInnerType::Leaf as u32).to_be_bytes() {
-            //println!("b..");
-            // storage_preference is not preserved for packed leaves,
-            // because they will not be written back to disk until modified,
-            // and every modification requires them to be unpacked.
-            // The leaf contents are scanned cheaply during unpacking, which
-            // recalculates the correct storage_preference for the contained keys.
-            Ok(Node(PackedLeaf(PackedMap::new(data))))
-        } else if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
-            //println!("c..");
             Ok(Node(CopylessInternal(
                 CopylessInternalNode::unpack(data, integrity_mode, decompressor)?
                     .complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
-            //println!("d..");
+            //println!("b..");
             let (b, n) = PackedChildBuffer::unpack(
                 data.into_sliced_cow_bytes().slice_from(4),
                 integrity_mode,

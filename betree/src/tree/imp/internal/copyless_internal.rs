@@ -355,9 +355,6 @@ impl<N> CopylessInternalNode<N> {
         use std::io::Write;
 
         let mut tmp = vec![];
-        use std::io::Write;
-
-        let mut tmp = vec![];
         let bytes_meta_data_len = bincode::serialized_size(&self.meta_data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 

@@ -470,7 +470,6 @@ where
                 object_size as u32,
             ));
             let integrity_mode = {
-            let integrity_mode = {
                 let pp = object.prepare_pack(
                     self.spl().storage_kind_map()[storage_class as usize],
                     &pivot_key,
@@ -553,7 +552,6 @@ where
             decompression_tag: self.default_compression.decompression_tag(),
             generation,
             info,
-            integrity_mode,
             integrity_mode,
         };
 
