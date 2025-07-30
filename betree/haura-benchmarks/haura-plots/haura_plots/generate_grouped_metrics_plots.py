@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     from haura_plots import util
-    print("✅ Successfully imported haura_plots utilities!")
+    print("Successfully imported haura_plots utilities!")
 except ImportError as e:
-    print(f"❌ Error importing haura_plots modules: {e}")
+    print(f"ERROR: Error importing haura_plots modules: {e}")
     print("Make sure you're running this script with Python 3.12+ from the haura-plots directory")
     sys.exit(1)
 
@@ -50,10 +50,10 @@ class GroupedMetricsPlotGenerator:
         """Log message if verbose mode is enabled"""
         if self.verbose:
             prefix = {
-                "INFO": "ℹ️ ",
-                "SUCCESS": "✅",
-                "WARNING": "⚠️ ",
-                "ERROR": "❌"
+                "INFO": "INFO: ",
+                "SUCCESS": "SUCCESS: ",
+                "WARNING": "WARNING: ",
+                "ERROR": "ERROR: "
             }.get(level, "")
             print(f"{prefix} {message}")
     
@@ -470,7 +470,7 @@ class GroupedMetricsPlotGenerator:
     
     def generate_grouped_plots(self, output_dir: Optional[str] = None) -> None:
         """Generate all grouped plots"""
-        self.log("🚀 Starting grouped metrics plot generation...")
+        self.log("Starting grouped metrics plot generation...")
         
         # Find and group runs
         grouped_runs = self.find_and_group_runs()
@@ -512,7 +512,7 @@ class GroupedMetricsPlotGenerator:
     def print_summary(self):
         """Print generation summary"""
         print("\n" + "="*60)
-        print("📊 GROUPED METRICS PLOT GENERATION SUMMARY")
+        print("GROUPED METRICS PLOT GENERATION SUMMARY")
         print("="*60)
         print(f"Total runs found:       {self.stats['total_runs']}")
         print(f"Successfully processed: {self.stats['successful_runs']}")
@@ -527,15 +527,15 @@ class GroupedMetricsPlotGenerator:
         print("="*60)
         
         if self.stats['plots_generated'] > 0:
-            print("✅ Grouped plot generation completed!")
-            print("📁 Generated plot types per chunk size:")
+            print("Grouped plot generation completed!")
+            print("Generated plot types per chunk size:")
             print("   - chunk_XXXX_write_throughput.svg")
             print("   - chunk_XXXX_read_throughput.svg")
             print("   - chunk_XXXX_tier_usage.svg")
             print("   - chunk_XXXX_system.svg")
-            print("\n🎯 Plots show combined data grouped by chunk size!")
+            print("\nPlots show combined data grouped by chunk size!")
         else:
-            print("⚠️  No plots were generated.")
+            print("WARNING: No plots were generated.")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -573,7 +573,7 @@ showing different compression algorithms and thread counts on the same plot.
         args.results_dirs = [d for d in default_dirs if Path(d).exists()]
         
         if not args.results_dirs:
-            print("❌ No default results directories found!")
+            print("ERROR: No default results directories found!")
             print("Please specify results directories with --results-dir")
             return 1
     

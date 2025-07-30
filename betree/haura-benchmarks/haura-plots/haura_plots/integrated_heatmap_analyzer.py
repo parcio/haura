@@ -246,10 +246,10 @@ class IntegratedHauraBenchmarkAnalyzer:
         self.thread_counts = sorted(list(self.thread_counts))
         
         if verbose:
-            print(f"✅ Loaded {loaded_count} benchmark runs")
+            print(f"Loaded {loaded_count} benchmark runs")
             if skipped_count > 0:
-                print(f"⚠️  Skipped {skipped_count} directories")
-            print(f"📊 Found {len(self.compression_algorithms)} compression algorithms, {len(self.entry_sizes)} entry sizes, {len(self.thread_counts)} thread counts")
+                print(f"Skipped {skipped_count} directories")
+            print(f"Found {len(self.compression_algorithms)} compression algorithms, {len(self.entry_sizes)} entry sizes, {len(self.thread_counts)} thread counts")
     
     def get_metric_statistics(self, metric: str) -> Dict[str, Any]:
         """Get statistics for a specific metric"""
@@ -691,13 +691,13 @@ class IntegratedHauraBenchmarkAnalyzer:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌡️ Haura Benchmark Analysis</h1>
+            <h1>Haura Benchmark Analysis</h1>
             <p>Comprehensive Multi-Dimensional Performance Heatmaps</p>
         </div>
         
         <div class="content">
             <div class="summary">
-                <h3>📊 Dataset Overview</h3>
+                <h3>Dataset Overview</h3>
                 <p><strong>Total benchmark runs:</strong> {len(self.data)}</p>
                 <p><strong>Compression algorithms:</strong> {", ".join(self.compression_algorithms)}</p>
                 <p><strong>Entry sizes:</strong> {", ".join([f"{s}B" for s in self.entry_sizes])}</p>
@@ -710,7 +710,7 @@ class IntegratedHauraBenchmarkAnalyzer:
             {optimal_html}
             
             <div class="data-info">
-                <h3>🎯 How to Read These Heatmaps</h3>
+                <h3>How to Read These Heatmaps</h3>
                 <ul>
                     <li><strong>Rows:</strong> Each row represents a compression algorithm + entry size combination</li>
                     <li><strong>Columns:</strong> Each column represents a different thread count</li>
@@ -735,7 +735,7 @@ class IntegratedHauraBenchmarkAnalyzer:
                 html_parts.append(f"""
             <div class="metric-section">
                 <div class="metric-header">
-                    <h2>🌡️ {config['title']} <span class="category-badge">{config['category']}</span></h2>
+                    <h2>{config['title']} <span class="category-badge">{config['category']}</span></h2>
                     <div class="description">
                         {config['description']}
                     </div>
@@ -757,7 +757,7 @@ class IntegratedHauraBenchmarkAnalyzer:
                 html_parts.append(f"""
             <div class="metric-section">
                 <div class="metric-header">
-                    <h2>❌ {config['title']}</h2>
+                    <h2>ERROR: {config['title']}</h2>
                     <div class="description">
                         Error creating heatmap: {str(e)}
                     </div>
@@ -795,7 +795,7 @@ class IntegratedHauraBenchmarkAnalyzer:
         
         return f"""
         <div class="summary">
-            <h3>📈 Key Metrics Statistics</h3>
+            <h3>Key Metrics Statistics</h3>
             <div class="stats-grid">
                 {"".join(stats_cards)}
             </div>

@@ -362,11 +362,11 @@ class SimpleHauraBenchmarkAnalyzer:
     </style>
 </head>
 <body>
-    <h1>🌡️ Haura Benchmark Multi-Dimensional Heatmaps</h1>
+    <h1>Haura Benchmark Multi-Dimensional Heatmaps</h1>
     <h2 style="text-align: center; color: #666;">Grouped by Entry Size with Individual Scales</h2>
     
     <div class="summary">
-        <h3>📊 Data Overview</h3>
+        <h3>Data Overview</h3>
         <p><strong>Total benchmark runs:</strong> """ + str(len(self.data)) + """</p>
         <p><strong>Compression algorithms:</strong> """ + ", ".join(self.compression_algorithms) + """</p>
         <p><strong>Entry sizes:</strong> """ + ", ".join([f"{s}B" for s in self.entry_sizes]) + """</p>
@@ -374,7 +374,7 @@ class SimpleHauraBenchmarkAnalyzer:
     </div>
     
     <div class="data-info">
-        <h3>🎯 How to Read These Grouped Heatmaps</h3>
+        <h3>How to Read These Grouped Heatmaps</h3>
         <ul>
             <li><strong>Grouping:</strong> Each heatmap shows one entry size with all compression algorithms</li>
             <li><strong>Rows:</strong> Each row represents a compression algorithm (Lz4, Zstd, None, Snappy)</li>
@@ -399,7 +399,7 @@ class SimpleHauraBenchmarkAnalyzer:
                 
                 html_parts.append(f"""
     <div class="metric-section">
-        <h2>🌡️ {config['title']}</h2>
+        <h2>{config['title']}</h2>
         <div class="description">
             {config['description']}
         </div>
@@ -419,7 +419,7 @@ class SimpleHauraBenchmarkAnalyzer:
                 print(f"Error creating heatmap for {config['metric']}: {e}")
                 html_parts.append(f"""
     <div class="metric-section">
-        <h2>❌ {config['title']}</h2>
+        <h2>ERROR: {config['title']}</h2>
         <div class="description">
             Error creating heatmap: {str(e)}
         </div>
@@ -428,7 +428,7 @@ class SimpleHauraBenchmarkAnalyzer:
         
         html_parts.append("""
     <div class="summary">
-        <h3>🎯 Key Insights</h3>
+        <h3>Key Insights</h3>
         <ul>
             <li><strong>Optimal configurations</strong> appear as dark/bright cells in performance heatmaps</li>
             <li><strong>Thread scaling</strong> can be observed by looking across rows (left to right)</li>
@@ -460,20 +460,20 @@ def main():
     analyzer.load_all_data()
     
     if len(analyzer.data) == 0:
-        print("❌ No benchmark data found!")
+        print("ERROR: No benchmark data found!")
         return
     
     # Generate heatmaps
-    print("🌡️ Generating heatmaps...")
+    print("Generating heatmaps...")
     html_content = analyzer.create_all_heatmaps()
     
     # Save HTML file
     with open(args.output, 'w') as f:
         f.write(html_content)
     
-    print(f"✅ Heatmap analysis saved to: {args.output}")
-    print(f"📊 Generated heatmaps for {len(analyzer.data)} benchmark runs")
-    print("🌐 Open the HTML file in a web browser to view the interactive heatmaps!")
+    print(f"Heatmap analysis saved to: {args.output}")
+    print(f"Generated heatmaps for {len(analyzer.data)} benchmark runs")
+    print("Open the HTML file in a web browser to view the interactive heatmaps!")
 
 if __name__ == "__main__":
     main()

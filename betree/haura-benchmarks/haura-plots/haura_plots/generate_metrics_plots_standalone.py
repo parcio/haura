@@ -17,7 +17,7 @@ try:
     import matplotlib.pyplot as plt
     import numpy as np
 except ImportError as e:
-    print(f"❌ Error importing required modules: {e}")
+    print(f"ERROR: Error importing required modules: {e}")
     print("Please install required packages:")
     print("  pip install matplotlib numpy")
     sys.exit(1)
@@ -242,10 +242,10 @@ class MetricsPlotGenerator:
         """Log message if verbose mode is enabled"""
         if self.verbose:
             prefix = {
-                "INFO": "ℹ️ ",
-                "SUCCESS": "✅",
-                "WARNING": "⚠️ ",
-                "ERROR": "❌"
+                "INFO": "INFO: ",
+                "SUCCESS": "SUCCESS: ",
+                "WARNING": "WARNING: ",
+                "ERROR": "ERROR: "
             }.get(level, "")
             print(f"{prefix} {message}")
     
@@ -403,7 +403,7 @@ class MetricsPlotGenerator:
     
     def generate_all_plots(self, overwrite: bool = False) -> None:
         """Generate plots for all benchmark runs"""
-        self.log("🚀 Starting metrics plot generation...")
+        self.log("Starting metrics plot generation...")
         
         # Find all run folders
         run_folders = self.find_run_folders()
@@ -424,7 +424,7 @@ class MetricsPlotGenerator:
     def print_summary(self):
         """Print generation summary"""
         print("\n" + "="*60)
-        print("📊 METRICS PLOT GENERATION SUMMARY")
+        print("METRICS PLOT GENERATION SUMMARY")
         print("="*60)
         print(f"Total runs found:     {self.stats['total_runs']}")
         print(f"Successfully processed: {self.stats['successful_runs']}")
@@ -439,14 +439,14 @@ class MetricsPlotGenerator:
         print("="*60)
         
         if self.stats['plots_generated'] > 0:
-            print("✅ Plot generation completed!")
-            print("📁 Check individual run folders for generated SVG files:")
+            print("Plot generation completed!")
+            print("Check individual run folders for generated SVG files:")
             print("   - plot_write.svg (write throughput)")
             print("   - plot_read.svg (read throughput)")  
             print("   - tier_usage.svg (storage tier usage)")
             print("   - proc.svg (system metrics)")
         else:
-            print("⚠️  No plots were generated.")
+            print("WARNING: No plots were generated.")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -481,7 +481,7 @@ Examples:
         args.results_dirs = [d for d in default_dirs if Path(d).exists()]
         
         if not args.results_dirs:
-            print("❌ No default results directories found!")
+            print("ERROR: No default results directories found!")
             print("Please specify results directories with --results-dir")
             return 1
     

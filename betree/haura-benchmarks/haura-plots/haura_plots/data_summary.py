@@ -11,16 +11,16 @@ def main():
     analyzer.load_all_data()
     
     print("=" * 80)
-    print("📊 HAURA BENCHMARK DATA SUMMARY")
+    print("HAURA BENCHMARK DATA SUMMARY")
     print("=" * 80)
     
-    print(f"\n🔢 TOTAL CONFIGURATIONS: {len(analyzer.data)}")
+    print(f"\nTOTAL CONFIGURATIONS: {len(analyzer.data)}")
     print(f"   • {len(analyzer.compression_algorithms)} compression algorithms")
     print(f"   • {len(analyzer.entry_sizes)} entry sizes") 
     print(f"   • {len(analyzer.thread_counts)} thread counts")
     print(f"   • Expected total: {len(analyzer.compression_algorithms)} × {len(analyzer.entry_sizes)} × {len(analyzer.thread_counts)} = {len(analyzer.compression_algorithms) * len(analyzer.entry_sizes) * len(analyzer.thread_counts)}")
     
-    print(f"\n🗜️ COMPRESSION ALGORITHMS:")
+    print(f"\nCOMPRESSION ALGORITHMS:")
     for comp in analyzer.compression_algorithms:
         count = sum(1 for key in analyzer.data.keys() if key[0] == comp)
         print(f"   • {comp}: {count} runs")
@@ -36,7 +36,7 @@ def main():
         print(f"   • {threads} threads: {count} runs")
     
     # Sample some data points
-    print(f"\n📋 SAMPLE DATA POINTS:")
+    print(f"\nSAMPLE DATA POINTS:")
     sample_keys = list(analyzer.data.keys())[:5]
     for key in sample_keys:
         compression, entry_size, threads = key
@@ -48,7 +48,7 @@ def main():
         print(f"     - Storage written: {data.get('storage_written', 'N/A')} bytes")
     
     # Find some interesting patterns
-    print(f"\n🎯 INTERESTING PATTERNS:")
+    print(f"\nINTERESTING PATTERNS:")
     
     # Find highest throughput
     max_throughput = 0
@@ -91,7 +91,7 @@ def main():
         print(f"   • Lowest storage written: {min_storage} bytes")
         print(f"     Configuration: {compression}, {entry_size}B, {threads} threads")
     
-    print(f"\n✅ DATA LOADED SUCCESSFULLY!")
+    print(f"\nDATA LOADED SUCCESSFULLY!")
     print(f"   Ready for heatmap visualization in heatmap_analysis.html")
     print("=" * 80)
 
