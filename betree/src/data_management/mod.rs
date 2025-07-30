@@ -22,6 +22,8 @@ use crate::{
     storage_pool::StoragePoolLayer,
     tree::{PivotKey, StorageKind},
     StoragePreference,
+    compression::CompressionConfiguration,
+    compression::DecompressionTag,
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -125,13 +127,6 @@ pub enum IntegrityMode<C> {
     Internal { csum: C, len: u32 },
 }
 
-impl<C: StaticSize> StaticSize for IntegrityMode<C> {
-    fn static_size() -> usize {
-        // FIXME: this only works if we abandon the other the integrity mode
-        C::static_size() + std::mem::size_of::<u32>()
-    }
-}
-
 impl<C> IntegrityMode<C> {
     pub fn checksum(&self) -> Option<&C> {
         match self {
@@ -168,12 +163,14 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         writer: W,
         pp: PreparePack,
         csum_builder: F,
+        compressor: &CompressionConfiguration
     ) -> Result<IntegrityMode<C>, io::Error>;
     /// Unpacks the object from the given `data`.
     fn unpack_at<C: Checksum>(
         d_id: DatasetId,
         data: Buf,
         integrity_mode: IntegrityMode<C>,
+        decompressor: DecompressionTag,
     ) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.

@@ -10,7 +10,7 @@ use crate::{
     buffer::Buf,
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
-    compression::CompressionBuilder,
+    compression::CompressionConfiguration,
     data_management::{CopyOnWriteReason, IntegrityMode},
     database::{DatasetId, Generation, Handler},
     migration::DmlMsg,
@@ -45,7 +45,7 @@ pub struct Dmu<E: 'static, SPL: StoragePoolLayer>
 where
     SPL::Checksum: StaticSize,
 {
-    default_compression: Box<dyn CompressionBuilder>,
+    default_compression: CompressionConfiguration,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
@@ -76,7 +76,7 @@ where
 {
     /// Returns a new `Dmu`.
     pub fn new(
-        default_compression: Box<dyn CompressionBuilder>,
+        default_compression: CompressionConfiguration,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
         default_storage_class: u8,
         pool: SPL,
@@ -134,6 +134,11 @@ where
     /// Returns the underlying cache.
     pub fn cache(&self) -> &RwLock<E> {
         &self.cache
+    }
+
+    /// Create a compression state with minimal overhead (high performance)
+    fn create_compressor(&self) -> Result<Box<dyn crate::compression::CompressionState>, crate::compression::Error> {
+        self.default_compression.create_compressor()
     }
 
     /// Returns the underlying storage pool.
@@ -444,10 +449,23 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
-        let compression = &self.default_compression;
-        let (integrity_mode, compressed_data) = {
+        // TODO: Transitions between the storage layouts *need* to happen here
+        // because of this pesky lazy promotion present in the DMU. This might
+        // require us to side-step and writeback just created buffer objects
+        // from here on.
+        //
+        // Mem -> Block: Fetch children, Create InternalNode, Continue with
+        // writeback (If the sum of buffers are ever >4MiB in size this violates
+        // the size restriction put in place by rebalance.) There might be
+        // useless writes when we writeback the children buffers of nodes first
+        // and then read them and write them out with the parent as a normal
+        // internal node here. FIXME
+        //
+        // Block -> Mem: Writeback new children, Create InternalNode, Continue
+        // with writeback
+
+        let (integrity_mode, compressed_data_) = {
             // FIXME: cache this
-            let mut state = compression.new_compression()?;
             let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
                 object_size as u32,
             ));
@@ -460,34 +478,69 @@ where
                     let mut builder = self.default_checksum_builder.build();
                     builder.ingest(bytes);
                     builder.finish()
-                })?;
+                }, &self.default_compression)?;
                 drop(object);
                 part
             };
-            (integrity_mode, state.finish(buf.into_buf())?)
+
+            match integrity_mode {
+                IntegrityMode::External => {
+                    // Skip compression entirely when NONE is configured
+                    if self.default_compression.is_compression_enabled() {
+                        let mut state = self.default_compression.create_compressor()
+                            .map_err(|e| crate::data_management::Error::CompressionError { source: e })?;
+
+                        (integrity_mode, state.compress_buf(buf.into_buf())?)
+                    } else {
+                        // No compression - direct pass-through
+                        (integrity_mode, buf.into_buf())
+                    }
+                },
+                IntegrityMode::Internal {..} => {
+                    /*let mut state_ref = compression.new_compression().unwrap();
+                    let mut state =  state_ref.write().unwrap();
+
+                    (integrity_mode, state.finish(buf.into_buf())?)*/
+                    (integrity_mode, buf.into_buf())
+                },
+            }
         };
 
-        assert!(compressed_data.len() <= u32::max_value() as usize);
-        let size = compressed_data.len();
-        // FIXME
-        if size > Block::round_up_from_bytes(object_size).to_bytes() {
-            warn!("anticipated size deviated from actual size, realloc necessary in writes... (Expected {}, Actual {})", Block::round_up_from_bytes(object_size).to_bytes(), size);
-        }
+        assert!(compressed_data_.len() <= u32::max_value() as usize);
+        let size = compressed_data_.len();
         debug!("Compressed object size is {size} bytes");
         let size = Block(((size + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32);
-        assert!(size.to_bytes() as usize >= compressed_data.len());
+        assert!(size.to_bytes() as usize >= compressed_data_.len());
         let offset = self.allocate(storage_class, size)?;
-        assert_eq!(size.to_bytes() as usize, compressed_data.len());
+        assert_eq!(size.to_bytes() as usize, compressed_data_.len());
 
         let info = self.modified_info.lock().remove(&mid).unwrap();
 
-        let checksum = match integrity_mode {
+        let (checksum, compressed_data)  = match integrity_mode.clone() {
             IntegrityMode::External => {
+                // let compression = &*self.default_compression.read().unwrap();
+                // let mut compression_state_ref = compression.new_compression().unwrap();
+                // let mut compression_state =  compression_state_ref.write().unwrap();
+
+                // let compressed_data = compression_state.finish(compressed_data_)?;
+
                 let mut state = self.default_checksum_builder.build();
-                state.ingest(compressed_data.as_ref());
-                state.finish()
-            }
-            IntegrityMode::Internal { .. } => self.default_checksum_builder.empty(),
+                state.ingest(compressed_data_.as_ref());
+
+                (state.finish(), compressed_data_)
+            },
+            IntegrityMode::Internal { csum, len } => {
+                // let compression = &*self.default_compression.read().unwrap();
+                // let mut compression_state_ref = compression.new_compression().unwrap();
+                // let mut compression_state =  compression_state_ref.write().unwrap();
+
+                // let compressed_data = compression_state.finish(compressed_data_)?;
+
+                //let mut state = self.default_checksum_builder.build();
+                //state.ingest(compressed_data_.as_ref());
+
+                ( self.default_checksum_builder.empty(), compressed_data_)
+            },
         };
 
         self.pool.begin_write(compressed_data, offset)?;
@@ -496,7 +549,7 @@ where
             offset,
             size,
             checksum,
-            decompression_tag: compression.decompression_tag(),
+            decompression_tag: self.default_compression.decompression_tag(),
             generation,
             info,
             integrity_mode,
@@ -1066,11 +1119,34 @@ where
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<Self::CacheValueRef, Error> {
         let (ptr, compressed_data, pk) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = ptr
-                .decompression_tag()
-                .new_decompression()?
-                .decompress(compressed_data)?;
-            Object::unpack_at(ptr.info(), data, ptr.integrity_mode.clone())?
+            
+            let d = ptr.decompression_tag();
+
+            let data = match ptr.integrity_mode.clone() {
+                IntegrityMode::External => {
+                    // Skip decompression entirely when NONE is configured
+                    if ptr.decompression_tag().is_decompression_needed() {
+                        ptr
+                        .decompression_tag()
+                        .new_decompression()?
+                        .decompress_buf(compressed_data)?
+                    } else {
+                        // No decompression needed - direct return
+                        compressed_data
+                    }
+
+                },
+                IntegrityMode::Internal {..} => {
+                    compressed_data
+                },
+            };
+            
+            // let data = ptr
+            //     .decompression_tag()
+            //     .new_decompression()?
+            //     .decompress(compressed_data)?;
+
+            Object::unpack_at(ptr.info(), data, ptr.integrity_mode.clone(), ptr.decompression_tag())?
         };
         let key = ObjectKey::Unmodified {
             offset: ptr.offset(),

@@ -9,16 +9,9 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
 };
 use crate::{
-    buffer::{self, Buf},
-    checksum::{Builder, Checksum},
-    cow_bytes::{CowBytes, SlicedCowBytes},
-    data_management::{
+    buffer::Buf, checksum::{Builder, Checksum}, compression::{CompressionConfiguration, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
-    },
-    database::DatasetId,
-    size::{Size, SizeMut, StaticSize},
-    tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
-    StoragePreference,
+    }, database::DatasetId, size::{Size, SizeMut, StaticSize}, tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind}, StoragePreference
 };
 use parking_lot::RwLock;
 use std::{
@@ -27,6 +20,9 @@ use std::{
     io::{self, Write},
     mem::replace,
 };
+use bincode::deserialize;
+
+use std::sync::{Arc, Mutex};
 
 /// The tree node type.
 #[derive(Debug)]
@@ -81,6 +77,9 @@ impl StorageMap {
     pub fn min_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         let pref = node.correct_preference();
         Some(match (&node.0, self.get(pref)) {
+            (MemLeaf(_), StorageKind::Hdd) => mib!(1),
+            (MemLeaf(_), StorageKind::Ssd) => mib!(1),
+            (MemLeaf(_), StorageKind::Memory) => mib!(1),
             (CopylessInternal(_), _) => return None,
             (_, StorageKind::Hdd) => mib!(1),
             (_, StorageKind::Ssd) => kib!(512),
@@ -91,9 +90,10 @@ impl StorageMap {
     pub fn max_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         let pref = node.correct_preference();
         Some(match (&node.0, self.get(pref)) {
-            (_, StorageKind::Hdd) => mib!(4),
-            (_, StorageKind::Ssd) => mib!(2),
-            (_, StorageKind::Memory) => mib!(2),
+            (MemLeaf(_), _) => mib!(2),
+            (CopylessInternal(_), _) => {
+                mib!(2)
+            }
         })
     }
 }
@@ -176,12 +176,13 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         &self,
         mut writer: W,
         _: PreparePack,
-        csum_builder: F,
+        csum_builder: F, 
+        compressor: &CompressionConfiguration
     ) -> Result<IntegrityMode<C>, io::Error> {
         match self.0 {
             MemLeaf(ref leaf) => {
                 writer.write_all((NodeInnerType::CopylessLeaf as u32).to_be_bytes().as_ref())?;
-                leaf.pack(writer, csum_builder)
+                leaf.pack(writer, csum_builder, compressor)
             }
             CopylessInternal(ref cpl_internal) => {
                 writer.write_all(
@@ -189,7 +190,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         .to_be_bytes()
                         .as_ref(),
                 )?;
-                cpl_internal.pack(writer, csum_builder)
+                cpl_internal.pack(writer, csum_builder, compressor)
             }
         }
     }
@@ -198,16 +199,22 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         d_id: DatasetId,
         data: Buf,
         integrity_mode: IntegrityMode<C>,
+        decompressor: DecompressionTag
     ) -> Result<Self, io::Error> {
         if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
+            //println!("a..");
             Ok(Node(CopylessInternal(
-                CopylessInternalNode::unpack(data, integrity_mode)?.complete_object_refs(d_id),
+                CopylessInternalNode::unpack(data, integrity_mode, decompressor)?
+                    .complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
-            Ok(Node(MemLeaf(PackedChildBuffer::unpack(
+            //println!("b..");
+            let (b, n) = PackedChildBuffer::unpack(
                 data.into_sliced_cow_bytes().slice_from(4),
                 integrity_mode,
-            )?)))
+                decompressor,
+            )?;
+            Ok(Node(MemLeaf(b)))
         } else {
             panic!(
                 "Unkown bytes to unpack. [0..4]: {}",
@@ -274,6 +281,14 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         //     }
         //     (default, _) => default,
         // };
+        
+        // Sync metadata with actual buffer sizes before packing
+        if let CopylessInternal(ref mut internal) = self.0 {
+            for (idx, child) in internal.children.iter().enumerate() {
+                internal.meta_data.entries_sizes[idx] = child.buffer().size();
+            }
+        }
+        
         Ok(PreparePack())
     }
 }

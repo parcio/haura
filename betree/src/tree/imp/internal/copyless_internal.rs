@@ -19,12 +19,16 @@ use crate::{
     storage_pool::AtomicSystemStoragePreference,
     tree::{imp::MIN_FANOUT, pivot_key::LocalPivotKey, KeyInfo},
     AtomicStoragePreference, StoragePreference,
+    compression::CompressionConfiguration,
+    compression::DecompressionTag,
 };
 use parking_lot::RwLock;
 use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 
 use super::serialize_nodepointer;
 use serde::{Deserialize, Serialize};
+
+use std::sync::{Arc, Mutex};
 
 pub(in crate::tree::imp) struct CopylessInternalNode<N> {
     // FIXME: This type can be used as zero-copy
@@ -160,15 +164,18 @@ const META_BINCODE_STATIC: usize = 33;
 const INTERNAL_INTEGRITY_CHECKSUM_SIZE: usize = 8 + 8;
 impl Size for InternalNodeMetaData {
     fn size(&self) -> usize {
-        self.current_size
-        // std::mem::size_of::<u32>()
-        //     + std::mem::size_of::<usize>()
-        //     + std::mem::size_of::<u8>()
-        //     + std::mem::size_of::<u8>()
-        //     + self.pivot.iter().map(|p| p.size()).sum::<usize>()
-        //     + self.pivot.len() * std::mem::size_of::<usize>()
-        //     + self.pivot.len() * std::mem::size_of::<u8>()
-        //     + META_BINCODE_STATIC
+        *self.actual_size().get_or_insert_with(|| {
+            std::mem::size_of::<u32>()
+                + std::mem::size_of::<usize>()
+                + std::mem::size_of::<u8>()
+                + std::mem::size_of::<u8>()
+                + self.pivot.iter().map(|p| p.size()).sum::<usize>()
+                + self.pivot.len() * std::mem::size_of::<usize>()
+                + self.pivot.len() * std::mem::size_of::<u8>()
+                // TODO: these magic numbers are for checksums of childrens
+                + self.entries_sizes.len() * INTERNAL_INTEGRITY_CHECKSUM_SIZE
+                + META_BINCODE_STATIC
+        })
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -336,9 +343,12 @@ impl<N> CopylessInternalNode<N> {
         &self,
         mut w: W,
         csum_builder: F,
+        compressor: &CompressionConfiguration,
     ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         N: serde::Serialize + StaticSize,
+        F: Fn(&[u8]) -> C,
+        C: Checksum,
         F: Fn(&[u8]) -> C,
         C: Checksum,
     {
@@ -371,7 +381,7 @@ impl<N> CopylessInternalNode<N> {
         }
 
         for child in self.children.iter() {
-            let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder)?;
+            let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder, compressor)?;
             assert_eq!(
                 bincode::serialized_size(&integrity).unwrap(),
                 INTERNAL_INTEGRITY_CHECKSUM_SIZE as u64
@@ -390,7 +400,7 @@ impl<N> CopylessInternalNode<N> {
     }
 
     /// Read object from a byte buffer and instantiate it.
-    pub fn unpack<C: Checksum>(buf: Buf, csum: IntegrityMode<C>) -> Result<Self, std::io::Error>
+    pub fn unpack<C: Checksum>(buf: Buf, csum: IntegrityMode<C>, decompressor: DecompressionTag) -> Result<Self, std::io::Error>
     where
         N: serde::de::DeserializeOwned + StaticSize,
     {
@@ -405,7 +415,7 @@ impl<N> CopylessInternalNode<N> {
         let len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
         cursor += 4;
 
-        let meta_data: InternalNodeMetaData = bincode::deserialize(&buf[cursor..cursor + len])
+        let mut meta_data: InternalNodeMetaData = bincode::deserialize(&buf[cursor..cursor + len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             .unwrap();
         cursor += len;
@@ -428,9 +438,12 @@ impl<N> CopylessInternalNode<N> {
         }
         for (idx, buffer_csum) in checksums.into_iter().enumerate() {
             let sub = buf.clone().slice_from(cursor as u32);
-            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, buffer_csum)?;
-            cursor += b.size();
-            assert_eq!(meta_data.entries_sizes[idx], b.size());
+            //print!("before: {} {}, ", sub.size(), sub.len());
+            let (b, next_offset) = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
+            //println!("after: {} {}. ", b.size(), b.len());
+            cursor += next_offset;//b.size();
+            // Update metadata to match the actual buffer size after unpacking
+            meta_data.entries_sizes[idx] = b.size();
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
             assert_eq!(meta_data.entries_sizes[idx], ptrs[idx].buffer.size());
         }
@@ -1069,7 +1082,7 @@ pub(super) mod tests {
 
     fn serialized_size<T: ObjectReference>(node: &CopylessInternalNode<T>) -> usize {
         let mut buf = Vec::new();
-        node.pack(&mut buf, quick_csum).unwrap();
+        node.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
         buf.len()
     }
 
@@ -1174,9 +1187,9 @@ pub(super) mod tests {
         println!("Start Prefix");
         buf.write_all(&[0; 4]).unwrap();
         println!("Start packing");
-        let csum = node.pack(&mut buf, quick_csum).unwrap();
+        let csum = node.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
         println!("Done packing");
-        let unpacked = CopylessInternalNode::<()>::unpack(buf.into_buf(), csum).unwrap();
+        let unpacked = CopylessInternalNode::<()>::unpack(buf.into_buf(), csum, crate::compression::DecompressionTag::None).unwrap();
         println!("Done unpacking");
         assert_eq!(unpacked.meta_data, node.meta_data);
         println!("Checked meta data");

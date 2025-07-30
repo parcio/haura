@@ -295,7 +295,17 @@ impl Size for SlicedCowBytes {
     }
 }
 
-impl SlicedCowBytes {
+impl From<Vec<u8>> for SlicedCowBytes {
+    fn from(vec: Vec<u8>) -> Self {
+        SlicedCowBytes {
+            pos: 0,
+            len: vec.len() as u32,
+            data: ByteSource::Cow(CowBytes::from(vec)),
+        }
+    }
+}
+    
+impl SlicedCowBytes {    
     /// Returns a new subslice which points to `self[pos..pos+len]`.
     pub fn subslice(self, pos: u32, len: u32) -> Self {
         assert!(pos + len <= self.len);
