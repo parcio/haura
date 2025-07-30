@@ -65,7 +65,7 @@ impl Gorilla {
 /// - If XOR has same leading/trailing zeros as previous XOR: store '10' + middle bits
 /// - Otherwise: store '11' + leading_zeros_count + meaningful_bits + trailing_zeros_count
 impl CompressionState for GorillaCompression {
-    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let value_size = if self.config.use_f64 { 8 } else { 4 };
         
         if data.len() % value_size != 0 || data.len() == 0 {
@@ -131,16 +131,16 @@ impl CompressionState for GorillaCompression {
             prev_value = current_value;
         }
 
-        result.extend_from_slice(&bit_writer.finish());
+        result.extend_from_slice(&bit_writer.compress_buf());
         Ok(result)
     }
 
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
+    fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
         
-        let compressed_data = self.finish_ext(data.as_ref())?;
+        let compressed_data = self.compress_val(data.as_ref())?;
 
         let size = data.as_ref().len() as u32;
         let comlen = compressed_data.len() as u32;
@@ -158,7 +158,7 @@ impl CompressionState for GorillaCompression {
 }
 
 impl DecompressionState for GorillaDecompression {
-    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
         if data.len() < 6 {
             return Ok(SlicedCowBytes::from(data.to_vec()));
         }
@@ -225,7 +225,7 @@ impl DecompressionState for GorillaDecompression {
         Ok(SlicedCowBytes::from(result))
     }
 
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
@@ -243,7 +243,7 @@ impl DecompressionState for GorillaDecompression {
 
         let compressed = &data[8..8 + comp_len];
 
-        let decompressed = self.decompress_ext(compressed, uncomp_size)?;
+        let decompressed = self.decompress_val(compressed, uncomp_size)?;
 
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
         buf.write_all(decompressed.as_ref())?;
@@ -304,7 +304,7 @@ impl BitWriter {
         }
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    fn compress_buf(mut self) -> Vec<u8> {
         if self.bit_count > 0 {
             self.buffer.push(self.current_byte);
         }
@@ -361,7 +361,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_gorilla_compression() {
+    fn test_gorilla_for_val_compression() {
         // Create test data with slowly changing floating point values
         let mut data = Vec::new();
         let mut value = 100.0f64;
@@ -373,12 +373,36 @@ mod tests {
 
         let gorilla = Gorilla::default();
         let mut compressor = gorilla.create_compressor().unwrap();
-        let compressed = compressor.finish_ext(&data).unwrap();
+        let compressed = compressor.compress_val(&data).unwrap();
         
         let mut decompressor = Gorilla::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_ext(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
-        println!("Original size: {}, Compressed size: {}", data.len(), compressed.len());
+        println!("Gorilla val compression - Original: {}, Compressed: {}", data.len(), compressed.len());
+    }
+
+    #[test]
+    fn test_gorilla_for_buf_compression() {
+        // Create test data with time series floating point values
+        let mut data = Vec::new();
+        let mut value = 50.0f64;
+        
+        for i in 0..30 {
+            value += (i as f64) * 0.05; // Small incremental changes
+            data.extend_from_slice(&value.to_le_bytes());
+        }
+
+        let buf = Buf::from_zero_padded(data.clone());
+        let gorilla = Gorilla::default();
+        
+        let mut compressor = gorilla.create_compressor().unwrap();
+        let compressed_buf = compressor.compress_buf(buf.clone()).unwrap();
+        
+        let mut decompressor = Gorilla::new_decompression().unwrap();
+        let decompressed_buf = decompressor.decompress_buf(compressed_buf).unwrap();
+        
+        assert_eq!(buf.as_ref(), decompressed_buf.as_ref());
+        println!("Gorilla buf compression - Original: {}, Compressed: {}", buf.len(), decompressed_buf.len());
     }
 }

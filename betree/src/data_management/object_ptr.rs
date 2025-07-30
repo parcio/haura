@@ -101,7 +101,7 @@ impl<D> ObjectPointer<D> {
         
          let data = match self.integrity_mode.clone() {
                 IntegrityMode::External => {
-                    decompression_state.decompress(compressed_data)?
+                    decompression_state.decompress_buf(compressed_data)?
                 },
                 IntegrityMode::Internal {..} => {
                     compressed_data

@@ -54,18 +54,18 @@ impl Snappy {
 }
 
 impl CompressionState for SnappyCompression {
-    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let mut encoder = Encoder::new();
         encoder.compress_vec(data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy compression failed: {}", e)).into())
     }
 
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
+    fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
         
-        let compressed_data = self.finish_ext(data.as_ref())?;
+        let compressed_data = self.compress_val(data.as_ref())?;
 
         let size = data.as_ref().len() as u32;
         let comlen = compressed_data.len() as u32;
@@ -83,7 +83,7 @@ impl CompressionState for SnappyCompression {
 }
 
 impl DecompressionState for SnappyDecompression {
-    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
         let mut decoder = Decoder::new();
         let decompressed = decoder.decompress_vec(data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy decompression failed: {}", e)))?;
@@ -91,7 +91,7 @@ impl DecompressionState for SnappyDecompression {
         Ok(SlicedCowBytes::from(decompressed))
     }
 
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
@@ -109,7 +109,7 @@ impl DecompressionState for SnappyDecompression {
 
         let compressed = &data[8..8 + comp_len];
 
-        let decompressed = self.decompress_ext(compressed, uncomp_size)?;
+        let decompressed = self.decompress_val(compressed, uncomp_size)?;
 
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
         buf.write_all(decompressed.as_ref())?;
@@ -122,30 +122,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_snappy_round_trip() {
+    fn test_snappy_for_val_compression() {
         let data = b"Hello, world! This is a test of Snappy compression.".repeat(10);
         let snappy = Snappy::default();
         
         let mut compressor = snappy.create_compressor().unwrap();
-        let compressed = compressor.finish_ext(&data).unwrap();
+        let compressed = compressor.compress_val(&data).unwrap();
         
         let mut decompressor = Snappy::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_ext(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
-        println!("Original size: {}, Compressed size: {}", data.len(), compressed.len());
+        println!("Snappy val compression - Original: {}, Compressed: {}", data.len(), compressed.len());
     }
 
     #[test]
-    fn test_real_snappy_round_trip() {
-        let data = b"Test data with some repeated patterns. Test data again.";
-        let mut encoder = Encoder::new();
-        let compressed = encoder.compress_vec(data).unwrap();
+    fn test_snappy_for_buf_compression() {
+        let data = b"Test data with some repeated patterns for Snappy compression.".repeat(20);
+        let buf = Buf::from_zero_padded(data.clone());
+        let snappy = Snappy::default();
         
-        let mut decoder = Decoder::new();
-        let decompressed = decoder.decompress_vec(&compressed).unwrap();
+        let mut compressor = snappy.create_compressor().unwrap();
+        let compressed_buf = compressor.compress_buf(buf.clone()).unwrap();
         
-        assert_eq!(data, decompressed.as_slice());
-        println!("Original size: {}, Compressed size: {}", data.len(), compressed.len());
+        let mut decompressor = Snappy::new_decompression().unwrap();
+        let decompressed_buf = decompressor.decompress_buf(compressed_buf).unwrap();
+        
+        assert_eq!(buf.as_ref(), decompressed_buf.as_ref());
+        println!("Snappy buf compression - Original: {}, Compressed: {}", buf.len(), decompressed_buf.len());
     }
 }

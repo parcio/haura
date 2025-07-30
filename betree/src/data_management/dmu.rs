@@ -490,7 +490,7 @@ where
                         let mut state = self.default_compression.create_compressor()
                             .map_err(|e| crate::data_management::Error::CompressionError { source: e })?;
 
-                        (integrity_mode, state.finish(buf.into_buf())?)
+                        (integrity_mode, state.compress_buf(buf.into_buf())?)
                     } else {
                         // No compression - direct pass-through
                         (integrity_mode, buf.into_buf())
@@ -1129,7 +1129,7 @@ where
                         ptr
                         .decompression_tag()
                         .new_decompression()?
-                        .decompress(compressed_data)?
+                        .decompress_buf(compressed_data)?
                     } else {
                         // No decompression needed - direct return
                         compressed_data

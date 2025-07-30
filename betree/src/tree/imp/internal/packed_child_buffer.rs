@@ -215,7 +215,7 @@ impl Map {
 
                                     let uncompressed_val = decompression_tag.new_decompression()
                                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
-                                        .decompress_ext(&buf, uncomp_len as usize)
+                                        .decompress_val(&buf, uncomp_len as usize)
                                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
 
                                     csum.verify(&uncompressed_val).unwrap();
@@ -338,7 +338,7 @@ impl Map {
 
                 let uncompressed_val = decompression_tag.new_decompression()
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap()
-                    .decompress_ext(&buf, uncomp_len)
+                    .decompress_val(&buf, uncomp_len)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))).unwrap();
 
                 csum.verify(&buf).unwrap();
@@ -884,7 +884,7 @@ impl PackedChildBuffer {
             let mut state = compressor.create_compressor()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
-            let compressed_head = state.finish_ext(&slice[..self.buffer.packed_vals_len()])
+            let compressed_head = state.compress_val(&slice[..self.buffer.packed_vals_len()])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
             let head_csum = csum_builder(&compressed_head);
@@ -950,7 +950,7 @@ impl PackedChildBuffer {
                 // Use compression
                 let mut state = compressor.create_compressor()
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
-                state.finish_ext(&val)
+                state.compress_val(&val)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
             } else {
                 // No compression - direct copy
@@ -974,7 +974,7 @@ impl PackedChildBuffer {
             // Use compression for header
             let mut state = compressor.create_compressor()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
-            state.finish_ext(&tmp)
+            state.compress_val(&tmp)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
         } else {
             // No compression - direct copy
@@ -1068,7 +1068,7 @@ impl PackedChildBuffer {
 
         let uncompressed_buf = decompressor.new_decompression()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?
-            .decompress_ext(&buf[12..12 + compressed_head_len].to_vec(), uncompressed_head_len)
+            .decompress_val(&buf[12..12 + compressed_head_len].to_vec(), uncompressed_head_len)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         let is_leaf = uncompressed_buf[0] != 0;
@@ -1271,6 +1271,7 @@ mod tests {
             .pack(
                 &mut buf,
                 crate::tree::imp::internal::copyless_internal::tests::quick_csum,
+                &crate::compression::CompressionConfiguration::None,
             )
             .unwrap();
         assert_eq!(buf.len(), child_buffer.size())
@@ -1334,9 +1335,9 @@ mod tests {
     fn unpack_equality(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
 
-        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
+        let (mut other, _) = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum, crate::compression::DecompressionTag::None).unwrap();
         other.buffer.unpacked();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
@@ -1349,9 +1350,9 @@ mod tests {
     fn unpackless_access(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
 
-        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
+        let (other, _) = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum, crate::compression::DecompressionTag::None).unwrap();
 
         for (key, (info, val)) in child_buffer.buffer.assert_unpacked() {
             let res = other.get(key).unwrap();
@@ -1363,9 +1364,9 @@ mod tests {
     fn unpackless_iter(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
 
-        let other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
+        let (other, _) = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum, crate::compression::DecompressionTag::None).unwrap();
 
         for (idx, (key, tup)) in child_buffer.get_all_messages().enumerate() {
             let res = other.get_all_messages().nth(idx).unwrap();
@@ -1377,8 +1378,8 @@ mod tests {
     fn serialize_deserialize_idempotent(child_buffer: PackedChildBuffer) {
         let mut buf = Vec::new();
         // buf.extend_from_slice(&[0u8; NODE_ID]);
-        let csum = child_buffer.pack(&mut buf, quick_csum).unwrap();
-        let mut other = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum).unwrap();
+        let csum = child_buffer.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
+        let (mut other, _) = PackedChildBuffer::unpack(CowBytes::from(buf).into(), csum, crate::compression::DecompressionTag::None).unwrap();
         other.buffer.unpacked();
         assert_eq!(other, child_buffer);
     }

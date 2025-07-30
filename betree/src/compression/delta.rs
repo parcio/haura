@@ -64,7 +64,7 @@ impl Delta {
 /// [value_size: u8][signed: u8][base_value][delta_count: u32][deltas...]
 /// Where deltas are variable-length encoded (smaller deltas use fewer bytes)
 impl CompressionState for DeltaCompression {
-    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let value_size = self.config.value_size as usize;
         if data.len() % value_size != 0 || data.len() == 0 {
             return Ok(data.to_vec());
@@ -99,12 +99,12 @@ impl CompressionState for DeltaCompression {
         Ok(result)
     }
 
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
+    fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
         
-        let compressed_data = self.finish_ext(data.as_ref())?;
+        let compressed_data = self.compress_val(data.as_ref())?;
 
         let size = data.as_ref().len() as u32;
         let comlen = compressed_data.len() as u32;
@@ -122,7 +122,7 @@ impl CompressionState for DeltaCompression {
 }
 
 impl DecompressionState for DeltaDecompression {
-    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
         if data.len() < 6 {
             return Ok(SlicedCowBytes::from(data.to_vec()));
         }
@@ -168,7 +168,7 @@ impl DecompressionState for DeltaDecompression {
         Ok(SlicedCowBytes::from(result))
     }
 
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
@@ -186,7 +186,7 @@ impl DecompressionState for DeltaDecompression {
 
         let compressed = &data[8..8 + comp_len];
 
-        let decompressed = self.decompress_ext(compressed, uncomp_size)?;
+        let decompressed = self.decompress_val(compressed, uncomp_size)?;
 
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
         buf.write_all(decompressed.as_ref())?;
@@ -277,7 +277,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_delta_compression() {
+    fn test_delta_for_val_compression() {
         // Create test data with sequential values (good for delta encoding)
         let mut data = Vec::new();
         for i in 1000i64..1100i64 {
@@ -286,13 +286,34 @@ mod tests {
 
         let delta = Delta::default();
         let mut compressor = delta.create_compressor().unwrap();
-        let compressed = compressor.finish_ext(&data).unwrap();
+        let compressed = compressor.compress_val(&data).unwrap();
         
         let mut decompressor = Delta::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_ext(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
-        println!("Original size: {}, Compressed size: {}", data.len(), compressed.len());
+        println!("Delta val compression - Original: {}, Compressed: {}", data.len(), compressed.len());
+    }
+
+    #[test]
+    fn test_delta_for_buf_compression() {
+        // Create test data with sequential values
+        let mut data = Vec::new();
+        for i in 500i64..600i64 {
+            data.extend_from_slice(&i.to_le_bytes());
+        }
+
+        let buf = Buf::from_zero_padded(data.clone());
+        let delta = Delta::default();
+        
+        let mut compressor = delta.create_compressor().unwrap();
+        let compressed_buf = compressor.compress_buf(buf.clone()).unwrap();
+        
+        let mut decompressor = Delta::new_decompression().unwrap();
+        let decompressed_buf = decompressor.decompress_buf(compressed_buf).unwrap();
+        
+        assert_eq!(buf.as_ref(), decompressed_buf.as_ref());
+        println!("Delta buf compression - Original: {}, Compressed: {}", buf.len(), decompressed_buf.len());
     }
 
     #[test]

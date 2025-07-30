@@ -75,7 +75,7 @@ use speedy::{Readable, Writable};
 const DATA_OFF: usize = mem::size_of::<u32>();
 
 impl CompressionState for ZstdCompression {    
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
+    fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
         let compressed_data = block::compress(&data, self.level as i32)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
@@ -93,7 +93,7 @@ impl CompressionState for ZstdCompression {
         Ok(buf.into_buf())
     }
 
-    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let compressed_data = block::compress(data, self.level as i32)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Compression error: {:?}", e)))?;
 
@@ -110,7 +110,7 @@ impl CompressionState for ZstdCompression {
 }
 
 impl DecompressionState for ZstdDecompression {
-    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes>
+    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes>
     {
         if data.len() < 8 {
             bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
@@ -131,7 +131,7 @@ impl DecompressionState for ZstdDecompression {
         Ok(SlicedCowBytes::from(uncompressed_data))
     }
     
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         if data.len() < 8 {
             bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
         }
@@ -157,8 +157,56 @@ impl DecompressionState for ZstdDecompression {
 #[cfg(test)]
 mod tests {
     use rand::RngCore;
-
     use super::*;
+
+    #[test]
+    fn test_zstd_for_val_compression() {
+        let data = b"Zstd compression test with repeated patterns for better compression ratio. ".repeat(30);
+        let zstd = Zstd { level: 6 };
+        
+        let mut compressor = zstd.create_compressor().unwrap();
+        let compressed = compressor.compress_val(&data).unwrap();
+        
+        let mut decompressor = Zstd::new_decompression().unwrap();
+        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+        
+        assert_eq!(data, decompressed.as_ref());
+        println!("Zstd val compression - Original: {}, Compressed: {}", data.len(), compressed.len());
+    }
+
+    #[test]
+    fn test_zstd_for_buf_compression() {
+        let data = b"Zstd test with Buf interface and compressible content. ".repeat(25);
+        let buf = Buf::from_zero_padded(data.clone());
+        let zstd = Zstd { level: 3 };
+        
+        let mut compressor = zstd.create_compressor().unwrap();
+        let compressed_buf = compressor.compress_buf(buf.clone()).unwrap();
+        
+        let mut decompressor = Zstd::new_decompression().unwrap();
+        let decompressed_buf = decompressor.decompress_buf(compressed_buf).unwrap();
+        
+        assert_eq!(buf.as_ref(), decompressed_buf.as_ref());
+        println!("Zstd buf compression - Original: {}, Compressed: {}", buf.len(), decompressed_buf.len());
+    }
+
+    #[test]
+    fn test_zstd_different_levels() {
+        let data = b"Testing different Zstd compression levels with this repeated text pattern. ".repeat(15);
+        
+        for level in [1, 6, 15] {
+            let zstd = Zstd { level };
+            
+            let mut compressor = zstd.create_compressor().unwrap();
+            let compressed = compressor.compress_val(&data).unwrap();
+            
+            let mut decompressor = Zstd::new_decompression().unwrap();
+            let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+            
+            assert_eq!(data, decompressed.as_ref());
+            println!("Zstd level {} - Original: {}, Compressed: {}", level, data.len(), compressed.len());
+        }
+    }
 
     #[test]
     fn encode_then_decode() {
@@ -168,9 +216,9 @@ mod tests {
         let buf = Buf::from_zero_padded(buf);
         let zstd = Zstd { level: 1 };
         let mut comp = zstd.create_compressor().unwrap();
-        let c_buf = comp.finish(buf.clone()).unwrap();
+        let c_buf = comp.compress_buf(buf.clone()).unwrap();
         let mut decomp = zstd.decompression_tag().new_decompression().unwrap();
-        let d_buf = decomp.decompress(c_buf).unwrap();
+        let d_buf = decomp.decompress_buf(c_buf).unwrap();
         assert_eq!(buf.as_ref().len(), d_buf.as_ref().len());
     }
 

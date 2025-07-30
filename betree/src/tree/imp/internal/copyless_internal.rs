@@ -1082,7 +1082,7 @@ pub(super) mod tests {
 
     fn serialized_size<T: ObjectReference>(node: &CopylessInternalNode<T>) -> usize {
         let mut buf = Vec::new();
-        node.pack(&mut buf, quick_csum).unwrap();
+        node.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
         buf.len()
     }
 
@@ -1187,9 +1187,9 @@ pub(super) mod tests {
         println!("Start Prefix");
         buf.write_all(&[0; 4]).unwrap();
         println!("Start packing");
-        let csum = node.pack(&mut buf, quick_csum).unwrap();
+        let csum = node.pack(&mut buf, quick_csum, &crate::compression::CompressionConfiguration::None).unwrap();
         println!("Done packing");
-        let unpacked = CopylessInternalNode::<()>::unpack(buf.into_buf(), csum).unwrap();
+        let unpacked = CopylessInternalNode::<()>::unpack(buf.into_buf(), csum, crate::compression::DecompressionTag::None).unwrap();
         println!("Done unpacking");
         assert_eq!(unpacked.meta_data, node.meta_data);
         println!("Checked meta data");

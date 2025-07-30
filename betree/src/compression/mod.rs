@@ -191,17 +191,18 @@ pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
 
 /// Trait for the object that compresses data.
 pub trait CompressionState {
-    /// Finishes the compression stream and returns a buffer that contains the
-    /// compressed data.
-    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>>;
-    fn finish(&mut self, data: Buf) -> Result<Buf>;
+    /// Compress data from slice and return the compressed data as a Vec<u8>
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>>;
+    /// Compress data from Buf and return the compressed data as a Buf
+    fn compress_buf(&mut self, data: Buf) -> Result<Buf>;
 }
 
 /// An implementation of consumption-based decompression.
 pub trait DecompressionState {
-    /// Decompress the given [Buf]. On No-op this is a simple pass through, no memory is copied.
-    fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes>;
-    fn decompress(&mut self, data: Buf) -> Result<Buf>;
+    /// Decompress data from slice and return the decompressed data as SlicedCowBytes
+    fn decompress_val(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes>;
+    /// Decompress data from Buf and return the decompressed data as a Buf
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf>;
 }
 
 mod none;
@@ -212,3 +213,6 @@ pub use self::lz4::Lz4;
 
 mod zstd;
 pub use self::zstd::Zstd;
+
+// #[cfg(test)]
+// mod comprehensive_tests;

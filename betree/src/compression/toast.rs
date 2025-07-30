@@ -65,7 +65,7 @@ impl Toast {
 /// compressed=0: data is uncompressed
 /// compressed=1: data is compressed with simplified LZ-style compression
 impl CompressionState for ToastCompression {
-    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         if data.len() < self.config.min_compress_size as usize {
             // Too small to compress
             let mut result = Vec::new();
@@ -97,12 +97,12 @@ impl CompressionState for ToastCompression {
         }
     }
 
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
+    fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
         
-        let compressed_data = self.finish_ext(data.as_ref())?;
+        let compressed_data = self.compress_val(data.as_ref())?;
 
         let size = data.as_ref().len() as u32;
         let comlen = compressed_data.len() as u32;
@@ -120,7 +120,7 @@ impl CompressionState for ToastCompression {
 }
 
 impl DecompressionState for ToastDecompression {
-    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
         if data.len() < 5 {
             return Ok(SlicedCowBytes::from(data.to_vec()));
         }
@@ -140,7 +140,7 @@ impl DecompressionState for ToastDecompression {
         }
     }
 
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
@@ -158,7 +158,7 @@ impl DecompressionState for ToastDecompression {
 
         let compressed = &data[8..8 + comp_len];
 
-        let decompressed = self.decompress_ext(compressed, uncomp_size)?;
+        let decompressed = self.decompress_val(compressed, uncomp_size)?;
 
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
         buf.write_all(decompressed.as_ref())?;
@@ -254,7 +254,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_toast_compression() {
+    fn test_toast_for_val_compression() {
         // Create test data with repeated patterns (good for LZ-style compression)
         let pattern = b"This is a test pattern that repeats. ";
         let mut data = Vec::new();
@@ -264,13 +264,35 @@ mod tests {
 
         let toast = Toast::default();
         let mut compressor = toast.create_compressor().unwrap();
-        let compressed = compressor.finish_ext(&data).unwrap();
+        let compressed = compressor.compress_val(&data).unwrap();
         
         let mut decompressor = Toast::new_decompression().unwrap();
-        let decompressed = decompressor.decompress_ext(&compressed, data.len()).unwrap();
+        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
         
         assert_eq!(data, decompressed.as_ref());
-        println!("Original size: {}, Compressed size: {}", data.len(), compressed.len());
+        println!("Toast val compression - Original: {}, Compressed: {}", data.len(), compressed.len());
+    }
+
+    #[test]
+    fn test_toast_for_buf_compression() {
+        // Create test data with repeated patterns
+        let pattern = b"TOAST compression test pattern repeats here. ";
+        let mut data = Vec::new();
+        for _ in 0..30 {
+            data.extend_from_slice(pattern);
+        }
+
+        let buf = Buf::from_zero_padded(data.clone());
+        let toast = Toast::default();
+        
+        let mut compressor = toast.create_compressor().unwrap();
+        let compressed_buf = compressor.compress_buf(buf.clone()).unwrap();
+        
+        let mut decompressor = Toast::new_decompression().unwrap();
+        let decompressed_buf = decompressor.decompress_buf(compressed_buf).unwrap();
+        
+        assert_eq!(buf.as_ref(), decompressed_buf.as_ref());
+        println!("Toast buf compression - Original: {}, Compressed: {}", buf.len(), decompressed_buf.len());
     }
 
     #[test]
@@ -286,7 +308,7 @@ mod tests {
         let small_data = b"small";
         let toast = Toast::default();
         let mut compressor = toast.create_compressor().unwrap();
-        let result = compressor.finish_ext(small_data).unwrap();
+        let result = compressor.compress_val(small_data).unwrap();
         
         // Should be stored uncompressed
         assert_eq!(result[0], 0u8); // Not compressed flag

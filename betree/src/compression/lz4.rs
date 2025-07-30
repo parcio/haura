@@ -61,7 +61,7 @@ impl Lz4 {
 
 
 impl CompressionState for Lz4Compression {
-    fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let mode = CompressionMode::HIGHCOMPRESSION(self.level as i32);
         // Use block-level compression - much more efficient than creating encoder each time
         let compressed_data = block::compress(data, Some(mode), false)
@@ -78,7 +78,7 @@ impl CompressionState for Lz4Compression {
         Ok(result)
     }
 
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
+    fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
@@ -104,7 +104,7 @@ impl CompressionState for Lz4Compression {
 
 
 impl DecompressionState for Lz4Decompression {
-    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_val(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
         if data.len() < 8 {
             bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
         }
@@ -125,7 +125,7 @@ impl DecompressionState for Lz4Decompression {
         Ok(SlicedCowBytes::from(decompressed))
     }
 
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         use crate::buffer::BufWrite;
         use crate::vdev::Block;
         use std::io::Write;
@@ -153,20 +153,56 @@ impl DecompressionState for Lz4Decompression {
 }
 
 
-// impl DecompressionState for Lz4Decompression {
-//     fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
-//         let mut buf = BufWrite::default(); // Let it grow as needed
-//         let mut decoder = Decoder::new(data)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//         io::copy(&mut decoder, &mut buf)?;
-//         Ok(buf.as_sliced_cow_bytes())
-//     }
+    #[test]
+    fn test_lz4_for_val_compression() {
+        let data = b"LZ4 compression test data with some repeated patterns. ".repeat(20);
+        let lz4 = Lz4 { level: 8 };
+        
+        let mut compressor = lz4.create_compressor().unwrap();
+        let compressed = compressor.compress_val(&data).unwrap();
+        
+        let mut decompressor = Lz4::new_decompression().unwrap();
+        let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+        
+        assert_eq!(data, decompressed.as_ref());
+        println!("LZ4 val compression - Original: {}, Compressed: {}", data.len(), compressed.len());
+    }
 
-//     fn decompress(&mut self, data: Buf) -> Result<Buf> {
-//         let mut buf = BufWrite::default(); // Let it grow as needed
-//         let mut decoder = Decoder::new(data.as_ref())?;
+    #[test]
+    fn test_lz4_for_buf_compression() {
+        let data = b"LZ4 test with Buf interface and repeated content. ".repeat(15);
+        let buf = Buf::from_zero_padded(data.clone());
+        let lz4 = Lz4 { level: 4 };
+        
+        let mut compressor = lz4.create_compressor().unwrap();
+        let compressed_buf = compressor.compress_buf(buf.clone()).unwrap();
+        
+        let mut decompressor = Lz4::new_decompression().unwrap();
+        let decompressed_buf = decompressor.decompress_buf(compressed_buf).unwrap();
+        
+        assert_eq!(buf.as_ref(), decompressed_buf.as_ref());
+        println!("LZ4 buf compression - Original: {}, Compressed: {}", buf.len(), decompressed_buf.len());
+    }
 
-//         io::copy(&mut decoder, &mut buf)?;
-//         Ok(buf.into_buf())
-//     }
-// }
+    #[test]
+    fn test_lz4_different_levels() {
+        let data = b"Testing different LZ4 compression levels with this repeated text. ".repeat(10);
+        
+        for level in [1, 8, 16] {
+            let lz4 = Lz4 { level };
+            
+            let mut compressor = lz4.create_compressor().unwrap();
+            let compressed = compressor.compress_val(&data).unwrap();
+            
+            let mut decompressor = Lz4::new_decompression().unwrap();
+            let decompressed = decompressor.decompress_val(&compressed, data.len()).unwrap();
+            
+            assert_eq!(data, decompressed.as_ref());
+            println!("LZ4 level {} - Original: {}, Compressed: {}", level, data.len(), compressed.len());
+        }
+    }
+}
