@@ -147,6 +147,9 @@ impl KvClient {
                         self.rng.fill(&mut value[start_idx..]);
                     }
                     
+                    // Sort the value vector
+                    value.sort();
+                    
                     value
                 }
                 "float" => {
@@ -167,12 +170,19 @@ impl KvClient {
                         self.rng.fill(&mut value[start_idx..]);
                     }
                     
+                    // Sort the value vector
+                    value.sort();
+                    
                     value
                 }
                 _ => {
                     // Default: fill with random bytes (same as original)
                     let mut value = vec![0u8; entry_size as usize];
                     self.rng.fill(&mut value[..]);
+                    
+                    // Sort the value vector
+                    value.sort();
+                    
                     value
                 }
             };

@@ -42,6 +42,22 @@ def extract_compression_value(config_path):
     if pattern_snappy.search(config_text):
         return "Snappy"
     
+    # Pattern for Rle (with parameters)
+    pattern_rle = re.compile(
+        r'compression\s*:\s*Rle\s*\(\s*Rle\s*\{[^}]*\}\s*,?\s*\)',
+        re.DOTALL
+    )
+    if pattern_rle.search(config_text):
+        return "Rle"
+    
+    # Pattern for Delta (with parameters)
+    pattern_delta = re.compile(
+        r'compression\s*:\s*Delta\s*\(\s*Delta\s*\{[^}]*\}\s*,?\s*\)',
+        re.DOTALL
+    )
+    if pattern_delta.search(config_text):
+        return "Delta"
+    
     # Pattern for None/null
     match_flat = re.search(r'compression\s*:\s*(None|null|nullptr)', config_text, re.IGNORECASE)
     if match_flat:
@@ -117,12 +133,14 @@ entry_size_positions = {
 }
 
 # Step 1: Define label order and fixed colors
-preferred_order = ["None", "Snappy", "Zstd(1)", "Zstd(5)", "Zstd(10)", "Lz4(1)", "Lz4(5)", "Lz4(10)"]
+preferred_order = ["None", "Snappy", "Rle", "Delta", "Zstd(1)", "Zstd(5)", "Zstd(10)", "Lz4(1)", "Lz4(5)", "Lz4(10)"]
 label_list = preferred_order  # For legend consistency
 
 label_colors = {
     "None": "#333333",       # Dark gray
     "Snappy": "#2ca02c",     # Green
+    "Rle": "#d62728",        # Red
+    "Delta": "#9467bd",      # Purple
     "Zstd(1)": "#1f77b4",     # Deep blue
     "Zstd(5)": "#5fa2dc",     # Medium blue
     "Zstd(10)": "#a6c8ed",    # Light blue

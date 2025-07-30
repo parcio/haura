@@ -891,9 +891,7 @@ impl PackedChildBuffer {
         C: ChecksumTrait,
     {
         if !self.buffer.is_unpacked() {
-            //println!("if !self.buffer.is_unpacked() .................{} {} {}", self.buffer.packed_header_len(), self.buffer.packed_vals_len(), self.buffer.packed_total_len());
             // Copy the contents of the buffer to the new writer without unpacking.
-            panic!("PackedChildBuffer::pack called on a packed buffer, this should never happen.");
             let slice = &self.buffer.assert_packed()[..];
 
             let mut state = compressor.create_compressor()

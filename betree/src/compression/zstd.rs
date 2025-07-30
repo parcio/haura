@@ -94,20 +94,41 @@ impl CompressionState for ZstdCompression {
     }
 
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-         match block::compress(data, self.level as i32) {
-            Ok(data) => Ok(data),
-            Err(e) => bail!(std::io::Error::new(std::io::ErrorKind::Other, format!("Compression error: {:?}", e))),
-        }
+        let compressed_data = block::compress(data, self.level as i32)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Compression error: {:?}", e)))?;
+
+        let size = data.len() as u32;
+        let comlen = compressed_data.len() as u32;
+
+        let mut result = Vec::with_capacity(4 + 4 + compressed_data.len());
+        result.extend_from_slice(&size.to_le_bytes());
+        result.extend_from_slice(&comlen.to_le_bytes());
+        result.extend_from_slice(&compressed_data);
+
+        Ok(result)
     }
 }
 
 impl DecompressionState for ZstdDecompression {
-    fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes>
+    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes>
     {
-        match block::decompress(data, len) {
-            Ok(data) => Ok(SlicedCowBytes::from(data)),
-            Err(e) => bail!(std::io::Error::new(std::io::ErrorKind::Other, format!("Decompression error: {:?}", e))),
+        if data.len() < 8 {
+            bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
         }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated"));
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
+        let uncompressed_data = block::decompress(compressed, uncomp_size)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Decompression error: {:?}", e)))?;
+
+        Ok(SlicedCowBytes::from(uncompressed_data))
     }
     
     fn decompress(&mut self, data: Buf) -> Result<Buf> {

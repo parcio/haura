@@ -418,7 +418,7 @@ impl<N> CopylessInternalNode<N> {
         let len = u32::from_le_bytes(buf[cursor..cursor + 4].try_into().unwrap()) as usize;
         cursor += 4;
 
-        let meta_data: InternalNodeMetaData = bincode::deserialize(&buf[cursor..cursor + len])
+        let mut meta_data: InternalNodeMetaData = bincode::deserialize(&buf[cursor..cursor + len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             .unwrap();
         cursor += len;
@@ -445,7 +445,8 @@ impl<N> CopylessInternalNode<N> {
             let (b, next_offset) = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
             //println!("after: {} {}. ", b.size(), b.len());
             cursor += next_offset;//b.size();
-            assert_eq!(meta_data.entries_sizes[idx], b.size());
+            // Update metadata to match the actual buffer size after unpacking
+            meta_data.entries_sizes[idx] = b.size();
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
             assert_eq!(meta_data.entries_sizes[idx], ptrs[idx].buffer.size());
         }

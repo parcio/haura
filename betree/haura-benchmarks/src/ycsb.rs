@@ -94,6 +94,8 @@ pub fn a(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
                         let mut value = vec![0u8; entry_size];
+                        let k = &keys[dist.sample(&mut rng) - 1][..];
+                        value = ds.get(k).unwrap().unwrap().to_vec();
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
@@ -175,6 +177,8 @@ pub fn b(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
                         let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
                         let mut value = vec![0u8; entry_size];
+                        let k = &keys[dist.sample(&mut rng) - 1][..];
+                        value = ds.get(k).unwrap().unwrap().to_vec();
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
@@ -461,7 +465,8 @@ pub fn e(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
                         let mut total = 0;
                         let mut value = vec![0u8; entry_size];
-
+                        let k = &keys[0][..];
+                        value = ds.get(k).unwrap().unwrap().to_vec();
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {

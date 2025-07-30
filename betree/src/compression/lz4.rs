@@ -64,8 +64,18 @@ impl CompressionState for Lz4Compression {
     fn finish_ext(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let mode = CompressionMode::HIGHCOMPRESSION(self.level as i32);
         // Use block-level compression - much more efficient than creating encoder each time
-        block::compress(data, Some(mode), false)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 compression failed: {:?}", e)).into())
+        let compressed_data = block::compress(data, Some(mode), false)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 compression failed: {:?}", e)))?;
+
+        let size = data.len() as u32;
+        let comlen = compressed_data.len() as u32;
+
+        let mut result = Vec::with_capacity(4 + 4 + compressed_data.len());
+        result.extend_from_slice(&size.to_le_bytes());
+        result.extend_from_slice(&comlen.to_le_bytes());
+        result.extend_from_slice(&compressed_data);
+
+        Ok(result)
     }
 
     fn finish(&mut self, data: Buf) -> Result<Buf> {
@@ -94,9 +104,22 @@ impl CompressionState for Lz4Compression {
 
 
 impl DecompressionState for Lz4Decompression {
-    fn decompress_ext(&mut self, data: &[u8], len: usize) -> Result<SlicedCowBytes> {
+    fn decompress_ext(&mut self, data: &[u8], _len: usize) -> Result<SlicedCowBytes> {
+        if data.len() < 8 {
+            bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
+        }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated"));
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
         // Use block-level decompression to match block-level compression
-        let decompressed = block::decompress(data, Some(len as i32))
+        let decompressed = block::decompress(compressed, Some(uncomp_size as i32))
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4 decompression failed: {:?}", e)))?;
         
         Ok(SlicedCowBytes::from(decompressed))

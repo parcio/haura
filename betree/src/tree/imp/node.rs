@@ -306,6 +306,14 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         //     }
         //     (default, _) => default,
         // };
+        
+        // Sync metadata with actual buffer sizes before packing
+        if let CopylessInternal(ref mut internal) = self.0 {
+            for (idx, child) in internal.children.iter().enumerate() {
+                internal.meta_data.entries_sizes[idx] = child.buffer().size();
+            }
+        }
+        
         Ok(PreparePack())
     }
 }
