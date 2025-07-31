@@ -6,7 +6,7 @@ use super::{
         packed_child_buffer::PackedChildBuffer,
         TakeChildBuffer,
     },
-    FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_SIZE,
+    FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_RATIO,
 };
 use crate::{
     buffer::{self, Buf},
@@ -84,7 +84,7 @@ impl StorageMap {
             (CopylessInternal(_), _) => return None,
             (_, StorageKind::Hdd) => mib!(1),
             (_, StorageKind::Ssd) => kib!(512),
-            (_, StorageKind::Memory) => kib!(512),
+            (_, StorageKind::Memory) => kib!(128),
         })
     }
 
@@ -93,7 +93,7 @@ impl StorageMap {
         Some(match (&node.0, self.get(pref)) {
             (_, StorageKind::Hdd) => mib!(4),
             (_, StorageKind::Ssd) => mib!(2),
-            (_, StorageKind::Memory) => mib!(2),
+            (_, StorageKind::Memory) => kib!(512),
         })
     }
 }
@@ -319,12 +319,14 @@ impl<N: StaticSize + HasStoragePreference> Node<N> {
     where
         N: ObjectReference,
     {
-        let max_size = storage_map.max_size(&self);
+        let max_size = storage_map.max_size(&self).unwrap();
         match self.0 {
             MemLeaf(_) => None,
-            CopylessInternal(ref mut nvminternal) => {
-                nvminternal.try_find_flush_candidate(MIN_FLUSH_SIZE, max_size.unwrap(), MIN_FANOUT)
-            }
+            CopylessInternal(ref mut nvminternal) => nvminternal.try_find_flush_candidate(
+                max_size / MIN_FLUSH_RATIO,
+                max_size,
+                MIN_FANOUT,
+            ),
         }
     }
 

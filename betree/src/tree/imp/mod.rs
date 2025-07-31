@@ -73,7 +73,8 @@ impl KeyInfo {
     }
 }
 
-const MIN_FLUSH_SIZE: usize = 256 * 1024;
+// The ratio determining the MIN_FLUSH_SIZE = MAX_SIZE / MIN_FLUSH_RATIO
+const MIN_FLUSH_RATIO: usize = 16;
 const MIN_FANOUT: usize = 2;
 pub(crate) const MAX_MESSAGE_SIZE: usize = 512 * 1024;
 
