@@ -96,7 +96,16 @@ impl CompressionState for DeltaCompression {
             prev_value = current_value;
         }
 
-        Ok(result)
+        // Add size headers like other compression algorithms
+        let size = data.len() as u32;
+        let comlen = result.len() as u32;
+
+        let mut final_result = Vec::with_capacity(4 + 4 + result.len());
+        final_result.extend_from_slice(&size.to_le_bytes());
+        final_result.extend_from_slice(&comlen.to_le_bytes());
+        final_result.extend_from_slice(&result);
+
+        Ok(final_result)
     }
 
     fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
@@ -123,29 +132,42 @@ impl CompressionState for DeltaCompression {
 
 impl DecompressionState for DeltaDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
-        if data.len() < 6 {
-            return Ok(SlicedCowBytes::from(data.to_vec()));
+        if data.len() < 8 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short").into());
+        }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated").into());
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
+        if compressed.len() < 6 {
+            return Ok(SlicedCowBytes::from(compressed.to_vec()));
         }
 
         let mut pos = 0;
-        let value_size = data[pos] as usize;
+        let value_size = compressed[pos] as usize;
         pos += 1;
-        let signed = data[pos] != 0;
+        let signed = compressed[pos] != 0;
         pos += 1;
 
-        if pos + value_size > data.len() {
-            return Ok(SlicedCowBytes::from(data.to_vec()));
+        if pos + value_size > compressed.len() {
+            return Ok(SlicedCowBytes::from(compressed.to_vec()));
         }
 
         // Read base value
-        let mut current_value = read_value(&data[pos..pos + value_size], value_size, signed);
+        let mut current_value = read_value(&compressed[pos..pos + value_size], value_size, signed);
         pos += value_size;
 
-        if pos + 4 > data.len() {
-            return Ok(SlicedCowBytes::from(data.to_vec()));
+        if pos + 4 > compressed.len() {
+            return Ok(SlicedCowBytes::from(compressed.to_vec()));
         }
 
-        let delta_count = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let delta_count = u32::from_le_bytes([compressed[pos], compressed[pos + 1], compressed[pos + 2], compressed[pos + 3]]) as usize;
         pos += 4;
 
         let mut result = Vec::new();
@@ -155,9 +177,9 @@ impl DecompressionState for DeltaDecompression {
 
         // Decode deltas
         for _ in 0..delta_count {
-            if pos >= data.len() { break; }
+            if pos >= compressed.len() { break; }
             
-            let (delta, bytes_read) = decode_varint(&data[pos..]);
+            let (delta, bytes_read) = decode_varint(&compressed[pos..]);
             if bytes_read == 0 { break; }
             pos += bytes_read;
 

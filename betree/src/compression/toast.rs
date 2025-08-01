@@ -66,35 +66,46 @@ impl Toast {
 /// compressed=1: data is compressed with simplified LZ-style compression
 impl CompressionState for ToastCompression {
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        if data.len() < self.config.min_compress_size as usize {
+        let toast_result = if data.len() < self.config.min_compress_size as usize {
             // Too small to compress
             let mut result = Vec::new();
             result.push(0u8); // Not compressed
             result.extend_from_slice(&(data.len() as u32).to_le_bytes());
             result.extend_from_slice(data);
-            return Ok(result);
-        }
-
-        // Try simplified LZ-style compression (similar to pglz approach)
-        let compressed = pglz_compress(data);
-        
-        let compression_ratio = (compressed.len() * 100) / data.len();
-        
-        if compression_ratio >= self.config.max_ratio_percent as usize {
-            // Compression not worthwhile
-            let mut result = Vec::new();
-            result.push(0u8); // Not compressed
-            result.extend_from_slice(&(data.len() as u32).to_le_bytes());
-            result.extend_from_slice(data);
-            Ok(result)
+            result
         } else {
-            // Use compressed version
-            let mut result = Vec::new();
-            result.push(1u8); // Compressed
-            result.extend_from_slice(&(data.len() as u32).to_le_bytes());
-            result.extend_from_slice(&compressed);
-            Ok(result)
-        }
+            // Try simplified LZ-style compression (similar to pglz approach)
+            let compressed = pglz_compress(data);
+            
+            let compression_ratio = (compressed.len() * 100) / data.len();
+            
+            if compression_ratio >= self.config.max_ratio_percent as usize {
+                // Compression not worthwhile
+                let mut result = Vec::new();
+                result.push(0u8); // Not compressed
+                result.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                result.extend_from_slice(data);
+                result
+            } else {
+                // Use compressed version
+                let mut result = Vec::new();
+                result.push(1u8); // Compressed
+                result.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                result.extend_from_slice(&compressed);
+                result
+            }
+        };
+
+        // Add size headers like other compression algorithms
+        let size = data.len() as u32;
+        let comlen = toast_result.len() as u32;
+
+        let mut final_result = Vec::with_capacity(4 + 4 + toast_result.len());
+        final_result.extend_from_slice(&size.to_le_bytes());
+        final_result.extend_from_slice(&comlen.to_le_bytes());
+        final_result.extend_from_slice(&toast_result);
+
+        Ok(final_result)
     }
 
     fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
@@ -121,22 +132,35 @@ impl CompressionState for ToastCompression {
 
 impl DecompressionState for ToastDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
-        if data.len() < 5 {
-            return Ok(SlicedCowBytes::from(data.to_vec()));
+        if data.len() < 8 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short").into());
+        }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated").into());
+        }
+
+        let toast_data = &data[8..8 + comp_len];
+
+        if toast_data.len() < 5 {
+            return Ok(SlicedCowBytes::from(toast_data.to_vec()));
         }
 
         let mut pos = 0;
-        let compressed = data[pos] != 0;
+        let compressed = toast_data[pos] != 0;
         pos += 1;
 
-        let original_size = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let original_size = u32::from_le_bytes([toast_data[pos], toast_data[pos + 1], toast_data[pos + 2], toast_data[pos + 3]]) as usize;
         pos += 4;
 
         if compressed {
-            let decompressed = pglz_decompress(&data[pos..], original_size)?;
+            let decompressed = pglz_decompress(&toast_data[pos..], original_size)?;
             Ok(SlicedCowBytes::from(decompressed))
         } else {
-            Ok(SlicedCowBytes::from(data[pos..].to_vec()))
+            Ok(SlicedCowBytes::from(toast_data[pos..].to_vec()))
         }
     }
 

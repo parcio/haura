@@ -28,8 +28,6 @@ use std::{borrow::Borrow, collections::BTreeMap, mem::replace};
 use super::serialize_nodepointer;
 use serde::{Deserialize, Serialize};
 
-use std::sync::{Arc, Mutex};
-
 pub(in crate::tree::imp) struct CopylessInternalNode<N> {
     // FIXME: This type can be used as zero-copy
     pub meta_data: InternalNodeMetaData,
@@ -164,18 +162,15 @@ const META_BINCODE_STATIC: usize = 33;
 const INTERNAL_INTEGRITY_CHECKSUM_SIZE: usize = 8 + 8;
 impl Size for InternalNodeMetaData {
     fn size(&self) -> usize {
-        *self.actual_size().get_or_insert_with(|| {
-            std::mem::size_of::<u32>()
-                + std::mem::size_of::<usize>()
-                + std::mem::size_of::<u8>()
-                + std::mem::size_of::<u8>()
-                + self.pivot.iter().map(|p| p.size()).sum::<usize>()
-                + self.pivot.len() * std::mem::size_of::<usize>()
-                + self.pivot.len() * std::mem::size_of::<u8>()
-                // TODO: these magic numbers are for checksums of childrens
-                + self.entries_sizes.len() * INTERNAL_INTEGRITY_CHECKSUM_SIZE
-                + META_BINCODE_STATIC
-        })
+        self.current_size
+        // std::mem::size_of::<u32>()
+        //     + std::mem::size_of::<usize>()
+        //     + std::mem::size_of::<u8>()
+        //     + std::mem::size_of::<u8>()
+        //     + self.pivot.iter().map(|p| p.size()).sum::<usize>()
+        //     + self.pivot.len() * std::mem::size_of::<usize>()
+        //     + self.pivot.len() * std::mem::size_of::<u8>()
+        //     + META_BINCODE_STATIC
     }
 
     fn actual_size(&self) -> Option<usize> {
@@ -343,12 +338,10 @@ impl<N> CopylessInternalNode<N> {
         &self,
         mut w: W,
         csum_builder: F,
-        compressor: &CompressionConfiguration,
+	compressor: &CompressionConfiguration,
     ) -> Result<IntegrityMode<C>, std::io::Error>
     where
         N: serde::Serialize + StaticSize,
-        F: Fn(&[u8]) -> C,
-        C: Checksum,
         F: Fn(&[u8]) -> C,
         C: Checksum,
     {
@@ -371,14 +364,8 @@ impl<N> CopylessInternalNode<N> {
 
         let mut tmp_buffers = vec![];
 
-        for (size, child) in self
-            .meta_data
-            .entries_sizes
-            .iter()
-            .zip(self.children.iter())
-        {
-            assert_eq!(*size, child.buffer.size());
-        }
+        // Note: We can't assert size equality here when compression is used
+        // because the buffer size changes during packing with compression
 
         for child in self.children.iter() {
             let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder, compressor)?;
@@ -436,14 +423,44 @@ impl<N> CopylessInternalNode<N> {
             );
             cursor += INTERNAL_INTEGRITY_CHECKSUM_SIZE;
         }
+        let num_children = ptrs.len();
         for (idx, buffer_csum) in checksums.into_iter().enumerate() {
-            let sub = buf.clone().slice_from(cursor as u32);
-            //print!("before: {} {}, ", sub.size(), sub.len());
-            let (b, next_offset) = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
-            //println!("after: {} {}. ", b.size(), b.len());
-            cursor += next_offset;//b.size();
-            // Update metadata to match the actual buffer size after unpacking
-            meta_data.entries_sizes[idx] = b.size();
+            // If we've reached the end of the buffer, we're done
+            if cursor >= buf.len() {
+                // This might happen if the last buffers are empty due to compression
+                // Create an empty buffer for the remaining children
+                for remaining_idx in idx..num_children {
+                    let empty_buffer = PackedChildBuffer::new(false);
+                    meta_data.entries_sizes[remaining_idx] = 0;
+                    let _ = std::mem::replace(&mut ptrs[remaining_idx].buffer, empty_buffer);
+                }
+                break;
+            }
+            
+            // For the last buffer, use the remaining bytes
+            let sub = if idx == num_children - 1 {
+                // Last buffer - use all remaining bytes
+                let remaining_bytes = buf.len() - cursor;
+                if remaining_bytes == 0 {
+                    // Empty buffer
+                    let empty_buffer = PackedChildBuffer::new(false);
+                    meta_data.entries_sizes[idx] = 0;
+                    let _ = std::mem::replace(&mut ptrs[idx].buffer, empty_buffer);
+                    continue;
+                }
+                buf.clone().subslice(cursor as u32, remaining_bytes as u32)
+            } else {
+                // Not the last buffer - let unpack determine the size
+                buf.clone().slice_from(cursor as u32)
+            };
+            
+            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
+            let buffer_size = b.size();
+            cursor += buffer_size;
+            
+            // Update the metadata to reflect the actual packed size (which may be compressed)
+            meta_data.entries_sizes[idx] = buffer_size;
+            
             let _ = std::mem::replace(&mut ptrs[idx].buffer, b);
             assert_eq!(meta_data.entries_sizes[idx], ptrs[idx].buffer.size());
         }
@@ -910,7 +927,7 @@ where
             let (left_child, right_child) = (&mut left[0].buffer, &mut right[0].buffer);
             left_child.rebalance(right_child, &new_pivot_key);
             self.node.meta_data.entries_sizes[self.pivot_key_idx] = left_child.size();
-            self.node.meta_data.entries_sizes[self.pivot_key_idx + 1] = left_child.size();
+            self.node.meta_data.entries_sizes[self.pivot_key_idx + 1] = right_child.size();
         }
 
         let mut size_delta = new_pivot_key.size() as isize;

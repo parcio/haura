@@ -56,8 +56,18 @@ impl Snappy {
 impl CompressionState for SnappyCompression {
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let mut encoder = Encoder::new();
-        encoder.compress_vec(data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy compression failed: {}", e)).into())
+        let compressed_data = encoder.compress_vec(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy compression failed: {}", e)))?;
+
+        let size = data.len() as u32;
+        let comlen = compressed_data.len() as u32;
+
+        let mut result = Vec::with_capacity(4 + 4 + compressed_data.len());
+        result.extend_from_slice(&size.to_le_bytes());
+        result.extend_from_slice(&comlen.to_le_bytes());
+        result.extend_from_slice(&compressed_data);
+
+        Ok(result)
     }
 
     fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
@@ -84,8 +94,21 @@ impl CompressionState for SnappyCompression {
 
 impl DecompressionState for SnappyDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
+        if data.len() < 8 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short").into());
+        }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated").into());
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
         let mut decoder = Decoder::new();
-        let decompressed = decoder.decompress_vec(data)
+        let decompressed = decoder.decompress_vec(compressed)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy decompression failed: {}", e)))?;
         
         Ok(SlicedCowBytes::from(decompressed))

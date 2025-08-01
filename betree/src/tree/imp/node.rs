@@ -208,13 +208,11 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                     .complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
-            //println!("b..");
-            let (b, n) = PackedChildBuffer::unpack(
+            Ok(Node(MemLeaf(PackedChildBuffer::unpack(
                 data.into_sliced_cow_bytes().slice_from(4),
                 integrity_mode,
                 decompressor,
-            )?;
-            Ok(Node(MemLeaf(b)))
+            )?)))
         } else {
             panic!(
                 "Unkown bytes to unpack. [0..4]: {}",

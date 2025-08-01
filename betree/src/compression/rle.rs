@@ -149,7 +149,16 @@ impl CompressionState for RleCompression {
         // Update run count
         result[run_count_pos..run_count_pos + 4].copy_from_slice(&run_count.to_le_bytes());
 
-        Ok(result)
+        // Add size headers like other compression algorithms
+        let size = data.len() as u32;
+        let comlen = result.len() as u32;
+
+        let mut final_result = Vec::with_capacity(4 + 4 + result.len());
+        final_result.extend_from_slice(&size.to_le_bytes());
+        final_result.extend_from_slice(&comlen.to_le_bytes());
+        final_result.extend_from_slice(&result);
+
+        Ok(final_result)
     }
 
     fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
@@ -176,44 +185,57 @@ impl CompressionState for RleCompression {
 
 impl DecompressionState for RleDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
-        if data.len() < 5 {
-            return Ok(SlicedCowBytes::from(data.to_vec()));
+        if data.len() < 8 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short").into());
+        }
+
+        let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let comp_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+
+        if data.len() < 8 + comp_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Compressed payload truncated").into());
+        }
+
+        let compressed = &data[8..8 + comp_len];
+
+        if compressed.len() < 5 {
+            return Ok(SlicedCowBytes::from(compressed.to_vec()));
         }
 
         let mut pos = 0;
-        let value_size = data[pos] as usize;
+        let value_size = compressed[pos] as usize;
         pos += 1;
 
-        let run_count = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let run_count = u32::from_le_bytes([compressed[pos], compressed[pos + 1], compressed[pos + 2], compressed[pos + 3]]) as usize;
         pos += 4;
 
         let mut result = Vec::new();
 
         for _ in 0..run_count {
-            if pos >= data.len() { break; }
+            if pos >= compressed.len() { break; }
             
-            let run_type = data[pos];
+            let run_type = compressed[pos];
             pos += 1;
 
             match run_type {
                 0 => {
                     // Literal run
-                    if pos + 2 > data.len() { break; }
-                    let count = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
+                    if pos + 2 > compressed.len() { break; }
+                    let count = u16::from_le_bytes([compressed[pos], compressed[pos + 1]]) as usize;
                     pos += 2;
 
-                    if pos + count * value_size > data.len() { break; }
-                    result.extend_from_slice(&data[pos..pos + count * value_size]);
+                    if pos + count * value_size > compressed.len() { break; }
+                    result.extend_from_slice(&compressed[pos..pos + count * value_size]);
                     pos += count * value_size;
                 }
                 1 => {
                     // Repeated run
-                    if pos + 4 > data.len() { break; }
-                    let count = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+                    if pos + 4 > compressed.len() { break; }
+                    let count = u32::from_le_bytes([compressed[pos], compressed[pos + 1], compressed[pos + 2], compressed[pos + 3]]) as usize;
                     pos += 4;
 
-                    if pos + value_size > data.len() { break; }
-                    let value = &data[pos..pos + value_size];
+                    if pos + value_size > compressed.len() { break; }
+                    let value = &compressed[pos..pos + value_size];
                     for _ in 0..count {
                         result.extend_from_slice(value);
                     }
