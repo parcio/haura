@@ -364,7 +364,7 @@ class BenchmarkHeatmapGenerator:
         plt.tight_layout()
         
         # Save heatmap
-        output_file = self.results_dir / f'heatmap_{metric_name}.png'
+        output_file = self.results_dir / f'ycsb_{self.ycsb_char}_heatmap_{metric_name}.png'
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         plt.close()
         

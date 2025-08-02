@@ -175,14 +175,14 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     fn pack<W: Write, F: Fn(&[u8]) -> C, C: Checksum>(
         &self,
         mut writer: W,
-        _: PreparePack,
+        prepare_pack: PreparePack,
         csum_builder: F, 
         compressor: &CompressionConfiguration
     ) -> Result<IntegrityMode<C>, io::Error> {
         match self.0 {
             MemLeaf(ref leaf) => {
                 writer.write_all((NodeInnerType::CopylessLeaf as u32).to_be_bytes().as_ref())?;
-                leaf.pack(writer, csum_builder, compressor)
+                leaf.pack(writer, prepare_pack, csum_builder, compressor)
             }
             CopylessInternal(ref cpl_internal) => {
                 writer.write_all(
@@ -190,11 +190,41 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         .to_be_bytes()
                         .as_ref(),
                 )?;
-                cpl_internal.pack(writer, csum_builder, compressor)
+                cpl_internal.pack(writer, prepare_pack, csum_builder, compressor)
             }
         }
     }
 
+    #[cfg(feature = "memory_metrics")]
+    fn unpack_at<C: Checksum>(
+        d_id: DatasetId,
+        data: Buf,
+        integrity_mode: IntegrityMode<C>,
+        decompressor: DecompressionTag,
+        vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>,
+    ) -> Result<Self, io::Error> {
+        if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
+            //println!("a..");
+            Ok(Node(CopylessInternal(
+                CopylessInternalNode::unpack(data, integrity_mode, decompressor, vdev_stats)?
+                    .complete_object_refs(d_id),
+            )))
+        } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
+            Ok(Node(MemLeaf(PackedChildBuffer::unpack(
+                data.into_sliced_cow_bytes().slice_from(4),
+                integrity_mode,
+                decompressor,
+                vdev_stats,
+            )?)))
+        } else {
+            panic!(
+                "Unkown bytes to unpack. [0..4]: {}",
+                u32::from_be_bytes(data[..4].try_into().unwrap())
+            );
+        }
+    }
+
+    #[cfg(not(feature = "memory_metrics"))]
     fn unpack_at<C: Checksum>(
         d_id: DatasetId,
         data: Buf,
@@ -287,7 +317,7 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
             }
         }
         
-        Ok(PreparePack())
+        Ok(PreparePack { storage_kind: _storage_kind })
     }
 }
 

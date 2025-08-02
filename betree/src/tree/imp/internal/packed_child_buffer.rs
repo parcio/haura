@@ -120,6 +120,10 @@ pub(in crate::tree::imp) struct PackedChildBuffer {
     pub(in crate::tree::imp) buffer: Map,
 
     pub(in crate::tree::imp) is_leaf: bool,
+    
+    #[cfg(feature = "memory_metrics")]
+    /// Optional reference to vdev statistics for tracking direct memory access
+    pub(in crate::tree::imp) vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>,
 }
 
 impl Default for PackedChildBuffer {
@@ -167,7 +171,168 @@ impl KeyIdx {
 
 impl Map {
     /// Fetch a mutable version of the internal btree map.
+    #[cfg(feature = "memory_metrics")]
     pub(in crate::tree::imp) fn unpacked(
+        &mut self,
+        vdev_stats: Option<&std::sync::Arc<crate::vdev::AtomicStatistics>>,
+    ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
+        self.unpacked_impl(vdev_stats)
+    }
+
+    #[cfg(not(feature = "memory_metrics"))]
+    pub(in crate::tree::imp) fn unpacked(
+        &mut self,
+    ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
+        self.unpacked_impl()
+    }
+
+    /// Internal implementation of unpacked method
+    #[cfg(feature = "memory_metrics")]
+    fn unpacked_impl(
+        &mut self,
+        vdev_stats: Option<&std::sync::Arc<crate::vdev::AtomicStatistics>>,
+    ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
+        match self {
+            Map::Packed { entry_count, data, decompression_tag } => {
+                // NOTE: copy data before to avoid sync epoch shenanigans
+                // necesary as we might rewrite the original memory region once here
+                let mut keys: Vec<CowBytes> = Vec::with_capacity(*entry_count);
+                let mut key_info = Vec::with_capacity(*entry_count);
+                let mut values_pos: Vec<(u32, u32, Checksum)> = Vec::with_capacity(*entry_count);
+
+                // current in-cache size
+                let mut size_delta: isize = -2 * std::mem::size_of::<usize>() as isize;
+
+                match decompression_tag {
+                    DecompressionTag::None => {
+                        // Uncompressed format
+                        for idx in 0..*entry_count {
+                            size_delta += KeyInfo::static_size() as isize;
+                            let off = HEADER + idx * KEY_IDX_SIZE;
+                            let kidx = KeyIdx::unpack(data.cut(off, 9).try_into().unwrap());
+                            
+                            // Track memory access for key data
+                            #[cfg(feature = "memory_metrics")]
+                            if let Some(stats) = vdev_stats {
+                                stats.memory_access.fetch_add(kidx.len as u64, std::sync::atomic::Ordering::Relaxed);
+                                stats.memory_access_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            
+                            key_info.push(KeyInfo {
+                                storage_preference: StoragePreference::from_u8(kidx.pref),
+                            });
+                            keys.push(CowBytes::from(
+                                data.cut(kidx.pos as usize, kidx.len as usize),
+                            ));
+                            size_delta += kidx.len as isize;
+
+                            let val_pos_off = kidx.pos as usize + kidx.len as usize;
+                            let val_pos = u32::from_le_bytes(data.cut(val_pos_off, 4).try_into().unwrap());
+                            let val_len =
+                                u32::from_le_bytes(data.cut(val_pos_off + 4, 4).try_into().unwrap());
+                            let val_csum: crate::database::Checksum = bincode::deserialize(data.cut(
+                                val_pos_off + 4 + 4,
+                                crate::database::Checksum::static_size(),
+                            ))
+                            .unwrap();
+                            values_pos.push((val_pos, val_len, val_csum));
+                            
+                            // Track memory access for value data
+                            #[cfg(feature = "memory_metrics")]
+                            if let Some(stats) = vdev_stats {
+                                stats.memory_access.fetch_add(val_len as u64, std::sync::atomic::Ordering::Relaxed);
+                                stats.memory_access_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            
+                            size_delta += val_len as isize;
+                        }
+                    }
+                    _ => {
+                        // Compressed format - same structure as uncompressed, but values are compressed
+                        for idx in 0..*entry_count {
+                            size_delta += KeyInfo::static_size() as isize;
+                            let off = HEADER + idx * KEY_IDX_SIZE;
+                            let kidx = KeyIdx::unpack(data.cut(off, 9).try_into().unwrap());
+                            
+                            // Track memory access for key data
+                            #[cfg(feature = "memory_metrics")]
+                            if let Some(stats) = vdev_stats {
+                                stats.memory_access.fetch_add(kidx.len as u64, std::sync::atomic::Ordering::Relaxed);
+                                stats.memory_access_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            
+                            key_info.push(KeyInfo {
+                                storage_preference: StoragePreference::from_u8(kidx.pref),
+                            });
+                            keys.push(CowBytes::from(
+                                data.cut(kidx.pos as usize, kidx.len as usize),
+                            ));
+                            size_delta += kidx.len as isize;
+
+                            let val_pos_off = kidx.pos as usize + kidx.len as usize;
+                            let val_pos = u32::from_le_bytes(data.cut(val_pos_off, 4).try_into().unwrap());
+                            let val_len =
+                                u32::from_le_bytes(data.cut(val_pos_off + 4, 4).try_into().unwrap());
+                            let val_csum: crate::database::Checksum = bincode::deserialize(data.cut(
+                                val_pos_off + 4 + 4,
+                                crate::database::Checksum::static_size(),
+                            ))
+                            .unwrap();
+                            values_pos.push((val_pos, val_len, val_csum));
+                            
+                            // Track memory access for value data
+                            #[cfg(feature = "memory_metrics")]
+                            if let Some(stats) = vdev_stats {
+                                stats.memory_access.fetch_add(val_len as u64, std::sync::atomic::Ordering::Relaxed);
+                                stats.memory_access_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            
+                            size_delta += val_len as isize;
+                        }
+                    }
+                }
+
+                *self = Map::Unpacked(BTreeMap::from_iter(keys.into_iter().zip(
+                    key_info.into_iter().zip(values_pos.into_iter().map(
+                        move |(pos, len, csum)| {
+                            // NOTE: copies data to not be invalidated later on rewrites... could be solved differently
+                            let compressed_buf = CowBytes::from(&data[pos as usize..(pos + len) as usize])
+                                .slice_from(0);
+                            
+                            // Decompress if needed
+                            let buf = match decompression_tag {
+                                DecompressionTag::None => compressed_buf,
+                                _ => {
+                                    let mut decompressor_state = decompression_tag.new_decompression()
+                                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}", e)))
+                                        .unwrap();
+                                    decompressor_state.decompress_val(&compressed_buf)
+                                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}", e)))
+                                        .unwrap()
+                                }
+                            };
+                            
+                            csum.verify(&buf).unwrap();
+                            buf
+                        },
+                    )),
+                )));
+
+                WithCacheSizeChange::new(
+                    match self {
+                        Map::Unpacked(ref mut map) => map,
+                        _ => unreachable!(),
+                    },
+                    size_delta,
+                )
+            }
+            Map::Unpacked(ref mut map) => WithCacheSizeChange::new(map, 0),
+        }
+    }
+
+    /// Internal implementation of unpacked method (non-memory_metrics version)
+    #[cfg(not(feature = "memory_metrics"))]
+    fn unpacked_impl(
         &mut self,
     ) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
         match self {
@@ -338,6 +503,66 @@ impl Map {
         }
     }
 
+    #[cfg(feature = "memory_metrics")]
+    pub fn get(&self, key: &[u8], vdev_stats: Option<&std::sync::Arc<crate::vdev::AtomicStatistics>>) -> Option<(KeyInfo, SlicedCowBytes)> {
+        match self {
+            Map::Packed { data, decompression_tag, .. } => self.find(key).map(|(pref, pos, len, csum)| {
+                // Track memory access for metrics
+                #[cfg(feature = "memory_metrics")]
+                if let Some(stats) = vdev_stats {
+                    let bytes_read = len as u64;
+                    stats.memory_access.fetch_add(bytes_read, std::sync::atomic::Ordering::Relaxed);
+                    stats.memory_access_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                
+                let compressed_buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
+                
+                // Decompress if needed
+                let buf = match decompression_tag {
+                    DecompressionTag::None => {
+                        // TODO: Pass on result
+                        csum.verify(&compressed_buf).unwrap();
+                        compressed_buf.slice_from(0)
+                    },
+                    _ => {
+                        let mut decompressor_state = decompression_tag.new_decompression()
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}", e)))
+                            .unwrap();
+                        let decompressed_buf = decompressor_state.decompress_val(&compressed_buf)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}", e)))
+                            .unwrap();
+                        // TODO: Pass on result
+                        csum.verify(&decompressed_buf).unwrap();
+                        decompressed_buf
+                    }
+                };
+                
+                (
+                    KeyInfo {
+                        storage_preference: StoragePreference::from_u8(pref),
+                    },
+                    buf,
+                )
+            }),
+            // TODO: This should be a cheap copy (a few bytes for the pref and
+            // the ptrs in slicedcowbytes) but please check this again.
+            Map::Unpacked(btree) => btree.get(key).cloned(),
+        }
+    }
+
+    /// Check if memory metrics feature is enabled at compile time
+    pub fn is_memory_metrics_enabled() -> bool {
+        #[cfg(feature = "memory_metrics")]
+        {
+            true
+        }
+        #[cfg(not(feature = "memory_metrics"))]
+        {
+            false
+        }
+    }
+
+    #[cfg(not(feature = "memory_metrics"))]
     pub fn get(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
         match self {
             Map::Packed { data, decompression_tag, .. } => self.find(key).map(|(pref, pos, len, csum)| {
@@ -509,7 +734,14 @@ impl PackedChildBuffer {
     }
 
     pub fn get(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
-        self.buffer.get(key)
+        #[cfg(feature = "memory_metrics")]
+        {
+            self.buffer.get(key, self.vdev_stats.as_ref())
+        }
+        #[cfg(not(feature = "memory_metrics"))]
+        {
+            self.buffer.get(key)
+        }
     }
 
     pub fn apply_with_info(
@@ -518,7 +750,7 @@ impl PackedChildBuffer {
         pref: StoragePreference,
     ) -> WithCacheSizeChange<Option<KeyInfo>> {
         self.messages_preference.invalidate();
-        self.buffer.unpacked().map(|tree| {
+        self.unpacked_with_stats().map(|tree| {
             tree.get_mut(key).map(|(keyinfo, _bytes)| {
                 keyinfo.storage_preference = pref;
                 keyinfo.clone()
@@ -527,7 +759,7 @@ impl PackedChildBuffer {
     }
 
     pub fn unpack_data(&mut self) -> WithCacheSizeChange<()> {
-        self.buffer.unpacked().map(|_| ())
+        self.unpacked_with_stats().map(|_| ())
     }
     pub fn split(
         &mut self,
@@ -537,11 +769,19 @@ impl PackedChildBuffer {
         assert!(self.size() > max_size);
         assert!(self.buffer.len() > 2);
 
-        self.buffer.unpacked().map_with_size_change(|buffer| {
-            let mut right_sibling = Self::new(self.is_leaf);
+        let is_leaf = self.is_leaf;
+        #[cfg(feature = "memory_metrics")]
+        let vdev_stats = self.vdev_stats.clone();
+
+        let mut sibling_size = 0;
+        let result = self.unpacked_with_stats().map_with_size_change(|buffer| {
+            let mut right_sibling = Self::new(is_leaf);
+            #[cfg(feature = "memory_metrics")]
+            {
+                right_sibling.vdev_stats = vdev_stats.clone();
+            }
             assert!(right_sibling.entries_size == 0);
 
-            let mut sibling_size = 0;
             let mut sibling_pref = StoragePreference::NONE;
             let mut split_key = None;
             for (k, (keyinfo, v)) in buffer.iter().rev() {
@@ -555,12 +795,8 @@ impl PackedChildBuffer {
             }
             let split_key = split_key.unwrap();
             right_sibling.buffer = Map::Unpacked(buffer.split_off(&split_key));
-            self.entries_size -= sibling_size;
             right_sibling.entries_size = sibling_size;
             right_sibling.messages_preference.set(sibling_pref);
-
-            // have removed many keys from self, no longer certain about own pref, mark invalid
-            self.messages_preference.invalidate();
 
             let pivot_key = buffer.iter().next_back().unwrap().0.clone();
 
@@ -572,7 +808,12 @@ impl PackedChildBuffer {
                 ),
                 -(sibling_size as isize),
             )
-        })
+        });
+        
+        self.entries_size -= sibling_size;
+        // have removed many keys from self, no longer certain about own pref, mark invalid
+        self.messages_preference.invalidate();
+        result
     }
 
     pub(crate) fn insert_msg_buffer<I, M>(
@@ -685,19 +926,24 @@ impl PackedChildBuffer {
     pub fn take(&mut self) -> (BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>, usize) {
         self.messages_preference.invalidate();
         (
-            std::mem::take(&mut self.buffer.unpacked().inner),
+            std::mem::take(&mut self.unpacked_with_stats().inner),
             replace(&mut self.entries_size, 0),
         )
     }
 
     pub fn append(&mut self, other: &mut Self) -> WithCacheSizeChange<()> {
-        self.buffer.unpacked().map_with_size_change(|buffer| {
-            buffer.append(&mut other.buffer.unpacked().inner);
-            self.entries_size += other.entries_size;
-            self.messages_preference
-                .upgrade_atomic(&other.messages_preference);
-            (other.entries_size as isize).into()
-        })
+        let other_entries_size = other.entries_size;
+        let other_messages_preference = other.messages_preference.clone();
+        
+        let result = self.unpacked_with_stats().map_with_size_change(|buffer| {
+            buffer.append(&mut other.unpacked_with_stats().inner);
+            (other_entries_size as isize).into()
+        });
+        
+        self.entries_size += other_entries_size;
+        self.messages_preference
+            .upgrade_atomic(&other_messages_preference);
+        result
     }
 
     /// Splits this `PackedChildBuffer` at `pivot` so that `self` contains all
@@ -711,6 +957,8 @@ impl PackedChildBuffer {
             entries_size: buffer_entries_size,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             is_leaf: self.is_leaf,
+            #[cfg(feature = "memory_metrics")]
+            vdev_stats: self.vdev_stats.clone(),
         }
     }
 
@@ -723,7 +971,7 @@ impl PackedChildBuffer {
         next_key.push(0);
 
         assert!(self.buffer.is_unpacked());
-        let right_buffer = self.buffer.unpacked().inner.split_off(&next_key[..]);
+        let right_buffer = self.unpacked_with_stats().inner.split_off(&next_key[..]);
         self.messages_preference.invalidate();
 
         let right_entry_size = right_buffer
@@ -783,13 +1031,15 @@ impl PackedChildBuffer {
 
         self.messages_preference.upgrade(keyinfo.storage_preference);
 
+        let is_leaf = self.is_leaf;
+        
         // grab cache size change and drop ref
-        let size_change = self.buffer.unpacked();
+        let size_change = self.unpacked_with_stats();
 
         match size_change.inner.entry(key.clone()) {
             Entry::Vacant(e) => {
                 // Resolve messages when the buffer is a leaf.
-                let size_delta = if self.is_leaf {
+                let size_delta = if is_leaf {
                     let mut data = None;
                     msg_action.apply_to_leaf(&key, msg, &mut data);
                     if let Some(data) = data {
@@ -806,9 +1056,11 @@ impl PackedChildBuffer {
                     size
                 };
 
+                // Update entries_size after releasing the borrow
+                let result = size_change.map_with_size_change(|_| (size_delta as isize).into());
                 self.entries_size += size_delta;
                 // assert_eq!(self.cache_size(), old_size + size_delta);
-                size_change.map_with_size_change(|_| (size_delta as isize).into())
+                result
             }
             Entry::Occupied(mut e) => {
                 let lower = e.get_mut();
@@ -818,7 +1070,7 @@ impl PackedChildBuffer {
                 };
                 let lower_size = lower_msg.size();
 
-                let (merged, merged_size) = if self.is_leaf {
+                let (merged, merged_size) = if is_leaf {
                     let mut new = Some(lower_msg);
                     msg_action.apply_to_leaf(&key, msg, &mut new);
                     if let Some(data) = new {
@@ -838,11 +1090,13 @@ impl PackedChildBuffer {
                 };
                 e.get_mut().1 = merged;
 
+                // Update entries_size after releasing the borrow
+                let result = size_change
+                    .map_with_size_change(|_| (merged_size as isize - lower_size as isize).into());
                 self.entries_size += merged_size;
                 self.entries_size -= lower_size;
                 // assert_eq!(self.cache_size(), old_size + merged_size - lower_size);
-                size_change
-                    .map_with_size_change(|_| (merged_size as isize - lower_size as isize).into())
+                result
             }
         }
     }
@@ -855,6 +1109,26 @@ impl PackedChildBuffer {
             entries_size: 0,
             system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
             is_leaf,
+            #[cfg(feature = "memory_metrics")]
+            vdev_stats: None,
+        }
+    }
+
+    #[cfg(feature = "memory_metrics")]
+    /// Set the vdev statistics reference for tracking memory access
+    pub fn set_vdev_stats(&mut self, stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>) {
+        self.vdev_stats = stats;
+    }
+
+    /// Helper method to call unpacked with appropriate parameters
+    fn unpacked_with_stats(&mut self) -> WithCacheSizeChange<&mut BTreeMap<CowBytes, (KeyInfo, SlicedCowBytes)>> {
+        #[cfg(feature = "memory_metrics")]
+        {
+            self.buffer.unpacked(self.vdev_stats.as_ref())
+        }
+        #[cfg(not(feature = "memory_metrics"))]
+        {
+            self.buffer.unpacked()
         }
     }
 
@@ -886,6 +1160,7 @@ impl PackedChildBuffer {
     pub fn pack<W, C, F>(
         &self,
         mut w: W,
+        prepare_pack: crate::data_management::PreparePack,
         csum_builder: F,
 	    compressor: &CompressionConfiguration,
     ) -> Result<IntegrityMode<C>, std::io::Error>
@@ -894,28 +1169,91 @@ impl PackedChildBuffer {
         F: Fn(&[u8]) -> C,
         C: ChecksumTrait,
     {
-        if !self.buffer.is_unpacked() {
-            // Copy the contents of the buffer to the new writer without unpacking.
-            w.write_all(&self.buffer.assert_packed()[..self.size()])?;
-            return Ok(IntegrityMode::Internal {
-                len: self.buffer.len_bytes_contained_in_checksum() as u32,
-                csum: csum_builder(
-                    &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
-                ),
-            });
+        // Determine IntegrityMode based on storage_kind
+        use crate::tree::StorageKind;
+        match prepare_pack.storage_kind {
+            StorageKind::Memory => {
+                // Memory storage: Use Internal mode - node handles compression/checksum
+                if !self.buffer.is_unpacked() {
+                    // Copy the contents of the buffer to the new writer without unpacking.
+                    w.write_all(&self.buffer.assert_packed()[..self.size()])?;
+                    return Ok(IntegrityMode::Internal {
+                        len: self.buffer.len_bytes_contained_in_checksum() as u32,
+                        csum: csum_builder(
+                            &self.buffer.assert_packed()[..self.buffer.len_bytes_contained_in_checksum()],
+                        ),
+                    });
+                }
+
+                // Handle compression cases for memory storage
+                match compressor {
+                    CompressionConfiguration::None => {
+                        // No compression - use the existing working logic
+                        self.pack_uncompressed(w, csum_builder)
+                    }
+                    _ => {
+                        // Compression enabled - use new compression logic
+                        self.pack_compressed(w, csum_builder, compressor)
+                    }
+                }
+            }
+            StorageKind::Ssd | StorageKind::Hdd => {
+                // SSD/HDD storage: Use External mode - DMU handles compression/checksum
+                // Write raw data without internal compression/checksum
+                if !self.buffer.is_unpacked() {
+                    // Copy the contents of the buffer to the new writer without unpacking.
+                    w.write_all(&self.buffer.assert_packed()[..self.size()])?;
+                } else {
+                    // Write unpacked data directly without compression
+                    self.pack_uncompressed_raw(w)?;
+                }
+                Ok(IntegrityMode::External)
+            }
+        }
+    }
+
+    fn pack_uncompressed_raw<W>(
+        &self,
+        mut w: W,
+    ) -> Result<(), std::io::Error>
+    where
+        W: std::io::Write,
+    {
+        use std::io::Write;
+        let mut tmp = vec![];
+
+        if self.is_leaf {
+            tmp.write_all(&[1])?;
+        } else {
+            tmp.write_all(&[0])?;
         }
 
-        // Handle compression cases
-        match compressor {
-            CompressionConfiguration::None => {
-                // No compression - use the existing working logic
-                self.pack_uncompressed(w, csum_builder)
-            }
-            _ => {
-                // Compression enabled - use new compression logic
-                self.pack_compressed(w, csum_builder, compressor)
-            }
+        tmp.write_all(&(self.buffer.assert_unpacked().len() as u32).to_le_bytes())?;
+        tmp.write_all(&(self.entries_size as u32).to_le_bytes())?;
+        tmp.write_all(&[self.messages_preference.unwrap_or_none().as_u8()])?;
+
+        // Write key metadata
+        for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
+            tmp.write_all(&(0u32).to_le_bytes())?; // pos key (will be updated)
+            tmp.write_all(&(key.len() as u32).to_le_bytes())?;
+            tmp.write_all(&[0u8])?; // pref key
         }
+
+        // Write keys and values directly without compression
+        for (key, (_, val)) in self.buffer.assert_unpacked().iter() {
+            tmp.write_all(key)?;
+            tmp.write_all(&(0u32).to_le_bytes())?; // pos val (placeholder)
+            tmp.write_all(&(val.len() as u32).to_le_bytes())?;
+            // No checksum for external mode
+        }
+
+        // Write values directly
+        for (_, (_, val)) in self.buffer.assert_unpacked().iter() {
+            tmp.write_all(val)?;
+        }
+
+        w.write_all(&tmp)?;
+        Ok(())
     }
 
     fn pack_uncompressed<W, C, F>(
@@ -1066,6 +1404,20 @@ impl PackedChildBuffer {
         })
     }
 
+    #[cfg(feature = "memory_metrics")]
+    pub fn unpack<C>(buf: SlicedCowBytes, csum: IntegrityMode<C>, decompressor: DecompressionTag, vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>) -> Result<Self, std::io::Error>
+    where
+        C: ChecksumTrait,
+    {
+        let mut result = match decompressor {
+            DecompressionTag::None => Self::unpack_uncompressed(buf, csum),
+            _ => Self::unpack_compressed(buf, csum, decompressor),
+        }?;
+        result.vdev_stats = vdev_stats;
+        Ok(result)
+    }
+
+    #[cfg(not(feature = "memory_metrics"))]
     pub fn unpack<C>(buf: SlicedCowBytes, csum: IntegrityMode<C>, decompressor: DecompressionTag) -> Result<Self, std::io::Error>
     where
         C: ChecksumTrait,
@@ -1088,6 +1440,8 @@ impl PackedChildBuffer {
                 entries_size: 0,
                 is_leaf: true, // Default to leaf for empty buffers
                 system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+                #[cfg(feature = "memory_metrics")]
+                vdev_stats: None,
             });
         }
 
@@ -1124,6 +1478,8 @@ impl PackedChildBuffer {
             entries_size,
             buffer,
             is_leaf,
+            #[cfg(feature = "memory_metrics")]
+            vdev_stats: None,
         })
     }
 
@@ -1139,6 +1495,8 @@ impl PackedChildBuffer {
                 entries_size: 0,
                 is_leaf: true,
                 system_storage_preference: AtomicSystemStoragePreference::from(StoragePreference::NONE),
+                #[cfg(feature = "memory_metrics")]
+                vdev_stats: None,
             });
         }
 
@@ -1178,6 +1536,8 @@ impl PackedChildBuffer {
             entries_size: compressed_size,
             buffer,
             is_leaf,
+            #[cfg(feature = "memory_metrics")]
+            vdev_stats: None,
         })
     }
 }
@@ -1201,7 +1561,7 @@ impl PackedChildBuffer {
         );
         let mut keys = Vec::new();
 
-        let buffer = self.buffer.unpacked();
+        let buffer = self.unpacked_with_stats();
 
         for (key, msg) in buffer.inner.range_mut::<[u8], _>(range) {
             size_delta += key.size() + msg.1.size();
@@ -1210,9 +1570,10 @@ impl PackedChildBuffer {
         for key in keys.into_iter() {
             buffer.inner.remove(&key);
         }
+        let result = (buffer.size_delta - (size_delta as isize)).into();
         self.entries_size -= size_delta;
         self.messages_preference.invalidate();
-        (buffer.size_delta - (size_delta as isize)).into()
+        result
     }
 }
 

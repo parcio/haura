@@ -16,7 +16,7 @@ pub struct Memory {
     mem: RwLock<Box<[u8]>>,
     id: String,
     size: Block<u64>,
-    stats: AtomicStatistics,
+    stats: std::sync::Arc<AtomicStatistics>,
 }
 
 impl Memory {
@@ -26,7 +26,7 @@ impl Memory {
             mem: RwLock::new(vec![0; size].into_boxed_slice()),
             id,
             size: Block::from_bytes(size as u64),
-            stats: Default::default(),
+            stats: std::sync::Arc::new(AtomicStatistics::default()),
         })
     }
 
@@ -159,6 +159,11 @@ impl Vdev for Memory {
 
     fn stats(&self) -> Statistics {
         self.stats.as_stats()
+    }
+
+    #[cfg(feature = "memory_metrics")]
+    fn atomic_stats(&self) -> Option<std::sync::Arc<AtomicStatistics>> {
+        Some(self.stats.clone())
     }
 
     fn for_each_child(&self, _f: &mut dyn FnMut(&dyn Vdev)) {}

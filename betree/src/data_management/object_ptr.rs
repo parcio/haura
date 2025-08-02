@@ -109,11 +109,25 @@ impl<D> ObjectPointer<D> {
             };
 
         //let data = decompression_state.decompress(compressed_data)?;
-        Ok(super::Object::unpack_at(
-            self.info(),
-            data,
-            self.integrity_mode.clone(),
-            self.decompression_tag(),
-        )?)
+        #[cfg(feature = "memory_metrics")]
+        {
+            let vdev_stats = pool.get_vdev_stats(self.offset());
+            Ok(super::Object::unpack_at(
+                self.info(),
+                data,
+                self.integrity_mode.clone(),
+                self.decompression_tag(),
+                vdev_stats,
+            )?)
+        }
+        #[cfg(not(feature = "memory_metrics"))]
+        {
+            Ok(super::Object::unpack_at(
+                self.info(),
+                data,
+                self.integrity_mode.clone(),
+                self.decompression_tag(),
+            )?)
+        }
     }
 }

@@ -337,6 +337,7 @@ impl<N> CopylessInternalNode<N> {
     pub fn pack<W: std::io::Write, C, F>(
         &self,
         mut w: W,
+        prepare_pack: crate::data_management::PreparePack,
         csum_builder: F,
 	compressor: &CompressionConfiguration,
     ) -> Result<IntegrityMode<C>, std::io::Error>
@@ -368,7 +369,7 @@ impl<N> CopylessInternalNode<N> {
         // because the buffer size changes during packing with compression
 
         for child in self.children.iter() {
-            let integrity = child.buffer.pack(&mut tmp_buffers, &csum_builder, compressor)?;
+            let integrity = child.buffer.pack(&mut tmp_buffers, prepare_pack, &csum_builder, compressor)?;
             assert_eq!(
                 bincode::serialized_size(&integrity).unwrap(),
                 INTERNAL_INTEGRITY_CHECKSUM_SIZE as u64
@@ -377,17 +378,47 @@ impl<N> CopylessInternalNode<N> {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         }
 
-        let csum = csum_builder(&tmp);
         w.write_all(&tmp)?;
         w.write_all(&tmp_buffers)?;
-        Ok(IntegrityMode::Internal {
-            csum,
-            len: tmp.len() as u32,
-        })
+        
+        // Determine IntegrityMode based on storage_kind
+        use crate::tree::StorageKind;
+        match prepare_pack.storage_kind {
+            StorageKind::Memory => {
+                // Memory storage: Use Internal mode - node handles checksum
+                let csum = csum_builder(&tmp);
+                Ok(IntegrityMode::Internal {
+                    csum,
+                    len: tmp.len() as u32,
+                })
+            }
+            StorageKind::Ssd | StorageKind::Hdd => {
+                // SSD/HDD storage: Use External mode - DMU handles checksum
+                Ok(IntegrityMode::External)
+            }
+        }
     }
 
     /// Read object from a byte buffer and instantiate it.
+    #[cfg(not(feature = "memory_metrics"))]
     pub fn unpack<C: Checksum>(buf: Buf, csum: IntegrityMode<C>, decompressor: DecompressionTag) -> Result<Self, std::io::Error>
+    where
+        N: serde::de::DeserializeOwned + StaticSize,
+    {
+        Self::unpack_impl(buf, csum, decompressor, None)
+    }
+
+    /// Read object from a byte buffer and instantiate it with memory metrics support.
+    #[cfg(feature = "memory_metrics")]
+    pub fn unpack<C: Checksum>(buf: Buf, csum: IntegrityMode<C>, decompressor: DecompressionTag, vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>) -> Result<Self, std::io::Error>
+    where
+        N: serde::de::DeserializeOwned + StaticSize,
+    {
+        Self::unpack_impl(buf, csum, decompressor, vdev_stats)
+    }
+
+    /// Internal implementation for unpacking that handles both memory_metrics and non-memory_metrics cases
+    fn unpack_impl<C: Checksum>(buf: Buf, csum: IntegrityMode<C>, decompressor: DecompressionTag, vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>) -> Result<Self, std::io::Error>
     where
         N: serde::de::DeserializeOwned + StaticSize,
     {
@@ -454,7 +485,16 @@ impl<N> CopylessInternalNode<N> {
                 buf.clone().slice_from(cursor as u32)
             };
             
-            let b: PackedChildBuffer = PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?;
+            let b: PackedChildBuffer = {
+                #[cfg(feature = "memory_metrics")]
+                {
+                    PackedChildBuffer::unpack(sub, buffer_csum, decompressor, vdev_stats.clone())?
+                }
+                #[cfg(not(feature = "memory_metrics"))]
+                {
+                    PackedChildBuffer::unpack(sub, buffer_csum, decompressor)?
+                }
+            };
             let buffer_size = b.size();
             cursor += buffer_size;
             

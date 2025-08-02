@@ -112,8 +112,11 @@ pub trait HasStoragePreference {
 }
 
 /// Intermediary structure to prove that media constraints have been checked.
-/// This is more of a hack since i don't want to pull apart the trait.
-pub struct PreparePack();
+/// Contains storage kind information to determine integrity mode.
+#[derive(Debug, Clone, Copy)]
+pub struct PreparePack {
+    pub storage_kind: StorageKind,
+}
 
 /// Which integrity mode is used by the nodes. Can be used to skip the
 /// processing of an entire node if it is not required to ensure integrity of
@@ -166,6 +169,16 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         compressor: &CompressionConfiguration
     ) -> Result<IntegrityMode<C>, io::Error>;
     /// Unpacks the object from the given `data`.
+    #[cfg(feature = "memory_metrics")]
+    fn unpack_at<C: Checksum>(
+        d_id: DatasetId,
+        data: Buf,
+        integrity_mode: IntegrityMode<C>,
+        decompressor: DecompressionTag,
+        vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>,
+    ) -> Result<Self, io::Error>;
+
+    #[cfg(not(feature = "memory_metrics"))]
     fn unpack_at<C: Checksum>(
         d_id: DatasetId,
         data: Buf,

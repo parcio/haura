@@ -24,23 +24,33 @@ pub struct Statistics {
     pub checksum_errors: Block<u64>,
     /// The total number of blocks of failed write requests
     pub failed_writes: Block<u64>,
+    #[cfg(feature = "memory_metrics")]
+    /// The total number of bytes of decompressed data accessed from memory
+    pub memory_access: u64,
+    #[cfg(feature = "memory_metrics")]
+    /// The total number of times memory was accessed for decompressed data
+    pub memory_access_count: u64,
     #[cfg(feature = "latency_metrics")]
     /// The average latency over all read operations
     pub read_latency: u64,
 }
 
 #[derive(Default, Debug)]
-struct AtomicStatistics {
-    read: AtomicU64,
-    written: AtomicU64,
-    failed_reads: AtomicU64,
-    checksum_errors: AtomicU64,
-    repaired: AtomicU64,
-    failed_writes: AtomicU64,
+pub(crate) struct AtomicStatistics {
+    pub(crate) read: AtomicU64,
+    pub(crate) written: AtomicU64,
+    pub(crate) failed_reads: AtomicU64,
+    pub(crate) checksum_errors: AtomicU64,
+    pub(crate) repaired: AtomicU64,
+    pub(crate) failed_writes: AtomicU64,
+    #[cfg(feature = "memory_metrics")]
+    pub(crate) memory_access: AtomicU64,
+    #[cfg(feature = "memory_metrics")]
+    pub(crate) memory_access_count: AtomicU64,
     #[cfg(feature = "latency_metrics")]
-    prev_read: AtomicU64,
+    pub(crate) prev_read: AtomicU64,
     #[cfg(feature = "latency_metrics")]
-    read_op_latency: AtomicU64,
+    pub(crate) read_op_latency: AtomicU64,
 }
 
 impl AtomicStatistics {
@@ -56,6 +66,10 @@ impl AtomicStatistics {
             failed_reads: Block(self.failed_reads.load(Ordering::Relaxed)),
             checksum_errors: Block(self.checksum_errors.load(Ordering::Relaxed)),
             failed_writes: Block(self.failed_writes.load(Ordering::Relaxed)),
+            #[cfg(feature = "memory_metrics")]
+            memory_access: self.memory_access.load(Ordering::Relaxed),
+            #[cfg(feature = "memory_metrics")]
+            memory_access_count: self.memory_access_count.load(Ordering::Relaxed),
             #[cfg(feature = "latency_metrics")]
             read_latency: self
                 .read_op_latency
@@ -165,6 +179,10 @@ pub trait Vdev: Send + Sync {
 
     /// Returns statistics about this vedv
     fn stats(&self) -> Statistics;
+
+    /// Returns atomic statistics reference for memory metrics tracking
+    #[cfg(feature = "memory_metrics")]
+    fn atomic_stats(&self) -> Option<std::sync::Arc<AtomicStatistics>>;
 
     /// Executes `f` for each child vdev.
     fn for_each_child(&self, f: &mut dyn FnMut(&dyn Vdev));
