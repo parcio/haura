@@ -507,12 +507,18 @@ where
                 (buf.into_buf(), crate::compression::DecompressionTag::None)
             }
             crate::tree::StorageKind::Ssd | crate::tree::StorageKind::Hdd => {
-                // For SSD/HDD mode, apply block-level compression to the entire packed node
-                debug!("SSD/HDD mode: Applying block-level compression");
-                let uncompressed_data = buf.into_buf();
-                let mut compression_state = compression.new_compression()?;
-                let compressed = compression_state.compress_buf(uncompressed_data)?;
-                (compressed, compression.decompression_tag())
+                // For SSD/HDD mode, apply block-level compression to the entire packed node if compression is enabled
+                let decompression_tag = compression.decompression_tag();
+                if matches!(decompression_tag, crate::compression::DecompressionTag::None) {
+                    debug!("SSD/HDD mode: No compression (None configured)");
+                    (buf.into_buf(), crate::compression::DecompressionTag::None)
+                } else {
+                    debug!("SSD/HDD mode: Applying block-level compression");
+                    let uncompressed_data = buf.into_buf();
+                    let mut compression_state = compression.new_compression()?;
+                    let compressed = compression_state.compress_buf(uncompressed_data)?;
+                    (compressed, decompression_tag)
+                }
             }
         };
 

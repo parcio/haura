@@ -928,7 +928,8 @@ impl PackedChildBuffer {
         )?;
         
         // Determine if we should use value-level compression
-        let use_value_compression = matches!(storage_kind, crate::tree::StorageKind::Memory) && compression.is_some();
+        let use_value_compression = matches!(storage_kind, crate::tree::StorageKind::Memory) 
+            && compression.as_ref().map_or(false, |c| c.is_compression_enabled());
         
         // Write compression type (0 = none, 1 = zstd, 2 = lz4, etc.)
         let compression_type = if use_value_compression {
