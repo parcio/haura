@@ -60,6 +60,37 @@ impl CompressionConfiguration {
         !matches!(self, CompressionConfiguration::None)
     }
 
+    /// Get the compression type ID for metadata storage
+    pub fn compression_type_id(&self) -> u8 {
+        match self {
+            CompressionConfiguration::None => 0,
+            CompressionConfiguration::Zstd(_) => 1,
+            CompressionConfiguration::Lz4(_) => 2,
+            CompressionConfiguration::Snappy(_) => 3,
+            CompressionConfiguration::Dictionary(_) => 4,
+            CompressionConfiguration::Rle(_) => 5,
+            CompressionConfiguration::Delta(_) => 6,
+            CompressionConfiguration::Gorilla(_) => 7,
+            CompressionConfiguration::Toast(_) => 8,
+        }
+    }
+
+    /// Get the decompression tag from compression type ID
+    pub fn decompression_tag_from_id(compression_type_id: u8) -> DecompressionTag {
+        match compression_type_id {
+            0 => DecompressionTag::None,
+            1 => DecompressionTag::Zstd,
+            2 => DecompressionTag::Lz4,
+            3 => DecompressionTag::Snappy,
+            4 => DecompressionTag::Dictionary,
+            5 => DecompressionTag::Rle,
+            6 => DecompressionTag::Delta,
+            7 => DecompressionTag::Gorilla,
+            8 => DecompressionTag::Toast,
+            _ => panic!("Unknown compression type ID: {}", compression_type_id),
+        }
+    }
+
     /// Create a compression state directly (high performance)
     pub fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
         match self {

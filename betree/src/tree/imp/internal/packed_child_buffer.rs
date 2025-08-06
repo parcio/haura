@@ -220,13 +220,8 @@ impl Map {
                                 // No compression
                                 compressed_buf
                             } else {
-                                // Decompress the value using DecompressionTag
-                                let decompression_tag = match *compression_type {
-                                    1 => crate::compression::DecompressionTag::Zstd,
-                                    2 => crate::compression::DecompressionTag::Lz4,
-                                    3 => crate::compression::DecompressionTag::Snappy,
-                                    _ => panic!("Unknown compression type: {}", *compression_type),
-                                };
+                                // Decompress the value using centralized mapping
+                                let decompression_tag = crate::compression::CompressionConfiguration::decompression_tag_from_id(*compression_type);
                                 
                                 let mut decompressor = decompression_tag.new_decompression()
                                     .expect("Failed to create decompressor");
@@ -324,13 +319,8 @@ impl Map {
                     // No compression
                     compressed_buf.slice_from(0)
                 } else {
-                    // Decompress the value using DecompressionTag
-                    let decompression_tag = match *compression_type {
-                        1 => crate::compression::DecompressionTag::Zstd,
-                        2 => crate::compression::DecompressionTag::Lz4,
-                        3 => crate::compression::DecompressionTag::Snappy,
-                        _ => panic!("Unknown compression type: {}", *compression_type),
-                    };
+                    // Decompress the value using centralized mapping
+                    let decompression_tag = crate::compression::CompressionConfiguration::decompression_tag_from_id(*compression_type);
                     
                     let mut decompressor = decompression_tag.new_decompression()
                         .expect("Failed to create decompressor");
@@ -586,13 +576,8 @@ impl<'a> Iterator for PackedBufferIterator<'a> {
             // No compression
             compressed_val
         } else {
-            // Decompress the value using DecompressionTag
-            let decompression_tag = match self.compression_type {
-                1 => crate::compression::DecompressionTag::Zstd,
-                2 => crate::compression::DecompressionTag::Lz4,
-                3 => crate::compression::DecompressionTag::Snappy,
-                _ => panic!("Unknown compression type: {}", self.compression_type),
-            };
+            // Decompress the value using centralized mapping
+            let decompression_tag = crate::compression::CompressionConfiguration::decompression_tag_from_id(self.compression_type);
             
             let mut decompressor = decompression_tag.new_decompression()
                 .expect("Failed to create decompressor");
@@ -931,14 +916,9 @@ impl PackedChildBuffer {
         let use_value_compression = matches!(storage_kind, crate::tree::StorageKind::Memory) 
             && compression.as_ref().map_or(false, |c| c.is_compression_enabled());
         
-        // Write compression type (0 = none, 1 = zstd, 2 = lz4, etc.)
+        // Write compression type using centralized mapping
         let compression_type = if use_value_compression {
-            match compression.as_ref().unwrap() {
-                crate::compression::CompressionConfiguration::Zstd(_) => 1u8,
-                crate::compression::CompressionConfiguration::Lz4(_) => 2u8,
-                crate::compression::CompressionConfiguration::Snappy(_) => 3u8,
-                _ => 1u8, // Default to Zstd for other types
-            }
+            compression.as_ref().unwrap().compression_type_id()
         } else {
             0u8
         };
