@@ -19,6 +19,10 @@ use procfs::process::Process;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus;
 
+use std::fs;
+use std::io::{BufReader, Read};
+//use std::path::Path;
+
 pub mod bufreader;
 
 pub type Database = database::Database;
@@ -117,6 +121,116 @@ impl KvClient {
             keys.push(k);
         }
         self.db.write().sync().unwrap();
+        keys
+    }
+
+    pub fn fill_entries_with_data_type(&mut self, entries: u64, entry_size: u32, data_type: &str) -> Vec<[u8; 8]> {
+        let mut keys = vec![];
+        
+        for idx in 0..entries {
+            let value = match data_type {
+                "int" => {
+                    // Fill with random integers
+                    let mut value = vec![0u8; entry_size as usize];
+                    let num_ints = entry_size as usize / 4; // 4 bytes per i32
+                    let remaining_bytes = entry_size as usize % 4;
+                    
+                    for i in 0..num_ints {
+                        let random_int: i32 = self.rng.gen();
+                        let bytes = random_int.to_le_bytes();
+                        value[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
+                    }
+                    
+                    // Fill remaining bytes with random data
+                    if remaining_bytes > 0 {
+                        let start_idx = num_ints * 4;
+                        self.rng.fill(&mut value[start_idx..]);
+                    }
+                    
+                    // Sort the value vector
+                    value.sort();
+                    
+                    value
+                }
+                "float" => {
+                    // Fill with random floats
+                    let mut value = vec![0u8; entry_size as usize];
+                    let num_floats = entry_size as usize / 4; // 4 bytes per f32
+                    let remaining_bytes = entry_size as usize % 4;
+                    
+                    for i in 0..num_floats {
+                        let random_float: f32 = self.rng.gen();
+                        let bytes = random_float.to_le_bytes();
+                        value[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
+                    }
+                    
+                    // Fill remaining bytes with random data
+                    if remaining_bytes > 0 {
+                        let start_idx = num_floats * 4;
+                        self.rng.fill(&mut value[start_idx..]);
+                    }
+                    
+                    // Sort the value vector
+                    value.sort();
+                    
+                    value
+                }
+                _ => {
+                    // Default: fill with random bytes (same as original)
+                    let mut value = vec![0u8; entry_size as usize];
+                    self.rng.fill(&mut value[..]);
+                    
+                    // Sort the value vector
+                    value.sort();
+                    
+                    value
+                }
+            };
+            
+            let k = (idx as u64).to_be_bytes();
+            self.ds.insert(&k[..], &value).unwrap();
+            keys.push(k);
+        }
+        
+        self.db.write().sync().unwrap();
+        keys
+    }
+
+    pub fn fill_entries_from_path<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        chunk_size: u32, // now explicitly used as variable chunk size
+    ) -> Vec<[u8; 8]> {
+        let mut keys = Vec::new();
+        let mut idx = 0u64;
+        println!("fill_entries_from_path");
+        for entry in fs::read_dir(path).expect("Failed to read directory") {
+            let entry = entry.expect("Invalid directory entry");
+            let file_path = entry.path();
+
+            if file_path.is_file() {
+                let file = File::open(&file_path).expect("Failed to open file");
+                let mut reader = BufReader::new(file);
+
+                loop {
+                    let mut buffer = vec![0u8; chunk_size as usize];
+                    let bytes_read = reader.read(&mut buffer).expect("Read error");
+
+                    if bytes_read == 0 {
+                        break; // end of file
+                    }
+
+                    buffer.truncate(bytes_read); // ensure last chunk has correct size
+                    let k = idx.to_be_bytes();
+                    self.ds.insert(&k[..], &buffer).unwrap();
+                    keys.push(k);
+                    idx += 1;
+                }
+            }
+        }
+
+        self.db.write().sync().unwrap();
+        //self.db.write().flush_().unwrap();
         keys
     }
 

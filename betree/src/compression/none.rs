@@ -7,7 +7,10 @@ use crate::{
     size::StaticSize,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::to_vec;
 use std::io;
+use std::sync::{Arc, Mutex};
+use crate::cow_bytes::{CowBytes, SlicedCowBytes};
 
 /// No-op compression.
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
@@ -24,7 +27,7 @@ impl StaticSize for None {
 }
 
 impl CompressionBuilder for None {
-    fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
+    fn create_compressor(&self) -> Result<Box<dyn CompressionState>> {
         Ok(Box::new(NoneCompression {
             buf: BufWrite::with_capacity(DEFAULT_BUFFER_SIZE),
         }))
@@ -57,13 +60,73 @@ impl io::Write for NoneCompression {
 }
 
 impl CompressionState for NoneCompression {
-    fn finish(&mut self, buf: Buf) -> Result<Buf> {
+    fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.to_vec())
+    }
+
+    fn compress_buf(&mut self, buf: Buf) -> Result<Buf> {
         Ok(buf)
     }
 }
 
 impl DecompressionState for NoneDecompression {
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
+    fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
+        Ok(SlicedCowBytes::from(data.to_vec()))
+    }
+
+    fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         Ok(data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_none_for_val_compression() {
+        let data = b"No compression test data - should pass through unchanged.";
+        let none = None;
+        
+        let mut compressor = none.create_compressor().unwrap();
+        let compressed = compressor.compress_val(data).unwrap();
+        
+        let mut decompressor = None::new_decompression().unwrap();
+        let decompressed = decompressor.decompress_val(&compressed).unwrap();
+        
+        assert_eq!(data, decompressed.as_ref());
+        assert_eq!(data.len(), compressed.len()); // No compression should mean same size
+        println!("None val compression - Original: {}, 'Compressed': {}", data.len(), compressed.len());
+    }
+
+    #[test]
+    fn test_none_for_buf_compression() {
+        let data = b"No compression test with Buf interface - pass through.";
+        let buf = Buf::from_zero_padded(data.to_vec());
+        let none = None;
+        
+        let mut compressor = none.create_compressor().unwrap();
+        let compressed_buf = compressor.compress_buf(buf.clone()).unwrap();
+        
+        let mut decompressor = None::new_decompression().unwrap();
+        let decompressed_buf = decompressor.decompress_buf(compressed_buf).unwrap();
+        
+        assert_eq!(buf.as_ref(), decompressed_buf.as_ref());
+        println!("None buf compression - Original: {}, 'Compressed': {}", buf.len(), decompressed_buf.len());
+    }
+
+    #[test]
+    fn test_none_empty_data() {
+        let data = b"";
+        let none = None;
+        
+        let mut compressor = none.create_compressor().unwrap();
+        let compressed = compressor.compress_val(data).unwrap();
+        
+        let mut decompressor = None::new_decompression().unwrap();
+        let decompressed = decompressor.decompress_val(&compressed).unwrap();
+        
+        assert_eq!(data, decompressed.as_ref());
+        assert_eq!(0, compressed.len());
     }
 }

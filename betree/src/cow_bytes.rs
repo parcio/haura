@@ -357,6 +357,16 @@ impl From<CowBytes> for SlicedCowBytes {
     }
 }
 
+impl From<Vec<u8>> for SlicedCowBytes {
+    fn from(vec: Vec<u8>) -> Self {
+        SlicedCowBytes {
+            pos: 0,
+            len: vec.len() as u32,
+            data: ByteSource::Cow(CowBytes::from(vec)),
+        }
+    }
+}
+
 impl Deref for SlicedCowBytes {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
