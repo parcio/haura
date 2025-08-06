@@ -310,7 +310,19 @@ impl Map {
     pub fn get(&self, key: &[u8]) -> Option<(KeyInfo, SlicedCowBytes)> {
         match self {
             Map::Packed { data, compression_type, .. } => self.find(key).map(|(pref, pos, len, csum)| {
-                let compressed_buf = unsafe { SlicedCowBytes::from_raw(data.as_ptr().add(pos), len) };
+                //println!("1. DEBUG: PackedChildBuffer::get - key={} pos={} len={} csum={:?}", String::from_utf8_lossy(key), pos, len, csum);
+                let compressed_buf = unsafe {
+                    #[cfg(feature = "memory_metrics")]
+                    if let Some(stats) = data.get_stats() {
+                        SlicedCowBytes::from_tracked_raw(data.as_ptr().add(pos), len, stats)
+                    } else {
+                        SlicedCowBytes::from_raw(data.as_ptr().add(pos), len)
+                    }
+                    #[cfg(not(feature = "memory_metrics"))]
+                    SlicedCowBytes::from_raw(data.as_ptr().add(pos), len)
+                };
+                //println!("2. DEBUG: PackedChildBuffer::get - key={} pos={} len={} csum={:?}", String::from_utf8_lossy(key), pos, len, csum);
+
                 // TODO: Pass on result
                 csum.verify(&compressed_buf).unwrap();
                 

@@ -6,7 +6,7 @@ use crate::{buffer::Buf, checksum::Checksum};
 use async_trait::async_trait;
 use libc::{c_ulong, ioctl};
 use pmdk;
-use std::{fs, io, os::unix::io::AsRawFd, sync::atomic::Ordering};
+use std::{fs, io, os::unix::io::AsRawFd, sync::{atomic::Ordering, Arc}};
 
 /// `LeafVdev` which is backed by NVM and uses `pmdk`.
 #[derive(Debug)]
@@ -14,7 +14,7 @@ pub struct PMemFile {
     file: pmdk::PMem,
     id: String,
     size: Block<u64>,
-    stats: AtomicStatistics,
+    stats: Arc<AtomicStatistics>,
 }
 
 impl PMemFile {
@@ -25,7 +25,7 @@ impl PMemFile {
             file,
             id,
             size,
-            stats: Default::default(),
+            stats: Arc::new(Default::default()),
         })
     }
 }
@@ -59,11 +59,23 @@ impl VdevRead for PMemFile {
             // # SAFETY
             // Since Bufs are read only anyways we ensure the safety of this
             // step by re-packing this forced mutable pointer into one.
-            Buf::from_raw(
-                std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
-                    .expect("Pmem pointer was null when trying to read from offset."),
-                size,
-            )
+            #[cfg(feature = "memory_metrics")]
+            {
+                Buf::from_tracked_raw(
+                    std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                        .expect("Pmem pointer was null when trying to read from offset."),
+                    size,
+                    self.stats.clone(),
+                )
+            }
+            #[cfg(not(feature = "memory_metrics"))]
+            {
+                Buf::from_raw(
+                    std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                        .expect("Pmem pointer was null when trying to read from offset."),
+                    size,
+                )
+            }
         };
 
         // let buf = {
@@ -108,11 +120,23 @@ impl VdevRead for PMemFile {
             // # SAFETY
             // Since Bufs are read only anyways we ensure the safety of this
             // step by re-packing this forced mutable pointer into one.
-            Buf::from_raw(
-                std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
-                    .expect("Pmem pointer was null when trying to read from offset."),
-                size,
-            )
+            #[cfg(feature = "memory_metrics")]
+            {
+                Buf::from_tracked_raw(
+                    std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                        .expect("Pmem pointer was null when trying to read from offset."),
+                    size,
+                    self.stats.clone(),
+                )
+            }
+            #[cfg(not(feature = "memory_metrics"))]
+            {
+                Buf::from_raw(
+                    std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                        .expect("Pmem pointer was null when trying to read from offset."),
+                    size,
+                )
+            }
         };
 
         // self.file.read(offset.to_bytes() as usize, buf.as_mut());

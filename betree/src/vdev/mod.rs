@@ -24,19 +24,29 @@ pub struct Statistics {
     pub checksum_errors: Block<u64>,
     /// The total number of blocks of failed write requests
     pub failed_writes: Block<u64>,
+    #[cfg(feature = "memory_metrics")]
+    /// The total number of bytes accessed directly from memory (Memory storage only)
+    pub memory_read: Block<u64>,
+    #[cfg(feature = "memory_metrics")]
+    /// The total number of direct memory access operations (Memory storage only)
+    pub memory_read_count: u64,
     #[cfg(feature = "latency_metrics")]
     /// The average latency over all read operations
     pub read_latency: u64,
 }
 
 #[derive(Default, Debug)]
-struct AtomicStatistics {
+pub(crate) struct AtomicStatistics {
     read: AtomicU64,
     written: AtomicU64,
     failed_reads: AtomicU64,
     checksum_errors: AtomicU64,
     repaired: AtomicU64,
     failed_writes: AtomicU64,
+    #[cfg(feature = "memory_metrics")]
+    pub(crate) memory_read: AtomicU64,
+    #[cfg(feature = "memory_metrics")]
+    pub(crate) memory_read_count: AtomicU64,
     #[cfg(feature = "latency_metrics")]
     prev_read: AtomicU64,
     #[cfg(feature = "latency_metrics")]
@@ -50,12 +60,22 @@ impl AtomicStatistics {
             self.prev_read
                 .store(self.read.load(Ordering::Relaxed), Ordering::Relaxed)
         }
+        
+        #[cfg(feature = "memory_metrics")]
+        let memory_read_val = self.memory_read.load(Ordering::Relaxed);
+        #[cfg(feature = "memory_metrics")]
+        let memory_read_count_val = self.memory_read_count.load(Ordering::Relaxed);
+        
         Statistics {
             read: Block(self.read.load(Ordering::Relaxed)),
             written: Block(self.written.load(Ordering::Relaxed)),
             failed_reads: Block(self.failed_reads.load(Ordering::Relaxed)),
             checksum_errors: Block(self.checksum_errors.load(Ordering::Relaxed)),
             failed_writes: Block(self.failed_writes.load(Ordering::Relaxed)),
+            #[cfg(feature = "memory_metrics")]
+            memory_read: Block(memory_read_val),
+            #[cfg(feature = "memory_metrics")]
+            memory_read_count: memory_read_count_val,
             #[cfg(feature = "latency_metrics")]
             read_latency: self
                 .read_op_latency
@@ -66,6 +86,28 @@ impl AtomicStatistics {
                         .saturating_sub(self.prev_read.load(Ordering::Relaxed)),
                 )
                 .unwrap_or(0),
+        }
+    }
+}
+
+impl Clone for AtomicStatistics {
+    fn clone(&self) -> Self {
+        use std::sync::atomic::Ordering;
+        Self {
+            read: AtomicU64::new(self.read.load(Ordering::Relaxed)),
+            written: AtomicU64::new(self.written.load(Ordering::Relaxed)),
+            failed_reads: AtomicU64::new(self.failed_reads.load(Ordering::Relaxed)),
+            checksum_errors: AtomicU64::new(self.checksum_errors.load(Ordering::Relaxed)),
+            repaired: AtomicU64::new(self.repaired.load(Ordering::Relaxed)),
+            failed_writes: AtomicU64::new(self.failed_writes.load(Ordering::Relaxed)),
+            #[cfg(feature = "memory_metrics")]
+            memory_read: AtomicU64::new(self.memory_read.load(Ordering::Relaxed)),
+            #[cfg(feature = "memory_metrics")]
+            memory_read_count: AtomicU64::new(self.memory_read_count.load(Ordering::Relaxed)),
+            #[cfg(feature = "latency_metrics")]
+            prev_read: AtomicU64::new(self.prev_read.load(Ordering::Relaxed)),
+            #[cfg(feature = "latency_metrics")]
+            read_op_latency: AtomicU64::new(self.read_op_latency.load(Ordering::Relaxed)),
         }
     }
 }
