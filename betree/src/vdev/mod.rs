@@ -30,6 +30,24 @@ pub struct Statistics {
     #[cfg(feature = "memory_metrics")]
     /// The total number of direct memory access operations (Memory storage only)
     pub memory_read_count: u64,
+    #[cfg(feature = "compression_metrics")]
+    /// The total number of bytes passed to compression algorithms
+    pub bytes_to_compressed: Block<u64>,
+    #[cfg(feature = "compression_metrics")]
+    /// The total number of bytes after compression
+    pub compressed_bytes: Block<u64>,
+    #[cfg(feature = "compression_metrics")]
+    /// The total time spent in compression operations (nanoseconds)
+    pub compression_time: u64,
+    #[cfg(feature = "compression_metrics")]
+    /// The total number of bytes passed to decompression algorithms
+    pub bytes_to_decompress: Block<u64>,
+    #[cfg(feature = "compression_metrics")]
+    /// The total number of bytes after decompression
+    pub bytes_after_decompression: Block<u64>,
+    #[cfg(feature = "compression_metrics")]
+    /// The total time spent in decompression operations (nanoseconds)
+    pub decompression_time: u64,
     #[cfg(feature = "latency_metrics")]
     /// The average latency over all read operations
     pub read_latency: u64,
@@ -47,6 +65,18 @@ pub(crate) struct AtomicStatistics {
     pub(crate) memory_read: AtomicU64,
     #[cfg(feature = "memory_metrics")]
     pub(crate) memory_read_count: AtomicU64,
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) bytes_to_compressed: AtomicU64,
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) compressed_bytes: AtomicU64,
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) compression_time: AtomicU64,
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) bytes_to_decompress: AtomicU64,
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) bytes_after_decompression: AtomicU64,
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) decompression_time: AtomicU64,
     #[cfg(feature = "latency_metrics")]
     prev_read: AtomicU64,
     #[cfg(feature = "latency_metrics")]
@@ -54,6 +84,20 @@ pub(crate) struct AtomicStatistics {
 }
 
 impl AtomicStatistics {
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) fn update_compression_metrics(&self, bytes_to_compressed: u64, compressed_bytes: u64, compression_time: u64) {
+        self.bytes_to_compressed.fetch_add(bytes_to_compressed, Ordering::Relaxed);
+        self.compressed_bytes.fetch_add(compressed_bytes, Ordering::Relaxed);
+        self.compression_time.fetch_add(compression_time, Ordering::Relaxed);
+    }
+
+    #[cfg(feature = "compression_metrics")]
+    pub(crate) fn update_decompression_metrics(&self, bytes_to_decompress: u64, bytes_after_decompression: u64, decompression_time: u64) {
+        self.bytes_to_decompress.fetch_add(bytes_to_decompress, Ordering::Relaxed);
+        self.bytes_after_decompression.fetch_add(bytes_after_decompression, Ordering::Relaxed);
+        self.decompression_time.fetch_add(decompression_time, Ordering::Relaxed);
+    }
+
     fn as_stats(&self) -> Statistics {
         #[cfg(feature = "latency_metrics")]
         {
@@ -66,6 +110,25 @@ impl AtomicStatistics {
         #[cfg(feature = "memory_metrics")]
         let memory_read_count_val = self.memory_read_count.load(Ordering::Relaxed);
         
+        // Get compression metrics from global instance and local vdev counters
+        #[cfg(feature = "compression_metrics")]
+        let (global_bytes_to_compressed, global_compressed_bytes, global_compression_time, 
+             global_bytes_to_decompress, global_bytes_after_decompression, global_decompression_time) = 
+            crate::compression::metrics::get_compression_metrics();
+        
+        #[cfg(feature = "compression_metrics")]
+        let bytes_to_compressed_val = self.bytes_to_compressed.load(Ordering::Relaxed) + global_bytes_to_compressed;
+        #[cfg(feature = "compression_metrics")]
+        let compressed_bytes_val = self.compressed_bytes.load(Ordering::Relaxed) + global_compressed_bytes;
+        #[cfg(feature = "compression_metrics")]
+        let compression_time_val = self.compression_time.load(Ordering::Relaxed) + global_compression_time;
+        #[cfg(feature = "compression_metrics")]
+        let bytes_to_decompress_val = self.bytes_to_decompress.load(Ordering::Relaxed) + global_bytes_to_decompress;
+        #[cfg(feature = "compression_metrics")]
+        let bytes_after_decompression_val = self.bytes_after_decompression.load(Ordering::Relaxed) + global_bytes_after_decompression;
+        #[cfg(feature = "compression_metrics")]
+        let decompression_time_val = self.decompression_time.load(Ordering::Relaxed) + global_decompression_time;
+        
         Statistics {
             read: Block(self.read.load(Ordering::Relaxed)),
             written: Block(self.written.load(Ordering::Relaxed)),
@@ -76,6 +139,18 @@ impl AtomicStatistics {
             memory_read: Block(memory_read_val),
             #[cfg(feature = "memory_metrics")]
             memory_read_count: memory_read_count_val,
+            #[cfg(feature = "compression_metrics")]
+            bytes_to_compressed: Block(bytes_to_compressed_val),
+            #[cfg(feature = "compression_metrics")]
+            compressed_bytes: Block(compressed_bytes_val),
+            #[cfg(feature = "compression_metrics")]
+            compression_time: compression_time_val,
+            #[cfg(feature = "compression_metrics")]
+            bytes_to_decompress: Block(bytes_to_decompress_val),
+            #[cfg(feature = "compression_metrics")]
+            bytes_after_decompression: Block(bytes_after_decompression_val),
+            #[cfg(feature = "compression_metrics")]
+            decompression_time: decompression_time_val,
             #[cfg(feature = "latency_metrics")]
             read_latency: self
                 .read_op_latency
@@ -104,6 +179,18 @@ impl Clone for AtomicStatistics {
             memory_read: AtomicU64::new(self.memory_read.load(Ordering::Relaxed)),
             #[cfg(feature = "memory_metrics")]
             memory_read_count: AtomicU64::new(self.memory_read_count.load(Ordering::Relaxed)),
+            #[cfg(feature = "compression_metrics")]
+            bytes_to_compressed: AtomicU64::new(self.bytes_to_compressed.load(Ordering::Relaxed)),
+            #[cfg(feature = "compression_metrics")]
+            compressed_bytes: AtomicU64::new(self.compressed_bytes.load(Ordering::Relaxed)),
+            #[cfg(feature = "compression_metrics")]
+            compression_time: AtomicU64::new(self.compression_time.load(Ordering::Relaxed)),
+            #[cfg(feature = "compression_metrics")]
+            bytes_to_decompress: AtomicU64::new(self.bytes_to_decompress.load(Ordering::Relaxed)),
+            #[cfg(feature = "compression_metrics")]
+            bytes_after_decompression: AtomicU64::new(self.bytes_after_decompression.load(Ordering::Relaxed)),
+            #[cfg(feature = "compression_metrics")]
+            decompression_time: AtomicU64::new(self.decompression_time.load(Ordering::Relaxed)),
             #[cfg(feature = "latency_metrics")]
             prev_read: AtomicU64::new(self.prev_read.load(Ordering::Relaxed)),
             #[cfg(feature = "latency_metrics")]

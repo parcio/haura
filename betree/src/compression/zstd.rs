@@ -77,6 +77,11 @@ const DATA_OFF: usize = mem::size_of::<u32>();
 impl CompressionState for ZstdCompression {    
     fn compress_buf(&mut self, data: Buf) -> Result<Buf> {
         //println!("compress_buf {} bytes with Zstd at level {}", data.as_ref().len(), self.level);
+        let input_size = data.as_ref().len();
+        
+        #[cfg(feature = "compression_metrics")]
+        let start = std::time::Instant::now();
+        
         let compressed_data = block::compress(&data, self.level as i32)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
@@ -91,11 +96,24 @@ impl CompressionState for ZstdCompression {
         buf.write_all(&comlen.to_le_bytes())?;
         buf.write_all(&compressed_data)?;
 
-        Ok(buf.into_buf())
+        let result = buf.into_buf();
+        
+        #[cfg(feature = "compression_metrics")]
+        {
+            let duration = start.elapsed().as_nanos() as u64;
+            super::metrics::record_compression_metrics(input_size, compressed_data.len(), duration);
+        }
+
+        Ok(result)
     }
 
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         //println!("compress_val {} bytes with Zstd at level {}", data.len(), self.level);
+        let input_size = data.len();
+        
+        #[cfg(feature = "compression_metrics")]
+        let start = std::time::Instant::now();
+        
         let compressed_data = block::compress(data, self.level as i32)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Compression error: {:?}", e)))?;
 
@@ -107,6 +125,12 @@ impl CompressionState for ZstdCompression {
         result.extend_from_slice(&comlen.to_le_bytes());
         result.extend_from_slice(&compressed_data);
 
+        #[cfg(feature = "compression_metrics")]
+        {
+            let duration = start.elapsed().as_nanos() as u64;
+            super::metrics::record_compression_metrics(input_size, compressed_data.len(), duration);
+        }
+
         Ok(result)
     }
 }
@@ -115,6 +139,8 @@ impl DecompressionState for ZstdDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes>
     {
         //println!("decompress_val {} bytes with Zstd", data.len());
+        let input_size = data.len();
+        
         if data.len() < 8 {
             bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
         }
@@ -127,15 +153,28 @@ impl DecompressionState for ZstdDecompression {
         }
 
         let compressed = &data[8..8 + comp_len];
+
+        #[cfg(feature = "compression_metrics")]
+        let start = std::time::Instant::now();
 
         let uncompressed_data = block::decompress(compressed, uncomp_size)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Decompression error: {:?}", e)))?;
 
-        Ok(SlicedCowBytes::from(uncompressed_data))
+        let result = SlicedCowBytes::from(uncompressed_data);
+        
+        #[cfg(feature = "compression_metrics")]
+        {
+            let duration = start.elapsed().as_nanos() as u64;
+            super::metrics::record_decompression_metrics(input_size, result.len(), duration);
+        }
+
+        Ok(result)
     }
     
     fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
         //println!("decompress_buf {} bytes with Zstd", data.len());
+        let input_size = data.len();
+        
         if data.len() < 8 {
             bail!(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Input too short"));
         }
@@ -148,13 +187,24 @@ impl DecompressionState for ZstdDecompression {
         }
 
         let compressed = &data[8..8 + comp_len];
+
+        #[cfg(feature = "compression_metrics")]
+        let start = std::time::Instant::now();
 
         let uncompressed_data = block::decompress(compressed, uncomp_size)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
 
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
         buf.write_all(&uncompressed_data)?;
-        Ok(buf.into_buf())
+        let result = buf.into_buf();
+        
+        #[cfg(feature = "compression_metrics")]
+        {
+            let duration = start.elapsed().as_nanos() as u64;
+            super::metrics::record_decompression_metrics(input_size, result.len(), duration);
+        }
+        
+        Ok(result)
     }
 }
 

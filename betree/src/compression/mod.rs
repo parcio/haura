@@ -277,3 +277,5 @@ pub use self::lz4::Lz4;
 
 mod zstd;
 pub use self::zstd::Zstd;
+
+pub mod metrics;

@@ -616,6 +616,8 @@ pub fn f(mut client: KvClient, size: u64, threads: usize, runtime: u64, data_sou
 }
 
 use rand_xoshiro::Xoshiro256Plus;
+use pprof::ProfilerGuard;
+use std::fs::File;
 
 pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_source: &str, data_type: &str, data_path: &str, entry_size: usize) {
     println!("Running YCSB Workload G");
@@ -644,7 +646,7 @@ pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
         leaf_sampled_keys.push(keys[i]);
     }
 
-    //client.ds.flush().unwrap();
+    client.db.write().sync().unwrap();
 
     // Shuffle the reduced key set
     //leaf_sampled_keys.shuffle(client.rng());
@@ -660,6 +662,7 @@ pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
+    //let guard = ProfilerGuard::new(100).unwrap(); // 100 Hz sampling rate
 
     //for workers in [1, 5, 10, 15, 20, 25] {
         let threads = (0..workers)
@@ -674,7 +677,8 @@ pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
                         let mut total = 0;
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
-                                for _ in 0..500 {
+                                //for _ in 0..500 
+                                {
                                     if let Some(k) = _keys.choose(&mut rng) {
                                         if let Some(value) = ds.get(*k).unwrap() {
                                             total += 1;
@@ -701,6 +705,20 @@ pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
             total += t.join().unwrap();
         }
         let end = start.elapsed();
+
+        // Generate flamegraph from the profiling data
+        // println!("Attempting to generate flamegraph...");
+        // match guard.report().build() {
+        //     Ok(report) => {
+        //         let file = File::create("flamegraph.svg").unwrap();
+        //         match report.flamegraph(file) {
+        //             Ok(_) => println!("Flamegraph generated: flamegraph.svg"),
+        //             Err(e) => println!("Failed to create flamegraph: {}", e),
+        //         }
+        //     }
+        //     Err(e) => println!("Failed to build profiling report: {}", e),
+        // }
+
         w.write_fmt(format_args!("{workers},{total},{}\n", end.as_nanos()))
             .unwrap();
         w.flush().unwrap();
@@ -709,7 +727,7 @@ pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
     //}
 }
 
-use std::fs::{self, File};
+use std::fs;
 use std::io::{BufReader, Read};
 use std::path::Path;
 

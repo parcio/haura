@@ -155,7 +155,7 @@ enum Mode {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "25")]
+        #[structopt(default_value = "30")]
         runtime: u64,
         #[structopt(long, default_value = "generated")]
         data_source: String,

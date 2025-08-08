@@ -61,20 +61,54 @@ impl io::Write for NoneCompression {
 
 impl CompressionState for NoneCompression {
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        Ok(data.to_vec())
+        let input_size = data.len();
+        let result = data.to_vec();
+        
+        #[cfg(feature = "compression_metrics")]
+        {
+            // For None compression, compression time is essentially zero
+            super::metrics::record_compression_metrics(input_size, result.len(), 0);
+        }
+        
+        Ok(result)
     }
 
     fn compress_buf(&mut self, buf: Buf) -> Result<Buf> {
+        let input_size = buf.len();
+        
+        #[cfg(feature = "compression_metrics")]
+        {
+            // For None compression, compression time is essentially zero
+            super::metrics::record_compression_metrics(input_size, input_size, 0);
+        }
+        
         Ok(buf)
     }
 }
 
 impl DecompressionState for NoneDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
-        Ok(SlicedCowBytes::from(data.to_vec()))
+        let input_size = data.len();
+        let result = SlicedCowBytes::from(data.to_vec());
+        
+        #[cfg(feature = "compression_metrics")]
+        {
+            // For None decompression, decompression time is essentially zero
+            super::metrics::record_decompression_metrics(input_size, result.len(), 0);
+        }
+        
+        Ok(result)
     }
 
     fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
+        let input_size = data.len();
+        
+        #[cfg(feature = "compression_metrics")]
+        {
+            // For None decompression, decompression time is essentially zero
+            super::metrics::record_decompression_metrics(input_size, input_size, 0);
+        }
+        
         Ok(data)
     }
 }
