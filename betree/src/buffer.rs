@@ -217,6 +217,8 @@ impl From<Box<[u8]>> for AlignedBuf {
 enum BufSource {
     Allocated(AlignedBuf),
     Foreign(Arc<UnsafeCell<NonNull<u8>>>, Block<u32>),
+    #[cfg(feature = "memory_metrics")]
+    TrackedForeign(Arc<UnsafeCell<NonNull<u8>>>, Block<u32>, std::sync::Arc<crate::vdev::AtomicStatistics>),
 }
 
 impl BufSource {
@@ -224,6 +226,8 @@ impl BufSource {
         match self {
             BufSource::Allocated(buf) => unsafe { (*buf.buf.get()).ptr.as_ptr() },
             BufSource::Foreign(ptr, _) => unsafe { (*ptr.get()).as_ptr() },
+            #[cfg(feature = "memory_metrics")]
+            BufSource::TrackedForeign(ptr, _, _) => unsafe { (*ptr.get()).as_ptr() },
         }
     }
 
@@ -231,10 +235,19 @@ impl BufSource {
         match self {
             BufSource::Allocated(buf) => unsafe { (*buf.buf.get()).capacity.to_bytes() as usize },
             BufSource::Foreign(_, s) => s.to_bytes() as usize,
+            #[cfg(feature = "memory_metrics")]
+            BufSource::TrackedForeign(_, s, _) => s.to_bytes() as usize,
         }
     }
 
     fn as_slice(&self) -> &[u8] {
+        // #[cfg(feature = "memory_metrics")]
+        // if let BufSource::TrackedForeign(_, size, stats) = self {
+        //     use std::sync::atomic::Ordering;
+        //     stats.memory_read.fetch_add(size.as_u64(), Ordering::Relaxed);
+        //     stats.memory_read_count.fetch_add(1, Ordering::Relaxed);
+        // }
+        
         unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
     }
 }
@@ -280,13 +293,6 @@ impl BufWrite {
         }
     }
 
-    pub fn as_sliced_cow_bytes(&self) -> SlicedCowBytes {
-        let slice = unsafe {
-            std::slice::from_raw_parts(self.buf.ptr.as_ptr(), self.size as usize)
-        };
-        SlicedCowBytes::from(CowBytes::from(slice))
-    }
-    
     /// Convert this to a read-only [Buf].
     /// This is always safe because [BufWrite] can't be split,
     /// and therefore no aliasing writable pieces can remain.
@@ -416,6 +422,18 @@ impl Buf {
         }
     }
 
+    #[cfg(feature = "memory_metrics")]
+    pub(crate) unsafe fn from_tracked_raw(
+        ptr: NonNull<u8>, 
+        size: Block<u32>,
+        stats: std::sync::Arc<crate::vdev::AtomicStatistics>
+    ) -> Self {
+        Self {
+            buf: BufSource::TrackedForeign(Arc::new(UnsafeCell::new(ptr)), size, stats),
+            range: Block(0)..size,
+        }
+    }
+
     /// Create a [Buf] from a byte vector. If `b.len()` is not a multiple of the block size,
     /// the size will be rounded up to the next multiple and filled with zeroes.
     pub fn from_zero_padded(mut b: Vec<u8>) -> Self {
@@ -441,6 +459,8 @@ impl Buf {
                 }
             }
             BufSource::Foreign(_, _) => self.into_buf_write().into_buf().into_full_mut(),
+            #[cfg(feature = "memory_metrics")]
+            BufSource::TrackedForeign(_, _, _) => self.into_buf_write().into_buf().into_full_mut(),
         }
     }
 
@@ -458,6 +478,12 @@ impl Buf {
                 }
             }
             BufSource::Foreign(_, _) => {
+                let mut tmp = BufWrite::with_capacity(self.range.end);
+                tmp.write(self.buf.as_slice()).unwrap();
+                tmp
+            }
+            #[cfg(feature = "memory_metrics")]
+            BufSource::TrackedForeign(_, _, _) => {
                 let mut tmp = BufWrite::with_capacity(self.range.end);
                 tmp.write(self.buf.as_slice()).unwrap();
                 tmp
@@ -480,6 +506,16 @@ impl Buf {
 
                 unsafe { SlicedCowBytes::from_raw(ptr.as_ptr(), size.to_bytes() as usize) }
             }
+            #[cfg(feature = "memory_metrics")]
+            BufSource::TrackedForeign(stg, size, stats) => {
+                let ptr = ManuallyDrop::new(
+                    Arc::try_unwrap(stg)
+                        .expect("TrackedRawBuf was not unique")
+                        .into_inner(),
+                );
+
+                unsafe { SlicedCowBytes::from_tracked_raw_no_tracking(ptr.as_ptr(), size.to_bytes() as usize, stats) }
+            }
         }
     }
 
@@ -501,6 +537,8 @@ impl Buf {
                 }
             }
             BufSource::Foreign(_, _) => self.buf.as_slice().to_vec().into_boxed_slice(),
+            #[cfg(feature = "memory_metrics")]
+            BufSource::TrackedForeign(_, _, _) => self.buf.as_slice().to_vec().into_boxed_slice(),
         }
     }
 
