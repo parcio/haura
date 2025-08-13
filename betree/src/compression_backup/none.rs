@@ -61,24 +61,20 @@ impl io::Write for NoneCompression {
 
 impl CompressionState for NoneCompression {
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        // No metrics recording for None compression - it's a true pass-through
         Ok(data.to_vec())
     }
 
     fn compress_buf(&mut self, buf: Buf) -> Result<Buf> {
-        // No metrics recording for None compression - it's a true pass-through
         Ok(buf)
     }
 }
 
 impl DecompressionState for NoneDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
-        // No metrics recording for None decompression - it's a true pass-through
         Ok(SlicedCowBytes::from(data.to_vec()))
     }
 
     fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
-        // No metrics recording for None decompression - it's a true pass-through
         Ok(data)
     }
 }

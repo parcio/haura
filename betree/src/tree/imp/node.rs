@@ -9,9 +9,16 @@ use super::{
     FillUpResult, KeyInfo, PivotKey, StorageMap, MIN_FANOUT, MIN_FLUSH_RATIO,
 };
 use crate::{
-    buffer::Buf, checksum::{Builder, Checksum}, compression::{CompressionConfiguration, DecompressionTag}, cow_bytes::{CowBytes, SlicedCowBytes}, data_management::{
+    buffer::{self, Buf},
+    checksum::{Builder, Checksum},
+    cow_bytes::{CowBytes, SlicedCowBytes},
+    data_management::{
         Dml, HasStoragePreference, IntegrityMode, Object, ObjectReference, PreparePack,
-    }, database::DatasetId, size::{Size, SizeMut, StaticSize}, tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind}, StoragePreference
+    },
+    database::DatasetId,
+    size::{Size, SizeMut, StaticSize},
+    tree::{pivot_key::LocalPivotKey, MessageAction, StorageKind},
+    StoragePreference,
 };
 use parking_lot::RwLock;
 use std::{
@@ -20,9 +27,6 @@ use std::{
     io::{self, Write},
     mem::replace,
 };
-use bincode::deserialize;
-
-use std::sync::{Arc, Mutex};
 
 /// The tree node type.
 #[derive(Debug)]
@@ -77,9 +81,6 @@ impl StorageMap {
     pub fn min_size<N: HasStoragePreference + StaticSize>(&self, node: &Node<N>) -> Option<usize> {
         let pref = node.correct_preference();
         Some(match (&node.0, self.get(pref)) {
-            (MemLeaf(_), StorageKind::Hdd) => mib!(1),
-            (MemLeaf(_), StorageKind::Ssd) => mib!(1),
-            (MemLeaf(_), StorageKind::Memory) => mib!(1),
             (CopylessInternal(_), _) => return None,
             (_, StorageKind::Hdd) => mib!(1),
             (_, StorageKind::Ssd) => kib!(512),
@@ -175,13 +176,12 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
         &self,
         mut writer: W,
         prepare_pack: PreparePack,
-        csum_builder: F, 
-        compressor: &CompressionConfiguration
+        csum_builder: F,
     ) -> Result<IntegrityMode<C>, io::Error> {
         match self.0 {
             MemLeaf(ref leaf) => {
                 writer.write_all((NodeInnerType::CopylessLeaf as u32).to_be_bytes().as_ref())?;
-                leaf.pack(writer, prepare_pack, csum_builder, compressor)
+                leaf.pack_with_compression(writer, csum_builder, prepare_pack.compression, prepare_pack.storage_kind)
             }
             CopylessInternal(ref cpl_internal) => {
                 writer.write_all(
@@ -189,58 +189,24 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
                         .to_be_bytes()
                         .as_ref(),
                 )?;
-                cpl_internal.pack(writer, prepare_pack, csum_builder, compressor)
+                cpl_internal.pack(writer, csum_builder)
             }
         }
     }
 
-    #[cfg(feature = "memory_metrics")]
     fn unpack_at<C: Checksum>(
         d_id: DatasetId,
         data: Buf,
         integrity_mode: IntegrityMode<C>,
-        decompressor: DecompressionTag,
-        vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>,
     ) -> Result<Self, io::Error> {
         if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
-            //println!("a..");
             Ok(Node(CopylessInternal(
-                CopylessInternalNode::unpack(data, integrity_mode, decompressor, vdev_stats)?
-                    .complete_object_refs(d_id),
+                CopylessInternalNode::unpack(data, integrity_mode)?.complete_object_refs(d_id),
             )))
         } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
             Ok(Node(MemLeaf(PackedChildBuffer::unpack(
                 data.into_sliced_cow_bytes().slice_from(4),
                 integrity_mode,
-                decompressor,
-                vdev_stats,
-            )?)))
-        } else {
-            panic!(
-                "Unkown bytes to unpack. [0..4]: {}",
-                u32::from_be_bytes(data[..4].try_into().unwrap())
-            );
-        }
-    }
-
-    #[cfg(not(feature = "memory_metrics"))]
-    fn unpack_at<C: Checksum>(
-        d_id: DatasetId,
-        data: Buf,
-        integrity_mode: IntegrityMode<C>,
-        decompressor: DecompressionTag
-    ) -> Result<Self, io::Error> {
-        if data[0..4] == (NodeInnerType::CopylessInternal as u32).to_be_bytes() {
-            //println!("a..");
-            Ok(Node(CopylessInternal(
-                CopylessInternalNode::unpack(data, integrity_mode, decompressor)?
-                    .complete_object_refs(d_id),
-            )))
-        } else if data[0..4] == (NodeInnerType::CopylessLeaf as u32).to_be_bytes() {
-            Ok(Node(MemLeaf(PackedChildBuffer::unpack(
-                data.into_sliced_cow_bytes().slice_from(4),
-                integrity_mode,
-                decompressor,
             )?)))
         } else {
             panic!(
@@ -275,48 +241,24 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
     fn prepare_pack(
         &mut self,
-        _storage_kind: StorageKind,
+        storage_kind: StorageKind,
         _pivot_key: &PivotKey,
     ) -> Result<crate::data_management::PreparePack, crate::data_management::Error>
     where
         R: ObjectReference,
     {
-        // NOTE: Only necessary transitions are represented here, all others are no-op. Can be improved.
-        // self.0 = match (
-        //     std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }),
-        //     storage_kind,
-        // ) {
-        //     // (Internal(internal), StorageKind::Memory) | (Internal(internal), StorageKind::Ssd) => {
-        //     //     // Spawn new child buffers from one internal node.
-        //     //     Inner::DisjointInternal(internal.to_disjoint_node(|new_cbuf| {
-        //     //         dmu.insert(
-        //     //             Node(Inner::ChildBuffer(new_cbuf)),
-        //     //             pivot_key.d_id(),
-        //     //             pivot_key.clone(),
-        //     //         )
-        //     //     }))
-        //     // }
-        //     (CopylessInternal(_internal), StorageKind::Hdd) => {
-        //         // Fetch children and pipe them into one node.
-        //         unimplemented!();
-        //         // let mut cbufs = Vec::with_capacity(internal.children.len());
-        //         // Inner::Internal(InternalNode::from_disjoint_node(internal, cbufs))
-        //     }
-        //     (Leaf(leaf), StorageKind::Memory) => Inner::MemLeaf(leaf.to_memory_leaf()),
-        //     (MemLeaf(leaf), StorageKind::Ssd) | (MemLeaf(leaf), StorageKind::Hdd) => {
-        //         Inner::Leaf(leaf.to_block_leaf())
-        //     }
-        //     (default, _) => default,
-        // };
-        
-        // Sync metadata with actual buffer sizes before packing
-        if let CopylessInternal(ref mut internal) = self.0 {
-            for (idx, child) in internal.children.iter().enumerate() {
-                internal.meta_data.entries_sizes[idx] = child.buffer().size();
+        // For Memory mode, we need compression at the value level
+        // Note: The actual compression will be passed from DMU
+        let compression = match storage_kind {
+            StorageKind::Memory => {
+                // Placeholder - will be replaced by DMU with actual compression
+                use crate::compression::CompressionConfiguration;
+                Some(CompressionConfiguration::None)
             }
-        }
+            _ => None, // SSD/HDD mode compression is handled at DMU level
+        };
         
-        Ok(PreparePack { storage_kind: _storage_kind })
+        Ok(crate::data_management::PreparePack::new(compression, storage_kind))
     }
 }
 

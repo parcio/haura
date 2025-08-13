@@ -18,7 +18,7 @@ use std::{
 pub struct Parity1<V> {
     vdevs: Box<[V]>,
     id: String,
-    stats: std::sync::Arc<AtomicStatistics>,
+    stats: AtomicStatistics,
 }
 
 impl<V> Parity1<V> {
@@ -29,7 +29,7 @@ impl<V> Parity1<V> {
         Parity1 {
             vdevs,
             id,
-            stats: std::sync::Arc::new(AtomicStatistics::default()),
+            stats: Default::default(),
         }
     }
 
@@ -82,11 +82,6 @@ impl<V: Vdev + VdevLeafRead + VdevLeafWrite> Vdev for Parity1<V> {
 
     fn stats(&self) -> Statistics {
         self.stats.as_stats()
-    }
-
-    #[cfg(feature = "memory_metrics")]
-    fn atomic_stats(&self) -> Option<std::sync::Arc<AtomicStatistics>> {
-        Some(self.stats.clone())
     }
 
     fn for_each_child(&self, f: &mut dyn FnMut(&dyn Vdev)) {

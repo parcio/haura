@@ -10,9 +10,6 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use snap::raw::{Encoder, Decoder};
 
-#[cfg(feature = "compression_metrics")]
-use std::time::Instant;
-
 /// Snappy compression configuration
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Snappy {
@@ -58,9 +55,6 @@ impl Snappy {
 
 impl CompressionState for SnappyCompression {
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        #[cfg(feature = "compression_metrics")]
-        let start_time = Instant::now();
-        
         let mut encoder = Encoder::new();
         let compressed_data = encoder.compress_vec(data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy compression failed: {}", e)))?;
@@ -73,16 +67,6 @@ impl CompressionState for SnappyCompression {
         result.extend_from_slice(&comlen.to_le_bytes());
         result.extend_from_slice(&compressed_data);
 
-        #[cfg(feature = "compression_metrics")]
-        {
-            let compression_time = start_time.elapsed().as_nanos() as u64;
-            super::metrics::record_compression_metrics(
-                data.len(),
-                result.len(),
-                compression_time,
-            );
-        }
-
         Ok(result)
     }
 
@@ -91,12 +75,7 @@ impl CompressionState for SnappyCompression {
         use crate::vdev::Block;
         use std::io::Write;
         
-        #[cfg(feature = "compression_metrics")]
-        let start_time = Instant::now();
-        
-        let mut encoder = Encoder::new();
-        let compressed_data = encoder.compress_vec(data.as_ref())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy compression failed: {}", e)))?;
+        let compressed_data = self.compress_val(data.as_ref())?;
 
         let size = data.as_ref().len() as u32;
         let comlen = compressed_data.len() as u32;
@@ -108,16 +87,6 @@ impl CompressionState for SnappyCompression {
         buf.write_all(&size.to_le_bytes())?;
         buf.write_all(&comlen.to_le_bytes())?;
         buf.write_all(&compressed_data)?;
-
-        #[cfg(feature = "compression_metrics")]
-        {
-            let compression_time = start_time.elapsed().as_nanos() as u64;
-            super::metrics::record_compression_metrics(
-                data.len(),
-                4 + 4 + compressed_data.len(),
-                compression_time,
-            );
-        }
 
         Ok(buf.into_buf())
     }
@@ -138,22 +107,9 @@ impl DecompressionState for SnappyDecompression {
 
         let compressed = &data[8..8 + comp_len];
 
-        #[cfg(feature = "compression_metrics")]
-        let start_time = Instant::now();
-
         let mut decoder = Decoder::new();
         let decompressed = decoder.decompress_vec(compressed)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy decompression failed: {}", e)))?;
-        
-        #[cfg(feature = "compression_metrics")]
-        {
-            let decompression_time = start_time.elapsed().as_nanos() as u64;
-            super::metrics::record_decompression_metrics(
-                data.len(),
-                decompressed.len(),
-                decompression_time,
-            );
-        }
         
         Ok(SlicedCowBytes::from(decompressed))
     }
@@ -176,26 +132,10 @@ impl DecompressionState for SnappyDecompression {
 
         let compressed = &data[8..8 + comp_len];
 
-        #[cfg(feature = "compression_metrics")]
-        let start_time = Instant::now();
-
-        let mut decoder = Decoder::new();
-        let decompressed = decoder.decompress_vec(compressed)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Snappy decompression failed: {}", e)))?;
+        let decompressed = self.decompress_val(compressed)?;
 
         let mut buf = BufWrite::with_capacity(Block::round_up_from_bytes(uncomp_size as u32));
-        buf.write_all(&decompressed)?;
-
-        #[cfg(feature = "compression_metrics")]
-        {
-            let decompression_time = start_time.elapsed().as_nanos() as u64;
-            super::metrics::record_decompression_metrics(
-                data.len(),
-                decompressed.len(),
-                decompression_time,
-            );
-        }
-
+        buf.write_all(decompressed.as_ref())?;
         Ok(buf.into_buf())
     }
 }

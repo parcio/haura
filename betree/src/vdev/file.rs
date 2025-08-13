@@ -19,7 +19,7 @@ pub struct File {
     file: fs::File,
     id: String,
     size: Block<u64>,
-    stats: std::sync::Arc<AtomicStatistics>,
+    stats: AtomicStatistics,
 }
 
 impl File {
@@ -40,7 +40,7 @@ impl File {
             file,
             id,
             size,
-            stats: std::sync::Arc::new(AtomicStatistics::default()),
+            stats: Default::default(),
         })
     }
 }
@@ -183,11 +183,6 @@ impl Vdev for File {
 
     fn stats(&self) -> Statistics {
         self.stats.as_stats()
-    }
-
-    #[cfg(feature = "memory_metrics")]
-    fn atomic_stats(&self) -> Option<std::sync::Arc<AtomicStatistics>> {
-        Some(self.stats.clone())
     }
 
     fn for_each_child(&self, _f: &mut dyn FnMut(&dyn Vdev)) {}

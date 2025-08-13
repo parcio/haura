@@ -22,8 +22,6 @@ use crate::{
     storage_pool::StoragePoolLayer,
     tree::{PivotKey, StorageKind},
     StoragePreference,
-    compression::CompressionConfiguration,
-    compression::DecompressionTag,
 };
 use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -112,10 +110,17 @@ pub trait HasStoragePreference {
 }
 
 /// Intermediary structure to prove that media constraints have been checked.
-/// Contains storage kind information to determine integrity mode.
-#[derive(Debug, Clone, Copy)]
+/// This is more of a hack since i don't want to pull apart the trait.
+/// Now carries compression configuration for storage-kind-aware compression.
 pub struct PreparePack {
-    pub storage_kind: StorageKind,
+    pub compression: Option<crate::compression::CompressionConfiguration>,
+    pub storage_kind: crate::tree::StorageKind,
+}
+
+impl PreparePack {
+    pub fn new(compression: Option<crate::compression::CompressionConfiguration>, storage_kind: crate::tree::StorageKind) -> Self {
+        Self { compression, storage_kind }
+    }
 }
 
 /// Which integrity mode is used by the nodes. Can be used to skip the
@@ -128,6 +133,13 @@ pub enum IntegrityMode<C> {
     External,
     /// Integrity is ensured by the node implementation itself.
     Internal { csum: C, len: u32 },
+}
+
+impl<C: StaticSize> StaticSize for IntegrityMode<C> {
+    fn static_size() -> usize {
+        // FIXME: this only works if we abandon the other the integrity mode
+        C::static_size() + std::mem::size_of::<u32>()
+    }
 }
 
 impl<C> IntegrityMode<C> {
@@ -166,24 +178,12 @@ pub trait Object<R>: Size + Sized + HasStoragePreference {
         writer: W,
         pp: PreparePack,
         csum_builder: F,
-        compressor: &CompressionConfiguration
     ) -> Result<IntegrityMode<C>, io::Error>;
     /// Unpacks the object from the given `data`.
-    #[cfg(feature = "memory_metrics")]
     fn unpack_at<C: Checksum>(
         d_id: DatasetId,
         data: Buf,
         integrity_mode: IntegrityMode<C>,
-        decompressor: DecompressionTag,
-        vdev_stats: Option<std::sync::Arc<crate::vdev::AtomicStatistics>>,
-    ) -> Result<Self, io::Error>;
-
-    #[cfg(not(feature = "memory_metrics"))]
-    fn unpack_at<C: Checksum>(
-        d_id: DatasetId,
-        data: Buf,
-        integrity_mode: IntegrityMode<C>,
-        decompressor: DecompressionTag,
     ) -> Result<Self, io::Error>;
 
     /// Returns debug information about an object.

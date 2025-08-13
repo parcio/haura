@@ -1,6 +1,6 @@
 //! This module provides the `Compression` trait for compressing and
 //! decompressing data.
-//! Supports multiple compression algorithms optimized for different storage kinds.
+//! `None` and `Lz4` are provided as implementation.
 
 use crate::{
     buffer::Buf,
@@ -11,7 +11,8 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, mem};
 
-#[macro_use]
+
+
 mod errors;
 pub use errors::*;
 
@@ -58,37 +59,6 @@ impl CompressionConfiguration {
     /// Check if compression is enabled (avoids compression overhead when disabled)
     pub fn is_compression_enabled(&self) -> bool {
         !matches!(self, CompressionConfiguration::None)
-    }
-
-    /// Get the compression type ID for metadata storage
-    pub fn compression_type_id(&self) -> u8 {
-        match self {
-            CompressionConfiguration::None => 0,
-            CompressionConfiguration::Zstd(_) => 1,
-            CompressionConfiguration::Lz4(_) => 2,
-            CompressionConfiguration::Snappy(_) => 3,
-            CompressionConfiguration::Dictionary(_) => 4,
-            CompressionConfiguration::Rle(_) => 5,
-            CompressionConfiguration::Delta(_) => 6,
-            CompressionConfiguration::Gorilla(_) => 7,
-            CompressionConfiguration::Toast(_) => 8,
-        }
-    }
-
-    /// Get the decompression tag from compression type ID
-    pub fn decompression_tag_from_id(compression_type_id: u8) -> DecompressionTag {
-        match compression_type_id {
-            0 => DecompressionTag::None,
-            1 => DecompressionTag::Zstd,
-            2 => DecompressionTag::Lz4,
-            3 => DecompressionTag::Snappy,
-            4 => DecompressionTag::Dictionary,
-            5 => DecompressionTag::Rle,
-            6 => DecompressionTag::Delta,
-            7 => DecompressionTag::Gorilla,
-            8 => DecompressionTag::Toast,
-            _ => panic!("Unknown compression type ID: {}", compression_type_id),
-        }
     }
 
     /// Create a compression state directly (high performance)
@@ -139,20 +109,7 @@ impl CompressionConfiguration {
         }
     }
 
-    /// Legacy compatibility - create builder (deprecated)
-    pub fn to_builder(&self) -> Box<dyn CompressionBuilder> {
-        match self {
-            CompressionConfiguration::None => Box::new(None),
-            CompressionConfiguration::Lz4(lz4) => Box::new(*lz4),
-            CompressionConfiguration::Zstd(zstd) => Box::new(*zstd),
-            CompressionConfiguration::Snappy(snappy) => Box::new(*snappy),
-            CompressionConfiguration::Dictionary(dict) => Box::new(*dict),
-            CompressionConfiguration::Rle(rle) => Box::new(*rle),
-            CompressionConfiguration::Delta(delta) => Box::new(*delta),
-            CompressionConfiguration::Gorilla(gorilla) => Box::new(*gorilla),
-            CompressionConfiguration::Toast(toast) => Box::new(*toast),
-        }
-    }
+
 }
 
 /// This tag is stored alongside compressed blobs, to select the appropriate decompression
@@ -230,43 +187,22 @@ pub trait CompressionBuilder: Debug + Size + Send + Sync + 'static {
     fn create_compressor(&self) -> Result<Box<dyn CompressionState>>;
     /// Which decompression algorithm needs to be used.
     fn decompression_tag(&self) -> DecompressionTag;
-    
-    /// Legacy compatibility - returns an object for compressing data (deprecated)
-    fn new_compression(&self) -> Result<Box<dyn CompressionState>> {
-        self.create_compressor()
-    }
 }
 
 /// Trait for the object that compresses data.
 pub trait CompressionState {
     /// Compress data from slice and return the compressed data as a Vec<u8>
-    /// Used for individual values during Memory storage kind packing
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>>;
-    
     /// Compress data from Buf and return the compressed data as a Buf
-    /// Used for block-level compression during SSD storage kind packing
     fn compress_buf(&mut self, data: Buf) -> Result<Buf>;
-    
-    /// Legacy compatibility - finishes the compression stream (deprecated)
-    fn finish(&mut self, data: Buf) -> Result<Buf> {
-        self.compress_buf(data)
-    }
 }
 
 /// An implementation of consumption-based decompression.
 pub trait DecompressionState {
     /// Decompress data from slice and return the decompressed data as SlicedCowBytes
-    /// Used for individual values during Memory storage kind unpacking
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes>;
-    
     /// Decompress data from Buf and return the decompressed data as a Buf
-    /// Used for block-level decompression during SSD storage kind unpacking
     fn decompress_buf(&mut self, data: Buf) -> Result<Buf>;
-    
-    /// Legacy compatibility - decompress the given [Buf] (deprecated)
-    fn decompress(&mut self, data: Buf) -> Result<Buf> {
-        self.decompress_buf(data)
-    }
 }
 
 mod none;
@@ -278,4 +214,5 @@ pub use self::lz4::Lz4;
 mod zstd;
 pub use self::zstd::Zstd;
 
-pub mod metrics;
+// #[cfg(test)]
+// mod comprehensive_tests;

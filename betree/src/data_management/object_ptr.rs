@@ -96,38 +96,21 @@ impl<D> ObjectPointer<D> {
         SPL: StoragePoolLayer<Checksum = D>,
         D: crate::size::StaticSize + crate::checksum::Checksum,
     {
-        let mut decompression_state = self.decompression_tag().new_decompression()?;
         let compressed_data = pool.read(self.size(), self.offset(), self.checksum.clone())?;
         
-         let data = match self.integrity_mode.clone() {
-                IntegrityMode::External => {
-                    decompression_state.decompress_buf(compressed_data)?
-                },
-                IntegrityMode::Internal {..} => {
-                    compressed_data
-                },
-            };
-
-        //let data = decompression_state.decompress(compressed_data)?;
-        #[cfg(feature = "memory_metrics")]
-        {
-            let vdev_stats = pool.get_vdev_stats(self.offset());
-            Ok(super::Object::unpack_at(
-                self.info(),
-                data,
-                self.integrity_mode.clone(),
-                self.decompression_tag(),
-                vdev_stats,
-            )?)
-        }
-        #[cfg(not(feature = "memory_metrics"))]
-        {
-            Ok(super::Object::unpack_at(
-                self.info(),
-                data,
-                self.integrity_mode.clone(),
-                self.decompression_tag(),
-            )?)
-        }
+        // Bypass decompression entirely when no compression is used
+        let data = if self.decompression_tag().is_decompression_needed() {
+            let mut decompression_state = self.decompression_tag().new_decompression()?;
+            decompression_state.decompress(compressed_data)?
+        } else {
+            // No decompression needed - data is already uncompressed
+            compressed_data
+        };
+        
+        Ok(super::Object::unpack_at(
+            self.info(),
+            data,
+            self.integrity_mode.clone(),
+        )?)
     }
 }
