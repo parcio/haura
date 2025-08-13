@@ -26,9 +26,9 @@ class BenchmarkHeatmapGenerator:
         self.metrics = {}
         
         # Define expected configurations
-        self.entry_sizes = [512, 4096, 16384, 32768]  # 512, 4k, 16k, 32k
+        self.entry_sizes = [512, 4096, 16384, 30000]
         self.compression_types = ['None', 'Snappy', 'Rle', 'Delta', 'Zstd(1)', 'Zstd(5)', 'Zstd(10)', 'Lz4(1)', 'Lz4(5)', 'Lz4(10)']
-        self.thread_counts = [1, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40]
+        self.thread_counts = [1, 2, 3, 4, 5, 8, 10, 15, 20, 25]
         
     def parse_folder_name(self, folder_name: str) -> Optional[Tuple[int, str, int]]:
         """Parse folder name to extract entry size, compression, and timestamp"""
@@ -42,17 +42,11 @@ class BenchmarkHeatmapGenerator:
             return None
         
         try:
-            # Extract entry size from "entry{size}" (handles both "entry512" and "entry4k")
-            entry_part = parts[2]  # "entry512", "entry4k", etc.
+            # Extract entry size from "entry{size}"
+            entry_part = parts[2]  # "entry512", "entry4096", etc.
             if not entry_part.startswith('entry'):
                 return None
-            
-            size_str = entry_part[5:]  # Remove "entry" prefix
-            if size_str.endswith('k'):
-                # Convert k suffix to actual bytes (e.g., "4k" -> 4096)
-                entry_size = int(size_str[:-1]) * 1024
-            else:
-                entry_size = int(size_str)
+            entry_size = int(entry_part[5:])  # Remove "entry" prefix
             
             # Last part is always timestamp
             timestamp = int(parts[-1])
@@ -169,26 +163,10 @@ class BenchmarkHeatmapGenerator:
             total_written = final_betree['storage']['tiers'][0]['vdevs'][0]['written']
             total_read = final_betree['storage']['tiers'][0]['vdevs'][0]['read']
             
-            # Extract memory read data (bytes read from memory)
-            total_memory_read = final_betree['storage']['tiers'][0]['vdevs'][0].get('memory_read', 0)
-            
-            # Extract memory read count (number of memory read operations)
-            total_memory_read_count = final_betree['storage']['tiers'][0]['vdevs'][0].get('memory_read_count', 0)
-            
-            # Extract compression metrics
-            bytes_to_compressed = final_betree['storage']['tiers'][0]['vdevs'][0].get('bytes_to_compressed', 0)
-            compressed_bytes = final_betree['storage']['tiers'][0]['vdevs'][0].get('compressed_bytes', 0)
-            
-            # Extract compression and decompression time (in nanoseconds)
-            total_compression_time_ns = final_betree['storage']['tiers'][0]['vdevs'][0].get('compression_time', 0)
-            total_decompression_time_ns = final_betree['storage']['tiers'][0]['vdevs'][0].get('decompression_time', 0)
-            
             # Calculate throughput metrics
             BLOCK_SIZE = 4096
             avg_write_throughput = (total_written * BLOCK_SIZE / 1024 / 1024) / runtime_sec
-            # Include both disk reads and memory reads in read throughput
-            total_read_bytes = (total_read * BLOCK_SIZE) + total_memory_read
-            avg_read_throughput = (total_read_bytes / 1024 / 1024) / runtime_sec
+            avg_read_throughput = (total_read * BLOCK_SIZE / 1024 / 1024) / runtime_sec
             
             # Calculate peak throughput
             write_incremental = []
@@ -199,20 +177,12 @@ class BenchmarkHeatmapGenerator:
                 prev_read = betree_data[i-1]['storage']['tiers'][0]['vdevs'][0]['read']
                 curr_read = betree_data[i]['storage']['tiers'][0]['vdevs'][0]['read']
                 
-                # Include memory read increments in read throughput
-                prev_memory_read = betree_data[i-1]['storage']['tiers'][0]['vdevs'][0].get('memory_read', 0)
-                curr_memory_read = betree_data[i]['storage']['tiers'][0]['vdevs'][0].get('memory_read', 0)
-                
                 write_incremental.append(curr_written - prev_written)
-                # Combine disk reads and memory reads for total read throughput
-                disk_read_bytes = (curr_read - prev_read) * BLOCK_SIZE
-                memory_read_bytes = curr_memory_read - prev_memory_read
-                total_read_increment = disk_read_bytes + memory_read_bytes
-                read_incremental.append(total_read_increment)
+                read_incremental.append(curr_read - prev_read)
             
             # Convert to MiB/s (multiply by 2 for 500ms epochs)
             write_throughputs = [blocks * BLOCK_SIZE / 1024 / 1024 * 2 for blocks in write_incremental]
-            read_throughputs = [bytes_read / 1024 / 1024 * 2 for bytes_read in read_incremental]
+            read_throughputs = [blocks * BLOCK_SIZE / 1024 / 1024 * 2 for blocks in read_incremental]
             
             peak_write = max(write_throughputs) if write_throughputs else 0
             peak_read = max(read_throughputs) if read_throughputs else 0
@@ -233,44 +203,21 @@ class BenchmarkHeatmapGenerator:
             storage_total = final_betree['usage'][0]['total']
             storage_utilization = (storage_used / storage_total) * 100 if storage_total > 0 else 0
             
-            # IOPS (including both storage and memory operations)
-            total_iops = (total_read + total_written + total_memory_read_count) / runtime_sec
-            
-            # Compression effectiveness calculation (percentage of space saved)
-            if bytes_to_compressed > 0:
-                # Calculate bytes saved by compression
-                compression_bytes_saved = bytes_to_compressed - compressed_bytes
-                compression_effectiveness = (compression_bytes_saved / bytes_to_compressed) * 100
-                # Calculate effective physical blocks written (accounting for compression)
-                # This estimates the actual storage blocks used after compression
-                compression_ratio = compressed_bytes / bytes_to_compressed
-                estimated_compressed_data_blocks = int((bytes_to_compressed * compression_ratio) / BLOCK_SIZE)
-                # Add metadata/system blocks (difference between total written and estimated data blocks)
-                estimated_data_blocks_before_compression = int(bytes_to_compressed / BLOCK_SIZE)
-                metadata_blocks = max(0, total_written - estimated_data_blocks_before_compression)
-                effective_blocks_written = estimated_compressed_data_blocks + metadata_blocks
-            else:
-                compression_effectiveness = 0  # No compression data available (none compression case)
-                effective_blocks_written = total_written  # No compression, use actual written blocks
+            # IOPS
+            total_iops = (total_read + total_written) / runtime_sec
             
             return {
                 'avg_write_throughput_mbps': round(avg_write_throughput, 2),
                 'avg_read_throughput_mbps': round(avg_read_throughput, 2),
                 'peak_write_throughput_mbps': round(peak_write, 2),
                 'peak_read_throughput_mbps': round(peak_read, 2),
-                'total_data_written_mb': round(total_written * BLOCK_SIZE / 1024 / 1024, 4),
-                'total_data_read_mb': round(total_read_bytes / 1024 / 1024, 4),
-                'total_data_written_blocks': int(total_written),  # Raw logical block count as integer
-                'total_data_read_blocks': int(total_read),        # Raw logical block count as integer
-                'effective_blocks_written': int(effective_blocks_written),  # Physical blocks after compression
+                'total_data_written_mb': round(total_written * BLOCK_SIZE / 1024 / 1024, 2),
+                'total_data_read_mb': round(total_read * BLOCK_SIZE / 1024 / 1024, 2),
                 'cache_hit_rate_percent': round(cache_hit_rate, 2),
                 'peak_memory_mb': round(peak_memory_mb, 2),
                 'cpu_utilization_percent': round(cpu_utilization, 2),
                 'storage_utilization_percent': round(storage_utilization, 2),
                 'total_iops': round(total_iops, 2),
-                'compression_effectiveness_percent': round(compression_effectiveness, 1),
-                'compression_time_seconds': round(total_compression_time_ns / 1_000_000_000, 3),  # Convert ns to seconds
-                'decompression_time_seconds': round(total_decompression_time_ns / 1_000_000_000, 3),  # Convert ns to seconds
                 'runtime_seconds': round(runtime_sec, 2)
             }
             
@@ -330,19 +277,7 @@ class BenchmarkHeatmapGenerator:
                 for metric_name in runs[0].keys():
                     values = [run[metric_name] for run in runs if metric_name in run]
                     if values:
-                        # Use different decimal places for different metrics
-                        if metric_name in ['total_data_written_blocks', 'total_data_read_blocks', 'effective_blocks_written']:
-                            # Block counts should be integers
-                            aggregated[metric_name] = int(round(np.mean(values)))
-                        elif metric_name in ['total_data_written_mb', 'total_data_read_mb']:
-                            decimal_places = 4
-                            aggregated[metric_name] = round(np.mean(values), decimal_places)
-                        elif metric_name == 'compression_effectiveness_percent':
-                            decimal_places = 1
-                            aggregated[metric_name] = round(np.mean(values), decimal_places)
-                        else:
-                            decimal_places = 2
-                            aggregated[metric_name] = round(np.mean(values), decimal_places)
+                        aggregated[metric_name] = round(np.mean(values), 2)
                 self.metrics[key] = aggregated
     
     def create_heatmap_data(self, metric_name: str, remove_empty: bool = None) -> Dict[int, pd.DataFrame]:
@@ -379,12 +314,7 @@ class BenchmarkHeatmapGenerator:
                 df = df.dropna(how='all')
                 
                 # Remove columns (thread counts) that are completely empty
-                # Use a more compatible approach for older pandas versions
-                cols_to_keep = []
-                for col in df.columns:
-                    if not df[col].isna().all():
-                        cols_to_keep.append(col)
-                df = df[cols_to_keep]
+                df = df.dropna(axis=1, how='all')
             
             # Only add to heatmap_data if there's actual data (or if keeping empty and df exists)
             if not df.empty or not remove_empty:
@@ -415,20 +345,11 @@ class BenchmarkHeatmapGenerator:
             vmin = df.min().min() if not df.isna().all().all() else 0
             vmax = df.max().max() if not df.isna().all().all() else 1
             
-            # Create heatmap with appropriate formatting
-            # Use different decimal places for different metrics
-            if metric_name in ['total_data_written_blocks', 'total_data_read_blocks', 'effective_blocks_written']:
-                fmt = '.0f'  # Integer format for block counts (no decimal places)
-            elif metric_name in ['total_data_written_mb', 'total_data_read_mb']:
-                fmt = '.4f'  # 4 decimal places for data written/read in MB
-            elif metric_name == 'compression_effectiveness_percent':
-                fmt = '.1f'  # 1 decimal place for compression effectiveness
-            else:
-                fmt = '.1f'  # 1 decimal place for other metrics
+            # Create heatmap
             sns.heatmap(df, 
                        ax=axes[i],
                        annot=True, 
-                       fmt=fmt,
+                       fmt='.1f',
                        cmap=cmap,
                        vmin=vmin,
                        vmax=vmax,
@@ -461,17 +382,11 @@ class BenchmarkHeatmapGenerator:
             ('peak_read_throughput_mbps', 'Peak Read Throughput', 'MiB/s', 'Blues'),
             ('total_data_written_mb', 'Total Data Written', 'MB', 'Oranges'),
             ('total_data_read_mb', 'Total Data Read', 'MB', 'Purples'),
-            ('total_data_written_blocks', 'Total Data Written (Logical)', 'blocks', 'Oranges'),
-            ('total_data_read_blocks', 'Total Data Read (Logical)', 'blocks', 'Purples'),
-            ('effective_blocks_written', 'Effective Blocks Written (After Compression)', 'blocks', 'Reds'),
             ('cache_hit_rate_percent', 'Cache Hit Rate', '%', 'Greens'),
             ('peak_memory_mb', 'Peak Memory Usage', 'MB', 'YlOrRd'),
             ('cpu_utilization_percent', 'CPU Utilization', '%', 'plasma'),
             ('storage_utilization_percent', 'Storage Utilization', '%', 'viridis'),
             ('total_iops', 'Total IOPS', 'ops/s', 'magma'),
-            ('compression_effectiveness_percent', 'Compression Effectiveness', '%', 'RdYlGn'),
-            ('compression_time_seconds', 'Total Compression Time', 'seconds', 'Reds'),
-            ('decompression_time_seconds', 'Total Decompression Time', 'seconds', 'Blues'),
             ('runtime_seconds', 'Runtime', 'seconds', 'coolwarm')
         ]
         

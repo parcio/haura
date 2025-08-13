@@ -77,18 +77,14 @@ def debug_compression_parsing(main_dir, target_char):
     print("=== END DEBUG ===\n")
 
 def extract_entry_size(folder_name):
-    """Extract entry size from folder name like 'ycsb_g_entry512_none_1753381182' or 'ycsb_g_entry4k_none_1753381182'"""
-    match = re.search(r'entry(\d+k?)', folder_name)
+    """Extract entry size from folder name like 'ycsb_g_entry512_none_1753381182'"""
+    match = re.search(r'entry(\d+)', folder_name)
     if match:
-        size_str = match.group(1)
-        if size_str.endswith('k'):
-            # Convert k suffix to actual bytes
-            return str(int(size_str[:-1]) * 1024)
-        return size_str
+        return match.group(1)
     return None
 
 # Debug: Show what compression values are being parsed
-# debug_compression_parsing(main_dir, target_char)
+debug_compression_parsing(main_dir, target_char)
 
 # Step 1: Collect all folders and group by entry size
 compression_labels = set()
@@ -102,50 +98,13 @@ for folder in os.listdir(main_dir):
             label = extract_compression_value(config_path)
             compression_labels.add(label)
 
-# Dynamically determine entry sizes and their positions
-available_entry_sizes = sorted([int(size) for size in folders_by_entry_size.keys()])
-entry_size_order = [str(size) for size in available_entry_sizes]
-
-# print(f"DEBUG: Detected entry sizes: {folders_by_entry_size.keys()}")
-# print(f"DEBUG: Available entry sizes (sorted): {available_entry_sizes}")
-# print(f"DEBUG: Entry size order: {entry_size_order}")
-
-# Create positions dynamically based on available entry sizes
-entry_size_positions = {}
-if len(available_entry_sizes) == 1:
-    entry_size_positions[entry_size_order[0]] = (0, 0)
-elif len(available_entry_sizes) == 2:
-    entry_size_positions[entry_size_order[0]] = (0, 0)
-    entry_size_positions[entry_size_order[1]] = (0, 1)
-elif len(available_entry_sizes) == 3:
-    entry_size_positions[entry_size_order[0]] = (0, 0)
-    entry_size_positions[entry_size_order[1]] = (0, 1)
-    entry_size_positions[entry_size_order[2]] = (1, 0)
-else:  # 4 or more
-    for i, size in enumerate(entry_size_order[:4]):  # Only show first 4
-        row = i // 2
-        col = i % 2
-        entry_size_positions[size] = (row, col)
-
 # Assign consistent color per label
 color_map = plt.get_cmap("tab10")
 label_list = sorted(list(compression_labels))
 label_colors = {label: color_map(i % 10) for i, label in enumerate(label_list)}
 
-# Step 2: Setup subplot layout based on number of entry sizes
-num_entry_sizes = len(available_entry_sizes)
-if num_entry_sizes == 1:
-    fig, axs = plt.subplots(1, 1, figsize=(8, 6))
-    axs = np.array([[axs]])  # Make it 2D numpy array for consistent indexing
-elif num_entry_sizes == 2:
-    fig, axs = plt.subplots(1, 2, figsize=(16, 6))
-    axs = np.array([axs])  # Make it 2D numpy array for consistent indexing
-elif num_entry_sizes == 3:
-    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
-    axs[1, 1].set_visible(False)  # Hide the unused subplot
-else:  # 4 or more
-    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
-
+# Step 2: Setup 2x2 subplot layout
+fig, axs = plt.subplots(2, 2, figsize=(16, 12))
 all_labels_used = set()
 
 title_map = {
@@ -163,6 +122,15 @@ title_map = {
 
 plot_title = title_map.get(target_char, f"YCSB-{target_char.upper()}")
 fig.suptitle(f"{plot_title} - Operations/sec by Thread Count (Different Entry Sizes)", fontsize=18, y=0.95)
+
+# Define entry size order for consistent subplot positioning
+entry_size_order = ['512', '4096', '16384', '30000']
+entry_size_positions = {
+    '512': (0, 0),    # Top-left
+    '4096': (0, 1),   # Top-right
+    '16384': (1, 0),  # Bottom-left
+    '30000': (1, 1)   # Bottom-right
+}
 
 # Step 1: Define label order and fixed colors
 preferred_order = ["None", "Snappy", "Rle", "Delta", "Zstd(1)", "Zstd(5)", "Zstd(10)", "Lz4(1)", "Lz4(5)", "Lz4(10)"]

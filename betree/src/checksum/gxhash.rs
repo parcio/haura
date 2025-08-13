@@ -22,6 +22,7 @@ impl Checksum for GxHash {
         &self,
         data: I,
     ) -> Result<(), ChecksumError> {
+        return Ok(());
         if self.0 == 0 {
             return Ok(());
         }

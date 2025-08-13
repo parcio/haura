@@ -8,7 +8,7 @@ use parking_lot::RwLock;
 use std::{
     io,
     ops::{Deref, DerefMut},
-    sync::{atomic::Ordering, Arc},
+    sync::atomic::Ordering,
 };
 
 /// `LeafVdev` that is backed by memory.
@@ -16,7 +16,7 @@ pub struct Memory {
     mem: RwLock<Box<[u8]>>,
     id: String,
     size: Block<u64>,
-    stats: Arc<AtomicStatistics>,
+    stats: std::sync::Arc<AtomicStatistics>,
 }
 
 impl Memory {
@@ -26,7 +26,7 @@ impl Memory {
             mem: RwLock::new(vec![0; size].into_boxed_slice()),
             id,
             size: Block::from_bytes(size as u64),
-            stats: Arc::new(Default::default()),
+            stats: std::sync::Arc::new(AtomicStatistics::default()),
         })
     }
 
@@ -58,23 +58,11 @@ impl Memory {
         match self.slice_blocks(size, offset) {
             Ok(slice) => {
                 let buf = unsafe {
-                    #[cfg(feature = "memory_metrics")]
-                    {
-                        Buf::from_tracked_raw(
-                            std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
-                                .expect("Pointer in Memory vdev was null."),
-                            size,
-                            self.stats.clone(),
-                        )
-                    }
-                    #[cfg(not(feature = "memory_metrics"))]
-                    {
-                        Buf::from_raw(
-                            std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
-                                .expect("Pointer in Memory vdev was null."),
-                            size,
-                        )
-                    }
+                    Buf::from_raw(
+                        std::ptr::NonNull::new(slice.as_ptr() as *mut u8)
+                            .expect("Pointer in Memory vdev was null."),
+                        size,
+                    )
                 };
                 #[cfg(feature = "latency_metrics")]
                 self.stats.read_op_latency.fetch_add(
@@ -173,6 +161,11 @@ impl Vdev for Memory {
         self.stats.as_stats()
     }
 
+    #[cfg(feature = "memory_metrics")]
+    fn atomic_stats(&self) -> Option<std::sync::Arc<AtomicStatistics>> {
+        Some(self.stats.clone())
+    }
+
     fn for_each_child(&self, _f: &mut dyn FnMut(&dyn Vdev)) {}
 }
 
@@ -187,14 +180,6 @@ impl VdevLeafRead for Memory {
         match self.slice(buf_mut.len(), offset.to_bytes() as usize) {
             Ok(src) => {
                 buf_mut.copy_from_slice(&src);
-                
-                // Track memory metrics for direct memory access
-                // #[cfg(feature = "memory_metrics")]
-                // {
-                //     self.stats.memory_read.fetch_add(size.as_u64(), Ordering::Relaxed);
-                //     self.stats.memory_read_count.fetch_add(1, Ordering::Relaxed);
-                // }
-                
                 #[cfg(feature = "latency_metrics")]
                 self.stats.read_op_latency.fetch_add(
                     start

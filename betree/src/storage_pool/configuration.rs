@@ -316,7 +316,6 @@ impl LeafVdev {
                     return Err(io::Error::last_os_error());
                 }
 
-
                 Ok(Leaf::File(vdev::File::new(
                     file,
                     path.to_string_lossy().into_owned(),
@@ -328,7 +327,6 @@ impl LeafVdev {
             )?)),
             #[cfg(feature = "nvm")]
             LeafVdev::PMemFile { ref path, len } => {
-
                 let file = match pmdk::PMem::open(path) {
                     Ok(handle) => handle,
                     Err(open_err) => match pmdk::PMem::create(path, len) {

@@ -41,7 +41,7 @@ function run {
     shift 3
 
     if [ "$total_runs" -gt 0 ]; then
-        sleep 15
+        sleep 30
     fi
     total_runs=$((total_runs + 1))
 
@@ -56,12 +56,6 @@ function run {
     env >"env"
     "$ROOT/../../target/release/bectl" config print-active >"config"
     numactl --cpunodebind=0 --membind=0 "$ROOT/target/release/betree-perf" "$mode" "$@"
-
-    # Generate flamegraph while running the benchmark
-    #flamegraph --output="flamegraph.svg" -- numactl --cpunodebind=0 --membind=0 "$ROOT/target/release/betree-perf" "$mode" "$@"
-#--freq 70  
-    #rm -f perf.data
-
 
     echo "merging results into $out_path/out.jsonl"
     "$ROOT/target/release/json-merge" \
@@ -220,13 +214,14 @@ function ycsb_a() {
     #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 6 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_a_${YCSB_SUFFIX:-unnamed}" ycsb-a "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_b() {
@@ -238,13 +233,14 @@ function ycsb_b() {
     #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 6 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_b_${YCSB_SUFFIX:-unnamed}" ycsb-b "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_c() {
@@ -285,13 +281,14 @@ function ycsb_e() {
     #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((2 * 1024 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
     #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 6 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_e_${YCSB_SUFFIX:-unnamed}" ycsb-e "$((1 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_f() {
@@ -310,17 +307,16 @@ function ycsb_g() {
     local data_type="${YCSB_DATA_TYPE:-int}"
     local data_path="${YCSB_DATA_PATH:-/home/skarim/Code/smash/haura/betree/haura-benchmarks/silesia_corpus}"
     
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 12 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 16 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 24 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 28 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 32 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 36 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
-    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 40 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 1 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 2 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 3 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 4 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 5 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 8 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 10 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 15 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    #run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 20 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
+    run "$RUN_IDENT" "ycsb_g_${YCSB_SUFFIX:-unnamed}" ycsb-g "$((2 * 1024 * 1024))" 0 25 --data-source "$data_source" --data-type "$data_type" --data-path "$data_path" --entry-size "$ENTRY_SIZE"
 }
 
 function ycsb_h() {
@@ -367,9 +363,9 @@ function run_all_ycsb_compressions() {
     # Define entry size configurations
     local entry_sizes=(
         '512|entry512'
-        '4096|entry4k'
-        '16384|entry16k'
-        '30000|entry32k'
+        '4096|entry4096'
+        '16384|entry16384'
+        '30000|entry30000'
     )
     
     # Define compression configurations
@@ -432,8 +428,7 @@ function run_all_ycsb_compressions() {
     done
 }
 
-#cargo build --release --features betree_storage_stack/memory_metrics
-cargo build --release --features betree_storage_stack/compression_metrics
+cargo build --release --features memory_metrics
 
 if [ -z "$BETREE_CONFIG" ]; then
     export BETREE_CONFIG="$PWD/perf-config.json"

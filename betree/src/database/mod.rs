@@ -241,7 +241,6 @@ impl DatabaseConfiguration {
         }
 
         Dmu::new(
-            self.compression.to_builder(),
             self.compression.clone(),
             <Checksum as crate::checksum::Checksum>::builder(),
             self.default_storage_class,
@@ -551,6 +550,12 @@ impl Database {
                 self.root_tree.insert(key, msg, StoragePreference::NONE)?;
             }
         }
+        Ok(())
+    }
+
+    pub fn flush_(&mut self) -> Result<()> {
+        let pool = self.root_tree.dmu().spl();
+        pool.flush()?;
         Ok(())
     }
 

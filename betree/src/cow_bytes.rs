@@ -230,8 +230,6 @@ pub struct SlicedCowBytes {
 pub(super) enum ByteSource {
     Cow(CowBytes),
     Raw { ptr: *const u8, len: usize },
-    #[cfg(feature = "memory_metrics")]
-    TrackedRaw { ptr: *const u8, len: usize, stats: std::sync::Arc<crate::vdev::AtomicStatistics>, track_access: bool },
 }
 
 impl Deref for ByteSource {
@@ -241,11 +239,6 @@ impl Deref for ByteSource {
         match self {
             ByteSource::Cow(data) => &data,
             ByteSource::Raw { ptr, len } => unsafe {
-                std::slice::from_raw_parts(ptr.clone(), *len)
-            },
-            #[cfg(feature = "memory_metrics")]
-            ByteSource::TrackedRaw { ptr, len, stats: _, track_access: _} => unsafe {
-                // Note: We don't track memory access here anymore - it's tracked at the slice level
                 std::slice::from_raw_parts(ptr.clone(), *len)
             },
         }
@@ -298,13 +291,21 @@ impl Size for SlicedCowBytes {
         match self.data {
             ByteSource::Cow(ref cow_bytes) => cow_bytes.cache_size(),
             ByteSource::Raw { .. } => std::mem::size_of::<usize>() + std::mem::size_of::<usize>(),
-            #[cfg(feature = "memory_metrics")]
-            ByteSource::TrackedRaw { .. } => std::mem::size_of::<usize>() + std::mem::size_of::<usize>() + std::mem::size_of::<std::sync::Arc<crate::vdev::AtomicStatistics>>() + std::mem::size_of::<bool>(),
         }
     }
 }
 
-impl SlicedCowBytes {
+impl From<Vec<u8>> for SlicedCowBytes {
+    fn from(vec: Vec<u8>) -> Self {
+        SlicedCowBytes {
+            pos: 0,
+            len: vec.len() as u32,
+            data: ByteSource::Cow(CowBytes::from(vec)),
+        }
+    }
+}
+    
+impl SlicedCowBytes {    
     /// Returns a new subslice which points to `self[pos..pos+len]`.
     pub fn subslice(self, pos: u32, len: u32) -> Self {
         assert!(pos + len <= self.len);
@@ -337,16 +338,6 @@ impl SlicedCowBytes {
                 (buf.as_mut_ptr() as *mut u8).copy_from(ptr, len);
                 &buf
             },
-            #[cfg(feature = "memory_metrics")]
-            ByteSource::TrackedRaw { ptr, len, .. } => unsafe {
-                //println!("2 DEBUG: into_raw called on TrackedRaw with len={}", len);
-                // FIXME: This copies data currently when the original buffer
-                // is from a raw source ot avoid breaking behavior from
-                // outside.
-                let mut buf = Vec::with_capacity(len);
-                (buf.as_mut_ptr() as *mut u8).copy_from(ptr, len);
-                &buf
-            },
         }
     }
 
@@ -358,44 +349,10 @@ impl SlicedCowBytes {
         }
     }
 
-    #[cfg(feature = "memory_metrics")]
-    pub(crate) unsafe fn from_tracked_raw(
-        ptr: *const u8, 
-        len: usize, 
-        stats: std::sync::Arc<crate::vdev::AtomicStatistics>
-    ) -> Self {
-        Self {
-            data: ByteSource::TrackedRaw { ptr, len, stats, track_access: true },
-            pos: 0,
-            len: len.try_into().expect("Capacity to large."),
-        }
-    }
-
-    #[cfg(feature = "memory_metrics")]
-    pub(crate) unsafe fn from_tracked_raw_no_tracking(
-        ptr: *const u8, 
-        len: usize, 
-        stats: std::sync::Arc<crate::vdev::AtomicStatistics>
-    ) -> Self {
-        Self {
-            data: ByteSource::TrackedRaw { ptr, len, stats, track_access: false },
-            pos: 0,
-            len: len.try_into().expect("Capacity to large."),
-        }
-    }
-
     pub(crate) fn into_cow_bytes(self) -> Result<CowBytes, SlicedCowBytes> {
         match self.data {
             ByteSource::Cow(cow_bytes) if self.pos == 0 => Ok(cow_bytes),
             _ => Err(self),
-        }
-    }
-
-    #[cfg(feature = "memory_metrics")]
-    pub(crate) fn get_stats(&self) -> Option<std::sync::Arc<crate::vdev::AtomicStatistics>> {
-        match &self.data {
-            ByteSource::TrackedRaw { stats, .. } => Some(stats.clone()),
-            _ => None,
         }
     }
 }
@@ -410,36 +367,11 @@ impl From<CowBytes> for SlicedCowBytes {
     }
 }
 
-impl From<Vec<u8>> for SlicedCowBytes {
-    fn from(vec: Vec<u8>) -> Self {
-        SlicedCowBytes {
-            pos: 0,
-            len: vec.len() as u32,
-            data: ByteSource::Cow(CowBytes::from(vec)),
-        }
-    }
-}
-
 impl Deref for SlicedCowBytes {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
         let start = self.pos as usize;
         let end = start + self.len as usize;
-        
-        // Track memory access for TrackedRaw sources at the slice level
-        #[cfg(feature = "memory_metrics")]
-        if let ByteSource::TrackedRaw { stats, track_access, .. } = &self.data {
-            if *track_access {
-                //println!("DEBUG: Deref called on TrackedRaw with len={} (TRACKED)", self.len);
-                use std::sync::atomic::Ordering;
-                // Track memory access at the slice level
-                stats.memory_read.fetch_add(self.len as u64, Ordering::Relaxed);
-                stats.memory_read_count.fetch_add(1, Ordering::Relaxed);
-            } else {
-                //println!("DEBUG: Deref called on TrackedRaw with len={} (NOT TRACKED)", self.len);
-            }
-        }
-        
         &self.data[start..end]
     }
 }

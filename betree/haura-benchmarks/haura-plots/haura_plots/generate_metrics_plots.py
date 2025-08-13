@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate metrics plots for all benchmark runs - Standalone version
-Includes necessary functions from metrics_plots.py and util.py with Python 3.8 compatibility
+Generate metrics plots for all benchmark runs using existing metrics_plots.py functions
 """
 
 import os
@@ -11,218 +10,36 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import argparse
 
+# Add the haura_plots directory to Python path
+sys.path.insert(0, str(Path(__file__).parent))
+
 try:
+    # Try to import matplotlib and numpy first
     import matplotlib
     matplotlib.use('Agg')  # Use non-interactive backend
     import matplotlib.pyplot as plt
     import numpy as np
-except ImportError as e:
-    print(f"ERROR: Error importing required modules: {e}")
-    print("Please install required packages:")
+    
+    # Add haura_plots to path and import
+    haura_plots_path = str(Path(__file__).parent / "haura_plots")
+    if haura_plots_path not in sys.path:
+        sys.path.insert(0, haura_plots_path)
+    
+    # Import util first
+    import util
+    
+    # Now import the plotting functions with util available
+    import metrics_plots
+    plot_throughput = metrics_plots.plot_throughput
+    plot_tier_usage = metrics_plots.plot_tier_usage
+    plot_system = metrics_plots.plot_system
+    
+except Exception as e:
+    print(f"❌ Error importing required modules: {e}")
+    print("Make sure you have matplotlib and numpy installed:")
     print("  pip install matplotlib numpy")
+    print("Also ensure you're running this script from the haura-plots directory")
     sys.exit(1)
-
-# Utility functions from util.py (Python 3.8 compatible)
-BLOCK_SIZE = 4096
-SEC_MS = 1000
-EPOCH_MS = 1000
-
-# Colors
-GREEN = '#2ca02c'
-BLUE = '#1f77b4'
-
-def subtract_first_index(data):
-    """Subtract the first element from all elements in the list."""
-    if len(data) > 0:
-        first = data[0]
-        for i in range(len(data)):
-            data[i] -= first
-
-def subtract_last_index(data):
-    """Subtract each element from the next element in the list."""
-    if len(data) > 1:
-        for i in range(len(data) - 1, 0, -1):
-            data[i] -= data[i - 1]
-
-def ms_to_string(ms):
-    """Convert milliseconds to a formatted string."""
-    seconds = ms // 1000
-    minutes = seconds // 60
-    seconds = seconds % 60
-    return f"{minutes}:{seconds:02d}"
-
-def num_to_name(tier):
-    """Convert a number to the corresponding tier name in the storage hierarchy."""
-    names = {0: 'Fastest', 1: 'Fast', 2: 'Slow', 3: 'Slowest'}
-    return names.get(tier, f'Tier{tier}')
-
-def read_jsonl(file_handle):
-    """Read JSONL file and return list of parsed JSON objects."""
-    data = []
-    for line in file_handle:
-        line = line.strip()
-        if line:
-            data.append(json.loads(line))
-    return data
-
-# Plotting functions from metrics_plots.py (adapted)
-def plot_throughput(data, path):
-    """Print a four row throughput plot with focussed read or write throughput."""
-    
-    epoch = [temp['epoch_ms'] for temp in data]
-    subtract_first_index(epoch)
-    epoch_formatted = list(map(ms_to_string, epoch))
-    num_tiers = len(data[0]['storage']['tiers'])
-    fig, axs = plt.subplots(num_tiers, 1, figsize=(16,8))
-    
-    # Handle single tier case
-    if num_tiers == 1:
-        axs = [axs]
-    
-    for tier_id in range(num_tiers):
-        for disk_id in range(len(data[0]['storage']['tiers'][tier_id]['vdevs'])):
-            writes = np.array([])
-            reads = np.array([])
-            for point in data:
-                writes = np.append(writes, point['storage']['tiers'][tier_id]['vdevs'][disk_id]['written'])
-                reads = np.append(reads, point['storage']['tiers'][tier_id]['vdevs'][disk_id]['read'])
-
-            if len(writes) > 0:
-                subtract_last_index(writes)
-                subtract_last_index(reads)
-
-            # convert to MiB from Blocks
-            writes = writes * BLOCK_SIZE / 1024 / 1024 * (SEC_MS / EPOCH_MS)
-            reads = reads * BLOCK_SIZE / 1024 / 1024 * (SEC_MS / EPOCH_MS)
-
-        axs[tier_id].plot(epoch, reads, label = 'Read', linestyle='dotted', color=GREEN)
-        axs[tier_id].plot(epoch, writes, label = 'Written', color=BLUE)
-        axs[tier_id].set_xlabel("runtime (minute:seconds)")
-        axs[tier_id].set_xticks(epoch, epoch_formatted)
-        axs[tier_id].locator_params(tight=True, nbins=10)
-        axs[tier_id].set_ylabel(f"{num_to_name(tier_id)}\nMiB/s (I/0)")
-        label=' | '.join(path.split('/')[-2:])
-    
-    fig.legend(loc="center right",handles=axs[0].get_lines())
-    fig.suptitle(f"Haura - {label}", y=0.98)
-    fig.savefig(f"{path}/plot_write.svg")
-    
-    for tier_id in range(num_tiers):
-        lines = axs[tier_id].get_lines()
-        if len(lines) > 0:
-            lines[0].set_linestyle('solid')
-            lines[0].zorder = 2.1
-            lines[1].set_linestyle('dotted')
-            lines[1].zorder = 2.0
-    
-    fig.legend(loc="center right",handles=axs[0].get_lines())
-    fig.savefig(f"{path}/plot_read.svg")
-    plt.close(fig)
-
-def plot_tier_usage(data, path):
-    """Plot the utilized space of each storage tier."""
-    fig, axs = plt.subplots(4, 1, figsize=(10,13))
-
-    # 0 - 3; Fastest - Slowest
-    free = [[], [], [], []]
-    total = [[], [], [], []]
-    
-    # Map each timestep to an individual
-    for ts in data:
-        tier = 0
-        for stat in ts["usage"]:
-            free[tier].append(stat["free"])
-            total[tier].append(stat["total"])
-            tier += 1
-
-    tier = 0
-    for fr in free:
-        axs[tier].plot((np.array(total[tier]) - np.array(fr)) * 4096 / 1024 / 1024 / 1024, 
-                      label="Used", marker="o", markevery=200, color=BLUE)
-        axs[tier].plot(np.array(total[tier]) * 4096 / 1024 / 1024 / 1024, 
-                      label="Total", marker="^", markevery=200, color=GREEN)
-        axs[tier].set_ylim(bottom=0)
-        axs[tier].set_ylabel(f"{num_to_name(tier)}\nCapacity in GiB")
-        tier += 1
-
-    fig.legend(loc='center right',handles=axs[0].get_lines())
-    fig.savefig(f"{path}/tier_usage.svg")
-    plt.close(fig)
-
-def plot_system(path):
-    """Plot the system usage and temperatures during the run."""
-    data = []
-    jsonl_file = f"{path}/out.jsonl"
-    
-    try:
-        with open(jsonl_file, 'r', encoding="UTF-8") as metrics:
-            data = read_jsonl(metrics)
-    except FileNotFoundError:
-        print(f"Warning: {jsonl_file} not found, skipping system plot")
-        return
-    except Exception as e:
-        print(f"Warning: Error reading {jsonl_file}: {e}")
-        return
-
-    if not data:
-        print(f"Warning: No data found in {jsonl_file}")
-        return
-
-    epoch = [temp['epoch_ms'] for temp in data]
-    subtract_first_index(epoch)
-    epoch_formatted = list(map(ms_to_string, epoch))
-    min_pagefaults = [x["proc_minflt"] + x["proc_cminflt"] for x in data]
-    maj_pagefaults = [x["proc_majflt"] + x["proc_cmajflt"] for x in data]
-    virtual_mem = [x["proc_vsize"] for x in data]
-    resident_mem = [x["proc_rss"] for x in data]
-    utime = [x["proc_utime"] + x["proc_cutime"] for x in data]
-    stime = [x["proc_stime"] + x["proc_cstime"] for x in data]
-
-    fig, axs = plt.subplots(3,2, figsize=(10, 10))
-    eticks = range(0, epoch[-1:][0], 30 * 10**3)
-    eticks_formatted = list(map(ms_to_string, eticks))
-
-    # Page Faults (Minor)
-    axs[0][0].plot(epoch, min_pagefaults)
-    axs[0][0].set_ylabel("Minor Pagefaults (All threads)")
-    axs[0][0].set_xticks(eticks, eticks_formatted)
-
-    # Page Faults (Major)
-    axs[1][0].plot(epoch, maj_pagefaults)
-    axs[1][0].set_ylabel("Major Pagefaults (All threads)")
-    axs[1][0].set_xticks(eticks, eticks_formatted)
-
-    # Show[0] in MiB
-    axs[2][0].plot(epoch, np.array(virtual_mem) / 1024 / 1024)
-    axs[2][0].set_ylabel("Virtual Memory [MiB]")
-    axs[2][0].set_xticks(eticks, eticks_formatted)
-
-    # Resident Memory
-    axs[2][1].plot(epoch, np.array(resident_mem))
-    axs[2][1].set_ylabel("Resident Memory Pages [#]")
-    axs[2][1].set_xticks(eticks, eticks_formatted)
-
-    # CPU time
-    axs[0][1].plot(epoch, utime, label="utime")
-    axs[0][1].plot(epoch, stime, label="stime")
-    axs[0][1].set_ylabel("time [s] (All threads)")
-    axs[0][1].set_xticks(eticks, eticks_formatted)
-    axs[0][1].legend(bbox_to_anchor=(1.35, 0.6))
-
-    # Temperature plots
-    temps_keys = [key for key in data[0].keys() if 'hwmon' in key and 'Tccd' not in key]
-    line_styles = ['-', '--', '-.', ':']
-    for i, key in enumerate(temps_keys):
-        style = line_styles[i % len(line_styles)]
-        axs[1][1].plot(epoch, [x[key] for x in data], label=key, linestyle=style)
-    
-    axs[1][1].set_xticks(eticks, eticks_formatted)
-    axs[1][1].set_ylabel("Temperature [C]")
-    axs[1][1].legend(bbox_to_anchor=(1.0, 0.6))
-
-    fig.tight_layout()
-    fig.savefig(f"{path}/proc.svg")
-    plt.close(fig)
 
 class MetricsPlotGenerator:
     """Generate metrics plots for all benchmark runs"""
@@ -242,10 +59,10 @@ class MetricsPlotGenerator:
         """Log message if verbose mode is enabled"""
         if self.verbose:
             prefix = {
-                "INFO": "INFO: ",
-                "SUCCESS": "SUCCESS: ",
-                "WARNING": "WARNING: ",
-                "ERROR": "ERROR: "
+                "INFO": "ℹ️ ",
+                "SUCCESS": "✅",
+                "WARNING": "⚠️ ",
+                "ERROR": "❌"
             }.get(level, "")
             print(f"{prefix} {message}")
     
@@ -403,7 +220,7 @@ class MetricsPlotGenerator:
     
     def generate_all_plots(self, overwrite: bool = False) -> None:
         """Generate plots for all benchmark runs"""
-        self.log("Starting metrics plot generation...")
+        self.log("🚀 Starting metrics plot generation...")
         
         # Find all run folders
         run_folders = self.find_run_folders()
@@ -424,7 +241,7 @@ class MetricsPlotGenerator:
     def print_summary(self):
         """Print generation summary"""
         print("\n" + "="*60)
-        print("METRICS PLOT GENERATION SUMMARY")
+        print("📊 METRICS PLOT GENERATION SUMMARY")
         print("="*60)
         print(f"Total runs found:     {self.stats['total_runs']}")
         print(f"Successfully processed: {self.stats['successful_runs']}")
@@ -439,14 +256,14 @@ class MetricsPlotGenerator:
         print("="*60)
         
         if self.stats['plots_generated'] > 0:
-            print("Plot generation completed!")
-            print("Check individual run folders for generated SVG files:")
+            print("✅ Plot generation completed!")
+            print("📁 Check individual run folders for generated SVG files:")
             print("   - plot_write.svg (write throughput)")
             print("   - plot_read.svg (read throughput)")  
             print("   - tier_usage.svg (storage tier usage)")
             print("   - proc.svg (system metrics)")
         else:
-            print("WARNING: No plots were generated.")
+            print("⚠️  No plots were generated.")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -481,7 +298,7 @@ Examples:
         args.results_dirs = [d for d in default_dirs if Path(d).exists()]
         
         if not args.results_dirs:
-            print("ERROR: No default results directories found!")
+            print("❌ No default results directories found!")
             print("Please specify results directories with --results-dir")
             return 1
     

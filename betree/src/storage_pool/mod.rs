@@ -106,6 +106,10 @@ pub trait StoragePoolLayer: Clone + Send + Sync + 'static {
 
     /// Get default storage class.
     fn default_storage_class(&self) -> u8;
+
+    /// Get vdev statistics for memory metrics tracking.
+    #[cfg(feature = "memory_metrics")]
+    fn get_vdev_stats(&self, offset: DiskOffset) -> Option<std::sync::Arc<crate::vdev::AtomicStatistics>>;
 }
 
 mod disk_offset;

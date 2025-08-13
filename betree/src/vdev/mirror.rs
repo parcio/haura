@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering;
 pub struct Mirror<V> {
     vdevs: Box<[V]>,
     id: String,
-    stats: AtomicStatistics,
+    stats: std::sync::Arc<AtomicStatistics>,
 }
 
 impl<V> Mirror<V> {
@@ -23,7 +23,7 @@ impl<V> Mirror<V> {
         Mirror {
             vdevs,
             id,
-            stats: Default::default(),
+            stats: std::sync::Arc::new(AtomicStatistics::default()),
         }
     }
 }
@@ -239,6 +239,11 @@ impl<V: Vdev> Vdev for Mirror<V> {
 
     fn stats(&self) -> Statistics {
         self.stats.as_stats()
+    }
+
+    #[cfg(feature = "memory_metrics")]
+    fn atomic_stats(&self) -> Option<std::sync::Arc<AtomicStatistics>> {
+        Some(self.stats.clone())
     }
 
     fn for_each_child(&self, f: &mut dyn FnMut(&dyn Vdev)) {
