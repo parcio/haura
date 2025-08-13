@@ -4,11 +4,20 @@ version = "0.1.0"
 authors = ["tilpner <betree@tilpner.com>"]
 edition = "2018"
 
+[features]
+memory_metrics = ["betree_storage_stack/memory_metrics"]
+
+[[bin]]
+name = "test_memory_metrics"
+path = "src/test_memory_metrics.rs"
+
+
+
 [workspace]
 members = ["."]
 
 [dependencies]
-betree_storage_stack = { path = ".." }
+betree_storage_stack = { path = "..", features = ["nvm"] }
 
 structopt = "0.3"
 figment = { version = "0.10", features = [ "json", "yaml" ] }

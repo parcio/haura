@@ -111,7 +111,17 @@ pub trait HasStoragePreference {
 
 /// Intermediary structure to prove that media constraints have been checked.
 /// This is more of a hack since i don't want to pull apart the trait.
-pub struct PreparePack();
+/// Now carries compression configuration for storage-kind-aware compression.
+pub struct PreparePack {
+    pub compression: Option<crate::compression::CompressionConfiguration>,
+    pub storage_kind: crate::tree::StorageKind,
+}
+
+impl PreparePack {
+    pub fn new(compression: Option<crate::compression::CompressionConfiguration>, storage_kind: crate::tree::StorageKind) -> Self {
+        Self { compression, storage_kind }
+    }
+}
 
 /// Which integrity mode is used by the nodes. Can be used to skip the
 /// processing of an entire node if it is not required to ensure integrity of

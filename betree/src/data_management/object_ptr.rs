@@ -96,9 +96,17 @@ impl<D> ObjectPointer<D> {
         SPL: StoragePoolLayer<Checksum = D>,
         D: crate::size::StaticSize + crate::checksum::Checksum,
     {
-        let mut decompression_state = self.decompression_tag().new_decompression()?;
         let compressed_data = pool.read(self.size(), self.offset(), self.checksum.clone())?;
-        let data = decompression_state.decompress(compressed_data)?;
+        
+        // Bypass decompression entirely when no compression is used
+        let data = if self.decompression_tag().is_decompression_needed() {
+            let mut decompression_state = self.decompression_tag().new_decompression()?;
+            decompression_state.decompress(compressed_data)?
+        } else {
+            // No decompression needed - data is already uncompressed
+            compressed_data
+        };
+        
         Ok(super::Object::unpack_at(
             self.info(),
             data,

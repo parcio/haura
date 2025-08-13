@@ -42,8 +42,10 @@ core_affinity = "0.5"
 async-trait = "0.1"
 
 lz4-sys = "1.9"
+lz4 = "1.23.1"
 zstd = { version = "0.9", default-features = false }
 zstd-safe = { version = "4.0", default-features = false, features = ["experimental"] }
+snap = "1.1"
 
 speedy = "0.7"
 enum_dispatch = "0.3"
@@ -84,6 +86,9 @@ figment_config = ["figment"]
 # leaf vdev. This requires additional system calls due to time measuring and is
 # therefore safeguarded into it's own feature
 latency_metrics = []
+# Track memory access metrics for direct memory operations (e.g., PackedChildBuffer)
+# This adds minimal overhead (~0.1-0.4%) but provides complete metrics accuracy
+memory_metrics = []
 nvm = ["pmdk"]
 # Log the allocations and deallocations done for later analysis
 allocation_log = []

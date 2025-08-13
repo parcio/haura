@@ -242,6 +242,7 @@ impl DatabaseConfiguration {
 
         Dmu::new(
             self.compression.to_builder(),
+            self.compression.clone(),
             <Checksum as crate::checksum::Checksum>::builder(),
             self.default_storage_class,
             spu,

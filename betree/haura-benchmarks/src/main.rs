@@ -65,43 +65,136 @@ enum Mode {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "20")]
         runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
     },
     YcsbB {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "20")]
         runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
     },
     YcsbC {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "20")]
         runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
     },
     YcsbD {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "20")]
         runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
     },
     YcsbE {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "20")]
         runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
     },
     YcsbF {
         size: u64,
         kind: u8,
         threads: u32,
-        #[structopt(default_value = "120")]
+        #[structopt(default_value = "20")]
         runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
+    },
+    YcsbG {
+        size: u64,
+        kind: u8,
+        threads: u32,
+        #[structopt(default_value = "20")]
+        runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
+    },
+    YcsbH {
+        size: u64,
+        kind: u8,
+        threads: u32,
+        #[structopt(default_value = "20")]
+        runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
+    },
+    YcsbI {
+        size: u64,
+        kind: u8,
+        threads: u32,
+        #[structopt(default_value = "20")]
+        runtime: u64,
+        #[structopt(long, default_value = "generated")]
+        data_source: String,
+        #[structopt(long, default_value = "int")]
+        data_type: String,
+        #[structopt(long, default_value = "")]
+        data_path: String,
+        #[structopt(long, default_value = "30000")]
+        entry_size: usize,
     },
 }
 
@@ -210,54 +303,117 @@ fn run_all(mode: Mode) -> Result<(), Box<dyn Error>> {
             kind,
             threads,
             runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
         } => {
             let client = control.kv_client(0);
-            ycsb::a(client, size, threads as usize, runtime)
+            ycsb::a(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
         }
         Mode::YcsbB {
             size,
             kind,
             threads,
             runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
         } => {
             let client = control.kv_client(0);
-            ycsb::b(client, size, threads as usize, runtime)
+            ycsb::b(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
         }
         Mode::YcsbC {
             size,
             kind,
             threads,
             runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
         } => {
             let client = control.kv_client(0);
-            ycsb::c(client, size, threads as usize, runtime)
+            ycsb::c(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
         }
         Mode::YcsbD {
             size,
             kind,
             threads,
             runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
         } => {
             let client = control.kv_client(0);
-            ycsb::d(client, size, threads as usize, runtime)
+            ycsb::d(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
         }
         Mode::YcsbE {
             size,
             kind,
             threads,
             runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
         } => {
             let client = control.kv_client(0);
-            ycsb::e(client, size, threads as usize, runtime)
+            ycsb::e(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
         }
         Mode::YcsbF {
             size,
             kind,
             threads,
             runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
         } => {
             let client = control.kv_client(0);
-            ycsb::f(client, size, threads as usize, runtime)
+            ycsb::f(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
+        }
+        Mode::YcsbG {
+            size,
+            kind,
+            threads,
+            runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
+        } => {
+            let client = control.kv_client(0);
+            ycsb::g(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
+        }
+        Mode::YcsbH {
+            size,
+            kind,
+            threads,
+            runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
+        } => {
+            let client = control.kv_client(0);
+            ycsb::h(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
+        }
+        Mode::YcsbI {
+            size,
+            kind,
+            threads,
+            runtime,
+            data_source,
+            data_type,
+            data_path,
+            entry_size,
+        } => {
+            let client = control.kv_client(0);
+            ycsb::i(client, size, threads as usize, runtime, &data_source, &data_type, &data_path, entry_size)
         }
     }
 

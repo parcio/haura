@@ -10,7 +10,7 @@ use crate::{
     buffer::Buf,
     cache::{Cache, ChangeKeyError, RemoveError},
     checksum::{Builder, Checksum, State},
-    compression::CompressionBuilder,
+    compression::{CompressionBuilder, CompressionConfiguration},
     data_management::{CopyOnWriteReason, IntegrityMode},
     database::{DatasetId, Generation, Handler},
     migration::DmlMsg,
@@ -46,6 +46,7 @@ where
     SPL::Checksum: StaticSize,
 {
     default_compression: Box<dyn CompressionBuilder>,
+    default_compression_config: CompressionConfiguration,
     // NOTE: Why was this included in the first place? Delayed Compression? Streaming Compression?
     // default_compression_state: C::CompressionState,
     default_storage_class: u8,
@@ -77,6 +78,7 @@ where
     /// Returns a new `Dmu`.
     pub fn new(
         default_compression: Box<dyn CompressionBuilder>,
+        default_compression_config: CompressionConfiguration,
         default_checksum_builder: <SPL::Checksum as Checksum>::Builder,
         default_storage_class: u8,
         pool: SPL,
@@ -107,6 +109,7 @@ where
 
         Dmu {
             // default_compression_state: default_compression.new_compression().expect("Can't create compression state"),
+            default_compression_config,
             default_compression,
             default_storage_class,
             default_checksum_builder,
@@ -169,6 +172,30 @@ where
         }
 
         Ok(())
+    }
+
+    /// Select appropriate compression based on storage kind
+    fn select_compression_for_storage_kind(&self, storage_kind: crate::tree::StorageKind) -> &dyn CompressionBuilder {
+        use crate::tree::StorageKind;
+        
+        // Apply storage-kind-aware compression strategy
+        match storage_kind {
+            StorageKind::Hdd => {
+                // HDD: Prioritize high compression ratios over speed to reduce I/O
+                debug!("Using HDD-optimized compression for storage_kind: {:?}", storage_kind);
+                &*self.default_compression
+            }
+            StorageKind::Memory => {
+                // Memory: Individual value compression (not applied at this level)
+                debug!("Using Memory-optimized compression for storage_kind: {:?}", storage_kind);
+                &*self.default_compression
+            }
+            StorageKind::Ssd => {
+                // SSD: Node-level compression with configured algorithm
+                debug!("Using SSD-optimized compression for storage_kind: {:?}", storage_kind);
+                &*self.default_compression
+            }
+        }
     }
 }
 
@@ -433,7 +460,7 @@ where
         }
 
         debug!("Estimated object size is {object_size} bytes");
-        debug!("Using compression {:?}", &self.default_compression);
+        debug!("Default compression configured: {:?}", &self.default_compression);
         let generation = self.handler.current_generation();
         // Use storage hints if available
         if let Some(pref) = self.storage_hints.lock().remove(&pivot_key) {
@@ -444,27 +471,55 @@ where
             .preferred_class()
             .unwrap_or(self.default_storage_class);
 
-        let compression = &self.default_compression;
-        let (integrity_mode, compressed_data) = {
-            // FIXME: cache this
-            let mut state = compression.new_compression()?;
-            let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
-                object_size as u32,
-            ));
-            let integrity_mode = {
-                let pp = object.prepare_pack(
-                    self.spl().storage_kind_map()[storage_class as usize],
-                    &pivot_key,
-                )?;
-                let part = object.pack(&mut buf, pp, |bytes| {
-                    let mut builder = self.default_checksum_builder.build();
-                    builder.ingest(bytes);
-                    builder.finish()
-                })?;
-                drop(object);
-                part
-            };
-            (integrity_mode, state.finish(buf.into_buf())?)
+        // Select compression based on storage kind
+        let storage_kind = self.spl().storage_kind_map()[storage_class as usize];
+        let compression = self.select_compression_for_storage_kind(storage_kind);
+        let compression_enabled = self.default_compression_config.is_compression_enabled();
+        
+        // Pack the object first
+        let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
+            object_size as u32,
+        ));
+        let integrity_mode = {
+            let mut pp = object.prepare_pack(
+                storage_kind,
+                &pivot_key,
+            )?;
+            
+            // For Memory mode, override with actual compression configuration only if compression is enabled
+            if matches!(storage_kind, crate::tree::StorageKind::Memory) && compression_enabled {
+                pp.compression = Some(self.default_compression_config.clone());
+            }
+            
+            let part = object.pack(&mut buf, pp, |bytes| {
+                let mut builder = self.default_checksum_builder.build();
+                builder.ingest(bytes);
+                builder.finish()
+            })?;
+            drop(object);
+            part
+        };
+        
+        // Apply compression based on storage kind
+        let (compressed_data, actual_decompression_tag) = match storage_kind {
+            crate::tree::StorageKind::Memory => {
+                // For Memory mode, compression is handled at value level inside PackedChildBuffer
+                debug!("Memory mode: No block-level compression at DMU level");
+                (buf.into_buf(), crate::compression::DecompressionTag::None)
+            }
+            crate::tree::StorageKind::Ssd | crate::tree::StorageKind::Hdd => {
+                // For SSD/HDD mode, apply block-level compression only if compression is enabled
+                if !compression_enabled {
+                    debug!("SSD/HDD mode: No compression (compression disabled)");
+                    (buf.into_buf(), crate::compression::DecompressionTag::None)
+                } else {
+                    debug!("SSD/HDD mode: Applying block-level compression");
+                    let uncompressed_data = buf.into_buf();
+                    let mut compression_state = compression.new_compression()?;
+                    let compressed = compression_state.compress_buf(uncompressed_data)?;
+                    (compressed, compression.decompression_tag())
+                }
+            }
         };
 
         assert!(compressed_data.len() <= u32::max_value() as usize);
@@ -496,7 +551,7 @@ where
             offset,
             size,
             checksum,
-            decompression_tag: compression.decompression_tag(),
+            decompression_tag: actual_decompression_tag,
             generation,
             info,
             integrity_mode,
@@ -1066,10 +1121,15 @@ where
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<Self::CacheValueRef, Error> {
         let (ptr, compressed_data, pk) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = ptr
-                .decompression_tag()
-                .new_decompression()?
-                .decompress(compressed_data)?;
+            let data = if ptr.decompression_tag().is_decompression_needed() {
+                // Apply decompression
+                ptr.decompression_tag()
+                    .new_decompression()?
+                    .decompress(compressed_data)?
+            } else {
+                // No decompression needed - use data directly
+                compressed_data
+            };
             Object::unpack_at(ptr.info(), data, ptr.integrity_mode.clone())?
         };
         let key = ObjectKey::Unmodified {

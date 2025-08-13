@@ -175,13 +175,13 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
     fn pack<W: Write, F: Fn(&[u8]) -> C, C: Checksum>(
         &self,
         mut writer: W,
-        _: PreparePack,
+        prepare_pack: PreparePack,
         csum_builder: F,
     ) -> Result<IntegrityMode<C>, io::Error> {
         match self.0 {
             MemLeaf(ref leaf) => {
                 writer.write_all((NodeInnerType::CopylessLeaf as u32).to_be_bytes().as_ref())?;
-                leaf.pack(writer, csum_builder)
+                leaf.pack_with_compression(writer, csum_builder, prepare_pack.compression, prepare_pack.storage_kind)
             }
             CopylessInternal(ref cpl_internal) => {
                 writer.write_all(
@@ -241,40 +241,24 @@ impl<R: ObjectReference + HasStoragePreference + StaticSize> Object<R> for Node<
 
     fn prepare_pack(
         &mut self,
-        _storage_kind: StorageKind,
+        storage_kind: StorageKind,
         _pivot_key: &PivotKey,
     ) -> Result<crate::data_management::PreparePack, crate::data_management::Error>
     where
         R: ObjectReference,
     {
-        // NOTE: Only necessary transitions are represented here, all others are no-op. Can be improved.
-        // self.0 = match (
-        //     std::mem::replace(&mut self.0, unsafe { std::mem::zeroed() }),
-        //     storage_kind,
-        // ) {
-        //     // (Internal(internal), StorageKind::Memory) | (Internal(internal), StorageKind::Ssd) => {
-        //     //     // Spawn new child buffers from one internal node.
-        //     //     Inner::DisjointInternal(internal.to_disjoint_node(|new_cbuf| {
-        //     //         dmu.insert(
-        //     //             Node(Inner::ChildBuffer(new_cbuf)),
-        //     //             pivot_key.d_id(),
-        //     //             pivot_key.clone(),
-        //     //         )
-        //     //     }))
-        //     // }
-        //     (CopylessInternal(_internal), StorageKind::Hdd) => {
-        //         // Fetch children and pipe them into one node.
-        //         unimplemented!();
-        //         // let mut cbufs = Vec::with_capacity(internal.children.len());
-        //         // Inner::Internal(InternalNode::from_disjoint_node(internal, cbufs))
-        //     }
-        //     (Leaf(leaf), StorageKind::Memory) => Inner::MemLeaf(leaf.to_memory_leaf()),
-        //     (MemLeaf(leaf), StorageKind::Ssd) | (MemLeaf(leaf), StorageKind::Hdd) => {
-        //         Inner::Leaf(leaf.to_block_leaf())
-        //     }
-        //     (default, _) => default,
-        // };
-        Ok(PreparePack())
+        // For Memory mode, we need compression at the value level
+        // Note: The actual compression will be passed from DMU
+        let compression = match storage_kind {
+            StorageKind::Memory => {
+                // Placeholder - will be replaced by DMU with actual compression
+                use crate::compression::CompressionConfiguration;
+                Some(CompressionConfiguration::None)
+            }
+            _ => None, // SSD/HDD mode compression is handled at DMU level
+        };
+        
+        Ok(crate::data_management::PreparePack::new(compression, storage_kind))
     }
 }
 
