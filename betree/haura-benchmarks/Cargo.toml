@@ -9,6 +9,7 @@ members = ["."]
 
 [dependencies]
 betree_storage_stack = { path = ".." , features = ["nvm"]}
+pprof = { version = "0.11.1", features = ["flamegraph"] }
 
 structopt = "0.3"
 figment = { version = "0.10", features = [ "json", "yaml" ] }
@@ -25,3 +26,4 @@ log = "0.4"
 parking_lot = "0.11"
 zip = "0.5"
 zipf = "7.0.1"
+

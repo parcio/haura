@@ -674,16 +674,14 @@ pub fn g(mut client: KvClient, size: u64, workers: usize, runtime: u64, data_sou
                 (
                     std::thread::spawn(move || {
                         let mut rng = Xoshiro256Plus::seed_from_u64(id as u64);
+                        let uniform_dist = rand::distributions::Uniform::new(0, _keys.len()); // Create once
                         let mut total = 0;
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
-                                //for _ in 0..500 
-                                {
-                                    if let Some(k) = _keys.choose(&mut rng) {
-                                        if let Some(value) = ds.get(*k).unwrap() {
-                                            total += 1;
-                                        }
-                                    }
+                                let idx = uniform_dist.sample(&mut rng);
+                                let k = &_keys[idx][..];
+                                if let Some(value) = ds.get(k).unwrap() {
+                                    total += 1;
                                 }
                             }
                         }

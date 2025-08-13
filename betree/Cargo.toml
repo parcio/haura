@@ -88,6 +88,8 @@ figment_config = ["figment"]
 latency_metrics = []
 # Track direct memory access operations for Memory storage vdevs
 memory_metrics = []
+# Track compression and decompression metrics including ratios and timing
+compression_metrics = []
 nvm = ["pmdk"]
 # Log the allocations and deallocations done for later analysis
 allocation_log = []

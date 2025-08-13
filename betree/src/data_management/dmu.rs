@@ -474,6 +474,7 @@ where
         // Select compression based on storage kind
         let storage_kind = self.spl().storage_kind_map()[storage_class as usize];
         let compression = self.select_compression_for_storage_kind(storage_kind);
+        let compression_enabled = self.default_compression_config.is_compression_enabled();
         
         // Pack the object first
         let mut buf = crate::buffer::BufWrite::with_capacity(Block::round_up_from_bytes(
@@ -485,8 +486,8 @@ where
                 &pivot_key,
             )?;
             
-            // For Memory mode, override with actual compression configuration
-            if matches!(storage_kind, crate::tree::StorageKind::Memory) {
+            // For Memory mode, override with actual compression configuration only if compression is enabled
+            if matches!(storage_kind, crate::tree::StorageKind::Memory) && compression_enabled {
                 pp.compression = Some(self.default_compression_config.clone());
             }
             
@@ -507,17 +508,16 @@ where
                 (buf.into_buf(), crate::compression::DecompressionTag::None)
             }
             crate::tree::StorageKind::Ssd | crate::tree::StorageKind::Hdd => {
-                // For SSD/HDD mode, apply block-level compression to the entire packed node if compression is enabled
-                let decompression_tag = compression.decompression_tag();
-                if matches!(decompression_tag, crate::compression::DecompressionTag::None) {
-                    debug!("SSD/HDD mode: No compression (None configured)");
+                // For SSD/HDD mode, apply block-level compression only if compression is enabled
+                if !compression_enabled {
+                    debug!("SSD/HDD mode: No compression (compression disabled)");
                     (buf.into_buf(), crate::compression::DecompressionTag::None)
                 } else {
                     debug!("SSD/HDD mode: Applying block-level compression");
                     let uncompressed_data = buf.into_buf();
                     let mut compression_state = compression.new_compression()?;
                     let compressed = compression_state.compress_buf(uncompressed_data)?;
-                    (compressed, decompression_tag)
+                    (compressed, compression.decompression_tag())
                 }
             }
         };
@@ -1121,10 +1121,15 @@ where
     fn finish_prefetch(&self, p: Self::Prefetch) -> Result<Self::CacheValueRef, Error> {
         let (ptr, compressed_data, pk) = block_on(p)?;
         let object: Node<ObjRef<ObjectPointer<SPL::Checksum>>> = {
-            let data = ptr
-                .decompression_tag()
-                .new_decompression()?
-                .decompress(compressed_data)?;
+            let data = if ptr.decompression_tag().is_decompression_needed() {
+                // Apply decompression
+                ptr.decompression_tag()
+                    .new_decompression()?
+                    .decompress(compressed_data)?
+            } else {
+                // No decompression needed - use data directly
+                compressed_data
+            };
             Object::unpack_at(ptr.info(), data, ptr.integrity_mode.clone())?
         };
         let key = ObjectKey::Unmodified {

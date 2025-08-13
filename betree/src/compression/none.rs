@@ -61,54 +61,24 @@ impl io::Write for NoneCompression {
 
 impl CompressionState for NoneCompression {
     fn compress_val(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        let input_size = data.len();
-        let result = data.to_vec();
-        
-        #[cfg(feature = "compression_metrics")]
-        {
-            // For None compression, compression time is essentially zero
-            super::metrics::record_compression_metrics(input_size, result.len(), 0);
-        }
-        
-        Ok(result)
+        // No metrics recording for None compression - it's a true pass-through
+        Ok(data.to_vec())
     }
 
     fn compress_buf(&mut self, buf: Buf) -> Result<Buf> {
-        let input_size = buf.len();
-        
-        #[cfg(feature = "compression_metrics")]
-        {
-            // For None compression, compression time is essentially zero
-            super::metrics::record_compression_metrics(input_size, input_size, 0);
-        }
-        
+        // No metrics recording for None compression - it's a true pass-through
         Ok(buf)
     }
 }
 
 impl DecompressionState for NoneDecompression {
     fn decompress_val(&mut self, data: &[u8]) -> Result<SlicedCowBytes> {
-        let input_size = data.len();
-        let result = SlicedCowBytes::from(data.to_vec());
-        
-        #[cfg(feature = "compression_metrics")]
-        {
-            // For None decompression, decompression time is essentially zero
-            super::metrics::record_decompression_metrics(input_size, result.len(), 0);
-        }
-        
-        Ok(result)
+        // No metrics recording for None decompression - it's a true pass-through
+        Ok(SlicedCowBytes::from(data.to_vec()))
     }
 
     fn decompress_buf(&mut self, data: Buf) -> Result<Buf> {
-        let input_size = data.len();
-        
-        #[cfg(feature = "compression_metrics")]
-        {
-            // For None decompression, decompression time is essentially zero
-            super::metrics::record_decompression_metrics(input_size, input_size, 0);
-        }
-        
+        // No metrics recording for None decompression - it's a true pass-through
         Ok(data)
     }
 }
