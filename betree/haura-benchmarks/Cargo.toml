@@ -17,7 +17,7 @@ path = "src/test_memory_metrics.rs"
 members = ["."]
 
 [dependencies]
-betree_storage_stack = { path = ".." }
+betree_storage_stack = { path = "..", features = ["nvm"] }
 
 structopt = "0.3"
 figment = { version = "0.10", features = [ "json", "yaml" ] }
