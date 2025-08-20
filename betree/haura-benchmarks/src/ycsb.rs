@@ -56,31 +56,28 @@ pub fn a(mut client: KvClient, size: u64, threads: usize, runtime: u64) {
     let mut w = std::io::BufWriter::new(f);
     w.write_all(b"threads,ops,time_ns\n").unwrap();
 
-    let keys_arc = Arc::new(keys);
-
     for workers in 1..=threads {
         println!("Running benchmark with {workers} threads...");
         let threads = (0..workers)
             .map(|_| std::sync::mpsc::channel::<std::time::Instant>())
             .enumerate()
             .map(|(id, (tx, rx))| {
-                let keys_arc_clone = Arc::clone(&keys_arc);
+                let keys = keys.clone();
                 let ds = client.ds.clone();
                 (
                     std::thread::spawn(move || {
                         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(id as u64);
-                        let dist =
-                            zipf::ZipfDistribution::new(keys_arc_clone.len(), ZIPF_EXP).unwrap();
+                        let dist = zipf::ZipfDistribution::new(keys.len(), ZIPF_EXP).unwrap();
                         let mut total = 0;
                         let value = vec![0u8; ENTRY_SIZE];
                         while let Ok(start) = rx.recv() {
                             while start.elapsed().as_secs() < runtime {
                                 for _ in 0..100 {
-                                    let k = &keys_arc_clone[dist.sample(&mut rng) - 1][..];
+                                    let k = &keys[dist.sample(&mut rng) - 1][..];
                                     if rng.gen_bool(0.5) {
                                         ds.get(k).unwrap().unwrap();
                                     } else {
-                                        ds.upsert(k, &value, 0).unwrap();
+                                        ds.upsert(k.to_vec(), &value, 0).unwrap();
                                     }
                                     total += 1;
                                 }

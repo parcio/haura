@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use betree_storage_stack::allocator::{
-    self, Allocator, ApproximateBestFitTree, BestFitList, BestFitScan, BestFitTree, FirstFitList,
-    FirstFitScan, FirstFitTree, HybridAllocator, NextFitList, NextFitScan, SegmentAllocator,
-    WorstFitList, WorstFitScan, WorstFitTree, SEGMENT_SIZE_BYTES, SEGMENT_SIZE_LOG_2,
+    self, Allocator, BestFitFSM, BestFitList, BestFitScan, BestFitTree, FirstFitFSM, FirstFitList,
+    FirstFitScan, HybridAllocator, NextFitList, NextFitScan, SegmentAllocator, WorstFitFSM,
+    WorstFitList, WorstFitScan, SEGMENT_SIZE_BYTES, SEGMENT_SIZE_LOG_2,
 };
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use rand::{
@@ -185,10 +185,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let zipfian_exponent = 0.99;
 
     let distributions = [
-        //(
-        //    "uniform",
-        //    SizeDistribution::Uniform(Uniform::new(min_size, max_size + 1)),
-        //),
+        (
+            "uniform",
+            SizeDistribution::Uniform(Uniform::new(min_size, max_size + 1)),
+        ),
         (
             "zipfian",
             SizeDistribution::Zipfian(
@@ -206,16 +206,16 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         bench_alloc,
         FirstFitScan,
         FirstFitList,
-        FirstFitTree,
+        FirstFitFSM,
         NextFitScan,
         NextFitList,
         BestFitScan,
         BestFitList,
-        ApproximateBestFitTree,
+        BestFitFSM,
         BestFitTree,
         WorstFitScan,
         WorstFitList,
-        WorstFitTree,
+        WorstFitFSM,
         SegmentAllocator
     );
 
@@ -242,16 +242,16 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         bench_new,
         FirstFitScan,
         FirstFitList,
-        FirstFitTree,
+        FirstFitFSM,
         NextFitScan,
         NextFitList,
         BestFitScan,
         BestFitList,
-        ApproximateBestFitTree,
+        BestFitFSM,
         BestFitTree,
         WorstFitScan,
         WorstFitList,
-        WorstFitTree,
+        WorstFitFSM,
         SegmentAllocator
     );
 

@@ -2,24 +2,22 @@ use super::*;
 
 /// Based on the free-space-map allocator from postgresql:
 /// https://github.com/postgres/postgres/blob/02ed3c2bdcefab453b548bc9c7e0e8874a502790/src/backend/storage/freespace/README
-/// This is an approximate best fit allocator. It will not always find the best fit but it tries
-/// its best.
-pub struct ApproximateBestFitTree {
+pub struct FirstFitFSM {
     data: BitArr!(for SEGMENT_SIZE, in u8, Lsb0),
     fsm_tree: Vec<(u32, u32)>, // Array to represent the FSM tree, storing max free space
     tree_height: u32,
 }
 
-impl Allocator for ApproximateBestFitTree {
+impl Allocator for FirstFitFSM {
     fn data(&mut self) -> &mut BitArr!(for SEGMENT_SIZE, in u8, Lsb0) {
         &mut self.data
     }
 
-    /// Constructs a new `BestFitFSM` given the segment allocation bitmap.
+    /// Constructs a new `FirstFitFSM` given the segment allocation bitmap.
     /// The `bitmap` must have a length of `SEGMENT_SIZE`.
     fn new(bitmap: [u8; SEGMENT_SIZE_BYTES]) -> Self {
         let data = BitArray::new(bitmap);
-        let mut allocator = ApproximateBestFitTree {
+        let mut allocator = FirstFitFSM {
             data,
             fsm_tree: Vec::new(),
             tree_height: 0,
@@ -33,34 +31,29 @@ impl Allocator for ApproximateBestFitTree {
             return Some(0);
         }
 
-        if self.fsm_tree.is_empty() || self.fsm_tree[0].1 < size {
+        if self.fsm_tree[0].1 < size {
             return None; // Not enough free space
         }
 
         let mut current_node_index = 0;
         while current_node_index < self.fsm_tree.len() / 2 {
-            // Traverse internal nodes
             let left_child_index = 2 * current_node_index + 1;
             let right_child_index = 2 * current_node_index + 2;
 
-            let left_child_value = *self.fsm_tree.get(left_child_index).unwrap_or(&(0, 0));
-            let right_child_value = *self.fsm_tree.get(right_child_index).unwrap_or(&(0, 0));
-
-            match (left_child_value.1 >= size, right_child_value.1 >= size) {
-                (true, true) => {
-                    // Both children can fit size
-                    if left_child_value.1 < right_child_value.1 {
-                        // Left is better fit
-                        current_node_index = left_child_index;
-                    } else {
-                        // Right is better or equal fit
-                        current_node_index = right_child_index;
-                    }
+            // Check left child first for first fit
+            if let Some(left_child_value) = self.fsm_tree.get(left_child_index) {
+                if left_child_value.1 >= size {
+                    current_node_index = left_child_index;
+                    continue; // Go deeper into left subtree
                 }
-                (true, false) => current_node_index = left_child_index, // Only left can fit
-                (false, true) => current_node_index = right_child_index, // Only right can fit
-                (false, false) => unreachable!(), // Neither child can fit, stop traversal
             }
+            if let Some(right_child_value) = self.fsm_tree.get(right_child_index) {
+                if right_child_value.1 >= size {
+                    current_node_index = right_child_index;
+                    continue; // Go deeper into right subtree
+                }
+            }
+            unreachable!();
         }
 
         // current_node_index is now the index of the best-fit leaf node
@@ -119,7 +112,7 @@ impl Allocator for ApproximateBestFitTree {
     }
 }
 
-impl ApproximateBestFitTree {
+impl FirstFitFSM {
     fn get_free_segments(&mut self) -> Vec<(u32, u32)> {
         let mut offset: u32 = 0;
         let mut free_segments = Vec::new();
@@ -193,7 +186,7 @@ mod tests {
     #[test]
     fn build_empty() {
         let bitmap = [0u8; SEGMENT_SIZE_BYTES];
-        let allocator = ApproximateBestFitTree::new(bitmap);
+        let allocator = FirstFitFSM::new(bitmap);
 
         // In an empty bitmap, the root node should have a large free space
         assert_eq!(allocator.fsm_tree[0].0, 0 as u32);
@@ -204,14 +197,14 @@ mod tests {
     #[test]
     fn build_simple() {
         // Example bitmap: 3 segments allocated at the beginning, 2 free, 3 allocated, rest free
-        let mut allocator = ApproximateBestFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = FirstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
         let bitmap = allocator.data();
 
         // Manually allocate some segments
         bitmap[0..3].fill(true); // Allocate 3 blocks at the beginning
         bitmap[5..7].fill(true); // Allocate 2 blocks after the free ones
 
-        let mut allocator = ApproximateBestFitTree::new(bitmap.into_inner());
+        let mut allocator = FirstFitFSM::new(bitmap.into_inner());
 
         let fsm_tree = vec![
             (7, SEGMENT_SIZE as u32 - 7),
@@ -224,7 +217,7 @@ mod tests {
 
     #[test]
     fn build_complex() {
-        let mut allocator = ApproximateBestFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = FirstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
         let bitmap = allocator.data();
 
         // Manually allocate some segments to create a non-trivial tree
@@ -235,7 +228,7 @@ mod tests {
         bitmap[35..36].fill(true);
         bitmap[42..53].fill(true);
 
-        let allocator = ApproximateBestFitTree::new(bitmap.into_inner());
+        let allocator = FirstFitFSM::new(bitmap.into_inner());
 
         // binary heap layout
         let fsm_tree = vec![
@@ -263,7 +256,7 @@ mod tests {
     #[test]
     fn allocate_empty_fsm_tree() {
         let bitmap = [0u8; SEGMENT_SIZE_BYTES];
-        let mut allocator = ApproximateBestFitTree::new(bitmap);
+        let mut allocator = FirstFitFSM::new(bitmap);
 
         let allocation = allocator.allocate(1024);
         assert!(allocation.is_some()); // Allocation should succeed
@@ -279,7 +272,7 @@ mod tests {
 
     #[test]
     fn allocate_complex_fsm_tree() {
-        let mut allocator = ApproximateBestFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = FirstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
         let bitmap = allocator.data();
 
         // Manually allocate some segments to create a non-trivial tree
@@ -290,7 +283,7 @@ mod tests {
         bitmap[35..36].fill(true);
         bitmap[42..53].fill(true);
 
-        let mut allocator = ApproximateBestFitTree::new(bitmap.into_inner());
+        let mut allocator = FirstFitFSM::new(bitmap.into_inner());
 
         // Best-fit should allocate from the segment at offset 3 with size 2
         let allocation = allocator.allocate(2); // Request allocation of size 2
@@ -314,7 +307,7 @@ mod tests {
 
     #[test]
     fn allocate_fail_fsm_tree() {
-        let mut allocator = ApproximateBestFitTree::new([0u8; SEGMENT_SIZE_BYTES]);
+        let mut allocator = FirstFitFSM::new([0u8; SEGMENT_SIZE_BYTES]);
         let root_free_space = allocator.fsm_tree[0].1;
 
         // Try to allocate more than available space

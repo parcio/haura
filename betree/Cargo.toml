@@ -71,7 +71,7 @@ criterion = "0.3"
 zipf = "7.0.1"
 
 [features]
-default = ["init_env_logger", "figment_config", "allocation_log"]
+default = ["init_env_logger", "figment_config"]
 
 # unlock unstable API for consumption by bectl and other debugging tools
 internal-api = []
@@ -87,14 +87,3 @@ nvm = ["pmdk"]
 # Log the allocations and deallocations done for later analysis
 allocation_log = []
 
-# Used for benchmarking the allocators on different segment sizes
-seg_log_2_14 = []
-seg_log_2_15 = []
-seg_log_2_16 = []
-seg_log_2_17 = []
-seg_log_2_18 = []
-seg_log_2_19 = []
-seg_log_2_20 = []
-seg_log_2_21 = []
-seg_log_2_22 = []
-seg_log_2_23 = []
